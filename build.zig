@@ -15,12 +15,13 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    const c_flags = &.{ "-std=c99", "-DLEXBOR_STATIC" };
     zexplorer_lib.addCSourceFile(.{
         .file = b.path("src/minimal.c"),
-        .flags = &.{"-std=c99"},
+        .flags = c_flags,
     });
     zexplorer_lib.addIncludePath(lexbor_src_path);
-    zexplorer_lib.addObjectFile(lexbor_static_lib_path);
+    // zexplorer_lib.addObjectFile(lexbor_static_lib_path);
     zexplorer_lib.linkLibC();
 
     const zexplorer_module = b.addModule(
