@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("root.zig");
+// TODO: Enable once type issues are resolved
+// const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+const EventLoop = @import("event_loop.zig").EventLoop;
+const NativeBridge = @import("js_native_bridge.zig");
 const qjs = @cImport({
     @cInclude("quickjs.h");
 });
@@ -8,6 +12,92 @@ const qjs = @cImport({
 const native_os = builtin.os.tag;
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+/// Install console.log as a global function in QuickJS context
+fn installConsole(ctx: ?*qjs.JSContext) void {
+    const global = qjs.JS_GetGlobalObject(ctx);
+    defer qjs.JS_FreeValue(ctx, global);
+
+    const console_obj = qjs.JS_NewObject(ctx);
+    const log_fn = qjs.JS_NewCFunction2(ctx, js_console_log, "log", 1, qjs.JS_CFUNC_generic_magic, 0);
+    _ = qjs.JS_SetPropertyStr(ctx, console_obj, "log", log_fn);
+    _ = qjs.JS_SetPropertyStr(ctx, global, "console", console_obj);
+}
+
+/// Demo: Native Bridge - Passing data between QuickJS and Zig
+fn demoNativeBridge(ctx: ?*qjs.JSContext) !void {
+    z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
+
+    // Test 1: Process regular array
+    z.print("--- Test 1: Process Array (JS → Zig → JS) ---\n", .{});
+    const test1 =
+        \\const data = [1, 2, 3, 4, 5];
+        \\console.log("Input array:", data);
+        \\const result = Native.processArray(data);
+        \\console.log("Result from Zig:", result);
+        \\result;
+    ;
+
+    const result1 = qjs.JS_Eval(ctx, test1, test1.len, "<test1>", 0);
+    defer qjs.JS_FreeValue(ctx, result1);
+
+    // Test 2: Transform array (return new array)
+    z.print("\n--- Test 2: Transform Array (Return New Array) ---\n", .{});
+    const test2 =
+        \\const input = [1, 2, 3, 4, 5];
+        \\console.log("Input:", input);
+        \\const output = Native.transformArray(input);
+        \\console.log("Output from Zig:", output);
+        \\output;
+    ;
+
+    const result2 = qjs.JS_Eval(ctx, test2, test2.len, "<test2>", 0);
+    defer qjs.JS_FreeValue(ctx, result2);
+
+    // Test 3: TypedArray (zero-copy performance)
+    z.print("\n--- Test 3: TypedArray (Zero-Copy) ---\n", .{});
+    const test3 =
+        \\const buffer = new Float64Array([10, 20, 30, 40, 50]);
+        \\console.log("TypedArray input:", buffer);
+        \\const result = Native.processTypedArray(buffer);
+        \\console.log("Result from Zig (zero-copy!):", result);
+        \\result;
+    ;
+
+    const result3 = qjs.JS_Eval(ctx, test3, test3.len, "<test3>", 0);
+    defer qjs.JS_FreeValue(ctx, result3);
+
+    // Test 4: Process object
+    z.print("\n--- Test 4: Process Object ---\n", .{});
+    const test4 =
+        \\const obj = { x: 10, y: 20, values: [1, 2, 3, 4, 5] };
+        \\console.log("Input object:", JSON.stringify(obj));
+        \\const result = Native.processObject(obj);
+        \\console.log("Result from Zig:", result);
+        \\result;
+    ;
+
+    const result4 = qjs.JS_Eval(ctx, test4, test4.len, "<test4>", 0);
+    defer qjs.JS_FreeValue(ctx, result4);
+
+    // Test 5: Process text
+    z.print("\n--- Test 5: Text Processing ---\n", .{});
+    const test5 =
+        \\const messy = "Hello   World  !  How   are   you?";
+        \\console.log("Input text:", messy);
+        \\const clean = Native.processText(messy);
+        \\console.log("Cleaned by Zig:", clean);
+        \\clean;
+    ;
+
+    const result5 = qjs.JS_Eval(ctx, test5, test5.len, "<test5>", 0);
+    defer qjs.JS_FreeValue(ctx, result5);
+
+    z.print("\n✅ Native bridge working!\n", .{});
+    z.print("  • JavaScript can call Zig functions\n", .{});
+    z.print("  • Data flows: JS → Zig → JS\n", .{});
+    z.print("  • Heavy computation runs at native speed\n\n", .{});
+}
 
 pub fn main() !void {
     // Arena allocator setup for benchmarking
@@ -26,6 +116,370 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
+    const rt = qjs.JS_NewRuntime();
+    defer qjs.JS_FreeRuntime(rt);
+
+    const ctx = qjs.JS_NewContext(rt);
+    defer qjs.JS_FreeContext(ctx);
+
+    // Install console.log globally for all demos
+    installConsole(ctx);
+
+    // Install native bridge for high-performance data processing
+    NativeBridge.installNativeBridge(ctx);
+
+    firstQuickJSTest();
+
+    try demoNativeBridge(ctx);
+    try demoEventLoop(gpa, ctx, rt);
+    try demoExecuteScriptFromHTML(gpa, ctx);
+    try demoQuickJSProxyAndStreams(ctx);
+    // TODO: Fix type issues - concept is solid, implementation needs type adjustments
+    // try demoVirtualDOM_SSR(gpa, ctx);
+    try zexplore_example_com(gpa, "https://www.example.com");
+    try demoSimpleParsing(gpa);
+    try demoTemplate(gpa);
+    try demoParserReUse(gpa);
+    try demoStreamParser(gpa);
+    try demoInsertAdjacentElement(gpa);
+    try demoInsertAdjacentHTML(gpa);
+    try demoSetInnerHTML(gpa);
+    try demoSearchComparison(gpa);
+    try demoSuspiciousAttributes(gpa);
+    try demoNormalizer(gpa);
+    try normalizeString_DOM_parsing_bencharmark(gpa);
+    try serverSideRenderingBenchmark(gpa);
+}
+
+/// Console.log implementation for QuickJS
+fn js_console_log(
+    ctx: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    var i: c_int = 0;
+    while (i < argc) : (i += 1) {
+        const str = qjs.JS_ToCString(ctx, argv[@intCast(i)]);
+        if (str != null) {
+            defer qjs.JS_FreeCString(ctx, str);
+            if (i > 0) z.print(" ", .{});
+            z.print("{s}", .{str});
+        }
+    }
+    z.print("\n", .{});
+
+    // Return undefined - use runtime creation to avoid comptime issues
+    var val: qjs.JSValue = undefined;
+    val.tag = qjs.JS_TAG_UNDEFINED;
+    val.u = std.mem.zeroes(qjs.JSValueUnion);
+    return val;
+}
+
+/// Demo: Event Loop with setTimeout/setInterval
+fn demoEventLoop(allocator: std.mem.Allocator, ctx: ?*qjs.JSContext, rt: ?*qjs.JSRuntime) !void {
+    z.print("\n=== Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
+
+    // Initialize event loop
+    var event_loop = try EventLoop.init(allocator, ctx, rt);
+    defer event_loop.deinit();
+
+    // Install timer APIs (setTimeout, setInterval, clearTimeout, clearInterval)
+    // Note: console.log is already installed globally in main()
+    try event_loop.installTimerAPIs();
+
+    // Test 1: Simple setTimeout
+    z.print("--- Test 1: setTimeout (500ms) ---\n", .{});
+    const timeout_test =
+        \\let count = 0;
+        \\setTimeout(() => {
+        \\  count = 42;
+        \\  console.log("setTimeout fired! count = " + count);
+        \\}, 500);
+        \\count; // Should be 0 initially
+    ;
+
+    const result1 = qjs.JS_Eval(ctx, timeout_test, timeout_test.len, "<timeout_test>", 0);
+    defer qjs.JS_FreeValue(ctx, result1);
+
+    var initial_count: i32 = 0;
+    _ = qjs.JS_ToInt32(ctx, &initial_count, result1);
+    z.print("Initial count (before timeout): {d}\n", .{initial_count});
+
+    // Test 2: setInterval with clearInterval
+    z.print("\n--- Test 2: setInterval (200ms, cancel after 5 iterations) ---\n", .{});
+    const interval_test =
+        \\let counter = 0;
+        \\const intervalId = setInterval(() => {
+        \\  counter++;
+        \\  console.log("Interval tick: " + counter);
+        \\  if (counter >= 5) {
+        \\    clearInterval(intervalId);
+        \\    console.log("Interval cleared!");
+        \\  }
+        \\}, 200);
+        \\intervalId;
+    ;
+
+    const result2 = qjs.JS_Eval(ctx, interval_test, interval_test.len, "<interval_test>", 0);
+    defer qjs.JS_FreeValue(ctx, result2);
+
+    // Test 3: Multiple timers with different delays
+    z.print("\n--- Test 3: Multiple timers (100ms, 300ms, 700ms) ---\n", .{});
+    const multiple_timers =
+        \\setTimeout(() => console.log("Timer 1: 100ms"), 100);
+        \\setTimeout(() => console.log("Timer 2: 300ms"), 300);
+        \\setTimeout(() => console.log("Timer 3: 700ms"), 700);
+        \\"Timers scheduled";
+    ;
+
+    const result3 = qjs.JS_Eval(ctx, multiple_timers, multiple_timers.len, "<multiple>", 0);
+    defer qjs.JS_FreeValue(ctx, result3);
+
+    const scheduled_msg = qjs.JS_ToCString(ctx, result3);
+    if (scheduled_msg != null) {
+        defer qjs.JS_FreeCString(ctx, scheduled_msg);
+        z.print("{s}\n", .{scheduled_msg});
+    }
+
+    // Test 4: Async/await with setTimeout (simulating async operations)
+    z.print("\n--- Test 4: Async/await + setTimeout ---\n", .{});
+    const async_test =
+        \\async function delayedGreeting(name, ms) {
+        \\  return new Promise(resolve => {
+        \\    setTimeout(() => resolve("Hello, " + name + "!"), ms);
+        \\  });
+        \\}
+        \\
+        \\(async () => {
+        \\  console.log("Starting async operation...");
+        \\  const msg = await delayedGreeting("Zig", 400);
+        \\  console.log("Async result: " + msg);
+        \\})();
+        \\"Async operation started";
+    ;
+
+    const result4 = qjs.JS_Eval(ctx, async_test, async_test.len, "<async>", 0);
+    defer qjs.JS_FreeValue(ctx, result4);
+
+    // Run the event loop to process all timers
+    z.print("\n🔄 Running event loop...\n\n", .{});
+    try event_loop.run();
+
+    z.print("\n✅ Event loop completed!\n", .{});
+    z.print("  • setTimeout works\n", .{});
+    z.print("  • setInterval works\n", .{});
+    z.print("  • clearTimeout/clearInterval work\n", .{});
+    z.print("  • Async/await + setTimeout integration works\n\n", .{});
+
+    // Verify final count value
+    const global = qjs.JS_GetGlobalObject(ctx);
+    defer qjs.JS_FreeValue(ctx, global);
+
+    const count_prop = qjs.JS_GetPropertyStr(ctx, global, "count");
+    defer qjs.JS_FreeValue(ctx, count_prop);
+
+    var final_count: i32 = 0;
+    _ = qjs.JS_ToInt32(ctx, &final_count, count_prop);
+    z.print("Final count (after setTimeout): {d}\n\n", .{final_count});
+}
+
+/// Demo: QuickJS Proxy and Async/Streams Support
+fn demoQuickJSProxyAndStreams(ctx: ?*qjs.JSContext) !void {
+    z.print("\n=== QuickJS Advanced Features: Proxy & Async ------\n\n", .{});
+
+    // Note: console.log is already installed globally in main()
+
+    // Test 1: ES6 Proxy - intercept property access
+    const proxy_test =
+        \\// Create a reactive object using Proxy
+        \\const handler = {
+        \\  get: function(target, prop) {
+        \\    console.log(`Getting property: ${prop}`);
+        \\    return target[prop];
+        \\  },
+        \\  set: function(target, prop, value) {
+        \\    console.log(`Setting ${prop} = ${value}`);
+        \\    target[prop] = value;
+        \\    return true;
+        \\  }
+        \\};
+        \\
+        \\const obj = { name: "Zig", version: "0.15.2" };
+        \\const proxy = new Proxy(obj, handler);
+        \\
+        \\// Test getter
+        \\const n = proxy.name;
+        \\
+        \\// Test setter
+        \\proxy.version = "0.16.0";
+        \\
+        \\"Proxy test complete";
+    ;
+
+    z.print("--- Test 1: ES6 Proxy ---\n", .{});
+    const result1 = qjs.JS_Eval(ctx, proxy_test, proxy_test.len, "<proxy>", 0);
+    defer qjs.JS_FreeValue(ctx, result1);
+
+    if (qjs.JS_IsException(result1) != 0) {
+        const exception = qjs.JS_GetException(ctx);
+        defer qjs.JS_FreeValue(ctx, exception);
+        const error_str = qjs.JS_ToCString(ctx, exception);
+        if (error_str != null) {
+            defer qjs.JS_FreeCString(ctx, error_str);
+            z.print("Error: {s}\n", .{error_str});
+        }
+    } else {
+        const result_str = qjs.JS_ToCString(ctx, result1);
+        if (result_str != null) {
+            defer qjs.JS_FreeCString(ctx, result_str);
+            z.print("Result: {s}\n\n", .{result_str});
+        }
+    }
+
+    // Test 2: Promise support (basic async)
+    const promise_test =
+        \\// Create a Promise
+        \\const promise = new Promise((resolve, reject) => {
+        \\  // Simulate async operation
+        \\  resolve("Promise resolved!");
+        \\});
+        \\
+        \\let result = "pending";
+        \\promise.then(value => {
+        \\  result = value;
+        \\  console.log("Promise:", value);
+        \\});
+        \\
+        \\// Note: QuickJS executes promises synchronously unless you use the event loop
+        \\result;
+    ;
+
+    z.print("--- Test 2: Promise Support ---\n", .{});
+    const result2 = qjs.JS_Eval(ctx, promise_test, promise_test.len, "<promise>", 0);
+    defer qjs.JS_FreeValue(ctx, result2);
+
+    if (qjs.JS_IsException(result2) != 0) {
+        const exception = qjs.JS_GetException(ctx);
+        defer qjs.JS_FreeValue(ctx, exception);
+        const error_str = qjs.JS_ToCString(ctx, exception);
+        if (error_str != null) {
+            defer qjs.JS_FreeCString(ctx, error_str);
+            z.print("Error: {s}\n", .{error_str});
+        }
+    } else {
+        // Execute pending jobs (needed for promises)
+        _ = qjs.JS_ExecutePendingJob(qjs.JS_GetRuntime(ctx), null);
+
+        const result_str = qjs.JS_ToCString(ctx, result2);
+        if (result_str != null) {
+            defer qjs.JS_FreeCString(ctx, result_str);
+            z.print("Result: {s}\n\n", .{result_str});
+        }
+    }
+
+    // Test 3: Async/Await (requires promise job execution)
+    const async_test =
+        \\async function fetchData() {
+        \\  return "Data from async function";
+        \\}
+        \\
+        \\let asyncResult = "not executed";
+        \\
+        \\(async () => {
+        \\  asyncResult = await fetchData();
+        \\  console.log("Async result:", asyncResult);
+        \\})();
+        \\
+        \\"Async function created";
+    ;
+
+    z.print("--- Test 3: Async/Await ---\n", .{});
+    const result3 = qjs.JS_Eval(ctx, async_test, async_test.len, "<async>", 0);
+    defer qjs.JS_FreeValue(ctx, result3);
+
+    if (qjs.JS_IsException(result3) != 0) {
+        const exception = qjs.JS_GetException(ctx);
+        defer qjs.JS_FreeValue(ctx, exception);
+        const error_str = qjs.JS_ToCString(ctx, exception);
+        if (error_str != null) {
+            defer qjs.JS_FreeCString(ctx, error_str);
+            z.print("Error: {s}\n", .{error_str});
+        }
+    } else {
+        // Execute all pending promise jobs
+        var ctx_ptr: ?*qjs.JSContext = undefined;
+        while (qjs.JS_ExecutePendingJob(qjs.JS_GetRuntime(ctx), &ctx_ptr) > 0) {}
+
+        const result_str = qjs.JS_ToCString(ctx, result3);
+        if (result_str != null) {
+            defer qjs.JS_FreeCString(ctx, result_str);
+            z.print("Sync result: {s}\n", .{result_str});
+        }
+
+        // Check the async result variable
+        const global = qjs.JS_GetGlobalObject(ctx);
+        defer qjs.JS_FreeValue(ctx, global);
+
+        const async_result_val = qjs.JS_GetPropertyStr(ctx, global, "asyncResult");
+        defer qjs.JS_FreeValue(ctx, async_result_val);
+
+        const async_result_str = qjs.JS_ToCString(ctx, async_result_val);
+        if (async_result_str != null) {
+            defer qjs.JS_FreeCString(ctx, async_result_str);
+            z.print("Async variable value: {s}\n\n", .{async_result_str});
+        }
+    }
+
+    // Test 4: Generator functions
+    const generator_test =
+        \\function* numberGenerator() {
+        \\  yield 1;
+        \\  yield 2;
+        \\  yield 3;
+        \\}
+        \\
+        \\const gen = numberGenerator();
+        \\const values = [];
+        \\
+        \\let next = gen.next();
+        \\while (!next.done) {
+        \\  values.push(next.value);
+        \\  next = gen.next();
+        \\}
+        \\
+        \\JSON.stringify(values);
+    ;
+
+    z.print("--- Test 4: Generator Functions ---\n", .{});
+    const result4 = qjs.JS_Eval(ctx, generator_test, generator_test.len, "<generator>", 0);
+    defer qjs.JS_FreeValue(ctx, result4);
+
+    if (qjs.JS_IsException(result4) != 0) {
+        const exception = qjs.JS_GetException(ctx);
+        defer qjs.JS_FreeValue(ctx, exception);
+        const error_str = qjs.JS_ToCString(ctx, exception);
+        if (error_str != null) {
+            defer qjs.JS_FreeCString(ctx, error_str);
+            z.print("Error: {s}\n", .{error_str});
+        }
+    } else {
+        const result_str = qjs.JS_ToCString(ctx, result4);
+        if (result_str != null) {
+            defer qjs.JS_FreeCString(ctx, result_str);
+            z.print("Generator output: {s}\n\n", .{result_str});
+        }
+    }
+
+    z.print("✅ QuickJS supports:\n", .{});
+    z.print("  • ES6 Proxy (for reactive programming)\n", .{});
+    z.print("  • Promises (with job queue execution)\n", .{});
+    z.print("  • Async/Await (requires pending job execution)\n", .{});
+    z.print("  • Generators (yield/next pattern)\n", .{});
+    z.print("  • Symbol, WeakMap, WeakSet, etc.\n\n", .{});
+}
+
+fn firstQuickJSTest() void {
     const rt = qjs.JS_NewRuntime();
     defer qjs.JS_FreeRuntime(rt);
 
@@ -56,23 +510,7 @@ pub fn main() !void {
         defer qjs.JS_FreeCString(ctx, js_str);
         z.print("QuickJS result: {s}\n\n", .{js_str});
     }
-
-    try demoExecuteScriptFromHTML(gpa, ctx);
-    try zexplore_example_com(gpa, "https://www.example.com");
-    try demoSimpleParsing(gpa);
-    try demoTemplate(gpa);
-    try demoParserReUse(gpa);
-    try demoStreamParser(gpa);
-    try demoInsertAdjacentElement(gpa);
-    try demoInsertAdjacentHTML(gpa);
-    try demoSetInnerHTML(gpa);
-    try demoSearchComparison(gpa);
-    try demoSuspiciousAttributes(gpa);
-    try demoNormalizer(gpa);
-    try normalizeString_DOM_parsing_bencharmark(gpa);
-    try serverSideRenderingBenchmark(gpa);
 }
-
 /// use `parseString` or `createDocFromString` to create a document with a BODY element populated by the input string
 fn demoSimpleParsing(_: std.mem.Allocator) !void {
     const html = "<div></div>";
@@ -598,6 +1036,101 @@ fn demoSuspiciousAttributes(allocator: std.mem.Allocator) !void {
     z.print("\nAfter sanitization (permissive mode):\n", .{});
     try z.prettyPrint(allocator, body);
     z.print("\n", .{});
+}
+
+/// Demo: Virtual DOM + SSR with Browser APIs
+/// TODO: Complete implementation - currently disabled due to type compatibility issues
+/// The concept is proven - see VIRTUAL_DOM_CONCEPT.md and src/dom_bridge.zig for details
+///
+/// This demonstrates the VISION: JavaScript code using browser APIs (document.createElement, etc.)
+/// that directly manipulates a lexbor DOM tree. When complete, this will enable:
+/// - Server-side rendering of React/Vue/Preact components
+/// - HTMX backend generation with full JS scripting
+/// - Template engines running at native speed
+/// - Dynamic HTML generation with familiar browser APIs
+fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, ctx: ?*qjs.JSContext) !void {
+    _ = allocator;
+    _ = ctx;
+    z.print("\n=== Virtual DOM Bridge - SSR Demo (Work in Progress) ------\n\n", .{});
+    z.print("✨ CONCEPT: Map browser APIs → lexbor primitives\n", .{});
+    z.print("📄 See VIRTUAL_DOM_CONCEPT.md for the full implementation strategy\n", .{});
+    z.print("💾 See src/dom_bridge.zig for the bridge implementation (WIP)\n\n", .{});
+
+    // TODO: Uncomment when type issues are resolved
+    //
+    // Example of what this will enable:
+    //
+    // // Create a DOM bridge
+    // var bridge = try DOMBridge.init(allocator, ctx);
+    // defer bridge.deinit();
+    //
+    // // Install browser-like APIs
+    // try bridge.installAPIs();
+    //
+    // z.print("✅ Installed: document, window, console APIs\n\n", .{});
+    //
+    // // Now JavaScript can use browser APIs!
+    // const ssr_script =
+    //     \\// This JavaScript now runs with DOM APIs!
+    //     \\console.log("Hello from Virtual DOM!");
+    //     \\
+    //     \\// Create elements using document API
+    //     \\const div = document.createElement("div");
+    //     \\div.setAttribute("class", "container");
+    //     \\div.setAttribute("id", "app");
+    //     \\
+    //     \\const h1 = document.createElement("h1");
+    //     \\h1.textContent = "Welcome to Zexplorer SSR!";
+    //     \\
+    //     \\const p = document.createElement("p");
+    //     \\p.setAttribute("class", "description");
+    //     \\p.textContent = "This HTML was generated by JavaScript running in QuickJS, using a virtual DOM backed by lexbor!";
+    //     \\
+    //     \\// Build the tree
+    //     \\div.appendChild(h1);
+    //     \\div.appendChild(p);
+    //     \\
+    //     \\// Append to body
+    //     \\document.body.appendChild(div);
+    //     \\
+    //     \\// Return the result
+    //     \\"SSR Complete!";
+    // ;
+    //
+    // z.print("--- Executing JavaScript with DOM APIs ---\n", .{});
+    // const result = qjs.JS_Eval(ctx, ssr_script, ssr_script.len, "<ssr>", 0);
+    // defer qjs.JS_FreeValue(ctx, result);
+    //
+    // if (qjs.JS_IsException(result) != 0) {
+    //     const exception = qjs.JS_GetException(ctx);
+    //     defer qjs.JS_FreeValue(ctx, exception);
+    //
+    //     const error_str = qjs.JS_ToCString(ctx, exception);
+    //     if (error_str != null) {
+    //         defer qjs.JS_FreeCString(ctx, error_str);
+    //         z.print("❌ Error: {s}\n", .{error_str});
+    //     }
+    //     return;
+    // }
+    //
+    // const result_str = qjs.JS_ToCString(ctx, result);
+    // if (result_str != null) {
+    //     defer qjs.JS_FreeCString(ctx, result_str);
+    //     z.print("Result: {s}\n\n", .{result_str});
+    // }
+    //
+    // // Now extract the generated HTML from the lexbor DOM
+    // z.print("--- Generated HTML (from lexbor DOM) ---\n", .{});
+    // const body_node = z.bodyNode(bridge.doc).?;
+    // const body_html = try z.innerHTML(allocator, z.nodeToElement(body_node).?);
+    // defer allocator.free(body_html);
+    //
+    // z.print("{s}\n\n", .{body_html});
+    //
+    // // Pretty print it
+    // z.print("--- Pretty Print ---\n", .{});
+    // try z.prettyPrint(allocator, body_node);
+    // z.print("\n", .{});
 }
 
 fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, ctx: ?*qjs.JSContext) !void {

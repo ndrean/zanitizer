@@ -1,19 +1,54 @@
-# zexplorer: a lexbor in Zig project
+# zexplorer: HTML parser & JavaScript execution at native speed on a server
 
-[WIP] **Integrate [quickJS](https://github.com/bellard/quickjs/tree/master)** to execute JavaScript with `quickJS`. A SSR HTML processing powerhouse for web scrapping on steroids.
+A `lexbor` & `quickJS` in `Zig` project
 
-[![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
+- `lexbor` [License](https://github.com/lexbor/lexbor/blob/master/LICENSE)
+- `quickjs` [License](https://github.com/bellard/quickjs/blob/master/LICENSE)
+
+## WIP
+
+- Extend `lexbor` to run JavaScript with [quickJS integration](https://github.com/bellard/quickjs/tree/master).
+
+- or extend `quickJS` with the Window API with `lexbor`.
+
+See [QUICKJS_INTEGRATION.md]
+
+**Expectations**:
+
+- Native Speed: Lexbor parses/manipulates HTML at C speeds
+- No Serialization: JS directly manipulates real DOM via FFI
+- Memory Efficient: Single DOM tree, no virtual DOM overhead
+- Zero Network: All SSR happens in-process
+- Tiny footprint: 0.6MB, very fast start-up
+
+- NO JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts. Not suited for long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig` for this! (data processing, CSV parsing, batch and send to Zig...)
+
+[![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
 [![Scc Code Badge](https://sloc.xyz/github/ndrean/z-html/)](https://github.com/ndrean/z-html)
 
-`zexplorer` is a wrapper of the `C` library [lexbor](https://github.com/lexbor/lexbor), an HTML parser/DOM emulator.
+## Use cases
 
-
-
+- Testing frameworks - Headless DOM for tests
+- Email templates - Server-side rendering
+- PDF generation - HTML → PDF pipelines
+- API gateways - Transform HTML responses
+- Web scrapping on steroids.
+- A lightweight and fast jsdom alternative
+- A native SSR engine for any JS framework
+- A programmable HTML processor with full JS power
+- An HTMX backend powerhouse
 This is useful for web scraping, email sanitization, test engine for integrated tests, SSR post-processing of fragments.
 
 The primitives exposed here stay as close as possible to `JavaScript` semantics.
 
-**Features:**
+## ⚠️ Challenges
+
+- Browser APIs - Need polyfills for fetch, setTimeout, etc.
+- Event Loop - QuickJS has basic support, may need enhancement
+- Module System - Need to implement import/export
+- WASM - Would need separate runtime integration
+  
+## Lexbor integration status
 
 This project exposes a significant / essential subset of all available `lexbor` functions:
 
@@ -28,7 +63,7 @@ This project exposes a significant / essential subset of all available `lexbor` 
 - DOM / HTML-string normalization with options (remove comments, whitespace, empty nodes)
 - Pretty printing
 
-## `lexbor` DOM memory management: Document Ownership and zero-copy functions
+### `lexbor` DOM memory management: Document Ownership and zero-copy functions
 
 In `lexbor`, nodes belong to documents, and the document acts as the memory manager.
 
@@ -42,7 +77,7 @@ Some functions borrow memory from `lexbor` for zero-copy operations: their resul
 
 We opted for the following convention: add `_zc` (for _zero_copy_) to the **non allocated** version of a function. For example, you can get the qualifiedName of an HTMLElement with the allocated version `qualifiedName(allocator, node)` or by mapping to `lexbor` memory with `qualifiedName_zc(node)`. The non-allocated must be consumed immediately whilst the allocated result can outlive the calling function.
 
-<hr>
+---
 
 ## Install
 
