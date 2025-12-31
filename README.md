@@ -11,7 +11,7 @@ A `lexbor` & `quickJS` in `Zig` project
 
 - or extend `quickJS` with the Window API with `lexbor`.
 
-See [QUICKJS_INTEGRATION.md]
+See [QUICKJS_INTEGRATION.md] for examples, when/how to use JS or Zig.
 
 **Expectations**:
 
@@ -39,7 +39,7 @@ See [QUICKJS_INTEGRATION.md]
 - An HTMX backend powerhouse
 This is useful for web scraping, email sanitization, test engine for integrated tests, SSR post-processing of fragments.
 
-The primitives exposed here stay as close as possible to `JavaScript` semantics.
+The primitives exposed stay as close as possible to `JavaScript` semantics.
 
 ## ⚠️ Challenges
 
