@@ -1,6 +1,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("root.zig");
+const qjs = @cImport({
+    @cInclude("quickjs.h");
+});
+
 const native_os = builtin.os.tag;
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -22,6 +26,38 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
+    const rt = qjs.JS_NewRuntime();
+    defer qjs.JS_FreeRuntime(rt);
+
+    // Test QuickJS is working
+    const ctx = qjs.JS_NewContext(rt);
+    defer qjs.JS_FreeContext(ctx);
+
+    // Test 1: Simple arithmetic
+    const js_code = "2 + 2";
+    const result = qjs.JS_Eval(ctx, js_code, js_code.len, "<input>", 0);
+    defer qjs.JS_FreeValue(ctx, result);
+
+    var result_int: i32 = 0;
+    _ = qjs.JS_ToInt32(ctx, &result_int, result);
+    z.print("QuickJS test: 2 + 2 = {d}\n", .{result_int});
+
+    // Test 2: Execute more complex JavaScript
+    const complex_js =
+        \\const info = { name: "Zig", version: "0.15.2" };
+        \\const message = `Hello from ${info.name} ${info.version}!`;
+        \\message;
+    ;
+    const result2 = qjs.JS_Eval(ctx, complex_js, complex_js.len, "<eval>", 0);
+    defer qjs.JS_FreeValue(ctx, result2);
+
+    const js_str = qjs.JS_ToCString(ctx, result2);
+    if (js_str != null) {
+        defer qjs.JS_FreeCString(ctx, js_str);
+        z.print("QuickJS result: {s}\n\n", .{js_str});
+    }
+
+    try demoExecuteScriptFromHTML(gpa, ctx);
     try zexplore_example_com(gpa, "https://www.example.com");
     try demoSimpleParsing(gpa);
     try demoTemplate(gpa);
@@ -561,6 +597,109 @@ fn demoSuspiciousAttributes(allocator: std.mem.Allocator) !void {
     try z.sanitizeNode(allocator, body, .permissive);
     z.print("\nAfter sanitization (permissive mode):\n", .{});
     try z.prettyPrint(allocator, body);
+    z.print("\n", .{});
+}
+
+fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, ctx: ?*qjs.JSContext) !void {
+    z.print("\n=== Demo extracting and executing <script> from HTML ------\n\n", .{});
+
+    // Create HTML with embedded JavaScript
+    // Note: <script> tags in <head> might be removed by the HTML parser
+    const html_with_script =
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<body>
+        \\  <h1>Test</h1>
+        \\  <script>
+        \\    function greet(name) {
+        \\      return "Hello, " + name + "!";
+        \\    }
+        \\    var greeting_result = greet("QuickJS from Zig");
+        \\    greeting_result;
+        \\  </script>
+        \\  <p>Content</p>
+        \\  <script>
+        \\    const data = { count: 42, items: ["a", "b", "c"] };
+        \\    var json_result = JSON.stringify(data);
+        \\    json_result;
+        \\  </script>
+        \\</body>
+        \\</html>
+    ;
+
+    const doc = try z.createDocFromString(html_with_script);
+    defer z.destroyDocument(doc);
+    const node = z.documentRoot(doc).?;
+    try z.prettyPrint(allocator, node);
+
+    // Find all <script> elements
+    const script_elements = try z.querySelectorAll(allocator, doc, "script");
+    defer allocator.free(script_elements);
+
+    z.print("Found {} <script> tags\n\n", .{script_elements.len});
+
+    // Execute each script
+    for (script_elements, 0..) |script_elt, i| {
+        const script_content = z.textContent_zc(z.elementToNode(script_elt));
+
+        if (script_content.len > 0) {
+            z.print("Script #{}: Executing...\n", .{i + 1});
+            z.print("--- JavaScript Code ---\n{s}\n", .{script_content});
+            z.print("--- Execution Result ---\n", .{});
+
+            const eval_result = qjs.JS_Eval(ctx, script_content.ptr, script_content.len, "<script>", 0);
+            defer qjs.JS_FreeValue(ctx, eval_result);
+
+            // Check for errors
+            if (qjs.JS_IsException(eval_result) != 0) {
+                const exception = qjs.JS_GetException(ctx);
+                defer qjs.JS_FreeValue(ctx, exception);
+
+                const error_str = qjs.JS_ToCString(ctx, exception);
+                if (error_str != null) {
+                    defer qjs.JS_FreeCString(ctx, error_str);
+                    z.print("Error: {s}\n", .{error_str});
+                }
+            } else {
+                // Get the result as string
+                const result_str = qjs.JS_ToCString(ctx, eval_result);
+                if (result_str != null) {
+                    defer qjs.JS_FreeCString(ctx, result_str);
+                    z.print("Result: {s}\n", .{result_str});
+                } else {
+                    z.print("(undefined)\n", .{});
+                }
+            }
+            z.print("\n", .{});
+        }
+    }
+
+    // Now we can access variables defined in the scripts
+    z.print("--- Accessing JavaScript variables from Zig ---\n", .{});
+
+    // Get the 'greeting_result' variable from first script
+    const global = qjs.JS_GetGlobalObject(ctx);
+    defer qjs.JS_FreeValue(ctx, global);
+
+    const greeting_prop = qjs.JS_GetPropertyStr(ctx, global, "greeting_result");
+    defer qjs.JS_FreeValue(ctx, greeting_prop);
+
+    const greeting_str = qjs.JS_ToCString(ctx, greeting_prop);
+    if (greeting_str != null) {
+        defer qjs.JS_FreeCString(ctx, greeting_str);
+        z.print("Variable 'greeting_result': {s}\n", .{greeting_str});
+    }
+
+    // Get the 'json_result' variable from second script
+    const json_prop = qjs.JS_GetPropertyStr(ctx, global, "json_result");
+    defer qjs.JS_FreeValue(ctx, json_prop);
+
+    const json_str = qjs.JS_ToCString(ctx, json_prop);
+    if (json_str != null) {
+        defer qjs.JS_FreeCString(ctx, json_str);
+        z.print("Variable 'json_result': {s}\n", .{json_str});
+    }
+
     z.print("\n", .{});
 }
 

@@ -6,6 +6,39 @@ pub fn build(b: *std.Build) void {
 
     const lexbor_static_lib_path = b.path("lexbor_master_dist/lib/liblexbor_static.a");
     const lexbor_src_path = b.path("lexbor_master_dist/include");
+    const quickjs_src_path = b.path("vendor/quickjs");
+    const qjs_flags = &.{
+        "-std=gnu99",
+        "-D_GNU_SOURCE",
+        "-Dasm=__asm__",
+        "-DCONFIG_VERSION=\"2025-09-13\"", // Use actual version
+        "-DCONFIG_BIGNUM",
+        "-std=c99",
+        "-fno-sanitize=undefined", // Optional: QJS sometimes triggers UBSAN
+    };
+
+    const qjs_lib = b.addLibrary(.{
+        .name = "quickjs",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    qjs_lib.linkLibC();
+    qjs_lib.addCSourceFiles(.{
+        .root = quickjs_src_path,
+        .files = &.{
+            "quickjs.c",
+            "libregexp.c",
+            "libunicode.c",
+            "cutils.c",
+            "dtoa.c",
+        },
+        .flags = qjs_flags,
+    });
+
+    // const quickjs_dep = b.dependency("quickjs", .{ .target = target, .optimize = optimize });
 
     const zexplorer_lib = b.addLibrary(.{
         .name = "zexplorer",
@@ -15,6 +48,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
     const c_flags = &.{ "-std=c99", "-DLEXBOR_STATIC" };
     zexplorer_lib.addCSourceFile(.{
         .file = b.path("src/minimal.c"),
@@ -22,6 +56,7 @@ pub fn build(b: *std.Build) void {
     });
     zexplorer_lib.addIncludePath(lexbor_src_path);
     // zexplorer_lib.addObjectFile(lexbor_static_lib_path);
+    zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibC();
 
     const zexplorer_module = b.addModule(
@@ -49,8 +84,11 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.addImport("zhtml-examples", zexplorer_module);
     exe.addObjectFile(lexbor_static_lib_path);
+    exe.addIncludePath(lexbor_src_path);
+    exe.addIncludePath(quickjs_src_path);
     exe.linkLibC();
     exe.linkLibrary(zexplorer_lib);
+    exe.linkLibrary(qjs_lib);
     b.installArtifact(exe);
 
     // Run step

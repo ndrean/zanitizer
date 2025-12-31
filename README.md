@@ -1,9 +1,13 @@
 # zexplorer: a lexbor in Zig project
 
+[WIP] **Integrate [quickJS](https://github.com/bellard/quickjs/tree/master)**
+
 [![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
 [![Scc Code Badge](https://sloc.xyz/github/ndrean/z-html/)](https://github.com/ndrean/z-html)
 
 `zexplorer` is a wrapper of the `C` library [lexbor](https://github.com/lexbor/lexbor), an HTML parser/DOM emulator.
+
+**branch quickJS**: [WIP]  Execute JavaScript with `quickJS`. A SSR HTML processing powerhouse for web scrapping on steroids.
 
 This is useful for web scraping, email sanitization, test engine for integrated tests, SSR post-processing of fragments.
 
