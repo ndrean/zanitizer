@@ -1,0 +1,50 @@
+While jsdom is the standard, it suffers from being a simulation of a browser written in JavaScript running on V8. This adds layers of abstraction that consume significant memory and CPU.
+
+Your project represents a "Native DOM" approach: instead of simulating a DOM tree with JavaScript objects (heavy), you are backing JavaScript objects with high-performance C/Zig structs (Lexbor).
+
+Here is an analysis of why this is worth pursuing and where it fits:
+
+1. The Value Proposition vs. jsdom
+Performance: jsdom is notoriously slow for heavy DOM manipulation because every document.createElement('div') creates a heavy V8 object. Your approach uses QuickJS (lightweight) backed by Lexbor (extremely fast, flat C structs). This could offer order-of-magnitude speedups for server-side rendering.
+
+Memory Footprint: A Node.js instance with jsdom has a high base memory cost. Your Zig binary allows for a tiny footprint, making it viable for environments where Node.js is too heavy (e.g., sidecars, embedded devices, high-density serverless functions).
+
+Startup Time: QuickJS starts instantly. This makes your tool ideal for Functions-as-a-Service (FaaS) or CLI tools where the multi-second startup of Node+jsdom is painful.
+
+2. The Two Architectures You Proposd
+You mentioned two ways to look at this project. Both have distinct use cases:
+
+Path A: "A Better Node.js for SSR" (Extending QuickJS)
+
+Concept: You run a JS script that just happens to have window and document available.
+
+Killer App: Testing Frameworks. Imagine running Jest/Vitest tests 10x faster because the DOM isn't a simulation. Frontend developers crave faster test suites.
+
+Path B: "A Headless Programmable Browser" (Extending Lexbor)
+
+Concept: You load an HTML file, and the parser triggers JS execution when it sees <script>.
+
+Killer App: Scraping & Data Extraction. Tools like Puppeteer/Playwright are heavy (they run full Chrome). If you can execute just enough JS to hydrate a page and then use Lexbor to query selectors, you have a lightweight scraper that costs a fraction of a headless browser.
+
+3. Concrete Use Cases
+A. The "HTMX Backend" (Server-Side Components)
+You mentioned HTMX, and this is perhaps the most modern use case.
+
+The Problem: People love HTMX but hate switching languages. They want to write their UI logic in JavaScript (because they know the DOM API) but want it to run on the server to send HTML over the wire.
+
+Your Solution: A developer writes a standard JS Web Component or a simple script using document.createElement. Your runtime executes it on the server, serializes the result to a string using Lexbor's fast serialization, and sends it to the client.
+
+Why you win: You provide the standard DOM API (appendChild, setAttribute) on the server without the overhead of Node.js.
+
+B. High-Performance Email Generation
+The Problem: Transactional emails (receipts, dashboards) are often complex HTML tables. Templating languages (Mustache, Handlebars) are logic-less and hard to debug.
+
+Your Solution: Use standard DOM APIs to build the email. const table = document.createElement('table'); is explicit and type-safe-ish. You can create reusable JS components for email parts (headers, footers) and render them natively.
+
+C. "Edge" Rendering (Cloudflare Workers Alternative)
+Cloudflare Workers provides a standard Request/Response API but limits DOM access.
+
+Your runtime could be packaged as a specialized "Edge Renderer" that allows full DOM manipulation at the edge, enabling complex logic (like hydrating a React tree) to happen closer to the user, faster than Node.js could achieve.
+
+D. Static Site Generation (SSG)
+Most SSGs (Next.js, Astro) rely on Node.js. A tool built on your stack could generate static sites from JS components significantly faster, handling thousands of pages in seconds because the HTML serialization path (Lexbor) is native code.

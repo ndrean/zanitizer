@@ -2,6 +2,39 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+
+// Legacy QuickJS - no special defines needed
+pub const qjs = @cImport({
+    @cInclude("quickjs.h");
+});
+
+// Import wrapper for cleaner QuickJS API
+pub const wrapper = @import("wrapper.zig");
+
+// Re-export wrapper constants - use these instead of creating values manually
+// This avoids std.mem.zeroes() code smell and provides compile-time constants
+pub const jsException = wrapper.EXCEPTION;
+pub const jsNull = wrapper.NULL;
+pub const jsUndefined = wrapper.UNDEFINED;
+pub const jsTrue = wrapper.TRUE;
+pub const jsFalse = wrapper.FALSE;
+
+pub fn isUndefined(val: qjs.JSValue) bool {
+    return qjs.JS_IsUndefined(val) != 0;
+}
+
+pub fn isNull(val: qjs.JSValue) bool {
+    return qjs.JS_IsNull(val) != 0;
+}
+
+pub fn isException(val: qjs.JSValue) bool {
+    return qjs.JS_IsException(val) != 0;
+}
+
+pub fn isFunction(ctx: ?*qjs.JSContext, val: qjs.JSValue) bool {
+    return qjs.JS_IsFunction(ctx, val) != 0;
+}
+
 const lxb = @import("modules/core.zig");
 const css = @import("modules/css_selectors.zig");
 const chunks = @import("modules/chunks.zig");
@@ -21,6 +54,8 @@ const sanitize = @import("modules/sanitizer.zig");
 const parse = @import("modules/parsing.zig");
 const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
+
+// =========================================================================================================
 
 // Re-export commonly used types
 pub const Err = @import("errors.zig").LexborError;

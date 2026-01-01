@@ -1,5 +1,5 @@
 LEXBOR_VERSION = master
-LEXBOR_DIR = lexbor_src_${LEXBOR_VERSION}
+LEXBOR_DIR = vendor/lexbor_src_${LEXBOR_VERSION}
 LEXBOR_LIB = $(LEXBOR_DIR)/build/liblexbor_static.a
 
 all: $(LEXBOR_LIB)

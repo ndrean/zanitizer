@@ -739,7 +739,7 @@ The file _main.zig_ shows more use cases with parsing and serialization as well 
 - `lexbor` is built with static linking
 
 ```sh
-make -f Makefile.lexbor
+LEXOBR_VERSION=2.6 LEXBOR_DIR=vendor/lexbor_master  make -f Makefile.lexbor
 ```
 
 - tests: The _build.zig_ file runs all the tests from _root.zig_. It imports all the submodules and runs the tests.

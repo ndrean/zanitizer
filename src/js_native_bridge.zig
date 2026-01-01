@@ -1,33 +1,14 @@
 /// Bridge for passing data between QuickJS and Zig for high-performance processing
 /// This demonstrates how to pass arrays, objects, and complex data structures
-
 const std = @import("std");
-const qjs = @cImport({
-    @cInclude("quickjs.h");
-});
+const z = @import("root.zig");
+const qjs = z.qjs;
 
-/// Helper to create JS_EXCEPTION value at runtime
-fn jsException() qjs.JSValue {
-    var val: qjs.JSValue = undefined;
-    val.tag = qjs.JS_TAG_EXCEPTION;
-    val.u = std.mem.zeroes(qjs.JSValueUnion);
-    return val;
-}
-
-/// Helper to create JS_UNDEFINED value at runtime
-fn jsUndefined() qjs.JSValue {
-    var val: qjs.JSValue = undefined;
-    val.tag = qjs.JS_TAG_UNDEFINED;
-    val.u = std.mem.zeroes(qjs.JSValueUnion);
-    return val;
-}
-
-/// Helper to create JS_NULL value at runtime
-fn jsNull() qjs.JSValue {
-    var val: qjs.JSValue = undefined;
-    val.tag = qjs.JS_TAG_NULL;
-    val.u = std.mem.zeroes(qjs.JSValueUnion);
-    return val;
+/// Retrieve the Zig allocator stored in the JSContext opaque pointer
+fn getAllocator(ctx: ?*qjs.JSContext) std.mem.Allocator {
+    const opaque_ptr = qjs.JS_GetContextOpaque(ctx);
+    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+    return allocator_ptr.*;
 }
 
 /// Example 1: Process array of numbers in Zig (native speed)
@@ -38,23 +19,25 @@ pub fn js_processArray(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    if (argc < 1) return jsException();
+    if (argc < 1) return z.jsException;
 
     const array = argv[0];
 
     // Get array length
-    const length_prop = qjs.JS_GetPropertyStr(ctx, array, "length");
+    const length_prop = qjs.JS_GetPropertyStr(
+        ctx,
+        array,
+        "length",
+    );
     defer qjs.JS_FreeValue(ctx, length_prop);
 
     var length: u32 = 0;
     _ = qjs.JS_ToUint32(ctx, &length, length_prop);
 
-    // Allocate Zig array
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Get the Zig allocator from context (passed during setup)
+    const allocator = getAllocator(ctx);
 
-    const data = allocator.alloc(f64, length) catch return jsException();
+    const data = allocator.alloc(f64, length) catch return z.jsException;
     defer allocator.free(data);
 
     // Copy JavaScript array to Zig
@@ -92,7 +75,7 @@ pub fn js_transformArray(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    if (argc < 1) return jsException();
+    if (argc < 1) return z.jsException;
 
     const array = argv[0];
 
@@ -103,15 +86,13 @@ pub fn js_transformArray(
     var length: u32 = 0;
     _ = qjs.JS_ToUint32(ctx, &length, length_prop);
 
-    // Allocate Zig arrays
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Get the Zig allocator from context (passed during setup)
+    const allocator = getAllocator(ctx);
 
-    const input = allocator.alloc(f64, length) catch return jsException();
+    const input = allocator.alloc(f64, length) catch return z.jsException;
     defer allocator.free(input);
 
-    const output = allocator.alloc(f64, length) catch return jsException();
+    const output = allocator.alloc(f64, length) catch return z.jsException;
     defer allocator.free(output);
 
     // Copy JavaScript array to Zig
@@ -152,7 +133,7 @@ pub fn js_processTypedArray(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    if (argc < 1) return jsException();
+    if (argc < 1) return z.jsException;
 
     const typed_array = argv[0];
 
@@ -174,7 +155,7 @@ pub fn js_processTypedArray(
     var size: usize = 0;
     const data_ptr = qjs.JS_GetArrayBuffer(ctx, &size, buffer);
 
-    if (data_ptr == null) return jsException();
+    if (data_ptr == null) return z.jsException;
 
     // Cast to f64 array (assuming Float64Array)
     const data: [*]f64 = @ptrCast(@alignCast(data_ptr));
@@ -195,7 +176,7 @@ pub fn js_processObject(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    if (argc < 1) return jsException();
+    if (argc < 1) return z.jsException;
 
     const obj = argv[0];
 
@@ -221,12 +202,10 @@ pub fn js_processObject(
     var length: u32 = 0;
     _ = qjs.JS_ToUint32(ctx, &length, length_prop);
 
-    // Allocate and copy array
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Get the Zig allocator from context (passed during setup)
+    const allocator = getAllocator(ctx);
 
-    const values = allocator.alloc(f64, length) catch return jsException();
+    const values = allocator.alloc(f64, length) catch return z.jsException;
     defer allocator.free(values);
 
     var i: u32 = 0;
@@ -271,20 +250,18 @@ pub fn js_processText(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    if (argc < 1) return jsException();
+    if (argc < 1) return z.jsException;
 
     const text_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (text_c == null) return jsException();
+    if (text_c == null) return z.jsException;
     defer qjs.JS_FreeCString(ctx, text_c);
 
     const text = std.mem.span(text_c);
 
-    // Process in Zig
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Get the Zig allocator from context (passed during setup)
+    const allocator = getAllocator(ctx);
 
-    const result = processTextNative(allocator, text) catch return jsException();
+    const result = processTextNative(allocator, text) catch return z.jsException;
     defer allocator.free(result);
 
     // Return processed string
@@ -293,7 +270,7 @@ pub fn js_processText(
 
 fn processTextNative(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
     // Example: Remove extra whitespace
-    var result = std.ArrayList(u8).empty;
+    var result: std.ArrayList(u8) = .empty;
     defer result.deinit(allocator);
 
     var prev_was_space = false;
@@ -313,8 +290,13 @@ fn processTextNative(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
 }
 
 /// Install all native processing functions
-pub fn installNativeBridge(ctx_opaque: anytype) void {
+/// The allocator pointer is stored in the JSContext opaque data for use by bridge functions
+pub fn installNativeBridge(ctx_opaque: anytype, allocator: *std.mem.Allocator) void {
     const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(ctx_opaque));
+
+    // Store the Zig allocator in the JSContext opaque pointer
+    qjs.JS_SetContextOpaque(ctx, allocator);
+
     const global = qjs.JS_GetGlobalObject(ctx);
     defer qjs.JS_FreeValue(ctx, global);
 

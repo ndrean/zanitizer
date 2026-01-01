@@ -1,505 +1,403 @@
 const std = @import("std");
 const z = @import("root.zig");
-const qjs = @cImport({
-    @cInclude("quickjs.h");
-});
 
-/// DOM Bridge: Maps JavaScript Window/Document API to lexbor primitives
+var dom_class_id: z.qjs.JSClassID = 0;
+
+fn getAllocator(ctx: ?*z.qjs.JSContext) std.mem.Allocator {
+    const opaque_ptr = z.qjs.JS_GetContextOpaque(ctx);
+    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+    return allocator_ptr.*;
+}
+
 pub const DOMBridge = struct {
-    ctx: ?*anyopaque,
-    doc: *z.HTMLDocument,
     allocator: std.mem.Allocator,
+    ctx: ?*z.qjs.JSContext,
+    doc: *z.HTMLDocument,
 
-    pub fn init(allocator: std.mem.Allocator, ctx: ?*anyopaque) !DOMBridge {
-        const doc = try z.createDocument();
+    // Finalizer called when QuickJS garbage collects a wrapped DOM object
+    fn domFinalizer(rt: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
+        _ = rt;
+        _ = val;
+        // Do nothing - the Lexbor document owns the DOM nodes
+        // and will free them when the document is destroyed.
+        // We just need to prevent QuickJS from trying to access them.
+    }
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        ctx: ?*z.qjs.JSContext,
+    ) !DOMBridge {
+        if (dom_class_id == 0) {
+            _ = z.qjs.JS_NewClassID(&dom_class_id);
+
+            const def = z.qjs.JSClassDef{
+                .class_name = "DOMNode",
+                .finalizer = &domFinalizer, // Add finalizer to prevent access to freed nodes
+                .gc_mark = null,
+                .call = null,
+                .exotic = null,
+            };
+
+            const rt = z.qjs.JS_GetRuntime(ctx);
+            _ = z.qjs.JS_NewClass(rt, dom_class_id, &def);
+        }
+
+        // Note: Allocator should already be set in context by installNativeBridge
+        // We don't overwrite it here
+
+        const doc = try z.createDocFromString("");
+
         return .{
+            .allocator = allocator,
             .ctx = ctx,
             .doc = doc,
-            .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *DOMBridge) void {
+        // WORKAROUND: Don't destroy the Lexbor document here
+        // Destroying it causes QuickJS GC assertion failures because QuickJS
+        // tries to access the wrapped DOM nodes during final garbage collection.
+        // The document will leak, but this prevents the crash.
+        // TODO: Find a proper solution for cleanup order
+        // _ = self;
+
+        // NOTE: If you uncomment below, you'll get the assertion:
         z.destroyDocument(self.doc);
     }
 
-    /// Install browser-like APIs into QuickJS global scope
     pub fn installAPIs(self: *DOMBridge) !void {
-        const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(self.ctx));
-        const global = qjs.JS_GetGlobalObject(ctx);
-        defer qjs.JS_FreeValue(ctx, global);
+        const ctx = self.ctx;
+        const global = z.qjs.JS_GetGlobalObject(ctx);
+        defer z.qjs.JS_FreeValue(ctx, global);
 
-        // Create document object
         try self.createDocumentAPI(global);
-
-        // Create window object
         try self.createWindowAPI(global);
-
-        // Add console object
-        try self.createConsoleAPI(global);
+        // Note: console is already installed in main.zig via installConsole()
+        // Don't overwrite it here
+        // try self.createConsoleAPI(global);
     }
 
-    fn createDocumentAPI(self: *DOMBridge, global: qjs.JSValue) !void {
-        const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(self.ctx));
-        const doc_obj = qjs.JS_NewObject(ctx);
-        defer qjs.JS_FreeValue(ctx, doc_obj);
+    fn createDocumentAPI(self: *DOMBridge, global: z.qjs.JSValue) !void {
+        const ctx = self.ctx;
+        const doc_obj = z.qjs.JS_NewObject(ctx);
+        // DO NOT defer free - JS_SetPropertyStr transfers ownership to global!
 
-        // document.createElement(tagName)
-        const create_element_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_createElement,
-            "createElement",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "createElement", create_element_fn);
+        const create_element_fn = z.qjs.JS_NewCFunction2(ctx, js_createElement, "createElement", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "createElement", create_element_fn);
 
-        // document.createTextNode(text)
-        const create_text_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_createTextNode,
-            "createTextNode",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "createTextNode", create_text_fn);
+        const create_text_fn = z.qjs.JS_NewCFunction2(ctx, js_createTextNode, "createTextNode", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "createTextNode", create_text_fn);
 
-        // document.querySelector(selector)
-        const query_selector_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_querySelector,
-            "querySelector",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelector", query_selector_fn);
+        const query_selector_fn = z.qjs.JS_NewCFunction2(ctx, js_querySelector, "querySelector", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelector", query_selector_fn);
 
-        // document.querySelectorAll(selector)
-        const query_selector_all_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_querySelectorAll,
-            "querySelectorAll",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelectorAll", query_selector_all_fn);
+        const query_selector_all_fn = z.qjs.JS_NewCFunction2(ctx, js_querySelectorAll, "querySelectorAll", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelectorAll", query_selector_all_fn);
 
-        // document.body
         const body_node = z.bodyNode(self.doc);
         if (body_node) |body| {
             const body_element = z.nodeToElement(body).?;
             const body_val = try wrapElement(ctx, body_element);
-            _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "body", body_val);
+            _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "body", body_val);
         }
 
-        // Store document reference in global
-        const opaque_obj = qjs.JS_NewObjectClass(ctx, 1);
-        _ = qjs.JS_SetOpaque(opaque_obj, @ptrCast(self.doc));
-        _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "_native_doc", opaque_obj);
+        // FIX: Cast dom_class_id to c_int
+        const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(self.doc));
+        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "_native_doc", opaque_obj);
 
-        _ = qjs.JS_SetPropertyStr(ctx, global, "document", doc_obj);
+        _ = z.qjs.JS_SetPropertyStr(ctx, global, "document", doc_obj);
     }
 
-    fn createWindowAPI(self: *DOMBridge, global: qjs.JSValue) !void {
-        const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(self.ctx));
-        const window_obj = qjs.JS_NewObject(ctx);
-        defer qjs.JS_FreeValue(ctx, window_obj);
+    fn createWindowAPI(self: *DOMBridge, global: z.qjs.JSValue) !void {
+        const ctx = self.ctx;
+        const window_obj = z.qjs.JS_NewObject(ctx);
+        // DO NOT defer free - JS_SetPropertyStr transfers ownership!
 
-        // window.location (basic support)
-        const location_obj = qjs.JS_NewObject(ctx);
-        const href = qjs.JS_NewString(ctx, "about:blank");
-        _ = qjs.JS_SetPropertyStr(ctx, location_obj, "href", href);
-        _ = qjs.JS_SetPropertyStr(ctx, window_obj, "location", location_obj);
+        const location_obj = z.qjs.JS_NewObject(ctx);
+        const href = z.qjs.JS_NewString(ctx, "about:blank");
+        _ = z.qjs.JS_SetPropertyStr(ctx, location_obj, "href", href);
+        _ = z.qjs.JS_SetPropertyStr(ctx, window_obj, "location", location_obj);
 
-        // window.navigator
-        const navigator_obj = qjs.JS_NewObject(ctx);
-        const user_agent = qjs.JS_NewString(ctx, "Zexplorer/1.0 (QuickJS; Lexbor)");
-        _ = qjs.JS_SetPropertyStr(ctx, navigator_obj, "userAgent", user_agent);
-        _ = qjs.JS_SetPropertyStr(ctx, window_obj, "navigator", navigator_obj);
+        const navigator_obj = z.qjs.JS_NewObject(ctx);
+        const user_agent = z.qjs.JS_NewString(ctx, "Zexplorer/1.0 (QuickJS; Lexbor)");
+        _ = z.qjs.JS_SetPropertyStr(ctx, navigator_obj, "userAgent", user_agent);
+        _ = z.qjs.JS_SetPropertyStr(ctx, window_obj, "navigator", navigator_obj);
 
-        _ = qjs.JS_SetPropertyStr(ctx, global, "window", window_obj);
-
-        // Make 'window' also available as 'globalThis' and 'self'
-        _ = qjs.JS_SetPropertyStr(ctx, global, "globalThis", window_obj);
-        _ = qjs.JS_SetPropertyStr(ctx, global, "self", window_obj);
+        _ = z.qjs.JS_SetPropertyStr(ctx, global, "window", window_obj);
+        _ = z.qjs.JS_SetPropertyStr(ctx, global, "globalThis", window_obj);
+        _ = z.qjs.JS_SetPropertyStr(ctx, global, "self", window_obj);
     }
 
-    fn createConsoleAPI(self: *DOMBridge, global: qjs.JSValue) !void {
-        const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(self.ctx));
-        const console_obj = qjs.JS_NewObject(ctx);
-        defer qjs.JS_FreeValue(ctx, console_obj);
+    fn createConsoleAPI(self: *DOMBridge, global: z.qjs.JSValue) !void {
+        const ctx = self.ctx;
+        const console_obj = z.qjs.JS_NewObject(ctx);
+        // DO NOT defer free - JS_SetPropertyStr transfers ownership!
 
-        // console.log
-        const log_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_consoleLog,
-            "log",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, console_obj, "log", log_fn);
+        const log_fn = z.qjs.JS_NewCFunction2(ctx, js_consoleLog, "log", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, console_obj, "log", log_fn);
 
-        // console.error
-        const error_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_consoleLog,
-            "error",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, console_obj, "error", error_fn);
+        const error_fn = z.qjs.JS_NewCFunction2(ctx, js_consoleLog, "error", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, console_obj, "error", error_fn);
 
-        _ = qjs.JS_SetPropertyStr(ctx, global, "console", console_obj);
+        _ = z.qjs.JS_SetPropertyStr(ctx, global, "console", console_obj);
     }
 
-    /// Wrap a lexbor Element into a JavaScript object with DOM methods
-    fn wrapElement(ctx: ?*qjs.JSContext, element: z.Element) !qjs.JSValue {
-        const elem_obj = qjs.JS_NewObject(ctx);
+    fn wrapElement(ctx: ?*z.qjs.JSContext, element: *z.HTMLElement) !z.qjs.JSValue {
+        const elem_obj = z.qjs.JS_NewObject(ctx);
+        // FIX: Cast dom_class_id
+        const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(element));
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "_native_element", opaque_obj);
 
-        // Store native element pointer
-        const opaque_obj = qjs.JS_NewObjectClass(ctx, 1);
-        _ = qjs.JS_SetOpaque(opaque_obj, @ptrCast(element));
-        _ = qjs.JS_SetPropertyStr(ctx, elem_obj, "_native_element", opaque_obj);
-
-        // element.tagName
         const tag_name = z.tagName_zc(element);
-        const tag_val = qjs.JS_NewString(ctx, tag_name.ptr);
-        _ = qjs.JS_SetPropertyStr(ctx, elem_obj, "tagName", tag_val);
+        const tag_val = z.qjs.JS_NewString(ctx, tag_name.ptr);
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "tagName", tag_val);
 
-        // element.appendChild(child)
-        const append_child_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_appendChild,
-            "appendChild",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, elem_obj, "appendChild", append_child_fn);
+        const append_child_fn = z.qjs.JS_NewCFunction2(ctx, js_appendChild, "appendChild", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "appendChild", append_child_fn);
 
-        // element.setAttribute(name, value)
-        const set_attr_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_setAttribute,
-            "setAttribute",
-            2,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, elem_obj, "setAttribute", set_attr_fn);
+        const set_attr_fn = z.qjs.JS_NewCFunction2(ctx, js_setAttribute, "setAttribute", 2, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "setAttribute", set_attr_fn);
 
-        // element.getAttribute(name)
-        const get_attr_fn = qjs.JS_NewCFunction2(
-            ctx,
-            js_getAttribute,
-            "getAttribute",
-            1,
-            qjs.JS_CFUNC_generic,
-            0,
-        );
-        _ = qjs.JS_SetPropertyStr(ctx, elem_obj, "getAttribute", get_attr_fn);
+        const get_attr_fn = z.qjs.JS_NewCFunction2(ctx, js_getAttribute, "getAttribute", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "getAttribute", get_attr_fn);
 
-        // element.textContent
+        // Add setTextContent as a method (property assignment doesn't work easily in vanilla QuickJS)
+        const set_text_fn = z.qjs.JS_NewCFunction2(ctx, js_setTextContent, "setTextContent", 1, z.qjs.JS_CFUNC_generic, 0);
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "setTextContent", set_text_fn);
+
+        // Set initial textContent as read-only property
         const text_content = z.textContent_zc(z.elementToNode(element));
-        const text_val = qjs.JS_NewString(ctx, text_content.ptr);
-        _ = qjs.JS_SetPropertyStr(ctx, elem_obj, "textContent", text_val);
+        const text_val = z.qjs.JS_NewString(ctx, text_content.ptr);
+        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "_textContent", text_val);
 
         return elem_obj;
     }
 };
 
-// ========================================================================
-// JavaScript C Function Implementations
-// ========================================================================
-
-fn js_createElement(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
+fn js_createElement(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     _ = this;
-    if (argc < 1) return qjs.JS_EXCEPTION;
+    if (argc < 1) return z.jsException;
 
-    const tag_name_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (tag_name_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, tag_name_c);
-
+    const tag_name_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (tag_name_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, tag_name_c);
     const tag_name = std.mem.span(tag_name_c);
 
-    // Get document from global
-    const global = qjs.JS_GetGlobalObject(ctx);
-    defer qjs.JS_FreeValue(ctx, global);
+    const global = z.qjs.JS_GetGlobalObject(ctx);
+    defer z.qjs.JS_FreeValue(ctx, global);
+    const doc_obj = z.qjs.JS_GetPropertyStr(ctx, global, "document");
+    defer z.qjs.JS_FreeValue(ctx, doc_obj);
+    const native_doc_val = z.qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
+    defer z.qjs.JS_FreeValue(ctx, native_doc_val);
 
-    const doc_obj = qjs.JS_GetPropertyStr(ctx, global, "document");
-    defer qjs.JS_FreeValue(ctx, doc_obj);
-
-    const native_doc_val = qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
-    defer qjs.JS_FreeValue(ctx, native_doc_val);
-
-    const doc_ptr = qjs.JS_GetOpaque(native_doc_val, 1);
+    const doc_ptr = z.qjs.JS_GetOpaque(native_doc_val, dom_class_id);
+    if (doc_ptr == null) return z.jsException;
     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
 
-    // Create element using lexbor
-    const element = z.createElement(doc, tag_name) catch return qjs.JS_EXCEPTION;
-
-    // Wrap and return
-    return DOMBridge.wrapElement(ctx, element) catch qjs.JS_EXCEPTION;
+    const element = z.createElement(doc, tag_name) catch return z.jsException;
+    return DOMBridge.wrapElement(ctx, element) catch z.jsException;
 }
 
-fn js_createTextNode(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
+fn js_createTextNode(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     _ = this;
-    if (argc < 1) return qjs.JS_EXCEPTION;
+    if (argc < 1) return z.jsException;
 
-    const text_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (text_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, text_c);
-
+    const text_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (text_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, text_c);
     const text = std.mem.span(text_c);
 
-    // Get document
-    const global = qjs.JS_GetGlobalObject(ctx);
-    defer qjs.JS_FreeValue(ctx, global);
+    const global = z.qjs.JS_GetGlobalObject(ctx);
+    defer z.qjs.JS_FreeValue(ctx, global);
+    const doc_obj = z.qjs.JS_GetPropertyStr(ctx, global, "document");
+    defer z.qjs.JS_FreeValue(ctx, doc_obj);
+    const native_doc_val = z.qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
+    defer z.qjs.JS_FreeValue(ctx, native_doc_val);
 
-    const doc_obj = qjs.JS_GetPropertyStr(ctx, global, "document");
-    defer qjs.JS_FreeValue(ctx, doc_obj);
-
-    const native_doc_val = qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
-    defer qjs.JS_FreeValue(ctx, native_doc_val);
-
-    const doc_ptr = qjs.JS_GetOpaque(native_doc_val, 1);
+    const doc_ptr = z.qjs.JS_GetOpaque(native_doc_val, dom_class_id);
+    if (doc_ptr == null) return z.jsException;
     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
 
-    // Create text node using lexbor
-    const text_node = z.createTextNode(doc, text) catch return qjs.JS_EXCEPTION;
+    const text_node = z.createTextNode(doc, text) catch return z.jsException;
 
-    // Wrap as object
-    const text_obj = qjs.JS_NewObject(ctx);
-    const opaque_obj = qjs.JS_NewObjectClass(ctx, 1);
-    _ = qjs.JS_SetOpaque(opaque_obj, @ptrCast(text_node));
-    _ = qjs.JS_SetPropertyStr(ctx, text_obj, "_native_node", opaque_obj);
+    const text_obj = z.qjs.JS_NewObject(ctx);
+    // FIX: Cast dom_class_id
+    const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+    _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(text_node));
+    _ = z.qjs.JS_SetPropertyStr(ctx, text_obj, "_native_node", opaque_obj);
 
     return text_obj;
 }
 
-fn js_appendChild(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
-    if (argc < 1) return qjs.JS_EXCEPTION;
+fn js_appendChild(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 1) return z.jsException;
+    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
+    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
 
-    // Get parent element from 'this'
-    const native_elem_val = qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer qjs.JS_FreeValue(ctx, native_elem_val);
+    const parent_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
+    if (parent_ptr == null) return z.jsException;
+    const parent: *z.HTMLElement = @ptrCast(@alignCast(parent_ptr));
 
-    const parent_ptr = qjs.JS_GetOpaque(native_elem_val, 1);
-    const parent: z.Element = @ptrCast(@alignCast(parent_ptr));
+    const child_elem_val = z.qjs.JS_GetPropertyStr(ctx, argv[0], "_native_element");
+    const child_node_val = z.qjs.JS_GetPropertyStr(ctx, argv[0], "_native_node");
 
-    // Get child from argument
-    const child_elem_val = qjs.JS_GetPropertyStr(ctx, argv[0], "_native_element");
-    const child_node_val = qjs.JS_GetPropertyStr(ctx, argv[0], "_native_node");
+    var child_node: *z.DomNode = undefined;
 
-    var child_node: z.Node = undefined;
-    if (qjs.JS_IsUndefined(child_elem_val) == 0) {
-        defer qjs.JS_FreeValue(ctx, child_elem_val);
-        const child_ptr = qjs.JS_GetOpaque(child_elem_val, 1);
-        const child_elem: z.Element = @ptrCast(@alignCast(child_ptr));
+    // FIX: Use z.isUndefined (bool)
+    if (!z.isUndefined(child_elem_val)) {
+        defer z.qjs.JS_FreeValue(ctx, child_elem_val);
+        const child_ptr = z.qjs.JS_GetOpaque(child_elem_val, dom_class_id);
+        if (child_ptr == null) return z.jsException;
+        const child_elem: *z.HTMLElement = @ptrCast(@alignCast(child_ptr));
         child_node = z.elementToNode(child_elem);
-    } else if (qjs.JS_IsUndefined(child_node_val) == 0) {
-        defer qjs.JS_FreeValue(ctx, child_node_val);
-        const node_ptr = qjs.JS_GetOpaque(child_node_val, 1);
+    } else if (!z.isUndefined(child_node_val)) {
+        defer z.qjs.JS_FreeValue(ctx, child_node_val);
+        const node_ptr = z.qjs.JS_GetOpaque(child_node_val, dom_class_id);
+        if (node_ptr == null) return z.jsException;
         child_node = @ptrCast(@alignCast(node_ptr));
     } else {
-        return qjs.JS_EXCEPTION;
+        return z.jsException;
     }
 
-    // Append using lexbor
     z.appendChild(z.elementToNode(parent), child_node);
-
-    return argv[0]; // Return the child
+    return argv[0];
 }
 
-fn js_setAttribute(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
-    if (argc < 2) return qjs.JS_EXCEPTION;
-
-    const name_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (name_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, name_c);
-
-    const value_c = qjs.JS_ToCString(ctx, argv[1]);
-    if (value_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, value_c);
+fn js_setAttribute(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 2) return z.jsException;
+    const name_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (name_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, name_c);
+    const value_c = z.qjs.JS_ToCString(ctx, argv[1]);
+    if (value_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, value_c);
 
     const name = std.mem.span(name_c);
     const value = std.mem.span(value_c);
+    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
+    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
 
-    // Get element from 'this'
-    const native_elem_val = qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer qjs.JS_FreeValue(ctx, native_elem_val);
+    const elem_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
+    if (elem_ptr == null) return z.jsException;
+    const element: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr));
 
-    const elem_ptr = qjs.JS_GetOpaque(native_elem_val, 1);
-    const element: z.Element = @ptrCast(@alignCast(elem_ptr));
-
-    // Set attribute using lexbor
     _ = z.setAttribute(element, name, value);
-
-    return qjs.JS_UNDEFINED;
+    return z.jsUndefined;
 }
 
-fn js_getAttribute(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
-    if (argc < 1) return qjs.JS_EXCEPTION;
-
-    const name_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (name_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, name_c);
-
+fn js_getAttribute(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 1) return z.jsException;
+    const name_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (name_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, name_c);
     const name = std.mem.span(name_c);
+    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
+    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
 
-    // Get element from 'this'
-    const native_elem_val = qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer qjs.JS_FreeValue(ctx, native_elem_val);
+    const elem_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
+    if (elem_ptr == null) return z.jsException;
+    const element: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr));
 
-    const elem_ptr = qjs.JS_GetOpaque(native_elem_val, 1);
-    const element: z.Element = @ptrCast(@alignCast(elem_ptr));
-
-    // Get attribute using lexbor
     const attr_value = z.getAttribute_zc(element, name);
     if (attr_value) |val| {
-        return qjs.JS_NewString(ctx, val.ptr);
+        return z.qjs.JS_NewString(ctx, val.ptr);
     }
-
-    return qjs.JS_NULL;
+    return z.jsNull;
 }
 
-fn js_querySelector(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
+fn js_setTextContent(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 1) return z.jsException;
+    const text_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (text_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, text_c);
+    const text = std.mem.span(text_c);
+
+    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
+    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
+
+    const elem_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
+    if (elem_ptr == null) return z.jsException;
+    const element: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr));
+
+    const node = z.elementToNode(element);
+    z.setContentAsText(node, text) catch return z.jsException;
+    return z.jsUndefined;
+}
+
+fn js_querySelector(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     _ = this;
-    if (argc < 1) return qjs.JS_EXCEPTION;
-
-    const selector_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (selector_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, selector_c);
-
+    if (argc < 1) return z.jsException;
+    const selector_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (selector_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, selector_c);
     const selector = std.mem.span(selector_c);
 
-    // Get document
-    const global = qjs.JS_GetGlobalObject(ctx);
-    defer qjs.JS_FreeValue(ctx, global);
+    const global = z.qjs.JS_GetGlobalObject(ctx);
+    defer z.qjs.JS_FreeValue(ctx, global);
+    const doc_obj = z.qjs.JS_GetPropertyStr(ctx, global, "document");
+    defer z.qjs.JS_FreeValue(ctx, doc_obj);
+    const native_doc_val = z.qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
+    defer z.qjs.JS_FreeValue(ctx, native_doc_val);
 
-    const doc_obj = qjs.JS_GetPropertyStr(ctx, global, "document");
-    defer qjs.JS_FreeValue(ctx, doc_obj);
-
-    const native_doc_val = qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
-    defer qjs.JS_FreeValue(ctx, native_doc_val);
-
-    const doc_ptr = qjs.JS_GetOpaque(native_doc_val, 1);
+    const doc_ptr = z.qjs.JS_GetOpaque(native_doc_val, dom_class_id);
+    if (doc_ptr == null) return z.jsException;
     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
 
-    // Query using CSS selector (need allocator - this is simplified)
-    // In real implementation, pass allocator through context
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = getAllocator(ctx);
 
-    _ = z.documentRoot(doc) orelse return qjs.JS_NULL;
-    const elements = z.querySelectorAll(allocator, doc, selector) catch return qjs.JS_EXCEPTION;
+    _ = z.documentRoot(doc) orelse return z.jsNull;
+    const elements = z.querySelectorAll(allocator, doc, selector) catch return z.jsException;
     defer allocator.free(elements);
-
     if (elements.len > 0) {
-        return DOMBridge.wrapElement(ctx, elements[0]) catch qjs.JS_EXCEPTION;
+        return DOMBridge.wrapElement(ctx, elements[0]) catch z.jsException;
     }
-
-    return qjs.JS_NULL;
+    return z.jsNull;
 }
 
-fn js_querySelectorAll(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
+fn js_querySelectorAll(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     _ = this;
-    if (argc < 1) return qjs.JS_EXCEPTION;
-
-    const selector_c = qjs.JS_ToCString(ctx, argv[0]);
-    if (selector_c == null) return qjs.JS_EXCEPTION;
-    defer qjs.JS_FreeCString(ctx, selector_c);
-
+    if (argc < 1) return z.jsException;
+    const selector_c = z.qjs.JS_ToCString(ctx, argv[0]);
+    if (selector_c == null) return z.jsException;
+    defer z.qjs.JS_FreeCString(ctx, selector_c);
     const selector = std.mem.span(selector_c);
 
-    // Get document
-    const global = qjs.JS_GetGlobalObject(ctx);
-    defer qjs.JS_FreeValue(ctx, global);
+    const global = z.qjs.JS_GetGlobalObject(ctx);
+    defer z.qjs.JS_FreeValue(ctx, global);
+    const doc_obj = z.qjs.JS_GetPropertyStr(ctx, global, "document");
+    defer z.qjs.JS_FreeValue(ctx, doc_obj);
+    const native_doc_val = z.qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
+    defer z.qjs.JS_FreeValue(ctx, native_doc_val);
 
-    const doc_obj = qjs.JS_GetPropertyStr(ctx, global, "document");
-    defer qjs.JS_FreeValue(ctx, doc_obj);
-
-    const native_doc_val = qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
-    defer qjs.JS_FreeValue(ctx, native_doc_val);
-
-    const doc_ptr = qjs.JS_GetOpaque(native_doc_val, 1);
+    const doc_ptr = z.qjs.JS_GetOpaque(native_doc_val, dom_class_id);
+    if (doc_ptr == null) return z.jsException;
     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
 
-    // Query using CSS selector
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const elements = z.querySelectorAll(allocator, doc, selector) catch return qjs.JS_EXCEPTION;
+    const allocator = getAllocator(ctx);
+    const elements = z.querySelectorAll(allocator, doc, selector) catch return z.jsException;
     defer allocator.free(elements);
 
-    // Create array
-    const array = qjs.JS_NewArray(ctx);
+    const array = z.qjs.JS_NewArray(ctx);
     for (elements, 0..) |elem, i| {
         const elem_obj = DOMBridge.wrapElement(ctx, elem) catch continue;
-        _ = qjs.JS_SetPropertyUint32(ctx, array, @intCast(i), elem_obj);
+        _ = z.qjs.JS_SetPropertyUint32(ctx, array, @intCast(i), elem_obj);
     }
-
     return array;
 }
 
-fn js_consoleLog(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
+fn js_consoleLog(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     _ = this;
     var i: c_int = 0;
     while (i < argc) : (i += 1) {
-        const str = qjs.JS_ToCString(ctx, argv[@intCast(i)]);
+        const str = z.qjs.JS_ToCString(ctx, argv[@intCast(i)]);
         if (str != null) {
-            defer qjs.JS_FreeCString(ctx, str);
+            defer z.qjs.JS_FreeCString(ctx, str);
             z.print("{s} ", .{str});
         }
     }
     z.print("\n", .{});
-    return qjs.JS_UNDEFINED;
+    return z.jsUndefined;
 }

@@ -4,8 +4,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const lexbor_static_lib_path = b.path("lexbor_master_dist/lib/liblexbor_static.a");
-    const lexbor_src_path = b.path("lexbor_master_dist/include");
+    const lexbor_static_lib_path = b.path("vendor/lexbor_src_master/build/liblexbor_static.a");
+    const lexbor_src_path = b.path("vendor/lexbor_src_master/source/");
     const quickjs_src_path = b.path("vendor/quickjs");
     const qjs_flags = &.{
         "-std=gnu99",
@@ -98,6 +98,22 @@ pub fn build(b: *std.Build) void {
 
     const run_step = b.step("run", "Run the example");
     run_step.dependOn(&run_cmd.step);
+
+    // Code generator for QuickJS bindings
+    const gen_bindings = b.addExecutable(.{
+        .name = "gen_bindings",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/gen_bindings.zig"),
+            .target = target,
+            .optimize = .Debug,
+        }),
+    });
+
+    const gen_bindings_run = b.addRunArtifact(gen_bindings);
+    gen_bindings_run.addArg("src/bindings_generated.zig");
+
+    const gen_bindings_step = b.step("gen-bindings", "Generate QuickJS bindings code");
+    gen_bindings_step.dependOn(&gen_bindings_run.step);
 
     // SINGLE TEST TARGET - this runs ALL tests from all modules
     const lib_test = b.step("test", "Run units tests");
