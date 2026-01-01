@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
