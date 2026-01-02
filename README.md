@@ -75,7 +75,7 @@ const list = document.createElement("ul");
 
 for (let i = 1; i<4; i++) {
     const item = document.createElement("li");
-    item.setContentAsText("Item " + i);
+    item.setContentAsText("Item " + i * 10);
     list.appendChild(item);
 }
 
@@ -92,13 +92,13 @@ Let's populate the DOM!
 <body>
     <ul>
         <li id="1">
-            "Item 1"
+            "Item 10"
         </li>
         <li id="2">
-            "Item 2"
+            "Item 20"
         </li>
         <li id="3">
-            "Item 3"
+            "Item 30"
         </li>
     </ul>
 </body>

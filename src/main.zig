@@ -346,7 +346,7 @@ fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
         \\for (let i = 1; i<4; i++) {
         \\  const item = document.createElement("li");
         \\  item.setAttribute("id", i);
-        \\  item.setContentAsText("Item " + i);
+        \\  item.setContentAsText("Item " + i * 10);
         \\  list.appendChild(item);
         \\}
         \\container.appendChild(list);
