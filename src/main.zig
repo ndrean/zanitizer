@@ -35,8 +35,8 @@ pub fn main() !void {
 
     try demoGeneratedBindings(gpa, rt);
     try demoVirtualDOM_SSR(gpa, rt);
-    // try first_QuickJS_test(ctx_wrapper);
-    // try demoExecuteScriptFromHTML(gpa, ctx_wrapper);
+    try first_QuickJS_test(rt);
+    try demoExecuteScriptFromHTML(gpa, rt);
     // try demoNativeBridge(ctx);
     // try demoEventLoop(gpa, ctx, runtime.ptr);
     // try demoQuickJSProxyAndStreams(ctx);
@@ -73,8 +73,9 @@ fn demoMinimalTest(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     z.print("✓ Minimal test completed\n", .{});
 }
 
-fn first_QuickJS_test(ctx: w.Context) !void {
-    // Note: Don't deinit ctx here - it's owned by main() and shared across demos
+fn first_QuickJS_test(rt: *w.Runtime) !void {
+    const ctx = w.Context.init(rt);
+    defer ctx.deinit();
     z.print("\n=== Executing JavaScript simple code ------\n", .{});
 
     // Simple arithmetic
@@ -114,9 +115,12 @@ fn first_QuickJS_test(ctx: w.Context) !void {
     }
 }
 
-fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, ctx: w.Context) !void {
+fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     // Note: Don't deinit ctx here - it's owned by main() and shared across demos
     z.print("\n=== Extracting and Executing Scripts ------\n", .{});
+
+    const ctx = w.Context.init(rt);
+    defer ctx.deinit();
 
     // Create HTML with embedded JavaScript
     // Note: <script> tags in <head> might be removed by the HTML parser
@@ -223,8 +227,8 @@ fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
 
     // Install Bindings (static + prototype) and APIs (document, window, console)
     var bridge = try DOMBridge.init(allocator, ctx);
-    defer ctx.deinit();      // Cleanup order: ctx must be destroyed AFTER bridge
-    defer bridge.deinit();   // (defer is LIFO, so this runs first)
+    defer ctx.deinit(); // Cleanup order: ctx must be destroyed AFTER bridge
+    defer bridge.deinit(); // (defer is LIFO, so this runs first)
 
     try bridge.installAPIs();
 
@@ -318,8 +322,8 @@ fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     ctx.setAllocator(&allocator);
 
     var bridge = try DOMBridge.init(allocator, ctx);
-    defer ctx.deinit();      // Cleanup order: ctx must be destroyed AFTER bridge
-    defer bridge.deinit();   // (defer is LIFO, so this runs first)
+    defer ctx.deinit(); // Cleanup order: ctx must be destroyed AFTER bridge
+    defer bridge.deinit(); // (defer is LIFO, so this runs first)
 
     try bridge.installAPIs();
 

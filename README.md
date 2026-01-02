@@ -1,16 +1,14 @@
 # zexplorer: HTML parser & JavaScript execution at native speed on a server
 
-A `lexbor` & `quickJS` in `Zig` project
-
 ## WIP
 
 - Extend [lexbor](https://lexbor.com/) to run JavaScript with [quickJS integration](https://quickjs-ng.github.io/quickjs/).
 
 - or extend `quickJS` with the Window API with `lexbor`.
 
-See [QUICKJS_INTEGRATION.md] for examples, when/how to use JS or Zig.
+➡ One-shot usage (examples in `main.zig`)
 
-One-shot usage, or long-running:
+➡ [TODO] long-running with event-loop/async
 
 ```txt
 Long-running Process (main loop)

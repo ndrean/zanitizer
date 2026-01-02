@@ -77,6 +77,7 @@ pub const DOMBridge = struct {
         // 1. Create and register the prototype with shared methods
         const proto = ctx.newObject();
         bindings.installMethodBindings(ctx.ptr, proto);
+        // Register prototype for DOM class: every object created with `dom_class_id` should inherit fromm "proto"
         ctx.setClassProto(dom_class_id, proto);
 
         // 2. Create document, window, and console APIs
@@ -90,7 +91,7 @@ pub const DOMBridge = struct {
         const doc_obj = ctx.newObject();
         // DO NOT defer free - setPropertyStr transfers ownership to global!
 
-        // Install static bindings (createElement, createTextNode, getElementById, etc.)
+        // Install static bindings (createElement, createTextNode, getElementById, etc.) on the document object
         bindings.installStaticBindings(ctx.ptr, doc_obj);
 
         // Install custom query selectors (not yet in generated bindings)
@@ -108,7 +109,7 @@ pub const DOMBridge = struct {
             try ctx.setPropertyStr(doc_obj, "body", body_val);
         }
 
-        // Store native document pointer for static functions to retrieve
+        // Store native document pointer private/internal for static functions to retrieve as 'window.document' without being global
         const opaque_obj = ctx.newObjectClass(dom_class_id);
         _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(self.doc));
         try ctx.setPropertyStr(doc_obj, "_native_doc", opaque_obj);
