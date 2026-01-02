@@ -115,7 +115,7 @@ pub fn js_ownerDocument(
     // Call native Zig function
     const result = z.ownerDocument(arg0);
 
-    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(z.dom_class_id.*));
+    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, z.dom_class_id.*);
     _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
     return doc_obj;
 }

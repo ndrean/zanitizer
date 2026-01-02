@@ -9,34 +9,6 @@ const DOMBridge = z.dom_bridge.DOMBridge;
 const native_os = builtin.os.tag;
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
-/// Install console.log as a global function in QuickJS context
-fn installConsole(ctx: ?*z.qjs.JSContext) void {
-    const global = z.qjs.JS_GetGlobalObject(ctx);
-    defer z.qjs.JS_FreeValue(ctx, global);
-
-    const console_obj = z.qjs.JS_NewObject(ctx);
-    const log_fn = z.qjs.JS_NewCFunction2(
-        ctx,
-        js_console_log,
-        "log",
-        1,
-        z.qjs.JS_CFUNC_generic,
-        0,
-    );
-    _ = z.qjs.JS_SetPropertyStr(
-        ctx,
-        console_obj,
-        "log",
-        log_fn,
-    );
-    _ = z.qjs.JS_SetPropertyStr(
-        ctx,
-        global,
-        "console",
-        console_obj,
-    );
-}
-
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
         if (native_os == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
@@ -51,7 +23,15 @@ pub fn main() !void {
 
     // all QuickJS memory now goes through Zig allocator
     const rt = try w.Runtime.init(gpa);
-    defer rt.deinit();
+    defer {
+        // Force garbage collection before destroying runtime
+        rt.runGC();
+        rt.deinit();
+    }
+
+    // NOTE: QuickJS-ng has internal bytecode compilation leaks (~2 allocations per eval())
+    // These occur in _js_realloc_bytecode_rt during _resolve_variables/_resolve_labels
+    // This is a known QuickJS-ng issue, not a leak in our bindings
 
     try demoGeneratedBindings(gpa, rt);
     try demoVirtualDOM_SSR(gpa, rt);
@@ -75,6 +55,22 @@ pub fn main() !void {
     // try normalizeString_DOM_parsing_bencharmark(gpa);
     // try serverSideRenderingBenchmark(gpa);
 
+}
+
+fn demoMinimalTest(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+    z.print("\n=== Minimal Test (Pure QuickJS) ===\n\n", .{});
+
+    const ctx = w.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&allocator);
+
+    // Absolutely minimal JavaScript - no DOM, no bindings
+    const test_code = "const x = 1 + 1;";
+
+    const result = try ctx.eval(test_code, "<minimal>", .{});
+    defer ctx.freeValue(result);
+
+    z.print("✓ Minimal test completed\n", .{});
 }
 
 fn first_QuickJS_test(ctx: w.Context) !void {
@@ -225,12 +221,10 @@ fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     // set allocator for QuickJS context as the context has no access to DOMBridge allocator
     ctx.setAllocator(&allocator);
 
-    // Install Console (fresh contexts are empty)
-    installConsole(ctx.ptr);
-    // install Bindings installed via DOMBridge (static + prototype)
-    var bridge = try DOMBridge.init(allocator, ctx.ptr);
-    defer bridge.deinit();
-    defer ctx.deinit();
+    // Install Bindings (static + prototype) and APIs (document, window, console)
+    var bridge = try DOMBridge.init(allocator, ctx);
+    defer ctx.deinit();      // Cleanup order: ctx must be destroyed AFTER bridge
+    defer bridge.deinit();   // (defer is LIFO, so this runs first)
 
     try bridge.installAPIs();
 
@@ -311,6 +305,9 @@ fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     try z.prettyPrint(allocator, root);
 
     z.print("\n", .{});
+
+    // Run garbage collection to free bytecode and temporary objects
+    rt.runGC();
 }
 
 fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
@@ -319,11 +316,10 @@ fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     const ctx = w.Context.init(rt);
     errdefer ctx.deinit();
     ctx.setAllocator(&allocator);
-    installConsole(ctx.ptr);
 
-    var bridge = try DOMBridge.init(allocator, ctx.ptr);
-    defer bridge.deinit();
-    defer ctx.deinit();
+    var bridge = try DOMBridge.init(allocator, ctx);
+    defer ctx.deinit();      // Cleanup order: ctx must be destroyed AFTER bridge
+    defer bridge.deinit();   // (defer is LIFO, so this runs first)
 
     try bridge.installAPIs();
 
@@ -436,6 +432,9 @@ fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     }
 
     // z.print("\n✅ VERIFICATION COMPLETE: JavaScript DOM operations successfully modified Lexbor document!\n", .{});
+
+    // Run garbage collection to free bytecode and temporary objects
+    rt.runGC();
 }
 
 /// Demo: Native Bridge - Passing data between QuickJS and Zig
@@ -639,25 +638,6 @@ fn demoNativeBridge(ctx: w.Context) !void {
 // }
 
 /// Console.log implementation for QuickJS
-fn js_console_log(
-    ctx: ?*z.qjs.JSContext,
-    _: z.qjs.JSValue,
-    argc: c_int,
-    argv: [*c]z.qjs.JSValue,
-) callconv(.c) z.qjs.JSValue {
-    var i: c_int = 0;
-    while (i < argc) : (i += 1) {
-        const str = z.qjs.JS_ToCString(ctx, argv[@intCast(i)]);
-        if (str != null) {
-            defer z.qjs.JS_FreeCString(ctx, str);
-            if (i > 0) z.print(" ", .{});
-            z.print("{s}", .{str});
-        }
-    }
-    z.print("\n", .{});
-
-    return z.jsUndefined;
-}
 
 // /// Demo: Event Loop with setTimeout/setInterval
 fn demoEventLoop(allocator: std.mem.Allocator, ctx: ?*z.qjs.JSContext, rt: ?*z.qjs.JSRuntime) !void {

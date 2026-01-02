@@ -1,7 +1,7 @@
 const std = @import("std");
 const qjs = @import("root.zig").qjs;
 
-// pub const ClassID = u32;
+pub const ClassID = qjs.JSClassID;
 
 pub const ArrayBuffer = struct {
     buffer: Value,
@@ -45,26 +45,36 @@ pub const Runtime = struct {
     allocator: std.mem.Allocator,
     ptr: ?*qjs.JSRuntime,
 
-    // Legacy QuickJS uses JSMallocState instead of runtime_ptr
-    fn js_malloc(state: [*c]qjs.JSMallocState, size: usize) callconv(.c) ?*anyopaque {
-        // Get Runtime from the opaque field in JSMallocState
-        const runtime: *const Runtime = @ptrCast(@alignCast(state.*.@"opaque"));
+    // QuickJS-ng uses void *opaque instead of JSMallocState
+    fn js_calloc(runtime_ptr: ?*anyopaque, count: usize, size: usize) callconv(.c) ?*anyopaque {
+        const runtime: *const Runtime = @ptrCast(@alignCast(runtime_ptr));
+        const total_size = count * size;
+        const result = runtime.allocator.alloc(u8, H + total_size) catch |err|
+            @panic(@errorName(err));
+        std.mem.writeInt(usize, result[0..S], total_size, .little);
+        // Zero-initialize the memory (calloc behavior)
+        @memset(result[H..], 0);
+        return result[H..].ptr;
+    }
+
+    fn js_malloc(runtime_ptr: ?*anyopaque, size: usize) callconv(.c) ?*anyopaque {
+        const runtime: *const Runtime = @ptrCast(@alignCast(runtime_ptr));
         const result = runtime.allocator.alloc(u8, H + size) catch |err|
             @panic(@errorName(err));
         std.mem.writeInt(usize, result[0..S], size, .little);
         return result[H..].ptr;
     }
 
-    fn js_free(state: [*c]qjs.JSMallocState, ptr: ?*anyopaque) callconv(.c) void {
+    fn js_free(runtime_ptr: ?*anyopaque, ptr: ?*anyopaque) callconv(.c) void {
+        const runtime: *const Runtime = @ptrCast(@alignCast(runtime_ptr));
         if (ptr == null) return;
-        const runtime: *const Runtime = @ptrCast(@alignCast(state.*.@"opaque"));
         const result: [*]u8 = @ptrFromInt(@intFromPtr(ptr) - H);
         const len = std.mem.readInt(usize, result[0..S], .little);
         runtime.allocator.free(result[0 .. H + len]);
     }
 
-    fn js_realloc(state: [*c]qjs.JSMallocState, ptr: ?*anyopaque, new_len: usize) callconv(.c) ?*anyopaque {
-        const runtime: *const Runtime = @ptrCast(@alignCast(state.*.@"opaque"));
+    fn js_realloc(runtime_ptr: ?*anyopaque, ptr: ?*anyopaque, new_len: usize) callconv(.c) ?*anyopaque {
+        const runtime: *const Runtime = @ptrCast(@alignCast(runtime_ptr));
         if (ptr == null) {
             // Realloc with null pointer is same as malloc
             const result = runtime.allocator.alloc(u8, H + new_len) catch |err|
@@ -85,6 +95,7 @@ pub const Runtime = struct {
     }
 
     const malloc_functions = qjs.JSMallocFunctions{
+        .js_calloc = &js_calloc,
         .js_malloc = &js_malloc,
         .js_free = &js_free,
         .js_realloc = &js_realloc,
@@ -164,13 +175,12 @@ pub const Runtime = struct {
         return qjs.JS_DupValueRT(self.ptr, val);
     }
 
-    // pub inline fn newClassID(self: Runtime) !ClassID {
-    //     var class_id: ClassID = qjs.JS_INVALID_CLASS_ID;
-    //     if (qjs.JS_NewClassID(self.ptr, &class_id) == 0)
-    //         return error.ClassIDFailed;
-
-    //     return class_id;
-    // }
+    /// Allocate a new global ClassID (QuickJS-ng requires runtime parameter)
+    pub inline fn newClassID(self: *const Runtime) ClassID {
+        var class_id: ClassID = 0;
+        _ = qjs.JS_NewClassID(self.ptr, &class_id);
+        return class_id;
+    }
 
     // pub inline fn isRegisteredClass(self: Runtime, class_id: ClassID) bool {
     //     return qjs.JS_IsRegisteredClass(self.ptr, class_id);
@@ -187,10 +197,11 @@ pub const Runtime = struct {
     //     // exotic: [*c]JSClassExoticMethods = @import("std").mem.zeroes([*c]JSClassExoticMethods),
     // };
 
-    // pub inline fn newClass(self: Runtime, class_id: ClassID, class_def: *const qjs.JSClassDef) !void {
-    //     if (qjs.JS_NewClass(self.ptr, class_id, class_def) < 0)
-    //         return error.NewClassFailed;
-    // }
+    /// Register a class with the runtime
+    pub inline fn newClass(self: *const Runtime, class_id: ClassID, class_def: *const qjs.JSClassDef) !void {
+        if (qjs.JS_NewClass(self.ptr, class_id, class_def) < 0)
+            return error.NewClassFailed;
+    }
 
     // Job queue management
     pub inline fn isJobPending(self: *const Runtime) bool {
@@ -424,7 +435,7 @@ pub const Context = packed struct {
         return qjs.JS_NewObject(self.ptr);
     }
 
-    pub inline fn newObjectClass(self: Context, class_id: i32) Value {
+    pub inline fn newObjectClass(self: Context, class_id: ClassID) Value {
         return qjs.JS_NewObjectClass(self.ptr, class_id);
     }
 
@@ -776,7 +787,7 @@ pub const Context = packed struct {
         if (flags.async) c_flags |= qjs.JS_EVAL_FLAG_ASYNC;
 
         const result = qjs.JS_Eval(self.ptr, input.ptr, input.len, filename, c_flags);
-        if (qjs.JS_IsException(result) != 0) {
+        if (qjs.JS_IsException(result)) {
             return error.Exception;
         } else {
             return result;
@@ -1097,14 +1108,14 @@ pub const Context = packed struct {
     //     return qjs.JS_GetOpaque2(self.ptr, obj, class_id);
     // }
 
-    // // Class and prototype handling
-    // pub inline fn setClassProto(self: Context, class_id: ClassID, proto: Value) void {
-    //     qjs.JS_SetClassProto(self.ptr, class_id, proto);
-    // }
+    // Class and prototype handling
+    pub inline fn setClassProto(self: Context, class_id: ClassID, proto: Value) void {
+        qjs.JS_SetClassProto(self.ptr, class_id, proto);
+    }
 
-    // pub inline fn getClassProto(self: Context, class_id: ClassID) Value {
-    //     return qjs.JS_GetClassProto(self.ptr, class_id);
-    // }
+    pub inline fn getClassProto(self: Context, class_id: ClassID) Value {
+        return qjs.JS_GetClassProto(self.ptr, class_id);
+    }
 
     pub inline fn getFunctionProto(self: Context) Value {
         return qjs.JS_GetFunctionProto(self.ptr);

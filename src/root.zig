@@ -35,7 +35,7 @@ pub fn isNull(val: qjs.JSValue) bool {
 }
 
 pub fn isException(val: qjs.JSValue) bool {
-    return qjs.JS_IsException(val) != 0;
+    return qjs.JS_IsException(val);
 }
 
 pub fn isFunction(ctx: ?*qjs.JSContext, val: qjs.JSValue) bool {

@@ -1,8 +1,13 @@
 const std = @import("std");
 const z = @import("root.zig");
+const w = @import("wrapper.zig");
 const bindings = @import("bindings_generated.zig");
 
-pub var dom_class_id: z.qjs.JSClassID = 0;
+/// Global DOM ClassID shared across all contexts in the runtime
+/// This is initialized once per runtime (not per context) because QuickJS
+/// class IDs are global. Re-exported from root.zig as z.dom_class_id for
+/// access by generated bindings and other modules.
+pub var dom_class_id: w.ClassID = 0;
 
 fn getAllocator(ctx: ?*z.qjs.JSContext) std.mem.Allocator {
     // Helper for C-style callbacks that receive raw ctx pointer
@@ -14,7 +19,7 @@ fn getAllocator(ctx: ?*z.qjs.JSContext) std.mem.Allocator {
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
-    ctx: ?*z.qjs.JSContext,
+    ctx: w.Context,
     doc: *z.HTMLDocument,
 
     // Finalizer called when QuickJS garbage collects a wrapped DOM object
@@ -28,11 +33,13 @@ pub const DOMBridge = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        ctx: ?*z.qjs.JSContext,
+        ctx: w.Context,
     ) !DOMBridge {
         if (dom_class_id == 0) {
-            // runtime-wide
-            _ = z.qjs.JS_NewClassID(&dom_class_id);
+            // Allocate global ClassID (QuickJS-ng requires runtime)
+            const rt_ptr = z.qjs.JS_GetRuntime(ctx.ptr);
+            const rt = w.Runtime{ .ptr = rt_ptr, .allocator = allocator };
+            dom_class_id = rt.newClassID();
 
             const def = z.qjs.JSClassDef{
                 .class_name = "DOMNode",
@@ -42,8 +49,8 @@ pub const DOMBridge = struct {
                 .exotic = null,
             };
 
-            const rt = z.qjs.JS_GetRuntime(ctx);
-            _ = z.qjs.JS_NewClass(rt, dom_class_id, &def);
+            // Register class with runtime
+            _ = z.qjs.JS_NewClass(rt_ptr, dom_class_id, &def);
         }
 
         // Note: Allocator should already be set in context by installNativeBridge
@@ -59,104 +66,96 @@ pub const DOMBridge = struct {
     }
 
     pub fn deinit(self: *DOMBridge) void {
-        // WORKAROUND: Don't destroy the Lexbor document here
-        // Destroying it causes QuickJS GC assertion failures because QuickJS
-        // tries to access the wrapped DOM nodes during final garbage collection.
-        // The document will leak, but this prevents the crash.
-        // TODO: Find a proper solution for cleanup order
-        // _ = self;
-
-        // NOTE: If you uncomment below, you'll get the assertion:
         z.destroyDocument(self.doc);
     }
 
     pub fn installAPIs(self: *DOMBridge) !void {
         const ctx = self.ctx;
-        const global = z.qjs.JS_GetGlobalObject(ctx);
-        defer z.qjs.JS_FreeValue(ctx, global);
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
 
         // 1. Create and register the prototype with shared methods
-        const proto = z.qjs.JS_NewObject(ctx);
-        bindings.installMethodBindings(ctx, proto);
-        z.qjs.JS_SetClassProto(ctx, dom_class_id, proto);
+        const proto = ctx.newObject();
+        bindings.installMethodBindings(ctx.ptr, proto);
+        ctx.setClassProto(dom_class_id, proto);
 
-        // 2. Create document and window APIs
+        // 2. Create document, window, and console APIs
         try self.createDocumentAPI(global);
         try self.createWindowAPI(global);
-        // Note: console is already installed in main.zig via installConsole()
-        // Don't overwrite it here
-        // try self.createConsoleAPI(global);
+        try self.createConsoleAPI(global);
     }
 
-    fn createDocumentAPI(self: *DOMBridge, global: z.qjs.JSValue) !void {
+    fn createDocumentAPI(self: *DOMBridge, global: w.Value) !void {
         const ctx = self.ctx;
-        const doc_obj = z.qjs.JS_NewObject(ctx);
-        // DO NOT defer free - JS_SetPropertyStr transfers ownership to global!
+        const doc_obj = ctx.newObject();
+        // DO NOT defer free - setPropertyStr transfers ownership to global!
 
         // Install static bindings (createElement, createTextNode, getElementById, etc.)
-        bindings.installStaticBindings(ctx, doc_obj);
+        bindings.installStaticBindings(ctx.ptr, doc_obj);
 
         // Install custom query selectors (not yet in generated bindings)
-        const query_selector_fn = z.qjs.JS_NewCFunction2(ctx, js_querySelector, "querySelector", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelector", query_selector_fn);
+        const query_selector_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_querySelector, "querySelector", 1, z.qjs.JS_CFUNC_generic, 0);
+        try ctx.setPropertyStr(doc_obj, "querySelector", query_selector_fn);
 
-        const query_selector_all_fn = z.qjs.JS_NewCFunction2(ctx, js_querySelectorAll, "querySelectorAll", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelectorAll", query_selector_all_fn);
+        const query_selector_all_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_querySelectorAll, "querySelectorAll", 1, z.qjs.JS_CFUNC_generic, 0);
+        try ctx.setPropertyStr(doc_obj, "querySelectorAll", query_selector_all_fn);
 
         // Attach body element
         const body_node = z.bodyNode(self.doc);
         if (body_node) |body| {
             const body_element = z.nodeToElement(body).?;
-            const body_val = try wrapElement(ctx, body_element);
-            _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "body", body_val);
+            const body_val = try wrapElement(ctx.ptr, body_element);
+            try ctx.setPropertyStr(doc_obj, "body", body_val);
         }
 
         // Store native document pointer for static functions to retrieve
-        const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        const opaque_obj = ctx.newObjectClass(dom_class_id);
         _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(self.doc));
-        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "_native_doc", opaque_obj);
+        try ctx.setPropertyStr(doc_obj, "_native_doc", opaque_obj);
 
-        _ = z.qjs.JS_SetPropertyStr(ctx, global, "document", doc_obj);
+        try ctx.setPropertyStr(global, "document", doc_obj);
     }
 
-    fn createWindowAPI(self: *DOMBridge, global: z.qjs.JSValue) !void {
+    fn createWindowAPI(self: *DOMBridge, global: w.Value) !void {
         const ctx = self.ctx;
-        const window_obj = z.qjs.JS_NewObject(ctx);
-        // DO NOT defer free - JS_SetPropertyStr transfers ownership!
+        const window_obj = ctx.newObject();
+        // DO NOT defer free - setPropertyStr transfers ownership!
 
-        const location_obj = z.qjs.JS_NewObject(ctx);
-        const href = z.qjs.JS_NewString(ctx, "about:blank");
-        _ = z.qjs.JS_SetPropertyStr(ctx, location_obj, "href", href);
-        _ = z.qjs.JS_SetPropertyStr(ctx, window_obj, "location", location_obj);
+        const location_obj = ctx.newObject();
+        const href = ctx.newString("about:blank");
+        try ctx.setPropertyStr(location_obj, "href", href);
+        try ctx.setPropertyStr(window_obj, "location", location_obj);
 
-        const navigator_obj = z.qjs.JS_NewObject(ctx);
-        const user_agent = z.qjs.JS_NewString(ctx, "Zexplorer/1.0 (QuickJS; Lexbor)");
-        _ = z.qjs.JS_SetPropertyStr(ctx, navigator_obj, "userAgent", user_agent);
-        _ = z.qjs.JS_SetPropertyStr(ctx, window_obj, "navigator", navigator_obj);
+        const navigator_obj = ctx.newObject();
+        const user_agent = ctx.newString("Zexplorer/1.0 (QuickJS; Lexbor)");
+        try ctx.setPropertyStr(navigator_obj, "userAgent", user_agent);
+        try ctx.setPropertyStr(window_obj, "navigator", navigator_obj);
 
-        _ = z.qjs.JS_SetPropertyStr(ctx, global, "window", window_obj);
-        _ = z.qjs.JS_SetPropertyStr(ctx, global, "globalThis", window_obj);
-        _ = z.qjs.JS_SetPropertyStr(ctx, global, "self", window_obj);
+        try ctx.setPropertyStr(global, "window", window_obj);
+        // FIX: globalThis and self should point to the actual global object, not stub
+        // Note: Must duplicate global since setPropertyStr consumes the reference
+        try ctx.setPropertyStr(global, "globalThis", ctx.dupValue(global));
+        try ctx.setPropertyStr(global, "self", ctx.dupValue(global));
     }
 
-    fn createConsoleAPI(self: *DOMBridge, global: z.qjs.JSValue) !void {
+    fn createConsoleAPI(self: *DOMBridge, global: w.Value) !void {
         const ctx = self.ctx;
-        const console_obj = z.qjs.JS_NewObject(ctx);
-        // DO NOT defer free - JS_SetPropertyStr transfers ownership!
+        const console_obj = ctx.newObject();
+        // DO NOT defer free - setPropertyStr transfers ownership!
 
-        const log_fn = z.qjs.JS_NewCFunction2(ctx, js_consoleLog, "log", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, console_obj, "log", log_fn);
+        const log_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_consoleLog, "log", 1, z.qjs.JS_CFUNC_generic, 0);
+        try ctx.setPropertyStr(console_obj, "log", log_fn);
 
-        const error_fn = z.qjs.JS_NewCFunction2(ctx, js_consoleLog, "error", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, console_obj, "error", error_fn);
+        const error_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_consoleLog, "error", 1, z.qjs.JS_CFUNC_generic, 0);
+        try ctx.setPropertyStr(console_obj, "error", error_fn);
 
-        _ = z.qjs.JS_SetPropertyStr(ctx, global, "console", console_obj);
+        try ctx.setPropertyStr(global, "console", console_obj);
     }
 
     /// Wrap an HTMLElement for JavaScript (inherits methods from prototype)
     pub fn wrapElement(ctx: ?*z.qjs.JSContext, element: *z.HTMLElement) !z.qjs.JSValue {
         // Create object instance of our DOM class (inherits prototype automatically)
-        const elem_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        const elem_obj = z.qjs.JS_NewObjectClass(ctx, dom_class_id);
         _ = z.qjs.JS_SetOpaque(elem_obj, @ptrCast(element));
 
         // Add element-specific properties
@@ -171,7 +170,7 @@ pub const DOMBridge = struct {
     /// Wrap a DomNode for JavaScript (inherits methods from prototype)
     pub fn wrapNode(ctx: ?*z.qjs.JSContext, node: *z.DomNode) !z.qjs.JSValue {
         // Create object instance of our DOM class (inherits prototype automatically)
-        const node_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        const node_obj = z.qjs.JS_NewObjectClass(ctx, dom_class_id);
         _ = z.qjs.JS_SetOpaque(node_obj, @ptrCast(node));
 
         // Methods are inherited from prototype (set via JS_SetClassProto)
@@ -247,7 +246,8 @@ fn js_consoleLog(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv:
         const str = z.qjs.JS_ToCString(ctx, argv[@intCast(i)]);
         if (str != null) {
             defer z.qjs.JS_FreeCString(ctx, str);
-            z.print("{s} ", .{str});
+            if (i > 0) z.print(" ", .{});
+            z.print("{s}", .{str});
         }
     }
     z.print("\n", .{});

@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const lexbor_static_lib_path = b.path("vendor/lexbor_src_master/build/liblexbor_static.a");
     const lexbor_src_path = b.path("vendor/lexbor_src_master/source/");
-    const quickjs_src_path = b.path("vendor/quickjs");
+    const quickjs_src_path = b.path("vendor/quickjs-ng");
     const qjs_flags = &.{
         "-std=gnu99",
         "-D_GNU_SOURCE",

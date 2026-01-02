@@ -2,12 +2,9 @@
 
 A `lexbor` & `quickJS` in `Zig` project
 
-- `lexbor` [License](https://github.com/lexbor/lexbor/blob/master/LICENSE)
-- `quickjs` [License](https://github.com/bellard/quickjs/blob/master/LICENSE)
-
 ## WIP
 
-- Extend `lexbor` to run JavaScript with [quickJS integration](https://github.com/bellard/quickjs/tree/master).
+- Extend [lexbor](https://lexbor.com/) to run JavaScript with [quickJS integration](https://quickjs-ng.github.io/quickjs/).
 
 - or extend `quickJS` with the Window API with `lexbor`.
 
@@ -82,13 +79,35 @@ for (let i = 1; i<4; i++) {
 container.appendChild(list);
 const body = document.bodyElement();
 body.appendChild(container);
-console.log("✓ Document tree properly built!");
+console.log("\n✓ Document tree properly built!\n");
+
 ```
 
-The output is: 🚀
+And the Zig code to run this snippet:
+
+```zig
+const ctx = w.Context.init(rt);
+errdefer ctx.deinit();
+ctx.setAllocator(&allocator);
+
+var bridge = try DOMBridge.init(allocator, ctx);
+defer ctx.deinit();
+defer bridge.deinit();  
+try bridge.installAPIs();
+
+// 'html' is the JavaScript snippet above 
+const result = try ctx.eval(html,"<ssr>",.{});
+defer ctx.freeValue(result);
+
+const root = z.bodyNode(bridge.doc).?;
+try z.prettyPrint(allocator, root);
+```
+
+The output is shown below
 
 ```txt
 Let's populate the DOM!
+
 <body>
     <ul>
         <li id="1">
@@ -102,6 +121,8 @@ Let's populate the DOM!
         </li>
     </ul>
 </body>
+
+Document tree properly built!
 ```
 
 This project exposes a significant / essential subset of all available `lexbor` functions:
@@ -810,7 +831,7 @@ zig build run -Doptimize=ReleaseFast
 
 - Use the library: check _LIBRARY.md_.
 
-
+---
 
 ### Notes on search in `lexbor` source/examples
 
@@ -829,3 +850,8 @@ Directly in the source code:
 ```sh
 find lexbor_src_master/source -name "*.h" | xargs grep -l "lxb_selectors_opt_set_noi"
 ```
+
+## License
+
+- `lexbor` [License](https://github.com/lexbor/lexbor/blob/master/LICENSE)
+- `quickjs` [License](https://github.com/quickjs-ng/quickjs/blob/master/LICENSE)
