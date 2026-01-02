@@ -5,6 +5,8 @@ const bindings = @import("bindings_generated.zig");
 pub var dom_class_id: z.qjs.JSClassID = 0;
 
 fn getAllocator(ctx: ?*z.qjs.JSContext) std.mem.Allocator {
+    // Helper for C-style callbacks that receive raw ctx pointer
+    // For regular Zig code, use Context.getAllocator() from wrapper
     const opaque_ptr = z.qjs.JS_GetContextOpaque(ctx);
     const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
     return allocator_ptr.*;
@@ -29,6 +31,7 @@ pub const DOMBridge = struct {
         ctx: ?*z.qjs.JSContext,
     ) !DOMBridge {
         if (dom_class_id == 0) {
+            // runtime-wide
             _ = z.qjs.JS_NewClassID(&dom_class_id);
 
             const def = z.qjs.JSClassDef{
@@ -175,156 +178,6 @@ pub const DOMBridge = struct {
         return node_obj;
     }
 };
-
-fn js_createElement(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    _ = this;
-    if (argc < 1) return z.jsException;
-
-    const tag_name_c = z.qjs.JS_ToCString(ctx, argv[0]);
-    if (tag_name_c == null) return z.jsException;
-    defer z.qjs.JS_FreeCString(ctx, tag_name_c);
-    const tag_name = std.mem.span(tag_name_c);
-
-    const global = z.qjs.JS_GetGlobalObject(ctx);
-    defer z.qjs.JS_FreeValue(ctx, global);
-    const doc_obj = z.qjs.JS_GetPropertyStr(ctx, global, "document");
-    defer z.qjs.JS_FreeValue(ctx, doc_obj);
-    const native_doc_val = z.qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
-    defer z.qjs.JS_FreeValue(ctx, native_doc_val);
-
-    const doc_ptr = z.qjs.JS_GetOpaque(native_doc_val, dom_class_id);
-    if (doc_ptr == null) return z.jsException;
-    const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
-
-    const element = z.createElement(doc, tag_name) catch return z.jsException;
-    return DOMBridge.wrapElement(ctx, element) catch z.jsException;
-}
-
-fn js_createTextNode(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    _ = this;
-    if (argc < 1) return z.jsException;
-
-    const text_c = z.qjs.JS_ToCString(ctx, argv[0]);
-    if (text_c == null) return z.jsException;
-    defer z.qjs.JS_FreeCString(ctx, text_c);
-    const text = std.mem.span(text_c);
-
-    const global = z.qjs.JS_GetGlobalObject(ctx);
-    defer z.qjs.JS_FreeValue(ctx, global);
-    const doc_obj = z.qjs.JS_GetPropertyStr(ctx, global, "document");
-    defer z.qjs.JS_FreeValue(ctx, doc_obj);
-    const native_doc_val = z.qjs.JS_GetPropertyStr(ctx, doc_obj, "_native_doc");
-    defer z.qjs.JS_FreeValue(ctx, native_doc_val);
-
-    const doc_ptr = z.qjs.JS_GetOpaque(native_doc_val, dom_class_id);
-    if (doc_ptr == null) return z.jsException;
-    const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
-
-    const text_node = z.createTextNode(doc, text) catch return z.jsException;
-
-    const text_obj = z.qjs.JS_NewObject(ctx);
-    // FIX: Cast dom_class_id
-    const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
-    _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(text_node));
-    _ = z.qjs.JS_SetPropertyStr(ctx, text_obj, "_native_node", opaque_obj);
-
-    return text_obj;
-}
-
-fn js_appendChild(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    if (argc < 1) return z.jsException;
-    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
-
-    const parent_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
-    if (parent_ptr == null) return z.jsException;
-    const parent: *z.HTMLElement = @ptrCast(@alignCast(parent_ptr));
-
-    const child_elem_val = z.qjs.JS_GetPropertyStr(ctx, argv[0], "_native_element");
-    const child_node_val = z.qjs.JS_GetPropertyStr(ctx, argv[0], "_native_node");
-
-    var child_node: *z.DomNode = undefined;
-
-    // FIX: Use z.isUndefined (bool)
-    if (!z.isUndefined(child_elem_val)) {
-        defer z.qjs.JS_FreeValue(ctx, child_elem_val);
-        const child_ptr = z.qjs.JS_GetOpaque(child_elem_val, dom_class_id);
-        if (child_ptr == null) return z.jsException;
-        const child_elem: *z.HTMLElement = @ptrCast(@alignCast(child_ptr));
-        child_node = z.elementToNode(child_elem);
-    } else if (!z.isUndefined(child_node_val)) {
-        defer z.qjs.JS_FreeValue(ctx, child_node_val);
-        const node_ptr = z.qjs.JS_GetOpaque(child_node_val, dom_class_id);
-        if (node_ptr == null) return z.jsException;
-        child_node = @ptrCast(@alignCast(node_ptr));
-    } else {
-        return z.jsException;
-    }
-
-    z.appendChild(z.elementToNode(parent), child_node);
-    return argv[0];
-}
-
-fn js_setAttribute(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    if (argc < 2) return z.jsException;
-    const name_c = z.qjs.JS_ToCString(ctx, argv[0]);
-    if (name_c == null) return z.jsException;
-    defer z.qjs.JS_FreeCString(ctx, name_c);
-    const value_c = z.qjs.JS_ToCString(ctx, argv[1]);
-    if (value_c == null) return z.jsException;
-    defer z.qjs.JS_FreeCString(ctx, value_c);
-
-    const name = std.mem.span(name_c);
-    const value = std.mem.span(value_c);
-    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
-
-    const elem_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
-    if (elem_ptr == null) return z.jsException;
-    const element: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr));
-
-    _ = z.setAttribute(element, name, value);
-    return z.jsUndefined;
-}
-
-fn js_getAttribute(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    if (argc < 1) return z.jsException;
-    const name_c = z.qjs.JS_ToCString(ctx, argv[0]);
-    if (name_c == null) return z.jsException;
-    defer z.qjs.JS_FreeCString(ctx, name_c);
-    const name = std.mem.span(name_c);
-    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
-
-    const elem_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
-    if (elem_ptr == null) return z.jsException;
-    const element: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr));
-
-    const attr_value = z.getAttribute_zc(element, name);
-    if (attr_value) |val| {
-        return z.qjs.JS_NewString(ctx, val.ptr);
-    }
-    return z.jsNull;
-}
-
-fn js_setTextContent(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    if (argc < 1) return z.jsException;
-    const text_c = z.qjs.JS_ToCString(ctx, argv[0]);
-    if (text_c == null) return z.jsException;
-    defer z.qjs.JS_FreeCString(ctx, text_c);
-    const text = std.mem.span(text_c);
-
-    const native_elem_val = z.qjs.JS_GetPropertyStr(ctx, this, "_native_element");
-    defer z.qjs.JS_FreeValue(ctx, native_elem_val);
-
-    const elem_ptr = z.qjs.JS_GetOpaque(native_elem_val, dom_class_id);
-    if (elem_ptr == null) return z.jsException;
-    const element: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr));
-
-    const node = z.elementToNode(element);
-    z.setContentAsText(node, text) catch return z.jsException;
-    return z.jsUndefined;
-}
 
 fn js_querySelector(ctx: ?*z.qjs.JSContext, this: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     _ = this;

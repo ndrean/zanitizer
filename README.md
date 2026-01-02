@@ -15,21 +15,16 @@ See [QUICKJS_INTEGRATION.md] for examples, when/how to use JS or Zig.
 
 One-shot usage, or long-running:
 
-┌─────────────────────────────────────────────┐
-│  Long-running Process (main loop)           │
-│  ┌────────────────────────────────────────┐ │
-│  │ JS_Runtime (created once, persists)    │ │
-│  │                                        │ │
-│  │  Per-Request:                          │ │
-│  │  ┌──────────────────────────────────┐  │ │
-│  │  │ JS_Context (ephemeral)           │  │ │
-│  │  │  - DOM class registered          │  │ │
-│  │  │  - Prototype attached (SHARED)   │  │ │
-│  │  │  - Process request               │  │ │
-│  │  │  - Cleanup & destroy context     │  │ │
-│  │  └──────────────────────────────────┘  │ │
-│  └────────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
+```txt
+Long-running Process (main loop)
+-> JS_Runtime (created once, persists) 
+    -> Per request:
+        JS_Context (ephemeral)
+        - DOM class registered 
+        - Prototype attached (SHARED)
+        - Process request
+        - Cleanup & destroy context
+```
 
 > Generate automatic [lxb->qjs] bindings with `zig run gen_bindings.zig` whenever possible.
 
@@ -49,6 +44,7 @@ One-shot usage, or long-running:
 ## Use cases
 
 - Testing frameworks - Headless DOM for tests
+- Templating & Static Site Generation - (can use template components), outputs static HTML files
 - Email templates - Server-side rendering
 - PDF generation - HTML → PDF pipelines
 - API gateways - Transform HTML responses
@@ -63,12 +59,50 @@ The primitives exposed stay as close as possible to `JavaScript` semantics.
 
 ## ⚠️ Challenges
 
-- Browser APIs - Need polyfills for fetch, setTimeout, etc.
+- Partial Browser APIs - fetch via `libcurl`
 - Event Loop - QuickJS has basic support, may need enhancement
 - Module System - Need to implement import/export
 - WASM - Would need separate runtime integration
   
-## Lexbor integration status
+## QuickJS & Lexbor integration status
+
+An example of `JavaScript` code running DOM primitives, executed by `Zig`!
+
+```js
+console.log("\nLet's populate the DOM!\n");
+
+const list = document.createElement("ul");
+
+for (let i = 1; i<4; i++) {
+    const item = document.createElement("li");
+    item.setContentAsText("Item " + i);
+    list.appendChild(item);
+}
+
+container.appendChild(list);
+const body = document.bodyElement();
+body.appendChild(container);
+console.log("✓ Document tree properly built!");
+```
+
+The output is: 🚀
+
+```txt
+Let's populate the DOM!
+<body>
+    <ul>
+        <li id="1">
+            "Item 1"
+        </li>
+        <li id="2">
+            "Item 2"
+        </li>
+        <li id="3">
+            "Item 3"
+        </li>
+    </ul>
+</body>
+```
 
 This project exposes a significant / essential subset of all available `lexbor` functions:
 

@@ -4,9 +4,7 @@ const z = @import("root.zig");
 const EventLoop = @import("event_loop.zig").EventLoop;
 const NativeBridge = @import("js_native_bridge.zig");
 const w = z.wrapper;
-
-// TODO: Enable once type issues are resolved
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+const DOMBridge = z.dom_bridge.DOMBridge;
 
 const native_os = builtin.os.tag;
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -40,7 +38,7 @@ fn installConsole(ctx: ?*z.qjs.JSContext) void {
 }
 
 pub fn main() !void {
-    var gpa, const is_debug = gpa: {
+    const gpa, const is_debug = gpa: {
         if (native_os == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
@@ -52,29 +50,17 @@ pub fn main() !void {
     };
 
     // all QuickJS memory now goes through Zig allocator
-    const runtime = try w.Runtime.init(gpa);
-    defer runtime.deinit();
+    const rt = try w.Runtime.init(gpa);
+    defer rt.deinit();
 
-    const ctx_wrapper = w.Context.init(runtime);
-    defer ctx_wrapper.deinit();
-
-    const ctx = ctx_wrapper.ptr; // Get raw pointer for compatibility
-
-    // Install console.log globally for all demos
-    installConsole(ctx);
-
-    // Install native bridge for data processing directly in Zig
-    // Pass the allocator so bridge functions can use it directly
-    NativeBridge.installNativeBridge(ctx, &gpa);
-
-    try first_QuickJS_test(ctx_wrapper);
-    try demoExecuteScriptFromHTML(gpa, ctx_wrapper);
-    try demoGeneratedBindings(gpa, ctx);
+    try demoGeneratedBindings(gpa, rt);
+    try demoVirtualDOM_SSR(gpa, rt);
+    // try first_QuickJS_test(ctx_wrapper);
+    // try demoExecuteScriptFromHTML(gpa, ctx_wrapper);
     // try demoNativeBridge(ctx);
     // try demoEventLoop(gpa, ctx, runtime.ptr);
     // try demoQuickJSProxyAndStreams(ctx);
     // TODO: Fix type issues - concept is solid, implementation needs type adjustments
-    try demoVirtualDOM_SSR(gpa, ctx);
     // try zexplore_example_com(gpa, "https://www.example.com");
     // try demoSimpleParsing(gpa);
     // try demoTemplate(gpa);
@@ -106,8 +92,8 @@ fn first_QuickJS_test(ctx: w.Context) !void {
         defer ctx.freeValue(result);
 
         const res_int = try ctx.toInt32(result);
-        z.print("\n JS code to execute: \n{s}\n", .{js_code});
-        z.print("\n Result: {d}\n", .{res_int});
+        z.print("\nJS code to execute: \n{s}\n", .{js_code});
+        z.print("\nResult: ➡ {d}\n", .{res_int});
     }
 
     // Object getter with template literals
@@ -127,14 +113,14 @@ fn first_QuickJS_test(ctx: w.Context) !void {
         const res_str = try ctx.toZString(result);
         defer ctx.freeZString(res_str);
 
-        z.print("\n JS Code to evaluate: \n{s}\n", .{js_code});
-        z.print("\nResult: {s}\n\n", .{res_str});
+        z.print("\nJS code to execute: \n{s}\n", .{js_code});
+        z.print("\nResult: ➡ {s}\n\n", .{res_str});
     }
 }
 
 fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, ctx: w.Context) !void {
     // Note: Don't deinit ctx here - it's owned by main() and shared across demos
-    z.print("\n=== Extracting and Executing Scripts (ArrayList Pattern - Clean!) ===\n", .{});
+    z.print("\n=== Extracting and Executing Scripts ------\n", .{});
 
     // Create HTML with embedded JavaScript
     // Note: <script> tags in <head> might be removed by the HTML parser
@@ -184,12 +170,10 @@ fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, ctx: w.Context) !void
     // Execute each script
     for (scripts, 0..) |script_elt, i| {
         const content = z.textContent_zc(z.elementToNode(script_elt));
-        z.print("--- JavaScript Code ---\n{s}\n", .{content});
-        z.print("Script #{}: Executing...\n", .{i + 1});
+        z.print("Script #{}: \n{s}\n", .{ i + 1, content });
         if (content.len > 0) {
             var buf: [20]u8 = undefined;
             const file = try std.fmt.bufPrintZ(&buf, "<script-{}>", .{i + 1});
-            std.debug.print("{s}", .{file});
 
             const result = try ctx.eval(
                 content,
@@ -217,244 +201,248 @@ fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, ctx: w.Context) !void
     }
 
     // Now access the stored script results from ArrayList
-    z.print("\n--- Accessing Script Results from ArrayList ---\n", .{});
+    z.print("\n--- Script Results (from ArrayList) ---\n\n", .{});
 
-    // Access results by index
-    if (script_results.items.len > 0) {
-        z.print("Script #1 result: ", .{});
-        const result1_str = try ctx.toZString(script_results.items[0]);
-        defer ctx.freeZString(result1_str);
-        z.print("{s}\n", .{result1_str});
-    }
-
-    if (script_results.items.len > 1) {
-        z.print("Script #2 result: ", .{});
-        const result2_str = try ctx.toZString(script_results.items[1]);
-        defer ctx.freeZString(result2_str);
-        z.print("{s}\n", .{result2_str});
+    for (script_results.items, 0..) |result, i| {
+        const result_str = try ctx.toZString(result);
+        defer ctx.freeZString(result_str);
+        z.print("Result of Script #{}: {s}\n", .{ i + 1, result_str });
     }
 
     z.print("\n", .{});
 }
+
+// NOTE: Bindings are now split into static (document) and method (prototype)
+// Static bindings are installed on document via DOMBridge.createDocumentAPI
+// Method bindings are installed on prototype via DOMBridge.installAPIs
 
 /// Test the auto-generated QuickJS bindings
-fn demoGeneratedBindings(allocator: std.mem.Allocator, ctx: ?*z.qjs.JSContext) !void {
-    _ = allocator;
+fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     z.print("\n=== Testing Auto-Generated Bindings ===\n\n", .{});
 
-    // NOTE: Bindings are now split into static (document) and method (prototype)
-    // Static bindings are installed on document via DOMBridge.createDocumentAPI
-    // Method bindings are installed on prototype via DOMBridge.installAPIs
-    z.print("✅ Bindings installed via DOMBridge (static + prototype)\n\n", .{});
+    const ctx = w.Context.init(rt);
+    errdefer ctx.deinit();
+    // set allocator for QuickJS context as the context has no access to DOMBridge allocator
+    ctx.setAllocator(&allocator);
+
+    // Install Console (fresh contexts are empty)
+    installConsole(ctx.ptr);
+    // install Bindings installed via DOMBridge (static + prototype)
+    var bridge = try DOMBridge.init(allocator, ctx.ptr);
+    defer bridge.deinit();
+    defer ctx.deinit();
+
+    try bridge.installAPIs();
 
     // Test the bindings via JavaScript
+    // Static bindings are on 'document' object
+    // Method bindings are on element prototypes
     const test_code =
-        \\// Test auto-generated bindings
-        \\const doc = {}; // Mock document for testing
+        \\console.log("\n1. Testing createElement (static binding on document)...");
+        \\const elem = document.createElement("div");
+        \\console.log("✓ createElement returned:", typeof elem);
         \\
-        \\// Test 1: createElement (should work with proper document setup)
-        \\console.log("Testing createElement...");
-        \\try {
-        \\  const elem = test.createElement("div");
-        \\  console.log("✓ createElement returned:", typeof elem);
-        \\} catch(e) {
-        \\  console.log("✗ createElement error (expected - no document):", e.message);
-        \\}
+        \\console.log("\n2. Testing setAttribute (method binding via prototype)...");
+        \\elem.setAttribute("id", "test-element");
+        \\elem.setAttribute("class", "test-class");
+        \\console.log("✓ setAttribute succeeded");
         \\
-        \\// Test 2: setAttribute (needs element)
-        \\console.log("\nTesting setAttribute...");
-        \\try {
-        \\  // This will fail without a proper element, but tests the binding exists
-        \\  test.setAttribute("class", "test");
-        \\} catch(e) {
-        \\  console.log("✗ setAttribute error (expected - no element):", e.message);
-        \\}
+        \\console.log("\n3. Testing getAttribute (method binding via prototype)...");
+        \\const id = elem.getAttribute("id");
+        \\console.log("✓ getAttribute returned:", id);
         \\
-        \\console.log("\n✓ All generated bindings are callable from JavaScript!");
+        \\console.log("\n4. Testing createTextNode (static binding on document)...");
+        \\const textNode = document.createTextNode("Hello, World!");
+        \\console.log("✓ createTextNode returned:", typeof textNode);
+        \\console.log("\n4.b Testing getting Text node content");
+        \\console.log("✓ node.textContent() returns :", textNode.textContent());
+        \\
+        \\console.log("\n5. Testing appendChild (method binding via prototype)...");
+        \\elem.appendChild(textNode);
+        \\console.log("✓ appendChild succeeded");
+        \\
+        \\console.log("\n5.b Adding element to document body...");
+        \\const body = document.bodyElement();
+        \\body.appendChild(elem);
+        \\console.log("✓ Element added to document tree");
+        \\
+        \\console.log("\n6. Testing firstChild (DOM navigation)...");
+        \\const child = elem.firstChild();
+        \\console.log("✓ firstChild returned:", child === textNode ? "correct text node" : typeof child);
+        \\
+        \\// TODO: check why this fails: console.log("owner: ",child.ownerDocument());
+        \\
+        \\console.log("\n7. Testing parentNode (DOM navigation)...");
+        \\const parent = textNode.parentNode();
+        \\console.log("✓ parentNode returned:", parent === elem ? "correct parent element" : typeof parent);
+        \\
+        \\console.log("\n8. Testing textContent (zero-copy getter)...");
+        \\const text = elem.textContent;
+        \\console.log("✓ textContent returned:", text);
+        \\
+        \\console.log("\n9. Checking document body HTML...");
+        \\console.log("✓ Body innerHTML:", body.innerHTML());
+        \\
+        \\console.log("\n✓ All generated bindings work correctly!");
+        \\console.log("✓ DOM tree navigation working: elem -> textNode -> elem");
+        \\console.log("✓ Zero-copy textContent working!");
+        \\console.log("✓ Document tree properly built!");
     ;
 
-    const result = z.qjs.JS_Eval(ctx, test_code.ptr, test_code.len, "<generated-bindings-test>", 0);
-    defer z.qjs.JS_FreeValue(ctx, result);
+    const result = try ctx.eval(
+        test_code,
+        "<generated-bindings-test>",
+        .{},
+    );
+    defer ctx.freeValue(result);
 
-    if (z.qjs.JS_IsException(result) != 0) {
-        const exception = z.qjs.JS_GetException(ctx);
-        defer z.qjs.JS_FreeValue(ctx, exception);
+    if (z.isException(result)) {
+        const exception = ctx.getException();
+        defer ctx.freeValue(exception);
 
-        const error_str = z.qjs.JS_ToCString(ctx, exception);
-        if (error_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, error_str);
-            z.print("Error executing test: {s}\n", .{error_str});
-        }
+        const error_str = try ctx.toZString(exception);
+        defer ctx.freeZString(error_str);
+        z.print("Error executing generated bindings test: {s}\n", .{error_str});
+        return error.RuntimeError;
     }
+
+    z.print("\n=== Document HTML (from Zig side) ===\n", .{});
+    const root = z.bodyNode(bridge.doc).?;
+    try z.prettyPrint(allocator, root);
 
     z.print("\n", .{});
 }
 
-fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, ctx: ?*z.qjs.JSContext) !void {
+fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     z.print("\n=== Virtual DOM Bridge - SSR Demo (DIAGNOSTIC MODE) ===\n\n", .{});
 
-    var bridge = try DOMBridge.init(allocator, ctx);
+    const ctx = w.Context.init(rt);
+    errdefer ctx.deinit();
+    ctx.setAllocator(&allocator);
+    installConsole(ctx.ptr);
+
+    var bridge = try DOMBridge.init(allocator, ctx.ptr);
     defer bridge.deinit();
+    defer ctx.deinit();
+
     try bridge.installAPIs();
 
-    z.print("✅ Installed APIs. Starting incremental test...\n", .{});
-
-    // STEP 1: Basic Console Log (Should work)
-    z.print("--- Step 1: Testing Console ---\n", .{});
-    const step1 = "console.log('Step 1: Console works');";
-    _ = z.qjs.JS_Eval(ctx, step1, step1.len, "<step1>", 0);
-
-    // STEP 2: Create Element (Is this the crasher?)
-    z.print("--- Step 2: Testing document.createElement ---\n", .{});
-    const step2 =
-        \\const div = document.createElement("div");
-        \\console.log('Step 2: Element created');
-    ;
-    var result = z.qjs.JS_Eval(ctx, step2, step2.len, "<step2>", 0);
-    if (z.isException(result)) {
-        z.print("❌ Step 2 Failed!\n", .{});
-        return;
-    }
-    z.qjs.JS_FreeValue(ctx, result);
-
-    // STEP 3: Set Attribute
-    z.print("--- Step 3: Testing setAttribute ---\n", .{});
-    const step3 =
-        \\// We need to re-fetch div or assume it's lost between evals if we don't use global
-        \\// Let's use a self-contained script for safety
-        \\const d = document.createElement("div");
-        \\d.setAttribute("id", "test-id");
-        \\console.log('Step 3: Attribute set');
-    ;
-    result = z.qjs.JS_Eval(ctx, step3, step3.len, "<step3>", 0);
-    if (z.isException(result)) {
-        z.print("❌ Step 3 Failed!\n", .{}); // If it crashes here, setAttribute is the bug
-        return;
-    }
-    z.qjs.JS_FreeValue(ctx, result);
-
-    // STEP 4: Append Child to document.body
-    z.print("--- Step 4: Testing appendChild to body ---\n", .{});
-    const step4 =
+    z.print("--- Testing appendChild to body ---\n", .{});
+    const html =
         \\const container = document.createElement("div");
         \\container.setAttribute("id", "app-container");
         \\container.setAttribute("class", "main-wrapper");
         \\
         \\const heading = document.createElement("h1");
-        \\heading.setTextContent("Virtual DOM Test");
+        \\heading.setContentAsText("Virtual DOM Test");
         \\container.appendChild(heading);
         \\
         \\const paragraph = document.createElement("p");
         \\paragraph.setAttribute("class", "description");
-        \\paragraph.setTextContent("This was created via JavaScript!");
+        \\paragraph.setContentAsText("This was created via JavaScript!");
         \\container.appendChild(paragraph);
         \\
         \\const list = document.createElement("ul");
-        \\const item1 = document.createElement("li");
-        \\item1.setTextContent("Item 1");
-        \\list.appendChild(item1);
-        \\
-        \\const item2 = document.createElement("li");
-        \\item2.setTextContent("Item 2");
-        \\list.appendChild(item2);
-        \\
-        \\const item3 = document.createElement("li");
-        \\item3.setTextContent("Item 3");
-        \\list.appendChild(item3);
-        \\
+        \\for (let i = 1; i<4; i++) {
+        \\  const item = document.createElement("li");
+        \\  item.setAttribute("id", i);
+        \\  item.setContentAsText("Item " + i);
+        \\  list.appendChild(item);
+        \\}
         \\container.appendChild(list);
         \\
-        \\document.body.appendChild(container);
+        \\const body = document.bodyElement();
+        \\body.appendChild(container);
         \\console.log('Step 4: DOM structure created and appended to body');
     ;
-    result = z.qjs.JS_Eval(ctx, step4, step4.len, "<step4>", 0);
-    if (z.isException(result)) {
-        z.print("❌ Step 4 Failed! Checking exception...\n", .{});
-        const exception_val = z.qjs.JS_GetException(ctx);
-        const exception_str = z.qjs.JS_ToCString(ctx, exception_val);
-        if (exception_str != null) {
-            z.print("Error: {s}\n", .{exception_str});
-            z.qjs.JS_FreeCString(ctx, exception_str);
-        }
-        z.qjs.JS_FreeValue(ctx, exception_val);
-        return;
-    }
-    z.qjs.JS_FreeValue(ctx, result);
+    const result = try ctx.eval(
+        html,
+        "<ssr>",
+        .{},
+    );
+    defer ctx.freeValue(result);
 
-    z.print("\n✅ DIAGNOSTIC COMPLETE: All steps passed.\n\n", .{});
+    if (z.isException(result)) {
+        const exception = ctx.getException();
+        defer ctx.freeValue(exception);
+
+        const error_str = try ctx.toZString(exception);
+        defer ctx.freeZString(error_str);
+        z.print("Error executing generated bindings test: {s}\n", .{error_str});
+        return error.RuntimeError;
+    }
+
+    const root = z.bodyNode(bridge.doc).?;
+    try z.prettyPrint(allocator, root);
 
     // VERIFY: Check if Lexbor document actually contains what we created
     z.print("--- Verification: Inspecting Lexbor Document ---\n", .{});
 
-    const body_node = z.bodyNode(bridge.doc);
-    if (body_node) |body| {
-        z.print("\n📋 Document Body HTML:\n", .{});
-        const body_html = try z.innerHTML(allocator, z.nodeToElement(body).?);
-        defer allocator.free(body_html);
-        z.print("{s}\n\n", .{body_html});
+    z.print("\n📋 Document Body HTML:\n", .{});
+    const body_html = try z.innerHTML(allocator, z.nodeToElement(root).?);
+    defer allocator.free(body_html);
+    z.print("{s}\n\n", .{body_html});
 
-        // Pretty print the DOM tree
-        z.print("📊 Document Body Tree:\n", .{});
-        try z.prettyPrint(allocator, body);
-        z.print("\n", .{});
+    // Pretty print the DOM tree
+    z.print("📊 Document Body Tree:\n", .{});
+    try z.prettyPrint(allocator, root);
+    z.print("\n", .{});
 
-        // Verify specific elements exist
-        z.print("🔍 Verification Checks:\n", .{});
+    // Verify specific elements exist
+    z.print("🔍 Verification Checks:\n", .{});
 
-        // Check for container with id="app-container"
-        const container_selector = "#app-container";
-        if (try z.querySelector(allocator, bridge.doc, container_selector)) |container_elem| {
-            z.print("  ✅ Found container div with id='app-container'\n", .{});
+    // Check for container with id="app-container"
+    const container_selector = "#app-container";
+    if (try z.querySelector(allocator, bridge.doc, container_selector)) |container_elem| {
+        z.print("  ✅ Found container div with id='app-container'\n", .{});
 
-            // Check attributes
-            if (try z.getAttribute(allocator, container_elem, "class")) |class_val| {
-                defer allocator.free(class_val);
-                z.print("  ✅ Container has class='{s}'\n", .{class_val});
-            }
-        } else {
-            z.print("  ❌ Container div not found!\n", .{});
-        }
-
-        // Check for h1
-        const h1_selector = "h1";
-        if (try z.querySelector(allocator, bridge.doc, h1_selector)) |h1_elem| {
-            const text = z.textContent_zc(z.elementToNode(h1_elem));
-            z.print("  ✅ Found h1 with text: '{s}'\n", .{text});
-        } else {
-            z.print("  ❌ h1 not found!\n", .{});
-        }
-
-        // Check for paragraph with class
-        const p_selector = "p.description";
-        if (try z.querySelector(allocator, bridge.doc, p_selector)) |p_elem| {
-            const text = z.textContent_zc(z.elementToNode(p_elem));
-            z.print("  ✅ Found paragraph with text: '{s}'\n", .{text});
-        } else {
-            z.print("  ❌ Paragraph not found!\n", .{});
-        }
-
-        // Check for list items
-        const li_selector = "li";
-        const li_elements = try z.querySelectorAll(allocator, bridge.doc, li_selector);
-        defer allocator.free(li_elements);
-        z.print("  ✅ Found {d} list items\n", .{li_elements.len});
-
-        if (li_elements.len == 3) {
-            z.print("  ✅ Correct number of list items!\n", .{});
-        } else {
-            z.print("  ❌ Expected 3 list items, found {d}\n", .{li_elements.len});
+        // Check attributes
+        if (try z.getAttribute(allocator, container_elem, "class")) |class_val| {
+            defer allocator.free(class_val);
+            z.print("  ✅ Container has class='{s}'\n", .{class_val});
         }
     } else {
-        z.print("❌ Body node not found in document!\n", .{});
+        z.print("  ❌ Container div not found!\n", .{});
     }
 
-    z.print("\n✅ VERIFICATION COMPLETE: JavaScript DOM operations successfully modified Lexbor document!\n", .{});
+    // Check for h1
+    const h1_selector = "h1";
+    if (try z.querySelector(allocator, bridge.doc, h1_selector)) |h1_elem| {
+        const text = z.textContent_zc(z.elementToNode(h1_elem));
+        z.print("  ✅ Found h1 with text: '{s}'\n", .{text});
+    } else {
+        z.print("  ❌ h1 not found!\n", .{});
+    }
+
+    // Check for paragraph with class
+    const p_selector = "p.description";
+    if (try z.querySelector(allocator, bridge.doc, p_selector)) |p_elem| {
+        const text = z.textContent_zc(z.elementToNode(p_elem));
+        z.print("  ✅ Found paragraph with text: '{s}'\n", .{text});
+    } else {
+        z.print("  ❌ Paragraph not found!\n", .{});
+    }
+
+    // Check for list items
+    const li_selector = "li";
+    const li_elements = try z.querySelectorAll(allocator, bridge.doc, li_selector);
+    defer allocator.free(li_elements);
+    z.print("  ✅ Found {d} list items\n", .{li_elements.len});
+
+    if (li_elements.len == 3) {
+        z.print("  ✅ Correct number of list items!\n", .{});
+    } else {
+        z.print("  ❌ Expected 3 list items, found {d}\n", .{li_elements.len});
+    }
+
+    // z.print("\n✅ VERIFICATION COMPLETE: JavaScript DOM operations successfully modified Lexbor document!\n", .{});
 }
 
 /// Demo: Native Bridge - Passing data between QuickJS and Zig
 fn demoNativeBridge(ctx: w.Context) !void {
     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
 
+    // NativeBridge.installNativeBridge(ctx, &gpa);
     // Test 1: Process regular array
     z.print("--- Test 1: Process Array (JS → Zig → JS) ---\n", .{});
     const test1 =

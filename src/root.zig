@@ -23,7 +23,7 @@ pub const jsFalse = wrapper.FALSE;
 // Initialized by DOMBridge.init(), used by generated bindings
 // Note: This is a pointer to the actual var in dom_bridge.zig
 // Access with z.dom_class_id.* in generated code
-const dom_bridge = @import("dom_bridge.zig");
+pub const dom_bridge = @import("dom_bridge.zig");
 pub const dom_class_id = &dom_bridge.dom_class_id;
 
 pub fn isUndefined(val: qjs.JSValue) bool {

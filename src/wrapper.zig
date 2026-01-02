@@ -345,6 +345,18 @@ pub const Context = packed struct {
         qjs.JS_FreeContext(self.ptr);
     }
 
+    /// Set allocator in context opaque for use by bindings
+    pub inline fn setAllocator(self: Context, allocator: *const std.mem.Allocator) void {
+        qjs.JS_SetContextOpaque(self.ptr, @constCast(allocator));
+    }
+
+    /// Get allocator from context opaque (set via setAllocator)
+    pub inline fn getAllocator(self: Context) std.mem.Allocator {
+        const opaque_ptr = qjs.JS_GetContextOpaque(self.ptr);
+        const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+        return allocator_ptr.*;
+    }
+
     // pub inline fn getRuntime(self: Context) Runtime {
     //     return .{ .ptr = qjs.JS_GetRuntime(self.ptr) };
     // }
