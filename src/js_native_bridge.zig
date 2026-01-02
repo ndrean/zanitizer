@@ -5,7 +5,9 @@ const z = @import("root.zig");
 const qjs = z.qjs;
 
 /// Retrieve the Zig allocator stored in the JSContext opaque pointer
-fn getAllocator(ctx: ?*qjs.JSContext) std.mem.Allocator {
+/// This is used by generated bindings and manual wrappers to get the allocator
+/// without requiring it as an explicit JavaScript argument
+pub fn getAllocator(ctx: ?*qjs.JSContext) std.mem.Allocator {
     const opaque_ptr = qjs.JS_GetContextOpaque(ctx);
     const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
     return allocator_ptr.*;

@@ -11,11 +11,20 @@ const Timer = struct {
     is_cancelled: bool = false,
 };
 
+pub const Task = struct {
+    ctx: *qjs.JSContext,
+    resolve: z.qjs.JSValue,
+    reject: z.qjs.JSValue,
+    data: []const u8,
+    is_error: bool,
+};
+
 pub const EventLoop = struct {
     allocator: std.mem.Allocator,
     ctx: ?*qjs.JSContext,
     rt: ?*qjs.JSRuntime,
-    // FIX: Use ArrayListUnmanaged for explicit allocator passing
+    mutex: std.Thread.Mutex = .{},
+    task_queue: std.ArrayList(Task) = .{},
     timers: std.ArrayListUnmanaged(Timer),
     next_timer_id: u32 = 1,
     should_exit: bool = false,
@@ -26,6 +35,7 @@ pub const EventLoop = struct {
             .ctx = ctx,
             .rt = rt,
             .timers = .{},
+            .task_queue = .{},
         };
     }
 

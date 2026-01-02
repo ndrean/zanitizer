@@ -1,7 +1,8 @@
 const std = @import("std");
 const z = @import("root.zig");
+const bindings = @import("bindings_generated.zig");
 
-var dom_class_id: z.qjs.JSClassID = 0;
+pub var dom_class_id: z.qjs.JSClassID = 0;
 
 fn getAllocator(ctx: ?*z.qjs.JSContext) std.mem.Allocator {
     const opaque_ptr = z.qjs.JS_GetContextOpaque(ctx);
@@ -71,6 +72,12 @@ pub const DOMBridge = struct {
         const global = z.qjs.JS_GetGlobalObject(ctx);
         defer z.qjs.JS_FreeValue(ctx, global);
 
+        // 1. Create and register the prototype with shared methods
+        const proto = z.qjs.JS_NewObject(ctx);
+        bindings.installMethodBindings(ctx, proto);
+        z.qjs.JS_SetClassProto(ctx, dom_class_id, proto);
+
+        // 2. Create document and window APIs
         try self.createDocumentAPI(global);
         try self.createWindowAPI(global);
         // Note: console is already installed in main.zig via installConsole()
@@ -83,18 +90,17 @@ pub const DOMBridge = struct {
         const doc_obj = z.qjs.JS_NewObject(ctx);
         // DO NOT defer free - JS_SetPropertyStr transfers ownership to global!
 
-        const create_element_fn = z.qjs.JS_NewCFunction2(ctx, js_createElement, "createElement", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "createElement", create_element_fn);
+        // Install static bindings (createElement, createTextNode, getElementById, etc.)
+        bindings.installStaticBindings(ctx, doc_obj);
 
-        const create_text_fn = z.qjs.JS_NewCFunction2(ctx, js_createTextNode, "createTextNode", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "createTextNode", create_text_fn);
-
+        // Install custom query selectors (not yet in generated bindings)
         const query_selector_fn = z.qjs.JS_NewCFunction2(ctx, js_querySelector, "querySelector", 1, z.qjs.JS_CFUNC_generic, 0);
         _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelector", query_selector_fn);
 
         const query_selector_all_fn = z.qjs.JS_NewCFunction2(ctx, js_querySelectorAll, "querySelectorAll", 1, z.qjs.JS_CFUNC_generic, 0);
         _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "querySelectorAll", query_selector_all_fn);
 
+        // Attach body element
         const body_node = z.bodyNode(self.doc);
         if (body_node) |body| {
             const body_element = z.nodeToElement(body).?;
@@ -102,7 +108,7 @@ pub const DOMBridge = struct {
             _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "body", body_val);
         }
 
-        // FIX: Cast dom_class_id to c_int
+        // Store native document pointer for static functions to retrieve
         const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
         _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(self.doc));
         _ = z.qjs.JS_SetPropertyStr(ctx, doc_obj, "_native_doc", opaque_obj);
@@ -144,36 +150,29 @@ pub const DOMBridge = struct {
         _ = z.qjs.JS_SetPropertyStr(ctx, global, "console", console_obj);
     }
 
-    fn wrapElement(ctx: ?*z.qjs.JSContext, element: *z.HTMLElement) !z.qjs.JSValue {
-        const elem_obj = z.qjs.JS_NewObject(ctx);
-        // FIX: Cast dom_class_id
-        const opaque_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
-        _ = z.qjs.JS_SetOpaque(opaque_obj, @ptrCast(element));
-        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "_native_element", opaque_obj);
+    /// Wrap an HTMLElement for JavaScript (inherits methods from prototype)
+    pub fn wrapElement(ctx: ?*z.qjs.JSContext, element: *z.HTMLElement) !z.qjs.JSValue {
+        // Create object instance of our DOM class (inherits prototype automatically)
+        const elem_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        _ = z.qjs.JS_SetOpaque(elem_obj, @ptrCast(element));
 
+        // Add element-specific properties
         const tag_name = z.tagName_zc(element);
         const tag_val = z.qjs.JS_NewString(ctx, tag_name.ptr);
         _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "tagName", tag_val);
 
-        const append_child_fn = z.qjs.JS_NewCFunction2(ctx, js_appendChild, "appendChild", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "appendChild", append_child_fn);
-
-        const set_attr_fn = z.qjs.JS_NewCFunction2(ctx, js_setAttribute, "setAttribute", 2, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "setAttribute", set_attr_fn);
-
-        const get_attr_fn = z.qjs.JS_NewCFunction2(ctx, js_getAttribute, "getAttribute", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "getAttribute", get_attr_fn);
-
-        // Add setTextContent as a method (property assignment doesn't work easily in vanilla QuickJS)
-        const set_text_fn = z.qjs.JS_NewCFunction2(ctx, js_setTextContent, "setTextContent", 1, z.qjs.JS_CFUNC_generic, 0);
-        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "setTextContent", set_text_fn);
-
-        // Set initial textContent as read-only property
-        const text_content = z.textContent_zc(z.elementToNode(element));
-        const text_val = z.qjs.JS_NewString(ctx, text_content.ptr);
-        _ = z.qjs.JS_SetPropertyStr(ctx, elem_obj, "_textContent", text_val);
-
+        // Methods are inherited from prototype (set via JS_SetClassProto)
         return elem_obj;
+    }
+
+    /// Wrap a DomNode for JavaScript (inherits methods from prototype)
+    pub fn wrapNode(ctx: ?*z.qjs.JSContext, node: *z.DomNode) !z.qjs.JSValue {
+        // Create object instance of our DOM class (inherits prototype automatically)
+        const node_obj = z.qjs.JS_NewObjectClass(ctx, @intCast(dom_class_id));
+        _ = z.qjs.JS_SetOpaque(node_obj, @ptrCast(node));
+
+        // Methods are inherited from prototype (set via JS_SetClassProto)
+        return node_obj;
     }
 };
 

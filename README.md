@@ -13,6 +13,26 @@ A `lexbor` & `quickJS` in `Zig` project
 
 See [QUICKJS_INTEGRATION.md] for examples, when/how to use JS or Zig.
 
+One-shot usage, or long-running:
+
+┌─────────────────────────────────────────────┐
+│  Long-running Process (main loop)           │
+│  ┌────────────────────────────────────────┐ │
+│  │ JS_Runtime (created once, persists)    │ │
+│  │                                        │ │
+│  │  Per-Request:                          │ │
+│  │  ┌──────────────────────────────────┐  │ │
+│  │  │ JS_Context (ephemeral)           │  │ │
+│  │  │  - DOM class registered          │  │ │
+│  │  │  - Prototype attached (SHARED)   │  │ │
+│  │  │  - Process request               │  │ │
+│  │  │  - Cleanup & destroy context     │  │ │
+│  │  └──────────────────────────────────┘  │ │
+│  └────────────────────────────────────────┘ │
+└─────────────────────────────────────────────┘
+
+> Generate automatic [lxb->qjs] bindings with `zig run gen_bindings.zig` whenever possible.
+
 **Expectations**:
 
 - Native Speed: Lexbor parses/manipulates HTML at C speeds
