@@ -39,7 +39,7 @@ pub fn isException(val: qjs.JSValue) bool {
 }
 
 pub fn isFunction(ctx: ?*qjs.JSContext, val: qjs.JSValue) bool {
-    return qjs.JS_IsFunction(ctx, val) != 0;
+    return qjs.JS_IsFunction(ctx, val);
 }
 
 const lxb = @import("modules/core.zig");
