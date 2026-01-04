@@ -40,144 +40,136 @@ const ReturnType = union(enum) {
     document, // *HTMLDocument (No error)
 
     string, // []const u8 (allocated, will be freed with allocator from args)
-    optional_string, // ?[]const u8 (zero-copy, no allocator needed)
-    int32, // i32
-    uint32, // u32
-    boolean, // bool
+    optional_string, // ?[]const u8
+    int32,
+    uint32,
+    boolean,
 
-    error_void, // !void
-    error_element, // !*HTMLElement
-    error_node, // !*DomNode
+    // Special cases
     error_string, // ![]const u8
     error_document, // !*HTMLDocument
 };
 
-// ============================================================================
-// API DEFINITION
-// ============================================================================
-const api_functions = [_]BindingSpec{
-    // ---------------------------------------
-    // STATIC FUNCTIONS
-    // ---------------------------------------
+// Define the bindings to generate
+const bindings = [_]BindingSpec{
+    // Document methods (Static on document object)
     .{
         .name = "createElement",
-        .zig_func_name = "createElement",
+        .zig_func_name = "z.createElement",
         .kind = .static,
         .args = &.{ .document, .string },
-        .return_type = .error_element,
+        .return_type = .element, // Returns !*HTMLElement
     },
     .{
         .name = "documentRoot",
-        .zig_func_name = "documentRoot",
+        .zig_func_name = "z.documentRoot",
         .kind = .static,
         .args = &.{.document},
         .return_type = .optional_node,
     },
     .{
         .name = "bodyElement",
-        .zig_func_name = "bodyElement",
+        .zig_func_name = "z.bodyElement",
         .kind = .static,
         .args = &.{.document},
         .return_type = .optional_element,
     },
     .{
         .name = "ownerDocument",
-        .zig_func_name = "ownerDocument",
+        .zig_func_name = "z.ownerDocument",
         .kind = .static,
         .args = &.{.this_node},
-        .return_type = .document, // Fixed: Returns *HTMLDocument, not !*HTMLDocument
+        .return_type = .document,
     },
     .{
         .name = "createTextNode",
-        .zig_func_name = "createTextNode",
+        .zig_func_name = "z.createTextNode",
         .kind = .static,
         .args = &.{ .document, .string },
-        .return_type = .error_node,
+        .return_type = .node, // Returns !*DomNode
     },
     .{
         .name = "getElementById",
-        .zig_func_name = "getElementById",
+        .zig_func_name = "z.getElementById",
         .kind = .static,
         .args = &.{ .document_root, .string },
         .return_type = .optional_element,
     },
 
-    // ---------------------------------------
-    // METHODS (attached to DOMNode.prototype)
-    // ---------------------------------------
+    // Node/Element methods (Prototype methods)
     .{
         .name = "appendChild",
-        .zig_func_name = "appendChild",
+        .zig_func_name = "z.appendChild",
         .kind = .method,
-        .args = &.{ .this_node, .node }, // Correct: parent from 'this', child from 'args'
+        .args = &.{ .this_node, .node },
         .return_type = .void_type,
     },
     .{
         .name = "firstChild",
-        .zig_func_name = "firstChild",
+        .zig_func_name = "z.firstChild",
         .kind = .method,
         .args = &.{.this_node},
         .return_type = .optional_node,
     },
     .{
         .name = "parentNode",
-        .zig_func_name = "parentNode",
+        .zig_func_name = "z.parentNode",
         .kind = .method,
         .args = &.{.this_node},
         .return_type = .optional_node,
     },
     .{
         .name = "remove",
-        .zig_func_name = "removeNode",
+        .zig_func_name = "z.removeNode",
         .kind = .method,
         .args = &.{.this_node},
         .return_type = .void_type,
     },
     .{
         .name = "setAttribute",
-        .zig_func_name = "setAttribute",
+        .zig_func_name = "z.setAttribute",
         .kind = .method,
         .args = &.{ .this_element, .string, .string },
         .return_type = .void_type,
     },
     .{
         .name = "getAttribute",
-        .zig_func_name = "getAttribute_zc",
+        .zig_func_name = "z.getAttribute_zc",
         .kind = .method,
         .args = &.{ .this_element, .string },
         .return_type = .optional_string,
     },
     .{
         .name = "removeAttribute",
-        .zig_func_name = "removeAttribute",
+        .zig_func_name = "z.removeAttribute",
         .kind = .method,
         .args = &.{ .this_element, .string },
-        .return_type = .error_void,
+        .return_type = .void_type,
     },
     .{
         .name = "textContent",
-        .zig_func_name = "textContent_zc",
+        .zig_func_name = "z.textContent_zc",
         .kind = .method,
         .args = &.{.this_node},
         .return_type = .string,
     },
     .{
         .name = "setContentAsText",
-        .zig_func_name = "setContentAsText",
+        .zig_func_name = "z.setContentAsText",
         .kind = .method,
         .args = &.{ .this_node, .string },
-        .return_type = .error_void,
+        .return_type = .void_type,
     },
     .{
         .name = "setInnerHTML",
-        .zig_func_name = "setInnerHTML",
+        .zig_func_name = "z.setInnerHTML",
         .kind = .method,
         .args = &.{ .this_element, .string },
-        .return_type = .error_element,
+        .return_type = .element, // Returns the element itself (or new root)
     },
     .{
         .name = "innerHTML",
-        .zig_func_name = "innerHTML",
+        .zig_func_name = "z.innerHTML",
         .kind = .method,
         .args = &.{ .allocator, .this_element },
         .return_type = .error_string,
@@ -185,34 +177,24 @@ const api_functions = [_]BindingSpec{
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    if (args.len != 2) return error.InvalidArgs;
-    const out_path = args[1];
-
-    std.debug.print("Generating bindings to: {s}\n", .{out_path});
-
-    var output: std.ArrayList(u8) = .empty;
-    defer output.deinit(allocator);
-    const writer = output.writer(allocator);
-
-    try writeHeader(writer);
-    for (api_functions) |spec| {
-        try generateWrapper(writer, spec);
+    if (args.len < 2) {
+        std.debug.print("Usage: {s} <output_file>\n", .{args[0]});
+        return;
     }
-    try writeFooter(writer);
 
-    try std.fs.cwd().writeFile(.{ .sub_path = out_path, .data = output.items });
-    std.debug.print("✓ Generated {d} bindings successfully!\n", .{api_functions.len});
-}
+    const output_file_path = args[1];
 
-fn writeHeader(writer: anytype) !void {
-    try writer.writeAll(
+    // Use Allocating writer to build output in memory
+    var aw = std.Io.Writer.Allocating.init(allocator);
+    defer aw.deinit();
+    const stdout = &aw.writer;
+
+    try stdout.writeAll(
         \\// THIS FILE IS AUTO-GENERATED BY tools/gen_bindings.zig
         \\// DO NOT EDIT MANUALLY
         \\
@@ -222,55 +204,53 @@ fn writeHeader(writer: anytype) !void {
         \\const qjs = z.qjs;
         \\const DOMBridge = @import("dom_bridge.zig").DOMBridge;
         \\
-        \\// Helper to get allocator from context opaque pointer
-        \\fn getAllocator(ctx_ptr: ?*qjs.JSContext) std.mem.Allocator {
-        \\    const opaque_ptr = qjs.JS_GetContextOpaque(ctx_ptr);
-        \\    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-        \\    return allocator_ptr.*;
-        \\}
-        \\
         \\
     );
+
+    for (bindings) |binding| {
+        try genFunction(stdout, binding);
+    }
+
+    // Generate installers
+    try stdout.writeAll("\n\n// Install static bindings (document-level factories)\n");
+    try stdout.writeAll("pub fn installStaticBindings(ctx: ?*qjs.JSContext, doc_obj: qjs.JSValue) void {\n");
+    for (bindings) |binding| {
+        if (binding.kind == .static) {
+            try stdout.print("    _ = qjs.JS_SetPropertyStr(ctx, doc_obj, \"{s}\", qjs.JS_NewCFunction(ctx, js_{s}, \"{s}\", {d}));\n", .{ binding.name, binding.name, binding.name, countJsArgs(binding.args) });
+        }
+    }
+    try stdout.writeAll("}\n");
+
+    try stdout.writeAll("\n// Install method bindings (shared via prototype)\n");
+    try stdout.writeAll("pub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
+    for (bindings) |binding| {
+        if (binding.kind == .method) {
+            try stdout.print("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"{s}\", qjs.JS_NewCFunction(ctx, js_{s}, \"{s}\", {d}));\n", .{ binding.name, binding.name, binding.name, countJsArgs(binding.args) });
+        }
+    }
+    try stdout.writeAll("}\n");
+
+    // Write the accumulated output to file
+    const file = try std.fs.cwd().createFile(output_file_path, .{});
+    defer file.close();
+    try file.writeAll(aw.writer.buffer[0..aw.writer.end]);
 }
 
-fn countJSArgs(args: []const ArgType) u32 {
-    var count: u32 = 0;
+fn countJsArgs(args: []const ArgType) usize {
+    var count: usize = 0;
     for (args) |arg| {
         switch (arg) {
             .string, .int32, .uint32, .boolean, .element, .node => count += 1,
-            .allocator, .document, .document_root, .this_element, .this_node => {},
+            else => {},
         }
     }
     return count;
 }
 
-fn writeFooter(writer: anytype) !void {
-    try writer.writeAll("\n// Install static bindings (document-level factories)\npub fn installStaticBindings(ctx: ?*qjs.JSContext, doc_obj: qjs.JSValue) void {\n");
-    for (api_functions) |spec| {
-        if (spec.kind == .static) {
-            const js_argc = countJSArgs(spec.args);
-            try writer.print(
-                \\    _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "{s}", qjs.JS_NewCFunction(ctx, js_{s}, "{s}", {d}));
-                \\
-            , .{ spec.name, spec.name, spec.name, js_argc });
-        }
-    }
-    try writer.writeAll("}\n\n// Install method bindings (shared via prototype)\npub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
-    for (api_functions) |spec| {
-        if (spec.kind == .method) {
-            const js_argc = countJSArgs(spec.args);
-            try writer.print(
-                \\    _ = qjs.JS_SetPropertyStr(ctx, proto, "{s}", qjs.JS_NewCFunction(ctx, js_{s}, "{s}", {d}));
-                \\
-            , .{ spec.name, spec.name, spec.name, js_argc });
-        }
-    }
-    try writer.writeAll("}\n");
-}
-
-fn generateWrapper(writer: anytype, spec: BindingSpec) !void {
+fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     try writer.print(
-        \\/// Generated wrapper for z.{s}
+        \\
+        \\/// Generated wrapper for {s}
         \\pub fn js_{s}(
         \\    ctx_ptr: ?*qjs.JSContext,
         \\    this_val: qjs.JSValue,
@@ -279,56 +259,66 @@ fn generateWrapper(writer: anytype, spec: BindingSpec) !void {
         \\) callconv(.c) qjs.JSValue {{
         \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
         \\
-    , .{ spec.zig_func_name, spec.name });
+    , .{ func.zig_func_name, func.name });
 
-    // 1. SMART DISCARD of 'ctx'
-    // We only discard it if no argument and no return type needs the wrapper helper methods.
-    const uses_ctx = blk: {
-        for (spec.args) |arg| {
-            switch (arg) {
-                .document, .document_root, .string, .int32, .uint32, .boolean, .element, .node => break :blk true,
-                else => {},
-            }
-        }
-        switch (spec.return_type) {
-            .string, .error_string, .optional_string, .int32, .uint32, .boolean => break :blk true,
-            else => {},
-        }
-        break :blk false;
-    };
-    if (!uses_ctx) try writer.writeAll("    _ = ctx;\n");
+    // 1. ARGUMENT CHECKS
+    const js_arg_count = countJsArgs(func.args);
+    if (js_arg_count > 0) {
+        try writer.print("    if (argc < {d}) return w.EXCEPTION;\n", .{js_arg_count});
+    }
 
-    // Argument Check
-    const expected_js_args = countJSArgs(spec.args);
-    if (expected_js_args > 0) {
-        try writer.print("    if (argc < {d}) return w.EXCEPTION;\n", .{expected_js_args});
-    } else {
+    // 2. UNUSED VARS SUPPRESSION
+    if (js_arg_count == 0) {
         try writer.writeAll("    _ = argc; _ = argv;\n");
     }
-
-    // Unused Vars
-    const uses_this = blk: {
-        for (spec.args) |arg| {
-            if (arg == .this_element or arg == .this_node) break :blk true;
+    var uses_this = false;
+    var uses_ctx = false;
+    for (func.args) |arg| {
+        switch (arg) {
+            .this_element, .this_node => uses_this = true,
+            .string, .allocator, .document, .document_root, .element, .node => uses_ctx = true,
+            else => {},
         }
-        break :blk false;
-    };
-    if (!uses_this) try writer.writeAll("    _ = this_val;\n");
-
-    try writer.writeAll("\n");
-
-    var js_arg_idx: u32 = 0;
-
-    // We scan to find the allocator index ahead of time for return cleanup
-    var allocator_idx: ?usize = null;
-    for (spec.args, 0..) |arg, i| {
-        if (arg == .allocator) allocator_idx = i;
+    }
+    if (!uses_this) {
+        try writer.writeAll("    _ = this_val;\n");
+    }
+    // Suppress ctx usage check if nothing uses it
+    // ctx is used if: args use it, or return type needs wrapping
+    const return_needs_ctx = (func.return_type == .element or func.return_type == .node or
+        func.return_type == .optional_element or func.return_type == .optional_node or
+        func.return_type == .string or func.return_type == .error_string or func.return_type == .optional_string or
+        func.return_type == .int32 or func.return_type == .uint32 or func.return_type == .boolean);
+    if (!uses_ctx and !return_needs_ctx) {
+        try writer.writeAll("    _ = ctx;\n");
     }
 
-    for (spec.args, 0..) |arg, i| {
+    // 3. EXTRACT ARGUMENTS
+    var js_arg_idx: usize = 0;
+    var allocator_idx: ?usize = null;
+
+    for (func.args, 0..) |arg, i| {
         switch (arg) {
             .allocator => {
-                try writer.print("    const arg{d} = getAllocator(ctx_ptr);\n", .{i});
+                // UPDATE: Use ctx.getAllocator() directly
+                try writer.print("    const arg{d} = ctx.getAllocator();\n", .{i});
+                allocator_idx = i;
+            },
+            .this_element => {
+                try writer.print(
+                    \\    const elem_ptr{d} = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
+                    \\    if (elem_ptr{d} == null) return w.EXCEPTION;
+                    \\    const arg{d}: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr{d}));
+                    \\
+                , .{ i, i, i, i });
+            },
+            .this_node => {
+                try writer.print(
+                    \\    const node_ptr{d} = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
+                    \\    if (node_ptr{d} == null) return w.EXCEPTION;
+                    \\    const arg{d}: *z.DomNode = @ptrCast(@alignCast(node_ptr{d}));
+                    \\
+                , .{ i, i, i, i });
             },
             .document => {
                 try writer.print(
@@ -361,22 +351,6 @@ fn generateWrapper(writer: anytype, spec: BindingSpec) !void {
                     \\
                 , .{ i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i });
             },
-            .this_element => {
-                try writer.print(
-                    \\    const elem_ptr{d} = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
-                    \\    if (elem_ptr{d} == null) return w.EXCEPTION;
-                    \\    const arg{d}: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr{d}));
-                    \\
-                , .{ i, i, i, i });
-            },
-            .this_node => {
-                try writer.print(
-                    \\    const node_ptr{d} = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
-                    \\    if (node_ptr{d} == null) return w.EXCEPTION;
-                    \\    const arg{d}: *z.DomNode = @ptrCast(@alignCast(node_ptr{d}));
-                    \\
-                , .{ i, i, i, i });
-            },
             .element => {
                 try writer.print(
                     \\    const elem_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], z.dom_class_id.*);
@@ -404,61 +378,75 @@ fn generateWrapper(writer: anytype, spec: BindingSpec) !void {
                 js_arg_idx += 1;
             },
             .int32 => {
-                try writer.print("    const arg{d} = ctx.toInt32(argv[{d}]) catch return w.EXCEPTION;\n", .{ i, js_arg_idx });
+                try writer.print(
+                    \\    var arg{d}: i32 = 0;
+                    \\    if (qjs.JS_ToInt32(ctx_ptr, &arg{d}, argv[{d}]) != 0) return w.EXCEPTION;
+                    \\
+                , .{ i, i, js_arg_idx });
                 js_arg_idx += 1;
             },
             .uint32 => {
-                try writer.print("    const arg{d} = ctx.toUint32(argv[{d}]) catch return w.EXCEPTION;\n", .{ i, js_arg_idx });
+                try writer.print(
+                    \\    var arg{d}: u32 = 0;
+                    \\    if (qjs.JS_ToUint32(ctx_ptr, &arg{d}, argv[{d}]) != 0) return w.EXCEPTION;
+                    \\
+                , .{ i, i, js_arg_idx });
                 js_arg_idx += 1;
             },
             .boolean => {
-                try writer.print("    const arg{d} = ctx.toBool(argv[{d}]);\n", .{ i, js_arg_idx });
+                try writer.print("    const arg{d} = qjs.JS_ToBool(ctx_ptr, argv[{d}]) != 0;\n", .{ i, js_arg_idx });
                 js_arg_idx += 1;
             },
         }
     }
 
-    // Call Native
-    try writer.writeAll("\n    // Call native Zig function\n");
-    const has_return = switch (spec.return_type) {
-        .void_type, .error_void => false,
-        else => true,
-    };
-    const is_error_union = switch (spec.return_type) {
-        .error_void, .error_element, .error_node, .error_string, .error_document => true,
-        else => false,
-    };
-    const discard_result = std.mem.eql(u8, spec.zig_func_name, "setAttribute");
+    // 4. CALL NATIVE FUNCTION
+    try writer.writeAll("    // Call native Zig function\n");
 
-    if (discard_result) {
-        try writer.writeAll("    _ = ");
-    } else if (has_return) {
+    // Special case: setAttribute returns a value we need to discard
+    const is_set_attribute = std.mem.eql(u8, func.name, "setAttribute");
+
+    if (func.return_type != .void_type) {
         try writer.writeAll("    const result = ");
+    } else if (is_set_attribute) {
+        try writer.writeAll("    _ = ");
     } else {
         try writer.writeAll("    ");
     }
 
-    try writer.print("z.{s}(", .{spec.zig_func_name});
-    for (spec.args, 0..) |_, i| {
+    // Call
+    try writer.print("{s}(", .{func.zig_func_name});
+    for (func.args, 0..) |_, i| {
         if (i > 0) try writer.writeAll(", ");
         try writer.print("arg{d}", .{i});
     }
     try writer.writeAll(")");
 
-    if (is_error_union) {
-        try writer.writeAll(" catch return w.EXCEPTION;\n");
-    } else {
-        try writer.writeAll(";\n");
-    }
+    // Catch errors for non-void returns that are errors
+    if (func.return_type == .element or func.return_type == .node or func.return_type == .error_string or func.return_type == .error_document) {
+        try writer.writeAll(" catch return w.EXCEPTION");
+    } else if (func.return_type == .void_type and !is_set_attribute) {
+        // For void functions, only catch errors for specific functions we know return errors
+        const is_remove_attr = std.mem.eql(u8, func.name, "removeAttribute");
+        const is_set_content = std.mem.eql(u8, func.name, "setContentAsText");
+        const is_set_inner = std.mem.eql(u8, func.name, "setInnerHTML");
 
-    // Return Marshalling
-    try writer.writeAll("\n");
-    switch (spec.return_type) {
-        .void_type, .error_void => try writer.writeAll("    return w.UNDEFINED;\n"),
-        .element, .error_element => try writer.writeAll("    return DOMBridge.wrapElement(ctx_ptr, result) catch w.EXCEPTION;\n"),
-        .optional_element => try writer.writeAll("    if (result) |elem| { return DOMBridge.wrapElement(ctx_ptr, elem) catch w.EXCEPTION; } else { return w.NULL; }\n"),
-        .node, .error_node => try writer.writeAll("    return DOMBridge.wrapNode(ctx_ptr, result) catch w.EXCEPTION;\n"),
-        .optional_node => try writer.writeAll("    if (result) |node| { return DOMBridge.wrapNode(ctx_ptr, node) catch w.EXCEPTION; } else { return w.NULL; }\n"),
+        if (is_remove_attr or is_set_content or is_set_inner) {
+            try writer.writeAll(" catch return w.EXCEPTION");
+        }
+    }
+    try writer.writeAll(";\n\n");
+
+    // 5. RETURN VALUE
+    switch (func.return_type) {
+        .void_type => try writer.writeAll("    return w.UNDEFINED;\n"),
+        // UPDATE: Replace ctx_ptr with ctx in these calls
+        .element => try writer.writeAll("    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;\n"),
+        .node => try writer.writeAll("    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;\n"),
+
+        .optional_element => try writer.writeAll("    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }\n"),
+        .optional_node => try writer.writeAll("    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }\n"),
+
         .string, .error_string => {
             if (allocator_idx) |idx| {
                 try writer.print("    defer arg{d}.free(result);\n    return ctx.newString(result);\n", .{idx});
@@ -470,16 +458,9 @@ fn generateWrapper(writer: anytype, spec: BindingSpec) !void {
         .int32 => try writer.writeAll("    return ctx.newInt32(result);\n"),
         .uint32 => try writer.writeAll("    return ctx.newUint32(result);\n"),
         .boolean => try writer.writeAll("    return ctx.newBool(result);\n"),
-        .error_document => {
-            try writer.writeAll(
-                \\    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(z.dom_class_id.*));
-                \\    _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
-                \\    return doc_obj;
-                \\
-            );
-        },
-        // NEW: Handle non-error document return
-        .document => {
+
+        .document, .error_document => {
+            // Document creation might still use manual objects if wrapDocument isn't in DOMBridge yet
             try writer.writeAll(
                 \\    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(z.dom_class_id.*));
                 \\    _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
@@ -488,5 +469,6 @@ fn generateWrapper(writer: anytype, spec: BindingSpec) !void {
             );
         },
     }
-    try writer.writeAll("}\n\n");
+
+    try writer.writeAll("}\n");
 }

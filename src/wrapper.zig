@@ -22,6 +22,24 @@ pub const UNINITIALIZED = Value{ .tag = qjs.JS_TAG_UNINITIALIZED, .u = .{ .int32
 
 // pub const EXCEPTION = qjs.JS_EXCEPTION;
 
+// !! Context also defines
+pub inline fn isUndefined(val: qjs.JSValue) bool {
+    return qjs.JS_IsUndefined(val);
+    // QuickJS-ng headers usually return bool directly or int
+}
+
+pub inline fn isNull(val: qjs.JSValue) bool {
+    return qjs.JS_IsNull(val);
+}
+
+pub inline fn isException(val: qjs.JSValue) bool {
+    return qjs.JS_IsException(val);
+}
+
+pub inline fn isFunction(ctx: ?*qjs.JSContext, val: qjs.JSValue) bool {
+    return qjs.JS_IsFunction(ctx, val);
+}
+
 pub const TypedArrayType = enum(c_int) {
     Uint8ClampedArray = qjs.JS_TYPED_ARRAY_UINT8C,
     Int8Array = qjs.JS_TYPED_ARRAY_INT8,
@@ -90,8 +108,12 @@ pub const Runtime = struct {
         return result[H..].ptr;
     }
 
-    fn js_malloc_usable_size(_: ?*const anyopaque) callconv(.c) usize {
-        return 0;
+    // the header sotres the size, so QuickJS can perform in-place array growth optimizations
+    fn js_malloc_usable_size(ptr: ?*const anyopaque) callconv(.c) usize {
+        if (ptr == null) return 0;
+        // Pointer arithmetic to find the header (H bytes before the pointer)
+        const header_ptr: [*]const u8 = @ptrFromInt(@intFromPtr(ptr) - H);
+        return std.mem.readInt(usize, header_ptr[0..S], .little);
     }
 
     const malloc_functions = qjs.JSMallocFunctions{
@@ -175,6 +197,27 @@ pub const Runtime = struct {
         return qjs.JS_DupValueRT(self.ptr, val);
     }
 
+    /// Register a custom class with the runtime.
+    ///
+    /// Example:
+    ///
+    /// ```zig
+    /// rt.newClass(my_class_id, .{ .class_name = "MyClass", .finalizer = myFinalizer });
+    /// ```
+    pub inline fn newClass(self: *const Runtime, class_id: ClassID, def: ClassDef) !void {
+        // Convert Zig struct to C struct on the stack
+        const c_def = qjs.JSClassDef{
+            .class_name = def.class_name.ptr,
+            .finalizer = def.finalizer,
+            .gc_mark = def.gc_mark,
+            .call = def.call,
+            .exotic = @constCast(def.exotic),
+        };
+
+        if (qjs.JS_NewClass(self.ptr, class_id, &c_def) < 0)
+            return error.NewClassFailed;
+    }
+
     /// Allocate a new global ClassID (QuickJS-ng requires runtime parameter)
     pub inline fn newClassID(self: *const Runtime) ClassID {
         var class_id: ClassID = 0;
@@ -182,9 +225,26 @@ pub const Runtime = struct {
         return class_id;
     }
 
-    // pub inline fn isRegisteredClass(self: Runtime, class_id: ClassID) bool {
-    //     return qjs.JS_IsRegisteredClass(self.ptr, class_id);
-    // }
+    pub inline fn isRegisteredClass(self: Runtime, class_id: ClassID) bool {
+        return qjs.JS_IsRegisteredClass(self.ptr, class_id);
+    }
+
+    // Define custom Zig types for class definitions (Blob, File, LxbNode...)
+    // to behave like JS classes and own cleanup.
+
+    pub const ClassFinalizer = qjs.JSClassFinalizer; // fn(rt, val) void
+    pub const ClassGCMark = qjs.JSClassGCMark; // fn(rt, val, mark_func) void
+    pub const ClassCall = qjs.JSClassCall; // fn(ctx, func_obj, this, argc, argv, flags) Value
+    pub const ClassExoticMethods = qjs.JSClassExoticMethods;
+
+    // A Zig-friendly wrapper for JSClassDef
+    pub const ClassDef = struct {
+        class_name: [:0]const u8,
+        finalizer: ?*const ClassFinalizer = null,
+        gc_mark: ?*const ClassGCMark = null,
+        call: ?*const ClassCall = null,
+        exotic: ?*const ClassExoticMethods = null,
+    };
 
     // pub const ClassFinalizer = fn (?*Runtime, Value) void;
     // // pub const MarkFunc = fn (?*Runtime, ?*GCObjectHeader) void;
@@ -197,11 +257,11 @@ pub const Runtime = struct {
     //     // exotic: [*c]JSClassExoticMethods = @import("std").mem.zeroes([*c]JSClassExoticMethods),
     // };
 
-    /// Register a class with the runtime
-    pub inline fn newClass(self: *const Runtime, class_id: ClassID, class_def: *const qjs.JSClassDef) !void {
-        if (qjs.JS_NewClass(self.ptr, class_id, class_def) < 0)
-            return error.NewClassFailed;
-    }
+    // Register a class with the runtime
+    // pub inline fn newClass(self: *const Runtime, class_id: ClassID, class_def: *const qjs.JSClassDef) !void {
+    //     if (qjs.JS_NewClass(self.ptr, class_id, class_def) < 0)
+    //         return error.NewClassFailed;
+    // }
 
     // Job queue management
     pub inline fn isJobPending(self: *const Runtime) bool {
@@ -310,15 +370,38 @@ pub const Runtime = struct {
         }, self.ptr);
     }
 
+    fn js_promise_rejection_tracker(ctx: ?*qjs.JSContext, _: Value, reason: Value, is_handled: c_int, _: ?*anyopaque) callconv(.c) void {
+
+        // is_handled == 0 means a rejection happened without a .catch()
+        if (is_handled == 0) {
+            // It is safe to convert to string here for debugging purposes
+            const val_str = qjs.JS_ToString(ctx, reason);
+            const c_str = qjs.JS_ToCString(ctx, val_str);
+
+            if (c_str) |str| {
+                std.debug.print("[QuickJS] ⚠️  Unhandled Promise Rejection: {s}\n", .{str});
+                qjs.JS_FreeCString(ctx, str);
+            } else {
+                std.debug.print("[QuickJS] ⚠️  Unhandled Promise Rejection (Unknown Reason)\n", .{});
+            }
+
+            qjs.JS_FreeValue(ctx, val_str);
+        }
+    }
+
+    pub fn setPromiseRejectionTracker(self: *const Runtime) void {
+        qjs.JS_SetHostPromiseRejectionTracker(self.ptr, js_promise_rejection_tracker, null);
+    }
+
     // Shared ArrayBuffer support
     // pub inline fn setSharedArrayBufferFunctions(self: Runtime, functions: *const qjs.JSSharedArrayBufferFunctions) void {
     //     qjs.JS_SetSharedArrayBufferFunctions(self.ptr, functions);
     // }
 
     // Host callbacks
-    // pub inline fn setInterruptHandler(self: Runtime, cb: ?qjs.JSInterruptHandler, ptr: ?*anyopaque) void {
-    //     qjs.JS_SetInterruptHandler(self.ptr, cb, ptr);
-    // }
+    pub inline fn setInterruptHandler(self: Runtime, cb: ?qjs.JSInterruptHandler, ptr: ?*anyopaque) void {
+        qjs.JS_SetInterruptHandler(self.ptr, cb, ptr);
+    }
 
     pub inline fn setCanBlock(self: *const Runtime, can_block: bool) void {
         qjs.JS_SetCanBlock(self.ptr, can_block);
@@ -343,6 +426,59 @@ pub const Runtime = struct {
     //     const ret = qjs.JS_AddRuntimeFinalizer(self.ptr, finalizer, arg);
     //     if (ret < 0) return error.AddFinalizerFailed;
     // }
+
+    // 1. The C-Compatible Loader Function
+    fn js_module_loader(ctx: ?*qjs.JSContext, module_name: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef {
+        // Recover the context wrapper: we passed '&self.allocator' in setModuleLoader
+        const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+        const allocator = allocator_ptr.*;
+
+        const name_span = std.mem.span(module_name);
+
+        // Sanity check: prevent directory traversal in production!
+
+        const source = std.fs.cwd().readFileAlloc(allocator.*, name_span, 1_000_000) catch {
+            qjs.JS_ThrowReferenceError(ctx, "Could not load module '%s'", module_name);
+            return null;
+        };
+        defer allocator.free(source);
+
+        // Compile the module
+        // JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
+        const func_val = qjs.JS_Eval(
+            ctx,
+            source.ptr,
+            source.len,
+            module_name,
+            qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
+        );
+
+        if (qjs.JS_IsException(func_val) != 0) return null;
+
+        // return qjs.JS_VALUE_GET_PTR(func_val).module; <- C macro way
+        return @ptrCast(func_val.u.ptr);
+    }
+
+    fn js_module_normalize(ctx: ?*qjs.JSContext, _: [*c]const u8, name: [*c]const u8, _: ?*anyopaque) callconv(.c) [*c]u8 {
+        // Minimal: just duplicate the name (ignores relative paths)
+        // TODO: probably use:
+        // pub fn resolve(allocator: Allocator, paths: &.{base, name}) Allocator.Error![]u8
+        return qjs.js_strdup(ctx, name);
+    }
+
+    /// Set the module loader function for ES6 modules.
+    ///
+    /// Tells QuickJS to use the provided internal loaders for ES6 modules and uses the provided allocator from the Runtime.
+    /// Runs once.
+    pub fn setModuleLoader(self: *const Runtime) void {
+        // We pass the Runtime's allocator as the 'opaque' user data
+        qjs.JS_SetModuleLoaderFunc(
+            self.ptr,
+            js_module_normalize,
+            js_module_loader,
+            @constCast(&self.allocator),
+        );
+    }
 };
 
 pub const Context = packed struct {
@@ -368,9 +504,15 @@ pub const Context = packed struct {
         return allocator_ptr.*;
     }
 
-    // pub inline fn getRuntime(self: Context) Runtime {
-    //     return .{ .ptr = qjs.JS_GetRuntime(self.ptr) };
-    // }
+    // Use the existing allocator stored in the Context Opaque
+    // This assumes you set it up correctly in init()
+    /// Get the Runtime associated with this Context
+    pub fn getRuntime(self: Context) Runtime {
+        return Runtime{
+            .ptr = qjs.JS_GetRuntime(self.ptr),
+            .allocator = self.getAllocator(),
+        };
+    }
 
     pub inline fn isEqual(self: Context, a: Value, b: Value) bool {
         return qjs.JS_IsEqual(self.ptr, a, b);
@@ -724,11 +866,6 @@ pub const Context = packed struct {
         return qjs.JS_GetPropertyInt64(self.ptr, obj, idx);
     }
 
-    pub inline fn setProperty(self: Context, obj: Value, prop: Atom, val: Value) !void {
-        const ret = qjs.JS_SetProperty(self.ptr, obj, prop, val);
-        if (ret < 0) return error.Exception;
-    }
-
     pub inline fn setPropertyStr(self: Context, obj: Value, prop: [*:0]const u8, val: Value) !void {
         const ret = qjs.JS_SetPropertyStr(self.ptr, obj, prop, val);
         if (ret < 0) return error.Exception;
@@ -927,7 +1064,29 @@ pub const Context = packed struct {
         return qjs.JS_ValueToAtom(self.ptr, val);
     }
 
-    // Property descriptors and enumeration
+    // Used to implement Object.keys() behavior in Zig, inspect objects returned from JS,
+    pub inline fn getOwnPropertyNames(self: Context, obj: Value, flags: PropertyEnumFlags) ![]qjs.JSPropertyEnum {
+        var c_flags: c_int = 0;
+        if (flags.strings) c_flags |= qjs.JS_GPN_STRING_MASK;
+        if (flags.symbols) c_flags |= qjs.JS_GPN_SYMBOL_MASK;
+        if (flags.private) c_flags |= qjs.JS_GPN_PRIVATE_MASK;
+        if (flags.enum_only) c_flags |= qjs.JS_GPN_ENUM_ONLY;
+        if (flags.set_enum) c_flags |= qjs.JS_GPN_SET_ENUM;
+
+        var ptab: [*c]qjs.JSPropertyEnum = undefined;
+        var len: u32 = 0;
+
+        const ret = qjs.JS_GetOwnPropertyNames(self.ptr, &ptab, &len, obj, c_flags);
+        if (ret < 0) return error.Exception;
+
+        return ptab[0..len];
+    }
+
+    pub inline fn freePropertyEnum(self: Context, tab: []PropertyEnum) void {
+        // Cast back to C pointer for freeing
+        qjs.JS_FreePropertyEnum(self.ptr, @ptrCast(tab.ptr), @intCast(tab.len));
+    }
+
     pub const PropertyEnumFlags = packed struct {
         strings: bool = true,
         symbols: bool = false,
@@ -936,9 +1095,58 @@ pub const Context = packed struct {
         set_enum: bool = false,
     };
 
-    // pub const PropertyEnum = packed struct {
-    //     is_enumerable: bool,
-    //     atom: Atom,
+    pub const PropertyDescriptor = struct {
+        flags: PropertyFlags,
+        value: Value,
+        getter: Value,
+        setter: Value,
+    };
+
+    pub const PropertyFlags = packed struct {
+        configurable: bool,
+        writable: bool,
+        enumerable: bool,
+        normal: bool,
+        getset: bool,
+
+        pub fn fromInt(flags: c_int) PropertyFlags {
+            return .{
+                // Wrong: Using OR (flags | MASK) is always true/non-zero!
+                // Yuse AND (flags & MASK) to check if the bit is set.
+                .configurable = ((flags & qjs.JS_PROP_CONFIGURABLE) != 0),
+                .writable = ((flags & qjs.JS_PROP_WRITABLE) != 0),
+                .enumerable = ((flags & qjs.JS_PROP_ENUMERABLE) != 0),
+                .normal = ((flags & qjs.JS_PROP_NORMAL) != 0),
+                .getset = ((flags & qjs.JS_PROP_GETSET) != 0),
+            };
+        }
+
+        pub fn toInt(self: PropertyFlags) c_int {
+            var flags: c_int = 0;
+            // '|' is correct here because we are setting bits
+            if (self.configurable) flags |= qjs.JS_PROP_CONFIGURABLE;
+            if (self.writable) flags |= qjs.JS_PROP_WRITABLE;
+            if (self.enumerable) flags |= qjs.JS_PROP_ENUMERABLE;
+            if (self.normal) flags |= qjs.JS_PROP_NORMAL;
+            if (self.getset) flags |= qjs.JS_PROP_GETSET;
+            return flags;
+        }
+    };
+
+    pub const PropertyEnum = extern struct {
+        is_enumerable: bool,
+        atom: Atom,
+    };
+
+    // JSPropertyEnum uses int (4 bytes) for is_enumerable
+
+    // // Property descriptors and enumeration
+    // pub const PropertyEnumFlags = packed struct {
+    //     strings: bool = true,
+    //     symbols: bool = false,
+    //     private: bool = false,
+    //     enum_only: bool = false,
+    //     set_enum: bool = false,
     // };
 
     // typedef struct JSPropertyEnum {
@@ -963,46 +1171,36 @@ pub const Context = packed struct {
     //     return ptab[0..len];
     // }
 
-    // pub inline fn freePropertyEnum(self: Context, tab: []const qjs.JSPropertyEnum) void {
-    //     qjs.JS_FreePropertyEnum(self.ptr, @constCast(tab.ptr), @intCast(tab.len));
-    // }
+    /// Helper: Checks for exception, prints it to stderr, and frees it.
+    /// Returns true if an exception occurred.
+    pub fn checkAndPrintException(self: Context) bool {
+        const exception = self.getException();
+        if (self.isNull(exception)) return false;
+        defer self.freeValue(exception);
+
+        const val = self.toString(exception);
+        defer self.freeValue(val);
+
+        // Note: We use catch here because we are already handling an error
+        const str = self.toCString(val) catch "Unknown Error (toString failed)";
+        defer self.freeCString(str);
+
+        // Try to get stack trace
+        const stack = self.getPropertyStr(exception, "stack");
+        defer self.freeValue(stack);
+
+        if (!self.isUndefined(stack)) {
+            const stack_str = self.toCString(stack) catch "";
+            defer self.freeCString(stack_str);
+            std.debug.print(" ❗️Exception: {s}\n{s}\n", .{ str, stack_str });
+        } else {
+            std.debug.print("❗️ Exception: {s}\n", .{str});
+        }
+
+        return true;
+    }
 
     // Property descriptor structure
-
-    pub const PropertyFlags = packed struct {
-        configurable: bool,
-        writable: bool,
-        enumerable: bool,
-        normal: bool,
-        getset: bool,
-
-        pub fn fromInt(flags: c_int) PropertyFlags {
-            return .{
-                .configurable = ((flags | qjs.JS_PROP_CONFIGURABLE) != 0),
-                .writable = ((flags | qjs.JS_PROP_WRITABLE) != 0),
-                .enumerable = ((flags | qjs.JS_PROP_ENUMERABLE) != 0),
-                .normal = ((flags | qjs.JS_PROP_NORMAL) != 0),
-                .getset = ((flags | qjs.JS_PROP_GETSET) != 0),
-            };
-        }
-
-        pub fn toInt(self: PropertyFlags) c_int {
-            var flags: c_int = 0;
-            if (self.configurable) flags |= qjs.JS_PROP_CONFIGURABLE;
-            if (self.writable) flags |= qjs.JS_PROP_WRITABLE;
-            if (self.enumerable) flags |= qjs.JS_PROP_ENUMERABLE;
-            if (self.normal) flags |= qjs.JS_PROP_NORMAL;
-            if (self.getset) flags |= qjs.JS_PROP_GETSET;
-            return flags;
-        }
-    };
-
-    pub const PropertyDescriptor = struct {
-        flags: PropertyFlags,
-        value: Value,
-        getter: Value,
-        setter: Value,
-    };
 
     pub inline fn getOwnProperty(self: Context, obj: Value, prop: Atom) !PropertyDescriptor {
         var desc: qjs.JSPropertyDescriptor = undefined;
@@ -1095,18 +1293,20 @@ pub const Context = packed struct {
         return ret != 0;
     }
 
-    // pub inline fn setOpaque(_: Context, obj: Value, ptr: ?*anyopaque) !void {
-    //     if (qjs.JS_SetOpaque(obj, ptr) < 0)
-    //         return error.OpaqueSetFailed;
-    // }
+    pub inline fn setOpaque(_: Context, obj: Value, ptr: ?*anyopaque) !void {
+        if (qjs.JS_SetOpaque(obj, ptr) < 0)
+            return error.OpaqueSetFailed;
+    }
 
-    // pub inline fn getOpaque(_: Context, obj: Value, class_id: ClassID) ?*anyopaque {
-    //     return qjs.JS_GetOpaque(obj, class_id);
-    // }
+    /// Use getOpaque2 instead when possible
+    pub inline fn getOpaque(_: Context, obj: Value, class_id: ClassID) ?*anyopaque {
+        return qjs.JS_GetOpaque(obj, class_id);
+    }
 
-    // pub inline fn getOpaque2(self: Context, obj: Value, class_id: ClassID) ?*anyopaque {
-    //     return qjs.JS_GetOpaque2(self.ptr, obj, class_id);
-    // }
+    // Safe version of getOpaque that checks the context
+    pub inline fn getOpaque2(self: Context, obj: Value, class_id: ClassID) ?*anyopaque {
+        return qjs.JS_GetOpaque2(self.ptr, obj, class_id);
+    }
 
     // Class and prototype handling
     pub inline fn setClassProto(self: Context, class_id: ClassID, proto: Value) void {
@@ -1175,17 +1375,21 @@ pub const Context = packed struct {
     }
 
     // // C function integration
-    // pub inline fn newCFunction(self: Context, func: qjs.JSCFunction, name: []const u8, length: c_int) Value {
-    //     return qjs.JS_NewCFunction(self.ptr, func, name.ptr, length);
-    // }
+    pub inline fn newCFunction(self: Context, func: qjs.JSCFunction, name: []const u8, length: c_int) Value {
+        return qjs.JS_NewCFunction(self.ptr, func, name.ptr, length);
+    }
 
-    // pub inline fn newCFunction2(self: Context, func: qjs.JSCFunction, name: []const u8, length: c_int, cproto: qjs.JSCFunctionEnum, magic: c_int) Value {
-    //     return qjs.JS_NewCFunction2(self.ptr, func, name.ptr, length, cproto, magic);
-    // }
+    pub inline fn newCFunction2(self: Context, func: qjs.JSCFunction, name: []const u8, length: c_int, cproto: qjs.JSCFunctionEnum, magic: c_int) Value {
+        return qjs.JS_NewCFunction2(self.ptr, func, name.ptr, length, cproto, magic);
+    }
 
-    // pub inline fn newCFunctionMagic(self: Context, func: qjs.JSCFunctionMagic, name: []const u8, length: c_int, cproto: qjs.JSCFunctionEnum, magic: c_int) Value {
-    //     return qjs.JS_NewCFunctionMagic(self.ptr, func, name.ptr, length, cproto, magic);
-    // }
+    pub inline fn newCFunctionMagic(self: Context, func: qjs.JSCFunctionMagic, name: []const u8, length: c_int, cproto: qjs.JSCFunctionEnum, magic: c_int) Value {
+        return qjs.JS_NewCFunctionMagic(self.ptr, func, name.ptr, length, cproto, magic);
+    }
+
+    pub inline fn newCFunctionData(self: Context, func: qjs.JSCFunctionData, length: c_int, magic: c_int, data: []const Value) Value {
+        return qjs.JS_NewCFunctionData(self.ptr, func, length, magic, @intCast(data.len), data.ptr);
+    }
 
     pub inline fn setConstructor(self: Context, func_obj: Value, proto: Value) void {
         qjs.JS_SetConstructor(self.ptr, func_obj, proto);

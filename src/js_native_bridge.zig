@@ -2,6 +2,7 @@
 /// This demonstrates how to pass arrays, objects, and complex data structures
 const std = @import("std");
 const z = @import("root.zig");
+const w = @import("wrapper.zig");
 const qjs = z.qjs;
 
 /// Retrieve the Zig allocator stored in the JSContext opaque pointer
@@ -293,8 +294,9 @@ fn processTextNative(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
 
 /// Install all native processing functions
 /// The allocator pointer is stored in the JSContext opaque data for use by bridge functions
-pub fn installNativeBridge(ctx_opaque: anytype, allocator: *std.mem.Allocator) void {
-    const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(ctx_opaque));
+pub fn installNativeBridge(ctx: w.Context, allocator: *std.mem.Allocator) void {
+    // const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(ctx_opaque));
+    ctx.setAllocator(allocator);
 
     // Store the Zig allocator in the JSContext opaque pointer
     qjs.JS_SetContextOpaque(ctx, allocator);

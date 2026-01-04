@@ -26,7 +26,6 @@ Long-running Process (main loop)
 
 Web API integrated:
 
-- EventLoop, Async Tasks,
 - [Console](https://developer.mozilla.org/en-US/docs/Web/API/console)
 - [SetTimeout](https://developer.mozilla.org/en-US/docs/Web/API/Window/setTimeout), [setInterval](https://developer.mozilla.org/en-US/docs/Web/API/Window/setInterval),
 
@@ -34,6 +33,46 @@ Web API integrated:
 
 > 1. EventLoop + WorkerPool + Async Tasks. Promises created on main thread, resolved in worker pool (4?). Two queues, jobs and results. Use `libcurl` ?
 > 2. Marshall pur Zig functions (eg statistics, CSV parsing etc) into quickJS usable code.
+
+```mermaid
+graph TD
+    Start((Start Tick)) --> SignalCheck{Ctrl+C?}
+    SignalCheck -- Yes --> Exit
+    SignalCheck -- No --> Microtasks1
+
+    subgraph "Phase 1: Cleanup"
+    Microtasks1[Flush Pending Jobs]
+    note1[Executes .then from previous tick]
+    end
+
+    Microtasks1 --> Timers
+
+    subgraph "Phase 2: Timers"
+    Timers[Process Timers]
+    note2[Checks setTimeout / setInterval]
+    end
+
+    Timers --> AsyncIO
+
+    subgraph "Phase 3: Poll / Async I/O"
+    AsyncIO[Process Worker Queue]
+    note3[Checks if fetch/file threads finished]
+    end
+
+    AsyncIO --> Microtasks2
+
+    subgraph "Phase 4: Reaction"
+    Microtasks2[Flush Pending Jobs]
+    note4[Executes .then triggered by Phase 3]
+    end
+
+    Microtasks2 --> AutoExit{Mode = Script?}
+    
+    AutoExit -- Yes & Empty --> Exit
+    AutoExit -- No --> Sleep
+    
+    Sleep[Sleep / Idle] --> Start
+```
 
 **Expectations**:
 

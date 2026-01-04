@@ -7,12 +7,6 @@ const w = @import("wrapper.zig");
 const qjs = z.qjs;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 
-// Helper to get allocator from context opaque pointer
-fn getAllocator(ctx_ptr: ?*qjs.JSContext) std.mem.Allocator {
-    const opaque_ptr = qjs.JS_GetContextOpaque(ctx_ptr);
-    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-    return allocator_ptr.*;
-}
 
 /// Generated wrapper for z.createElement
 pub fn js_createElement(
@@ -24,7 +18,6 @@ pub fn js_createElement(
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
     _ = this_val;
-
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
     const doc_obj0 = ctx.getPropertyStr(global0, "document");
@@ -36,11 +29,10 @@ pub fn js_createElement(
     const arg0: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     const result = z.createElement(arg0, arg1) catch return w.EXCEPTION;
 
-    return DOMBridge.wrapElement(ctx_ptr, result) catch w.EXCEPTION;
+    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;
 }
 
 /// Generated wrapper for z.documentRoot
@@ -53,7 +45,6 @@ pub fn js_documentRoot(
     const ctx = w.Context{ .ptr = ctx_ptr };
     _ = argc; _ = argv;
     _ = this_val;
-
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
     const doc_obj0 = ctx.getPropertyStr(global0, "document");
@@ -63,11 +54,10 @@ pub fn js_documentRoot(
     const doc_ptr0 = qjs.JS_GetOpaque(native_doc0, z.dom_class_id.*);
     if (doc_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr0));
-
     // Call native Zig function
     const result = z.documentRoot(arg0);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx_ptr, node) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.bodyElement
@@ -80,7 +70,6 @@ pub fn js_bodyElement(
     const ctx = w.Context{ .ptr = ctx_ptr };
     _ = argc; _ = argv;
     _ = this_val;
-
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
     const doc_obj0 = ctx.getPropertyStr(global0, "document");
@@ -90,11 +79,10 @@ pub fn js_bodyElement(
     const doc_ptr0 = qjs.JS_GetOpaque(native_doc0, z.dom_class_id.*);
     if (doc_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr0));
-
     // Call native Zig function
     const result = z.bodyElement(arg0);
 
-    if (result) |elem| { return DOMBridge.wrapElement(ctx_ptr, elem) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.ownerDocument
@@ -105,17 +93,15 @@ pub fn js_ownerDocument(
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
-    _ = ctx;
     _ = argc; _ = argv;
-
+    _ = ctx;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
-
     // Call native Zig function
     const result = z.ownerDocument(arg0);
 
-    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, z.dom_class_id.*);
+    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(z.dom_class_id.*));
     _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
     return doc_obj;
 }
@@ -130,7 +116,6 @@ pub fn js_createTextNode(
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
     _ = this_val;
-
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
     const doc_obj0 = ctx.getPropertyStr(global0, "document");
@@ -142,11 +127,10 @@ pub fn js_createTextNode(
     const arg0: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     const result = z.createTextNode(arg0, arg1) catch return w.EXCEPTION;
 
-    return DOMBridge.wrapNode(ctx_ptr, result) catch w.EXCEPTION;
+    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;
 }
 
 /// Generated wrapper for z.getElementById
@@ -159,7 +143,6 @@ pub fn js_getElementById(
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
     _ = this_val;
-
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
     const doc_obj0 = ctx.getPropertyStr(global0, "document");
@@ -174,11 +157,10 @@ pub fn js_getElementById(
     const arg0 = root0.?;
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     const result = z.getElementById(arg0, arg1);
 
-    if (result) |elem| { return DOMBridge.wrapElement(ctx_ptr, elem) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.appendChild
@@ -190,14 +172,12 @@ pub fn js_appendChild(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
-
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
     const node_arg_ptr1 = qjs.JS_GetOpaque(argv[0], z.dom_class_id.*);
     if (node_arg_ptr1 == null) return ctx.throwTypeError("Argument 0 must be a DOM Node");
     const arg1: *z.DomNode = @ptrCast(@alignCast(node_arg_ptr1));
-
     // Call native Zig function
     z.appendChild(arg0, arg1);
 
@@ -212,17 +192,14 @@ pub fn js_firstChild(
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
-    _ = ctx;
     _ = argc; _ = argv;
-
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
-
     // Call native Zig function
     const result = z.firstChild(arg0);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx_ptr, node) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.parentNode
@@ -233,17 +210,14 @@ pub fn js_parentNode(
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
-    _ = ctx;
     _ = argc; _ = argv;
-
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
-
     // Call native Zig function
     const result = z.parentNode(arg0);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx_ptr, node) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.removeNode
@@ -254,13 +228,11 @@ pub fn js_remove(
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
-    _ = ctx;
     _ = argc; _ = argv;
-
+    _ = ctx;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
-
     // Call native Zig function
     z.removeNode(arg0);
 
@@ -276,7 +248,6 @@ pub fn js_setAttribute(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 2) return w.EXCEPTION;
-
     const elem_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
@@ -284,7 +255,6 @@ pub fn js_setAttribute(
     defer ctx.freeZString(arg1);
     const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg2);
-
     // Call native Zig function
     _ = z.setAttribute(arg0, arg1, arg2);
 
@@ -300,13 +270,11 @@ pub fn js_getAttribute(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
-
     const elem_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     const result = z.getAttribute_zc(arg0, arg1);
 
@@ -322,13 +290,11 @@ pub fn js_removeAttribute(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
-
     const elem_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     z.removeAttribute(arg0, arg1) catch return w.EXCEPTION;
 
@@ -344,11 +310,9 @@ pub fn js_textContent(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     _ = argc; _ = argv;
-
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
-
     // Call native Zig function
     const result = z.textContent_zc(arg0);
 
@@ -364,13 +328,11 @@ pub fn js_setContentAsText(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
-
     const node_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     z.setContentAsText(arg0, arg1) catch return w.EXCEPTION;
 
@@ -386,17 +348,15 @@ pub fn js_setInnerHTML(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
-
     const elem_ptr0 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
-
     // Call native Zig function
     const result = z.setInnerHTML(arg0, arg1) catch return w.EXCEPTION;
 
-    return DOMBridge.wrapElement(ctx_ptr, result) catch w.EXCEPTION;
+    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;
 }
 
 /// Generated wrapper for z.innerHTML
@@ -408,12 +368,10 @@ pub fn js_innerHTML(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     _ = argc; _ = argv;
-
-    const arg0 = getAllocator(ctx_ptr);
+    const arg0 = ctx.getAllocator();
     const elem_ptr1 = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
     if (elem_ptr1 == null) return w.EXCEPTION;
     const arg1: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr1));
-
     // Call native Zig function
     const result = z.innerHTML(arg0, arg1) catch return w.EXCEPTION;
 

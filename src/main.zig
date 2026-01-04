@@ -7,9 +7,48 @@ const AsyncTask = event_loop_mod.AsyncTask;
 const NativeBridge = @import("js_native_bridge.zig");
 const w = z.wrapper;
 const DOMBridge = z.dom_bridge.DOMBridge;
+const Pt = @import("Point.zig");
 
 const native_os = builtin.os.tag;
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+fn js_consoleLog(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    var i: c_int = 0;
+    while (i < argc) : (i += 1) {
+        if (i > 0) z.print(" ", .{});
+        const str = ctx.toCString(argv[@intCast(i)]) catch continue;
+        z.print("{s}", .{str});
+        ctx.freeCString(str);
+    }
+    z.print("\n", .{});
+    return w.UNDEFINED;
+}
+
+pub var app_should_quit = std.atomic.Value(bool).init(false);
+fn handleSigInt(_: c_int) callconv(.c) void {
+    // Just toggle the flag. Don't do complex work here.
+    app_should_quit.store(true, .seq_cst);
+}
+// Setup function to call at start of main()
+pub fn setupSignalHandler() void {
+    if (builtin.os.tag == .windows) {
+        // Windows needs a different approach (SetConsoleCtrlHandler),
+        // but for now we focus on POSIX (Linux/macOS) as requested.
+        return;
+    }
+
+    const act = std.posix.Sigaction{
+        .handler = .{ .handler = handleSigInt },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+
+    // Catch Ctrl+C (SIGINT)
+    std.posix.sigaction(std.posix.SIG.INT, &act, null);
+    // Optional: Catch Termination request (SIGTERM)
+    std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+}
 
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
@@ -23,6 +62,9 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
+    std.debug.print("Zig JSValue Size: {d}\n", .{@sizeOf(w.Value)});
+    setupSignalHandler();
+
     // all QuickJS memory now goes through Zig allocator
     const rt = try w.Runtime.init(gpa);
     defer {
@@ -30,18 +72,21 @@ pub fn main() !void {
         rt.runGC();
         rt.deinit();
     }
+    rt.setRuntimeOpaque(rt);
 
-    try demoGeneratedBindings(gpa, rt);
+    // try runDemoClass(gpa, rt);
+    // try demoGeneratedBindings(gpa, rt);
     // try demoVirtualDOM_SSR(gpa, rt);
     // try first_QuickJS_test(rt);
     // try demoExecuteScriptFromHTML(gpa, rt);
     // try demoNativeBridge(ctx);
 
+    try demoEventLoop(gpa, rt);
+    // try demoAsyncTaskInfrastructure(gpa, rt);
     // Test both local and global EventLoop patterns
-    try runWithLocalEventLoops(gpa, rt);
-    try runWithGlobalEventLoop(gpa, rt);
+    // try runWithLocalEventLoops(gpa, rt);
+    // try runWithGlobalEventLoop(gpa, rt);
     // try demoQuickJSProxyAndStreams(ctx);
-    // TODO: Fix type issues - concept is solid, implementation needs type adjustments
     // try zexplore_example_com(gpa, "https://www.example.com");
     // try demoSimpleParsing(gpa);
     // try demoTemplate(gpa);
@@ -226,12 +271,15 @@ fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     // set allocator for QuickJS context as the context has no access to DOMBridge allocator
     ctx.setAllocator(&allocator);
 
-    // Install Bindings (static + prototype) and APIs (document, window, console)
-    var bridge = try DOMBridge.init(allocator, ctx);
-    defer ctx.deinit(); // Cleanup order: ctx must be destroyed AFTER bridge
-    defer bridge.deinit(); // (defer is LIFO, so this runs first)
+    var dom_bridge = try DOMBridge.init(allocator, ctx);
 
-    try bridge.installAPIs();
+    // Install Bindings (static + prototype) and APIs (document, window, console)
+    // var bridge = try DOMBridge.init(allocator, ctx);
+    defer ctx.deinit(); // Cleanup order: ctx must be destroyed AFTER bridge
+    defer dom_bridge.deinit();
+    // defer bridge.deinit(); // (defer is LIFO, so this runs first)
+
+    try dom_bridge.installAPIs();
 
     // Test the bindings via JavaScript
     // Static bindings are on 'document' object
@@ -306,7 +354,7 @@ fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     }
 
     z.print("\n=== Document HTML (from Zig side) ===\n", .{});
-    const root = z.bodyNode(bridge.doc).?;
+    const root = z.bodyNode(dom_bridge.doc).?;
     try z.prettyPrint(allocator, root);
 
     z.print("\n", .{});
@@ -547,25 +595,27 @@ fn demoNativeBridge(ctx: w.Context) !void {
 
 // /// Demo: Event Loop with setTimeout/setInterval
 fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
-    z.print("\n=== Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
+    z.print("\n** Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
     const ctx = w.Context.init(rt);
     defer ctx.deinit();
+    ctx.setAllocator(&allocator);
 
     // Initialize event loop
-    var event_loop = try EventLoop.init(allocator, rt.ptr);
+    var event_loop = try EventLoop.init(allocator, rt);
     defer event_loop.deinit();
 
     // Install timer APIs (setTimeout, setInterval, clearTimeout, clearInterval)
-    // Note: console.log is installed by installTimerAPIs
-    try event_loop.installTimerAPIs(ctx.ptr);
+    // Note: console.log is installed by install
+    try event_loop.install(ctx);
 
     // Test 1: Simple setTimeout
-    z.print("--- Test 1: setTimeout (500ms) ---\n", .{});
+    z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set 'count=42'\n", .{});
     const timeout_test =
         \\globalThis.count = 0;
+        \\start = Date.now();
         \\setTimeout(() => {
         \\  globalThis.count = 42;
-        \\  console.log("setTimeout fired! count = " + globalThis.count);
+        \\  console.log("🟢 Get final 'count' after setTimeout of 500ms fired: count = " + globalThis.count, "after: ", Date.now()-start, "ms");
         \\}, 500);
         \\globalThis.count; // Should be 0 initially
     ;
@@ -573,20 +623,21 @@ fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     const result1 = try ctx.eval(timeout_test, "<timeout_test>", .{});
     defer ctx.freeValue(result1);
 
-    var initial_count: i32 = 0;
-    _ = z.qjs.JS_ToInt32(ctx.ptr, &initial_count, result1);
-    z.print("Initial count (before timeout): {d}\n", .{initial_count});
+    const initial_count: i32 = try ctx.toInt32(result1);
+
+    z.print("🟢 Get initial 'count' (before timeout): {d}\n", .{initial_count});
 
     // Test 2: setInterval with clearInterval
-    z.print("\n--- Test 2: setInterval (200ms, cancel after 5 iterations) ---\n", .{});
+    z.print("\n🟡 Execute \x1b[1m setInterval \x1b[0m of 200ms with 5 iterations", .{});
     const interval_test =
         \\let counter = 0;
+        \\start = Date.now(); 
         \\const intervalId = setInterval(() => {
         \\  counter++;
-        \\  console.log("Interval tick: " + counter);
+        \\  console.log("🟡 Got Interval tick #", counter, ", expected after ", counter * 200 , ", got after ", Date.now()-start, "ms");
         \\  if (counter >= 5) {
         \\    clearInterval(intervalId);
-        \\    console.log("Interval cleared!");
+        \\    console.log("🟡 Interval cleared; expected  after ", counter * 200, ", got after ",Date.now()-start, "ms");
         \\  }
         \\}, 200);
         \\intervalId;
@@ -596,11 +647,12 @@ fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     defer ctx.freeValue(result2);
 
     // Test 3: Multiple timers with different delays
-    z.print("\n--- Test 3: Multiple timers (100ms, 300ms, 700ms) ---\n", .{});
+    z.print("\n⚪️ Start multiple timers (100ms, 300ms, 700ms)\n", .{});
     const multiple_timers =
-        \\setTimeout(() => console.log("Timer 1: 100ms"), 100);
-        \\setTimeout(() => console.log("Timer 2: 300ms"), 300);
-        \\setTimeout(() => console.log("Timer 3: 700ms"), 700);
+        \\start = Date.now();
+        \\setTimeout(() => console.log("⚪️ Timer 1 expected after: 100ms", ", fired after: ", Date.now()-start, "ms"), 100);
+        \\setTimeout(() => console.log("⚪️ Timer 2 expected after: 300ms", ", fired after: ", Date.now()-start, "ms"), 300);
+        \\setTimeout(() => console.log("⚪️ Timer 3 expected after: 700ms", ", fired after: ", Date.now()-start, "ms"), 700);
         \\"Timers scheduled";
     ;
 
@@ -614,34 +666,82 @@ fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     }
 
     // Test 4: Async/await with setTimeout (simulating async operations)
-    z.print("\n--- Test 4: Async/await + setTimeout ---\n", .{});
-    const async_test =
-        \\async function delayedGreeting(name, ms) {
-        \\  return new Promise(resolve => {
-        \\    setTimeout(() => resolve("Hello, " + name + "!"), ms);
+    z.print("\n🔵 Execute \x1b[1mAsync/await\x1b[0m mocked as a setTimeout of 900ms ---\n", .{});
+    const async_test_0 =
+        \\async function delayedGreeting(txt, ms) {
+        \\  return new Promise((resolve) => {
+        \\    setTimeout(() => resolve(`🔵 ${txt} !`), ms);
+        \\  });
+        \\}
+        \\(async () => {
+        \\  start = Date.now();  
+        \\  console.log("🔵 Starting first async operation...IIEE");
+        \\  const delay = 900;
+        \\
+        \\  const msg = await delayedGreeting("Zig runs async QuickJS", delay);
+        \\  console.log("🔵 Async result ", msg, "received after ", Date.now()-start, "ms");
+        \\})();
+    ;
+
+    const async_test_1 =
+        \\async function delayedGreeting(txt, ms) {
+        \\  return new Promise((resolve) => {
+        \\    return setTimeout(() => resolve(`🟣 Hello, ${txt}!`), ms);
         \\  });
         \\}
         \\
-        \\(async () => {
-        \\  console.log("Starting async operation...");
-        \\  const msg = await delayedGreeting("Zig", 400);
-        \\  console.log("Async result: " + msg);
-        \\})();
-        \\"Async operation started";
+        \\  start = Date.now();  
+        \\  console.log("🟣 Starting second chained async operation....");
+        \\  let delay = 850;
+        \\
+        \\  delayedGreeting("Async ZiggyQuickJS", delay).then(msg => {
+        \\     console.log("🟣 Async result ", msg, "received after ", Date.now()-start, "ms");
+        \\  });
     ;
 
-    const result4 = try ctx.eval(async_test, "<async>", .{});
+    const async_test_2 =
+        \\async function delayedError(ms) {
+        \\  return new Promise((_, reject) => {
+        \\    setTimeout(() => reject(new Error("🔴 Failed")), ms);
+        \\  });
+        \\}
+        \\start = Date.now();
+        \\delay = 500;
+        \\console.log("🔴 Starting failing async operation....");
+        \\
+        \\delayedError(delay).catch((err) => {
+        \\  console.log(
+        \\    "🔴 Async error received after ",
+        \\    Date.now() - start,
+        \\    "ms:",
+        \\    err.message
+        \\  );
+        \\ });
+    ;
+
+    // _ = async_test_0; // Avoid unused variable warning
+
+    const result4 = try ctx.eval(async_test_0, "<async0>", .{});
     defer ctx.freeValue(result4);
 
-    // Run the event loop to process all timers
-    z.print("\n🔄 Running event loop...\n\n", .{});
-    try event_loop.run();
+    const result5 = try ctx.eval(async_test_1, "<async1>", .{});
+    defer ctx.freeValue(result5);
 
-    z.print("\n✅ Event loop completed!\n", .{});
-    z.print("  • setTimeout works\n", .{});
-    z.print("  • setInterval works\n", .{});
-    z.print("  • clearTimeout/clearInterval work\n", .{});
-    z.print("  • Async/await + setTimeout integration works\n\n", .{});
+    const result6 = try ctx.eval(async_test_2, "<async2>", .{});
+    // catch |err| {
+    //     // 1. Check if QuickJS has an exception pending
+    //     if (ctx.checkAndPrintException()) {
+    //         // This will print: "SyntaxError: Identifier 'delay' has already been declared"
+    //         return err;
+    //     }
+    //     return err; // Propagate unknown errors
+    // };
+    defer ctx.freeValue(result6);
+
+    // Run the event loop to process all timers
+    z.print("\n[Zig] 🔄 Running event loop...\n\n", .{});
+    const now = std.time.milliTimestamp();
+    try event_loop.run(.Script);
 
     // Verify final count value
     const global = ctx.getGlobalObject();
@@ -652,7 +752,10 @@ fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
 
     var final_count: i32 = 0;
     _ = z.qjs.JS_ToInt32(ctx.ptr, &final_count, count_prop);
-    z.print("Final count (after setTimeout): {d}\n\n", .{final_count});
+    z.print("🟢 Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
+
+    const elapsed = std.time.milliTimestamp() - now;
+    z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n", .{elapsed});
 }
 
 /// Demo: QuickJS Proxy and Async/Streams Support
@@ -860,7 +963,7 @@ fn demoAsyncTaskInfrastructure(allocator: std.mem.Allocator, rt: *w.Runtime) !vo
     var event_loop = try EventLoop.init(allocator, rt.ptr);
     defer event_loop.deinit();
 
-    try event_loop.installTimerAPIs(ctx.ptr);
+    try event_loop.install(ctx);
 
     // Test: Manually enqueue an async task (simulating worker thread completion)
     z.print("--- Test: Manual async task enqueue ---\n", .{});
@@ -894,9 +997,9 @@ fn demoAsyncTaskInfrastructure(allocator: std.mem.Allocator, rt: *w.Runtime) !vo
     // Simulate worker thread completing work by manually enqueuing a task
     const test_data = try allocator.dupe(u8, "Hello from async task!");
     const async_task = AsyncTask{
-        .ctx = ctx.ptr,
+        .ctx = ctx,
         .resolve = ctx.dupValue(resolve_fn),
-        .reject = z.jsUndefined, // Won't be used in this test
+        .reject = w.Value{ .val = w.UNDEFINED },
         .result = .{ .success = test_data },
     };
 
@@ -933,7 +1036,7 @@ fn runWithLocalEventLoops(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     z.print("RUNNING WITH LOCAL EVENT LOOPS\n", .{});
     z.print("========================================\n", .{});
 
-    try demoEventLoop(allocator, rt);
+    // try demoEventLoop(allocator, rt);
     try demoAsyncTaskInfrastructure(allocator, rt);
 }
 
@@ -947,24 +1050,20 @@ fn runWithGlobalEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     var event_loop = try EventLoop.init(allocator, rt.ptr);
     defer event_loop.deinit();
 
-    // Store EventLoop pointer in Runtime so bindings can find it
-    z.qjs.JS_SetRuntimeOpaque(rt.ptr, @ptrCast(&event_loop));
-
-    try demoEventLoopGlobal(allocator, rt);
+    try demoEventLoopGlobal(allocator, rt, &event_loop);
     try demoVirtualDOM_SSR(allocator, rt);
-    try demoAsyncTaskInfrastructureGlobal(allocator, rt);
+    try demoAsyncTaskInfrastructureGlobal(allocator, rt, &event_loop);
 }
 
 /// Demo: Event Loop with borrowed global instance
-fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *w.Runtime, event_loop: *EventLoop) !void {
     _ = allocator;
     z.print("\n=== Event Loop Demo (Global): setTimeout & setInterval ------\n\n", .{});
     const ctx = w.Context.init(rt);
     defer ctx.deinit();
 
-    // Borrow the global EventLoop from runtime and install APIs for this context
-    var event_loop = EventLoop.from(rt.ptr);
-    try event_loop.installTimerAPIs(ctx.ptr);
+    // Install timer APIs for this context
+    try event_loop.install(ctx);
 
     // Test 1: Simple setTimeout
     z.print("--- Test 1: setTimeout (500ms) ---\n", .{});
@@ -1063,14 +1162,13 @@ fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
 }
 
 /// Demo: Async Task Infrastructure with borrowed global instance
-fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtime, event_loop: *EventLoop) !void {
     z.print("\n=== Async Task Infrastructure Test (Global) ===\n\n", .{});
     const ctx = w.Context.init(rt);
     defer ctx.deinit();
 
-    // Borrow the global EventLoop from runtime and install APIs for this context
-    var event_loop = EventLoop.from(rt.ptr);
-    try event_loop.installTimerAPIs(ctx.ptr);
+    // Install timer APIs for this context
+    try event_loop.install(ctx);
 
     z.print("--- Test: Manual async task enqueue ---\n", .{});
 
@@ -1099,9 +1197,9 @@ fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtim
 
     const test_data = try allocator.dupe(u8, "Hello from async task!");
     const async_task = AsyncTask{
-        .ctx = ctx.ptr,
+        .ctx = ctx,
         .resolve = ctx.dupValue(resolve_fn),
-        .reject = z.jsUndefined,
+        .reject = w.Value{ .val = w.UNDEFINED },
         .result = .{ .success = test_data },
     };
 
@@ -1125,6 +1223,69 @@ fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtim
     z.print("  - enqueueTask() thread-safe enqueue works\n", .{});
     z.print("  - processAsyncTasks() resolves promises\n", .{});
     z.print("  - Event loop integrates async tasks with timers\n", .{});
+}
+
+pub fn runDemoClass(_: std.mem.Allocator, rt: *w.Runtime) !void {
+    z.print("\n=== Custom Class Demo (Point) ===\n", .{});
+
+    const ctx = w.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&rt.allocator);
+
+    {
+        const console = ctx.newObject();
+        // defer ctx.freeValue(console);
+
+        // Create log function
+        const log_fn = ctx.newCFunction(js_consoleLog, "log", 1);
+        // Attach to console object
+        _ = try ctx.setPropertyStr(console, "log", log_fn);
+
+        // Attach console to global
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
+        _ = try ctx.setPropertyStr(global, "console", console);
+    }
+
+    try Pt.install(rt, ctx);
+
+    // ========================================================================
+    // TEST IN JAVASCRIPT
+    // ========================================================================
+
+    const code =
+        \\console.log("1. Creating Point(3, 4)...");
+        \\const pt = new Point(3, 4);
+        \\
+        \\console.log("2. Calculating distance...");
+        \\const d = pt.distance();
+        \\console.log(`   Distance is: ${d}`);
+        \\
+        \\console.log("3. Testing Getter/Setter...");
+        \\console.log(`   Original X: ${pt.x}`);
+        \\pt.x = 5;
+        \\console.log(`   New X: ${pt.x}`);
+        \\console.log(`   Original Y: ${pt.y}`);
+        \\pt.y = 12;
+        \\console.log(`   New Y: ${pt.y}`);
+        \\console.log(`   New Distance: ${pt.distance()}`);
+        \\console.log(`.  Point(${pt.x}, ${pt.y})`);
+        \\
+        \\console.log("4. Force GC cleanup...");
+        \\
+    ;
+
+    const res = try ctx.eval(code, "<demo>", .{});
+
+    if (ctx.isException(res)) {
+        _ = ctx.checkAndPrintException();
+    }
+    ctx.freeValue(res);
+
+    // Force GC to show finalizer running
+    rt.runGC();
+
+    z.print("=== Demo Complete ===\n", .{});
 }
 
 // fn demoNativeBridge(ctx: ?*z.qjs.JSContext) !void {
