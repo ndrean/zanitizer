@@ -2,6 +2,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
+const utils = @import("utils.zig");
 
 // Unique Class ID to safely store the *EventLoop pointer
 var event_loop_class_id: zqjs.ClassID = 0;
@@ -37,6 +38,7 @@ pub const AsyncTask = struct {
 pub const EventLoop = struct {
     allocator: std.mem.Allocator,
     rt: *zqjs.Runtime,
+    thread_pool: std.Thread.Pool,
     mutex: std.Thread.Mutex = .{},
     task_queue: std.ArrayList(AsyncTask),
     task_cond: std.Thread.Condition = .{},
@@ -45,13 +47,21 @@ pub const EventLoop = struct {
     should_exit: bool = false,
     external_quit_flag: ?*std.atomic.Value(bool) = null,
 
-    pub fn init(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !EventLoop {
-        return .{
+    pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
+        // allocate on the HEAP!!!!!
+        const self = try allocator.create(EventLoop);
+
+        self.* = .{
             .allocator = allocator,
             .rt = rt,
             .timers = .{},
             .task_queue = .{},
+            .thread_pool = undefined,
         };
+
+        try self.thread_pool.init(.{ .allocator = allocator });
+
+        return self;
     }
 
     pub fn linkSignalFlag(self: *EventLoop, flag: *std.atomic.Value(bool)) void {
@@ -59,7 +69,7 @@ pub const EventLoop = struct {
     }
 
     /// Safe retrieval helper from context
-    fn getFromContext(ctx: zqjs.Context) ?*EventLoop {
+    pub fn getFromContext(ctx: zqjs.Context) ?*EventLoop {
         const global = ctx.getGlobalObject();
         defer ctx.freeValue(global);
 
@@ -75,26 +85,32 @@ pub const EventLoop = struct {
         return null;
     }
 
-    pub fn deinit(self: *EventLoop) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+    pub fn destroy(self: *EventLoop) void {
+        // Deinit thread pool first (waits for tasks to complete)
+        self.thread_pool.deinit();
 
-        // Clean up timers (each timer holds its own context reference)
-        for (self.timers.items) |timer| {
-            timer.ctx.freeValue(timer.callback);
-        }
-        self.timers.deinit(self.allocator);
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
-        // Clean up pending async tasks (each task holds its own context reference)
-        for (self.task_queue.items) |task| {
-            task.ctx.freeValue(task.resolve);
-            task.ctx.freeValue(task.reject);
-            switch (task.result) {
-                .success => |data| self.allocator.free(data),
-                .failure => |msg| self.allocator.free(msg),
+            // Clean up timers (each timer holds its own context reference)
+            for (self.timers.items) |timer| {
+                timer.ctx.freeValue(timer.callback);
             }
+            self.timers.deinit(self.allocator);
+
+            // Clean up pending async tasks (each task holds its own context reference)
+            for (self.task_queue.items) |task| {
+                task.ctx.freeValue(task.resolve);
+                task.ctx.freeValue(task.reject);
+                switch (task.result) {
+                    .success => |data| self.allocator.free(data),
+                    .failure => |msg| self.allocator.free(msg),
+                }
+            }
+            self.task_queue.deinit(self.allocator);
         }
-        self.task_queue.deinit(self.allocator);
+        self.allocator.destroy(self);
     }
 
     pub fn install(self: *EventLoop, ctx: zqjs.Context) !void {
@@ -137,11 +153,15 @@ pub const EventLoop = struct {
 
         // Install console (for convenience in testing/standalone event loop usage)
         const console_obj = ctx.newObject();
-        const log_fn = ctx.newCFunction(js_consoleLog, "log", 1);
+        const log_fn = ctx.newCFunction(utils.js_consoleLog, "log", 1);
         _ = try ctx.setPropertyStr(console_obj, "log", log_fn);
-        const error_fn = ctx.newCFunction(js_consoleLog, "error", 1);
+        const error_fn = ctx.newCFunction(utils.js_consoleLog, "error", 1);
         _ = try ctx.setPropertyStr(console_obj, "error", error_fn);
         _ = try ctx.setPropertyStr(global, "console", console_obj);
+
+        // Install fetch API
+        const fetch_fn = ctx.newCFunction(utils.js_fetch, "fetch", 1);
+        _ = try ctx.setPropertyStr(global, "fetch", fetch_fn);
     }
 
     fn addTimer(self: *EventLoop, ctx: zqjs.Context, callback: zqjs.Value, delay_ms: i64, is_interval: bool) !i32 {
@@ -282,7 +302,6 @@ pub const EventLoop = struct {
                     queue_empty = (self.task_queue.items.len == 0);
                     self.mutex.unlock();
                 }
-
                 if (self.timers.items.len == 0 and !did_async_work and queue_empty) {
                     break;
                 }
@@ -293,66 +312,6 @@ pub const EventLoop = struct {
                 const sleep_ns = @min(next_timeout, wait_cap) * 1_000_000;
                 std.Thread.sleep(@intCast(sleep_ns));
             }
-
-            // Check if we have any active timers
-            // var has_active_timers = false;
-            // for (self.timers.items) |timer| {
-            //     if (!timer.is_cancelled) {
-            //         has_active_timers = true;
-            //         break;
-            //     }
-            // }
-
-            // // Exit if no timers (will add more exit conditions later for async tasks)
-            // if (!has_active_timers) break;
-
-            // const now = std.time.milliTimestamp();
-            // var i: usize = 0;
-            // while (i < self.timers.items.len) {
-            //     var timer = &self.timers.items[i];
-            //     if (timer.is_cancelled) {
-            //         timer.ctx.freeValue(timer.callback);
-            //         _ = self.timers.swapRemove(i);
-            //         continue;
-            //     }
-
-            //     if (now >= timer.next_fire_time) {
-            //         // Use the timer's own context (the "tab" it belongs to)
-            //         const result = timer.ctx.call(timer.callback, zqjs.UNDEFINED, &[_]zqjs.Value{});
-
-            //         if (timer.ctx.isException(result)) {
-            //             const exception = timer.ctx.getException();
-            //             defer timer.ctx.freeValue(exception);
-            //             const str = timer.ctx.toCString(exception) catch null;
-            //             if (str) |s| {
-            //                 std.debug.print("Timer callback exception: {s}\n", .{s});
-            //                 timer.ctx.freeCString(s);
-            //             }
-            //         }
-            //         timer.ctx.freeValue(result);
-
-            //         if (timer.is_interval) {
-            //             timer.next_fire_time = now + timer.interval_ms;
-            //             i += 1;
-            //         } else {
-            //             timer.ctx.freeValue(timer.callback);
-            //             _ = self.timers.swapRemove(i);
-            //         }
-            //     } else {
-            //         i += 1;
-            //     }
-            // }
-
-            // var sleep_ms: u64 = 10;
-            // for (self.timers.items) |timer| {
-            //     if (!timer.is_cancelled) {
-            //         const time_until_fire = timer.next_fire_time - now;
-            //         if (time_until_fire > 0) {
-            //             sleep_ms = @min(sleep_ms, @as(u64, @intCast(time_until_fire)));
-            //         }
-            //     }
-            // }
-            // std.Thread.sleep(sleep_ms * std.time.ns_per_ms);
         }
     }
 
@@ -362,38 +321,76 @@ pub const EventLoop = struct {
 
         var i: usize = 0;
         while (i < self.timers.items.len) {
-            var timer = &self.timers.items[i];
-
-            if (timer.is_cancelled) {
-                timer.ctx.freeValue(timer.callback);
+            // check cancelation
+            if (self.timers.items[i].is_cancelled) {
+                self.timers.items[i].ctx.freeValue(self.timers.items[i].callback);
                 _ = self.timers.swapRemove(i);
                 continue;
             }
 
-            if (now >= timer.next_fire_time) {
-                const global = timer.ctx.getGlobalObject();
-                const ret = timer.ctx.call(timer.callback, global, &.{});
-                timer.ctx.freeValue(global);
+            const next_fire_time = self.timers.items[i].next_fire_time;
+            // check time
+            if (now >= next_fire_time) {
+                // copy to stack before calling JS
+                const ctx = self.timers.items[i].ctx;
+                const callback = self.timers.items[i].callback;
+                const is_interval = self.timers.items[i].is_interval;
+                const interval = self.timers.items[i].interval_ms;
 
-                if (timer.ctx.isException(ret)) {
-                    _ = timer.ctx.checkAndPrintException();
+                const global = ctx.getGlobalObject();
+                const ret = ctx.call(
+                    callback,
+                    global,
+                    &.{},
+                );
+                ctx.freeValue(global);
+
+                if (ctx.isException(ret)) {
+                    _ = ctx.checkAndPrintException();
                 }
-                timer.ctx.freeValue(ret);
+                ctx.freeValue(ret);
 
-                if (timer.is_interval) {
-                    timer.next_fire_time = now + timer.interval_ms;
-                    min_wait = @min(min_wait, timer.interval_ms);
+                // re-evaluate: check if timer canceled during callback
+                if (is_interval and !self.timers.items[i].is_cancelled) {
+                    self.timers.items[i].next_fire_time = now + interval;
+                    min_wait = @min(min_wait, interval);
                     i += 1;
                 } else {
-                    timer.ctx.freeValue(timer.callback);
+                    ctx.freeValue(callback);
                     _ = self.timers.swapRemove(i);
                 }
+                // if (ctx.isException(ret)) {
+                //     _ = ctx.checkAndPrintException();
+                // }
+                // ctx.freeValue(ret);
+
+                // if (timer.is_interval) {
+                //     timer.next_fire_time = now + timer.interval_ms;
+                //     min_wait = @min(min_wait, timer.interval_ms);
+                //     i += 1;
+                // } else {
+                //     timer.ctx.freeValue(timer.callback);
+                //     _ = self.timers.swapRemove(i);
+
             } else {
-                min_wait = @min(min_wait, timer.next_fire_time - now);
+                min_wait = @min(min_wait, next_fire_time - now);
                 i += 1;
             }
         }
+
         return min_wait;
+    }
+
+    /// Spawn a worker task on the thread pool and pass data Zig -> QJS
+    ///
+    /// The data passed in task_data is copied to the worker function
+    /// The worker_fn should call enqueueTask() when done
+    pub fn spawnWorker(
+        self: *EventLoop,
+        comptime worker_fn: anytype,
+        task_data: anytype,
+    ) !void {
+        try self.thread_pool.spawn(worker_fn, .{task_data});
     }
 };
 
@@ -449,16 +446,16 @@ fn js_clearTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: 
     return zqjs.UNDEFINED;
 }
 
-fn js_consoleLog(ctx: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    var i: c_int = 0;
-    while (i < argc) : (i += 1) {
-        const str = qjs.JS_ToCString(ctx, argv[@intCast(i)]);
-        if (str != null) {
-            defer qjs.JS_FreeCString(ctx, str);
-            if (i > 0) z.print(" ", .{});
-            z.print("{s}", .{str});
-        }
-    }
-    z.print("\n", .{});
-    return zqjs.UNDEFINED;
-}
+// fn js_consoleLog(ctx: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     var i: c_int = 0;
+//     while (i < argc) : (i += 1) {
+//         const str = qjs.JS_ToCString(ctx, argv[@intCast(i)]);
+//         if (str != null) {
+//             defer qjs.JS_FreeCString(ctx, str);
+//             if (i > 0) z.print(" ", .{});
+//             z.print("{s}", .{str});
+//         }
+//     }
+//     z.print("\n", .{});
+//     return zqjs.UNDEFINED;
+// }

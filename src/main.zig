@@ -5,25 +5,13 @@ const event_loop_mod = @import("event_loop.zig");
 const EventLoop = event_loop_mod.EventLoop;
 const AsyncTask = event_loop_mod.AsyncTask;
 const NativeBridge = @import("js_native_bridge.zig");
-const w = z.wrapper;
+const zqjs = z.wrapper;
 const DOMBridge = z.dom_bridge.DOMBridge;
 const Pt = @import("Point.zig");
+const js_consoleLog = @import("utils.zig").js_consoleLog;
 
 const native_os = builtin.os.tag;
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-fn js_consoleLog(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
-    var i: c_int = 0;
-    while (i < argc) : (i += 1) {
-        if (i > 0) z.print(" ", .{});
-        const str = ctx.toCString(argv[@intCast(i)]) catch continue;
-        z.print("{s}", .{str});
-        ctx.freeCString(str);
-    }
-    z.print("\n", .{});
-    return w.UNDEFINED;
-}
 
 pub var app_should_quit = std.atomic.Value(bool).init(false);
 fn handleSigInt(_: c_int) callconv(.c) void {
@@ -62,11 +50,10 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
-    std.debug.print("Zig JSValue Size: {d}\n", .{@sizeOf(w.Value)});
+    // std.debug.print("Zig JSValue Size: {d}\n", .{@sizeOf(zqjs.Value)});
     setupSignalHandler();
-
     // all QuickJS memory now goes through Zig allocator
-    const rt = try w.Runtime.init(gpa);
+    const rt = try zqjs.Runtime.init(gpa);
     defer {
         // Force garbage collection before destroying runtime
         rt.runGC();
@@ -74,20 +61,26 @@ pub fn main() !void {
     }
     rt.setRuntimeOpaque(rt);
 
-    // try runDemoClass(gpa, rt);
-    // try demoGeneratedBindings(gpa, rt);
-    // try demoVirtualDOM_SSR(gpa, rt);
+    // var event_loop = try EventLoop.init(gpa, rt);
+    // defer event_loop.deinit();
+
     // try first_QuickJS_test(rt);
+    // try demoFirstGetValue(gpa, rt);
+    // try runDemoClass(gpa, rt);
+    // try demoVirtualDOM_1(gpa, rt);
+    // try demoVirtualDOM_2(gpa, rt);
     // try demoExecuteScriptFromHTML(gpa, rt);
     // try demoNativeBridge(ctx);
 
-    try demoEventLoop(gpa, rt);
-    // try demoAsyncTaskInfrastructure(gpa, rt);
+    // try demoEventLoop(gpa, rt);
+    // try demoZigToAsyncJS(gpa, rt);
     // Test both local and global EventLoop patterns
     // try runWithLocalEventLoops(gpa, rt);
-    // try runWithGlobalEventLoop(gpa, rt);
+    // try runWithLocalEventLoops(gpa, rt);
+    try runWithGlobalEventLoop(gpa, rt);
     // try demoQuickJSProxyAndStreams(ctx);
-    // try zexplore_example_com(gpa, "https://www.example.com");
+    // const css_content = try zexplore_example_com(gpa, "https://www.example.com");
+    // defer gpa.free(css_content);
     // try demoSimpleParsing(gpa);
     // try demoTemplate(gpa);
     // try demoParserReUse(gpa);
@@ -103,24 +96,8 @@ pub fn main() !void {
 
 }
 
-fn demoMinimalTest(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
-    z.print("\n=== Minimal Test (Pure QuickJS) ===\n\n", .{});
-
-    const ctx = w.Context.init(rt);
-    defer ctx.deinit();
-    ctx.setAllocator(&allocator);
-
-    // Absolutely minimal JavaScript - no DOM, no bindings
-    const test_code = "const x = 1 + 1;";
-
-    const result = try ctx.eval(test_code, "<minimal>", .{});
-    defer ctx.freeValue(result);
-
-    z.print("✓ Minimal test completed\n", .{});
-}
-
-fn first_QuickJS_test(rt: *w.Runtime) !void {
-    const ctx = w.Context.init(rt);
+fn first_QuickJS_test(rt: *zqjs.Runtime) !void {
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
     z.print("\n=== Executing JavaScript simple code ------\n", .{});
 
@@ -135,6 +112,7 @@ fn first_QuickJS_test(rt: *w.Runtime) !void {
         defer ctx.freeValue(result);
 
         const res_int = try ctx.toInt32(result);
+        std.debug.assert(res_int == 4);
         z.print("\nJS code to execute: \n{s}\n", .{js_code});
         z.print("\nResult: ➡ {d}\n", .{res_int});
     }
@@ -161,11 +139,33 @@ fn first_QuickJS_test(rt: *w.Runtime) !void {
     }
 }
 
-fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn demoFirstGetValue(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n=== Minimal Test (Pure QuickJS) ===\n\n", .{});
+
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&gpa);
+
+    // Absolutely minimal JavaScript - no DOM, no bindings
+    const test_code = "const x = 1 + 1;";
+
+    const result = try ctx.eval(
+        test_code,
+        "<t1>",
+        .{},
+    );
+    defer ctx.freeValue(result);
+    const res_int = try ctx.toInt32(result);
+    std.debug.assert(res_int == 2);
+
+    z.print("✓ First test: {d}\n", .{res_int});
+}
+
+fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     // Note: Don't deinit ctx here - it's owned by main() and shared across demos
     z.print("\n=== Extracting and Executing Scripts ------\n", .{});
 
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
 
     // Create HTML with embedded JavaScript
@@ -263,10 +263,10 @@ fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *w.Runtime) !void
 // Method bindings are installed on prototype via DOMBridge.installAPIs
 
 /// Test the auto-generated QuickJS bindings
-fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn demoVirtualDOM_1(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n=== Testing Auto-Generated Bindings ===\n\n", .{});
 
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     errdefer ctx.deinit();
     // set allocator for QuickJS context as the context has no access to DOMBridge allocator
     ctx.setAllocator(&allocator);
@@ -363,10 +363,10 @@ fn demoGeneratedBindings(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
     rt.runGC();
 }
 
-fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn demoVirtualDOM_2(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n=== Virtual DOM Bridge - SSR Demo (DIAGNOSTIC MODE) ===\n\n", .{});
 
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     errdefer ctx.deinit();
     ctx.setAllocator(&allocator);
 
@@ -491,7 +491,7 @@ fn demoVirtualDOM_SSR(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
 }
 
 /// Demo: Native Bridge - Passing data between QuickJS and Zig
-fn demoNativeBridge(ctx: w.Context) !void {
+fn demoNativeBridge(ctx: zqjs.Context) !void {
     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
 
     // NativeBridge.installNativeBridge(ctx, &gpa);
@@ -594,22 +594,23 @@ fn demoNativeBridge(ctx: w.Context) !void {
 /// Console.log implementation for QuickJS
 
 // /// Demo: Event Loop with setTimeout/setInterval
-fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn demoEventLoop(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n** Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
-    ctx.setAllocator(&allocator);
+    ctx.setAllocator(&gpa);
 
     // Initialize event loop
-    var event_loop = try EventLoop.init(allocator, rt);
-    defer event_loop.deinit();
+    var event_loop = try EventLoop.create(gpa, rt);
+    defer event_loop.destroy();
+    event_loop.linkSignalFlag(&app_should_quit);
 
     // Install timer APIs (setTimeout, setInterval, clearTimeout, clearInterval)
     // Note: console.log is installed by install
     try event_loop.install(ctx);
 
     // Test 1: Simple setTimeout
-    z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set 'count=42'\n", .{});
+    z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set a Global 'count=42'\n", .{});
     const timeout_test =
         \\globalThis.count = 0;
         \\start = Date.now();
@@ -752,10 +753,10 @@ fn demoEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
 
     var final_count: i32 = 0;
     _ = z.qjs.JS_ToInt32(ctx.ptr, &final_count, count_prop);
-    z.print("🟢 Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
+    z.print("🟢 Check Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
 
     const elapsed = std.time.milliTimestamp() - now;
-    z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n", .{elapsed});
+    z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n\n", .{elapsed});
 }
 
 /// Demo: QuickJS Proxy and Async/Streams Support
@@ -954,37 +955,44 @@ fn demoQuickJSProxyAndStreams(ctx: ?*z.qjs.JSContext) !void {
 }
 
 // Demo: Async Task Infrastructure
-fn demoAsyncTaskInfrastructure(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
-    z.print("\n=== Async Task Infrastructure Test ===\n\n", .{});
-    const ctx = w.Context.init(rt);
+fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n[Zig] Passing data between Zig and Async Task\n\n", .{});
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
 
     // Initialize event loop
-    var event_loop = try EventLoop.init(allocator, rt.ptr);
+    var event_loop = try EventLoop.init(allocator, rt);
     defer event_loop.deinit();
 
     try event_loop.install(ctx);
 
     // Test: Manually enqueue an async task (simulating worker thread completion)
-    z.print("--- Test: Manual async task enqueue ---\n", .{});
 
     const promise_test =
-        \\let testPassed = false;
+        \\globalThis.testPassed = false;
+        \\globalThis.receivedData = null;
+        \\
         \\const promise = new Promise((resolve, reject) => {
-        \\  // Store resolve/reject for manual triggering
         \\  globalThis._testResolve = resolve;
         \\  globalThis._testReject = reject;
         \\});
+        \\
         \\promise.then(data => {
-        \\  console.log("Promise resolved with:", data);
-        \\  testPassed = true;
+        \\  console.log("Promise resolved with data passed from Zig: ", data);
+        \\  globalThis.receivedData = data;
+        \\  globalThis.testPassed = true;
         \\}).catch(err => {
         \\  console.log("Promise rejected with:", err);
+        \\}).then(() => {
+        \\  setTimeout(() => console.log("✅Test completed!"), 100);
         \\});
-        \\"Promise created, waiting for async task...";
     ;
 
-    const result1 = try ctx.eval(promise_test, "<promise_test>", .{});
+    const result1 = try ctx.eval(
+        promise_test,
+        "<promise_test>",
+        .{},
+    );
     defer ctx.freeValue(result1);
 
     // Get the resolve function
@@ -994,36 +1002,39 @@ fn demoAsyncTaskInfrastructure(allocator: std.mem.Allocator, rt: *w.Runtime) !vo
     const resolve_fn = ctx.getPropertyStr(global, "_testResolve");
     defer ctx.freeValue(resolve_fn);
 
-    // Simulate worker thread completing work by manually enqueuing a task
-    const test_data = try allocator.dupe(u8, "Hello from async task!");
+    // Passing data from Zig to JS
+    const test_data = try allocator.dupe(u8, "Hello from Zig in Async Task!");
+
     const async_task = AsyncTask{
         .ctx = ctx,
         .resolve = ctx.dupValue(resolve_fn),
-        .reject = w.Value{ .val = w.UNDEFINED },
+        .reject = zqjs.UNDEFINED,
         .result = .{ .success = test_data },
     };
 
     z.print("Enqueueing async task...\n", .{});
     event_loop.enqueueTask(async_task);
 
-    // Add a timeout to exit the event loop after promise resolves
-    const exit_timer =
-        \\setTimeout(() => {
-        \\  console.log("Test completed!");
-        \\}, 100);
-    ;
+    z.print("🔁 Running event loop...\n", .{});
+    try event_loop.run(.Script);
 
-    const result2 = try ctx.eval(exit_timer, "<exit>", .{});
-    defer ctx.freeValue(result2);
+    const test_passed_val = ctx.getPropertyStr(global, "testPassed");
+    defer ctx.freeValue(test_passed_val);
 
-    z.print("Running event loop...\n", .{});
-    try event_loop.run();
+    const test_passed = try ctx.toBool(test_passed_val);
+    z.print("🟢 Did the test pass ? {}\n", .{test_passed});
 
-    z.print("\n✓ Async task infrastructure test completed\n", .{});
-    z.print("  - AsyncTask struct works correctly\n", .{});
-    z.print("  - enqueueTask() thread-safe enqueue works\n", .{});
-    z.print("  - processAsyncTasks() resolves promises\n", .{});
-    z.print("  - Event loop integrates async tasks with timers\n", .{});
+    // Get the received data
+    const received_data_val = ctx.getPropertyStr(global, "receivedData");
+    defer ctx.freeValue(received_data_val);
+
+    if (!ctx.isNull(received_data_val)) {
+        const data_str = try ctx.toZString(received_data_val);
+        defer ctx.freeZString(data_str);
+        z.print("🟢 Received data: {s}\n\n", .{data_str});
+    } else {
+        z.print("🔴 No data received (promise may not have resolved)\n\n", .{});
+    }
 }
 
 // ============================================================================
@@ -1031,35 +1042,64 @@ fn demoAsyncTaskInfrastructure(allocator: std.mem.Allocator, rt: *w.Runtime) !vo
 // ============================================================================
 
 /// Local pattern: Each context creates its own EventLoop
-fn runWithLocalEventLoops(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn runWithLocalEventLoops(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n========================================\n", .{});
     z.print("RUNNING WITH LOCAL EVENT LOOPS\n", .{});
     z.print("========================================\n", .{});
 
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+
+    var event_loop = try EventLoop.create(gpa, rt);
+    defer event_loop.destroy();
+    try event_loop.install(ctx);
+
+    // Start event loop in background thread
+    const EventLoopThread = struct {
+        fn run(loop: *EventLoop) void {
+            loop.run(.Server) catch |err| {
+                z.print("Event loop error: {}\n", .{err});
+            };
+        }
+    };
+
+    const thread = try std.Thread.spawn(
+        .{},
+        EventLoopThread.run,
+        .{&event_loop},
+    );
+    defer {
+        event_loop.should_exit = true;
+        thread.join();
+    }
+
     // try demoEventLoop(allocator, rt);
-    try demoAsyncTaskInfrastructure(allocator, rt);
+    try demoZigToAsyncJS(gpa, rt);
+    const css_content = try zexplore_example_com(gpa, "https://www.example.com");
+    defer gpa.free(css_content);
 }
 
 /// Global pattern: One EventLoop per Runtime, shared across contexts
-fn runWithGlobalEventLoop(allocator: std.mem.Allocator, rt: *w.Runtime) !void {
+fn runWithGlobalEventLoop(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n========================================\n", .{});
     z.print("RUNNING WITH GLOBAL EVENT LOOP\n", .{});
     z.print("========================================\n", .{});
 
     // Create ONE event loop for the entire runtime (context-agnostic)
-    var event_loop = try EventLoop.init(allocator, rt.ptr);
-    defer event_loop.deinit();
+    var event_loop = try EventLoop.create(allocator, rt);
+    defer event_loop.destroy();
+    event_loop.linkSignalFlag(&app_should_quit);
 
-    try demoEventLoopGlobal(allocator, rt, &event_loop);
-    try demoVirtualDOM_SSR(allocator, rt);
-    try demoAsyncTaskInfrastructureGlobal(allocator, rt, &event_loop);
+    try demoEventLoopGlobal(allocator, rt, event_loop);
+    // try demoVirtualDOM_2(allocator, rt);
+    try demoAsyncTaskInfrastructureGlobal(allocator, rt, event_loop);
 }
 
 /// Demo: Event Loop with borrowed global instance
-fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *w.Runtime, event_loop: *EventLoop) !void {
+fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *zqjs.Runtime, event_loop: *EventLoop) !void {
     _ = allocator;
     z.print("\n=== Event Loop Demo (Global): setTimeout & setInterval ------\n\n", .{});
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
 
     // Install timer APIs for this context
@@ -1141,7 +1181,7 @@ fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *w.Runtime, event_loop:
 
     // Run the event loop to process all timers
     z.print("\n🔄 Running event loop...\n\n", .{});
-    try event_loop.run();
+    try event_loop.run(.Script);
 
     z.print("\n✅ Event loop completed!\n", .{});
     z.print("  • setTimeout works\n", .{});
@@ -1162,9 +1202,9 @@ fn demoEventLoopGlobal(allocator: std.mem.Allocator, rt: *w.Runtime, event_loop:
 }
 
 /// Demo: Async Task Infrastructure with borrowed global instance
-fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtime, event_loop: *EventLoop) !void {
+fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *zqjs.Runtime, event_loop: *EventLoop) !void {
     z.print("\n=== Async Task Infrastructure Test (Global) ===\n\n", .{});
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
 
     // Install timer APIs for this context
@@ -1199,7 +1239,7 @@ fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtim
     const async_task = AsyncTask{
         .ctx = ctx,
         .resolve = ctx.dupValue(resolve_fn),
-        .reject = w.Value{ .val = w.UNDEFINED },
+        .reject = zqjs.UNDEFINED,
         .result = .{ .success = test_data },
     };
 
@@ -1216,7 +1256,7 @@ fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtim
     defer ctx.freeValue(result2);
 
     z.print("Running event loop...\n", .{});
-    try event_loop.run();
+    try event_loop.run(.Script);
 
     z.print("\n✓ Async task infrastructure test completed\n", .{});
     z.print("  - AsyncTask struct works correctly\n", .{});
@@ -1225,10 +1265,10 @@ fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *w.Runtim
     z.print("  - Event loop integrates async tasks with timers\n", .{});
 }
 
-pub fn runDemoClass(_: std.mem.Allocator, rt: *w.Runtime) !void {
+pub fn runDemoClass(_: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n=== Custom Class Demo (Point) ===\n", .{});
 
-    const ctx = w.Context.init(rt);
+    const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
     ctx.setAllocator(&rt.allocator);
 
@@ -1914,7 +1954,7 @@ fn demoSuspiciousAttributes(allocator: std.mem.Allocator) !void {
     z.print("\n", .{});
 }
 
-fn zexplore_example_com(allocator: std.mem.Allocator, url: []const u8) !void {
+pub fn zexplore_example_com(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     z.print("\n=== Demo visiting the page {s} --------------\n\n", .{url});
     const page = try z.get(allocator, url);
     defer allocator.free(page);
@@ -1932,9 +1972,10 @@ fn zexplore_example_com(allocator: std.mem.Allocator, url: []const u8) !void {
     z.print("{s}\n", .{href_value});
 
     const style_by_walker = z.getElementByTag(html, .style);
-    var css_content: []const u8 = undefined;
+    var css_content: []u8 = undefined;
     if (style_by_walker) |style| {
-        css_content = z.textContent_zc(z.elementToNode(style));
+        // Use allocating version - caller (Worker) will free
+        css_content = try z.textContent(allocator, z.elementToNode(style));
         z.print("{s}\n", .{css_content});
     }
 
@@ -1945,6 +1986,7 @@ fn zexplore_example_com(allocator: std.mem.Allocator, url: []const u8) !void {
         // z.print("{s}\n", .{css_content_2});
         std.debug.assert(std.mem.eql(u8, css_content, css_content_2));
     }
+    return css_content;
 }
 
 fn normalizeString_DOM_parsing_bencharmark(allocator: std.mem.Allocator) !void {
