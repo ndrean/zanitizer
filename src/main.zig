@@ -9,6 +9,7 @@ const zqjs = z.wrapper;
 const DOMBridge = z.dom_bridge.DOMBridge;
 const Pt = @import("Point.zig");
 const js_consoleLog = @import("utils.zig").js_consoleLog;
+const AsyncBridge = @import("async_bridge.zig");
 
 const native_os = builtin.os.tag;
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -38,6 +39,73 @@ pub fn setupSignalHandler() void {
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
 }
 
+fn parseSimulate(ctx: zqjs.Context, args: []const zqjs.Value) !u64 {
+    if (args.len < 1) {
+        _ = ctx.throwTypeError("simulateWork requires 1 argument (ms)");
+        return error.InvalidArgs;
+    }
+    // Return the delay as u64 (the Payload)
+    return try ctx.toInt64(args[0]);
+}
+
+// on ThreadPool
+fn doSimulate(allocator: std.mem.Allocator, delay_ms: u64) ![]u8 {
+    // Blocking work
+    std.time.sleep(delay_ms * 1_000_000);
+
+    // Return result (must be allocated with 'allocator')
+    return std.fmt.allocPrint(allocator, "✅ Waited {d}ms via Generic Bridge!", .{delay_ms});
+}
+
+fn demoParallelExecution(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n=== Parallel Execution Demo ===\n\n", .{});
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&allocator);
+
+    const event_loop = try EventLoop.create(allocator, rt);
+    defer event_loop.destroy();
+    event_loop.linkSignalFlag(&app_should_quit);
+    try event_loop.install(ctx);
+
+    const code =
+        \\async function runDemo() {
+        \\  let start = Date.now();
+        \\  
+        \\  // 1. SEQUENTIAL (The "Slow" Way)
+        \\  console.log("🐌 Starting SEQUENTIAL tasks (await one by one)...");
+        \\  await simulateWork(1000);
+        \\  console.log("   - Task 1 done after :", Date.now()-start);
+        \\  await simulateWork(1000);
+        \\  console.log("   - Task 2 done after :", Date.now()-start);
+        \\  const seqTime = Date.now() - start;
+        \\  console.log(`🐌 Sequential Total: ${seqTime}ms (Expected ~2000ms)\n`);
+        \\
+        \\  // 2. PARALLEL (The "Fast" Way)
+        \\  start = Date.now();
+        \\  console.log("🚀 Starting PARALLEL tasks (Promise.all)...");
+        \\  
+        \\  // Launch both immediately!
+        \\  const p1 = simulateWork(1000);
+        \\  const p2 = simulateWork(1000);
+        \\  const p3 = simulateWork(1000);
+        \\
+        \\  // Wait for all to finish
+        \\  await Promise.all([p1, p2, p3]);
+        \\  
+        \\  const parTime = Date.now() - start;
+        \\  console.log(`🚀 Parallel Total: ${parTime}ms (Expected ~1000ms)`);
+        \\}
+        \\
+        \\runDemo();
+    ;
+
+    const res = try ctx.eval(code, "<parallel_demo>", .{});
+    defer ctx.freeValue(res);
+
+    try event_loop.run(.Script);
+}
+
 pub fn main() !void {
     const gpa, const is_debug = gpa: {
         if (native_os == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
@@ -63,6 +131,7 @@ pub fn main() !void {
 
     // var event_loop = try EventLoop.init(gpa, rt);
     // defer event_loop.deinit();
+    try demoParallelExecution(gpa, rt);
 
     // try first_QuickJS_test(rt);
     // try demoFirstGetValue(gpa, rt);
@@ -72,12 +141,12 @@ pub fn main() !void {
     // try demoExecuteScriptFromHTML(gpa, rt);
     // try demoNativeBridge(ctx);
 
-    // try demoEventLoop(gpa, rt);
+    try demoEventLoop(gpa, rt);
     // try demoZigToAsyncJS(gpa, rt);
     // Test both local and global EventLoop patterns
     // try runWithLocalEventLoops(gpa, rt);
     // try runWithLocalEventLoops(gpa, rt);
-    try runWithGlobalEventLoop(gpa, rt);
+    // try runWithGlobalEventLoop(gpa, rt);
     // try demoQuickJSProxyAndStreams(ctx);
     // const css_content = try zexplore_example_com(gpa, "https://www.example.com");
     // defer gpa.free(css_content);
@@ -751,8 +820,7 @@ fn demoEventLoop(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     const count_prop = ctx.getPropertyStr(global, "count");
     defer ctx.freeValue(count_prop);
 
-    var final_count: i32 = 0;
-    _ = z.qjs.JS_ToInt32(ctx.ptr, &final_count, count_prop);
+    const final_count = try ctx.toInt32(count_prop);
     z.print("🟢 Check Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
 
     const elapsed = std.time.milliTimestamp() - now;
@@ -1327,105 +1395,6 @@ pub fn runDemoClass(_: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 
     z.print("=== Demo Complete ===\n", .{});
 }
-
-// fn demoNativeBridge(ctx: ?*z.qjs.JSContext) !void {
-//     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
-
-//     // Test 1: Process regular array
-//     z.print("--- Test 1: Process Array (JS → Zig → JS) ---\n", .{});
-//     const test1 =
-//         \\const data = [1, 2, 3, 4, 5];
-//         \\console.log("Input array:", data);
-//         \\const result = Native.processArray(data);
-//         \\console.log("Result from Zig:", result);
-//         \\result;
-//     ;
-//     const result1 = z.qjs.JS_Eval(
-//         ctx,
-//         test1,
-//         test1.len,
-//         "<test1>",
-//         0,
-//     );
-//     defer z.qjs.JS_FreeValue(ctx, result1);
-
-//     // Test 2: Transform array (return new array)
-//     z.print("\n--- Test 2: Transform Array (Return New Array) ---\n", .{});
-//     const test2 =
-//         \\const input = [1, 2, 3, 4, 5];
-//         \\console.log("Input:", input);
-//         \\const output = Native.transformArray(input);
-//         \\console.log("Result from Zig:", output);
-//         \\output;
-//     ;
-//     const result2 = z.qjs.JS_Eval(
-//         ctx,
-//         test2,
-//         test2.len,
-//         "<test2>",
-//         0,
-//     );
-//     defer z.qjs.JS_FreeValue(ctx, result2);
-
-//     // Test 3: TypedArray (zero-copy performance)
-//     z.print("\n--- Test 3: TypedArray (Zero-Copy) ---\n", .{});
-//     const test3 =
-//         \\const buffer = new Float64Array([10, 20, 30, 40, 50]);
-//         \\console.log("TypedArray input:", buffer);
-//         \\const result = Native.processTypedArray(buffer);
-//         \\console.log("Result from Zig (zero-copy!):", result);
-//         \\result;
-//     ;
-//     const result3 = z.qjs.JS_Eval(
-//         ctx,
-//         test3,
-//         test3.len,
-//         "<test3>",
-//         0,
-//     );
-//     defer z.qjs.JS_FreeValue(ctx, result3);
-
-//     // Test 4: Process object
-//     z.print("\n--- Test 4: Process Object ---\n", .{});
-//     const test4 =
-//         \\const obj = { x: 10, y: 20, values: [1, 2, 3, 4, 5] };
-//         \\console.log("Input object:", JSON.stringify(obj));
-//         \\const result = Native.processObject(obj);
-//         \\console.log("Result from Zig:", result);
-//         \\result;
-//     ;
-//     const result4 = z.qjs.JS_Eval(
-//         ctx,
-//         test4,
-//         test4.len,
-//         "<test4>",
-//         0,
-//     );
-//     defer z.qjs.JS_FreeValue(ctx, result4);
-
-//     // Test 5: Process text
-//     z.print("\n--- Test 5: Text Processing ---\n", .{});
-//     const test5 =
-//         \\const messy = "Hello   World  !  How   are   you?";
-//         \\console.log("Input text:", messy);
-//         \\const clean = Native.processText(messy);
-//         \\console.log("Cleaned by Zig:", clean);
-//         \\clean;
-//     ;
-//     const result5 = z.qjs.JS_Eval(
-//         ctx,
-//         test5,
-//         test5.len,
-//         "<test5>",
-//         0,
-//     );
-//     defer z.qjs.JS_FreeValue(ctx, result5);
-
-//     z.print("\n✅ Native bridge working!\n", .{});
-//     z.print("  • JavaScript can call Zig functions\n", .{});
-//     z.print("  • Data flows: JS → Zig → JS\n", .{});
-//     z.print("  • Heavy computation runs at native speed\n\n", .{});
-// }
 
 /// use `parseString` or `createDocFromString` to create a document with a BODY element populated by the input string
 fn demoSimpleParsing(_: std.mem.Allocator) !void {
@@ -2827,3 +2796,102 @@ fn serverSideRenderingBenchmark(allocator: std.mem.Allocator) !void {
     z.print("• Parser reused across multiple requests\n", .{});
     z.print("• Malicious content is sanitized for security\n", .{});
 }
+
+// fn demoNativeBridge(ctx: ?*z.qjs.JSContext) !void {
+//     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
+
+//     // Test 1: Process regular array
+//     z.print("--- Test 1: Process Array (JS → Zig → JS) ---\n", .{});
+//     const test1 =
+//         \\const data = [1, 2, 3, 4, 5];
+//         \\console.log("Input array:", data);
+//         \\const result = Native.processArray(data);
+//         \\console.log("Result from Zig:", result);
+//         \\result;
+//     ;
+//     const result1 = z.qjs.JS_Eval(
+//         ctx,
+//         test1,
+//         test1.len,
+//         "<test1>",
+//         0,
+//     );
+//     defer z.qjs.JS_FreeValue(ctx, result1);
+
+//     // Test 2: Transform array (return new array)
+//     z.print("\n--- Test 2: Transform Array (Return New Array) ---\n", .{});
+//     const test2 =
+//         \\const input = [1, 2, 3, 4, 5];
+//         \\console.log("Input:", input);
+//         \\const output = Native.transformArray(input);
+//         \\console.log("Result from Zig:", output);
+//         \\output;
+//     ;
+//     const result2 = z.qjs.JS_Eval(
+//         ctx,
+//         test2,
+//         test2.len,
+//         "<test2>",
+//         0,
+//     );
+//     defer z.qjs.JS_FreeValue(ctx, result2);
+
+//     // Test 3: TypedArray (zero-copy performance)
+//     z.print("\n--- Test 3: TypedArray (Zero-Copy) ---\n", .{});
+//     const test3 =
+//         \\const buffer = new Float64Array([10, 20, 30, 40, 50]);
+//         \\console.log("TypedArray input:", buffer);
+//         \\const result = Native.processTypedArray(buffer);
+//         \\console.log("Result from Zig (zero-copy!):", result);
+//         \\result;
+//     ;
+//     const result3 = z.qjs.JS_Eval(
+//         ctx,
+//         test3,
+//         test3.len,
+//         "<test3>",
+//         0,
+//     );
+//     defer z.qjs.JS_FreeValue(ctx, result3);
+
+//     // Test 4: Process object
+//     z.print("\n--- Test 4: Process Object ---\n", .{});
+//     const test4 =
+//         \\const obj = { x: 10, y: 20, values: [1, 2, 3, 4, 5] };
+//         \\console.log("Input object:", JSON.stringify(obj));
+//         \\const result = Native.processObject(obj);
+//         \\console.log("Result from Zig:", result);
+//         \\result;
+//     ;
+//     const result4 = z.qjs.JS_Eval(
+//         ctx,
+//         test4,
+//         test4.len,
+//         "<test4>",
+//         0,
+//     );
+//     defer z.qjs.JS_FreeValue(ctx, result4);
+
+//     // Test 5: Process text
+//     z.print("\n--- Test 5: Text Processing ---\n", .{});
+//     const test5 =
+//         \\const messy = "Hello   World  !  How   are   you?";
+//         \\console.log("Input text:", messy);
+//         \\const clean = Native.processText(messy);
+//         \\console.log("Cleaned by Zig:", clean);
+//         \\clean;
+//     ;
+//     const result5 = z.qjs.JS_Eval(
+//         ctx,
+//         test5,
+//         test5.len,
+//         "<test5>",
+//         0,
+//     );
+//     defer z.qjs.JS_FreeValue(ctx, result5);
+
+//     z.print("\n✅ Native bridge working!\n", .{});
+//     z.print("  • JavaScript can call Zig functions\n", .{});
+//     z.print("  • Data flows: JS → Zig → JS\n", .{});
+//     z.print("  • Heavy computation runs at native speed\n\n", .{});
+// }

@@ -3,6 +3,7 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const utils = @import("utils.zig");
+// const js_simulateWork = utils.js_simulateWork;
 
 // Unique Class ID to safely store the *EventLoop pointer
 var event_loop_class_id: zqjs.ClassID = 0;
@@ -45,6 +46,7 @@ pub const EventLoop = struct {
     timers: std.ArrayList(Timer),
     next_timer_id: i32 = 1,
     should_exit: bool = false,
+    active_tasks: usize = 0,
     external_quit_flag: ?*std.atomic.Value(bool) = null,
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
@@ -162,6 +164,10 @@ pub const EventLoop = struct {
         // Install fetch API
         const fetch_fn = ctx.newCFunction(utils.js_fetch, "fetch", 1);
         _ = try ctx.setPropertyStr(global, "fetch", fetch_fn);
+
+        // test
+        const simulateWork_fn = ctx.newCFunction(utils.js_simulateWork, "simulateWork", 1);
+        _ = try ctx.setPropertyStr(global, "simulateWork", simulateWork_fn);
     }
 
     fn addTimer(self: *EventLoop, ctx: zqjs.Context, callback: zqjs.Value, delay_ms: i64, is_interval: bool) !i32 {
@@ -227,8 +233,14 @@ pub const EventLoop = struct {
             return false;
         };
         self.mutex.unlock();
+        // defer self.allocator.free(tasks);
 
         const count = tasks.len;
+
+        if (count > 0) {
+            self.active_tasks -= count;
+        }
+
         for (tasks) |task| {
             // Free the JS function references we held
             defer task.ctx.freeValue(task.resolve);
@@ -302,7 +314,7 @@ pub const EventLoop = struct {
                     queue_empty = (self.task_queue.items.len == 0);
                     self.mutex.unlock();
                 }
-                if (self.timers.items.len == 0 and !did_async_work and queue_empty) {
+                if (self.timers.items.len == 0 and !did_async_work and queue_empty and self.active_tasks == 0) {
                     break;
                 }
             }
@@ -391,6 +403,7 @@ pub const EventLoop = struct {
         task_data: anytype,
     ) !void {
         try self.thread_pool.spawn(worker_fn, .{task_data});
+        self.active_tasks += 1;
     }
 };
 

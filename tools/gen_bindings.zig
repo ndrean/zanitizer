@@ -9,6 +9,7 @@ const BindingSpec = struct {
     name: []const u8,
     zig_func_name: []const u8,
     kind: enum { static, method }, // static = on document, method = on prototype
+    // TODO: add `accessor` (getter/setter) instead of the functional approach
     args: []const ArgType,
     return_type: ReturnType,
 };
