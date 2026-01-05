@@ -4,6 +4,7 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 const utils = @import("utils.zig");
 const AsyncBindings = @import("async_bindings_generated.zig");
+const JSWorker = @import("js_worker.zig").JSWorker;
 
 // Unique Class ID to safely store the *EventLoop pointer
 var event_loop_class_id: zqjs.ClassID = 0;
@@ -48,6 +49,7 @@ pub const EventLoop = struct {
     should_exit: bool = false,
     active_tasks: usize = 0,
     external_quit_flag: ?*std.atomic.Value(bool) = null,
+    workers: std.ArrayList(*JSWorker) = .{},
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
         // the secret!! -> allocate on the HEAP!!!!!
@@ -111,8 +113,18 @@ pub const EventLoop = struct {
                 }
             }
             self.task_queue.deinit(self.allocator);
+
+            // Workers list cleanup (workers manage their own lifecycle)
+            self.workers.deinit(self.allocator);
         }
         self.allocator.destroy(self);
+    }
+
+    /// Register a worker for polling in the event loop
+    pub fn registerWorker(self: *EventLoop, worker: *JSWorker) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        try self.workers.append(self.allocator, worker);
     }
 
     pub fn install(self: *EventLoop, ctx: zqjs.Context) !void {
@@ -265,6 +277,17 @@ pub const EventLoop = struct {
         return (count > 0); // we did some work
     }
 
+    /// Poll all workers for incoming messages
+    fn pollWorkers(self: *EventLoop) !void {
+        self.mutex.lock();
+        const workers_copy = self.workers.items;
+        self.mutex.unlock();
+
+        for (workers_copy) |worker| {
+            try worker.poll();
+        }
+    }
+
     /// Main event loop processing
     pub fn run(self: *EventLoop, mode: RunMode) !void {
         // const rt = self.rt;
@@ -285,6 +308,9 @@ pub const EventLoop = struct {
 
             // Process Async I/O (Worker threads)
             const did_async_work = self.processAsyncTasks();
+
+            // Poll workers for messages
+            self.pollWorkers() catch {};
 
             // Flush new microtasks created by I/O
             while ((try self.rt.executePendingJob()) != null) {}

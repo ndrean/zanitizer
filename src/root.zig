@@ -11,6 +11,12 @@ pub const qjs = @cImport({
 // Import wrapper for cleaner QuickJS API
 pub const wrapper = @import("wrapper.zig");
 
+// Mailbox for inter-thread communication (Worker pattern)
+pub const mailbox = @import("mailbox");
+
+// Local mailbox implementation for Workers
+pub const Mailbox = @import("mailbox.zig").Mailbox;
+
 // Re-export wrapper constants - use these instead of creating values manually
 // This avoids std.mem.zeroes() code smell and provides compile-time constants
 pub const jsException = wrapper.EXCEPTION;

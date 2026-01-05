@@ -40,6 +40,11 @@ pub fn build(b: *std.Build) void {
 
     // const quickjs_dep = b.dependency("quickjs", .{ .target = target, .optimize = optimize });
 
+    const mailbox = b.dependency("mailbox", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const zexplorer_lib = b.addLibrary(.{
         .name = "zexplorer",
         .linkage = .static,
@@ -67,6 +72,9 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         },
     );
+
+    // Add mailbox as an importable module
+    zexplorer_module.addImport("mailbox", mailbox.module("mailbox"));
 
     // Link the module to the wrapper library: get C dependencies
     zexplorer_module.linkLibrary(zexplorer_lib);

@@ -125,6 +125,7 @@ pub const Runtime = struct {
     };
 
     pub fn init(allocator: std.mem.Allocator) !*Runtime {
+        // 'runtime' allcoated on the heap
         const runtime = try allocator.create(Runtime);
         runtime.allocator = allocator;
         runtime.ptr = qjs.JS_NewRuntime2(&malloc_functions, @constCast(runtime));
@@ -437,8 +438,12 @@ pub const Runtime = struct {
 
         // Sanity check: prevent directory traversal in production!
 
-        const source = std.fs.cwd().readFileAlloc(allocator.*, name_span, 1_000_000) catch {
-            qjs.JS_ThrowReferenceError(ctx, "Could not load module '%s'", module_name);
+        const source = std.fs.cwd().readFileAlloc(
+            allocator,
+            name_span,
+            1_000_000,
+        ) catch {
+            _ = qjs.JS_ThrowReferenceError(ctx, "Could not load module '%s'", module_name);
             return null;
         };
         defer allocator.free(source);
@@ -453,17 +458,32 @@ pub const Runtime = struct {
             qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
         );
 
-        if (qjs.JS_IsException(func_val) != 0) return null;
+        if (qjs.JS_IsException(func_val)) return null;
 
         // return qjs.JS_VALUE_GET_PTR(func_val).module; <- C macro way
         return @ptrCast(func_val.u.ptr);
     }
 
-    fn js_module_normalize(ctx: ?*qjs.JSContext, _: [*c]const u8, name: [*c]const u8, _: ?*anyopaque) callconv(.c) [*c]u8 {
-        // Minimal: just duplicate the name (ignores relative paths)
-        // TODO: probably use:
-        // pub fn resolve(allocator: Allocator, paths: &.{base, name}) Allocator.Error![]u8
-        return qjs.js_strdup(ctx, name);
+    fn js_module_normalize(ctx: ?*qjs.JSContext, base: [*c]const u8, name: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) [*c]u8 {
+        if (base == null) {
+            return qjs.js_strdup(ctx, name);
+        }
+
+        const name_slice = std.mem.span(name);
+
+        const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+        const allocator = allocator_ptr.*;
+
+        const base_slice = std.mem.span(base);
+        const base_dir = std.fs.path.dirname(base_slice) orelse ".";
+
+        const resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch {
+            // On OOM or error, return null (or throw JS error if desired)
+            return null;
+        };
+        defer allocator.free(resolved_path); // Free Zig memory when done
+
+        return qjs.js_strndup(ctx, resolved_path.ptr, resolved_path.len);
     }
 
     /// Set the module loader function for ES6 modules.
@@ -502,6 +522,17 @@ pub const Context = packed struct {
         const opaque_ptr = qjs.JS_GetContextOpaque(self.ptr);
         const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
         return allocator_ptr.*;
+    }
+
+    /// Set arbitrary opaque pointer in context (overwrites allocator!)
+    pub inline fn setContextOpaque(self: Context, ptr: anytype) void {
+        qjs.JS_SetContextOpaque(self.ptr, ptr);
+    }
+
+    /// Get opaque pointer from context and cast to type
+    pub inline fn getContextOpaque(self: Context, comptime T: type) ?*T {
+        const opaque_ptr = qjs.JS_GetContextOpaque(self.ptr) orelse return null;
+        return @ptrCast(@alignCast(opaque_ptr));
     }
 
     // Use the existing allocator stored in the Context Opaque
@@ -581,9 +612,13 @@ pub const Context = packed struct {
         return qjs.JS_NewObjectClass(self.ptr, class_id);
     }
 
-    // pub inline fn newObjectProtoClass(self: Context, proto: Value, class_id: ClassID) Value {
-    //     return qjs.JS_NewObjectProtoClass(self.ptr, proto, class_id);
-    // }
+    pub inline fn newObjectProtoClass(self: Context, proto: Value, class_id: ClassID) Value {
+        return qjs.JS_NewObjectProtoClass(self.ptr, proto, class_id);
+    }
+
+    pub inline fn newCFunctionConstructor(self: Context, func: qjs.JSCFunction, name: [*:0]const u8, length: c_int) Value {
+        return qjs.JS_NewCFunction2(self.ptr, func, name, length, qjs.JS_CFUNC_constructor, 0);
+    }
 
     pub inline fn newArray(self: Context) Value {
         return qjs.JS_NewArray(self.ptr);
@@ -1029,6 +1064,14 @@ pub const Context = packed struct {
 
     pub inline fn jsonStringify(self: Context, obj: Value, replacer: Value, space: Value) Value {
         return qjs.JS_JSONStringify(self.ptr, obj, replacer, space);
+    }
+
+    /// Simplified JSON stringify (no replacer/space)
+    pub inline fn jsonStringifySimple(self: Context, obj: Value) !Value {
+        const undef = Value{ .tag = qjs.JS_TAG_UNDEFINED, .u = .{ .int32 = 0 } };
+        const result = qjs.JS_JSONStringify(self.ptr, obj, undef, undef);
+        if (self.isException(result)) return error.JSONStringifyFailed;
+        return result;
     }
 
     // Atom handling

@@ -120,6 +120,7 @@ pub fn main() !void {
 
     // std.debug.print("Zig JSValue Size: {d}\n", .{@sizeOf(zqjs.Value)});
     setupSignalHandler();
+
     // all QuickJS memory now goes through Zig allocator
     const rt = try zqjs.Runtime.init(gpa);
     defer {
@@ -129,13 +130,12 @@ pub fn main() !void {
     }
     rt.setRuntimeOpaque(rt);
 
-    // var event_loop = try EventLoop.init(gpa, rt);
-    // defer event_loop.deinit();
-    // try demoParallelExecution(gpa, rt);
+    try demoESM(gpa, rt);
+    try demoParallelExecution(gpa, rt);
+    try runDemoClass(gpa, rt);
 
-    // try first_QuickJS_test(rt);
-    // try demoFirstGetValue(gpa, rt);
-    // try runDemoClass(gpa, rt);
+    try first_QuickJS_test(rt);
+    try getValueFromQJS(gpa, rt);
     // try demoVirtualDOM_1(gpa, rt);
     // try demoVirtualDOM_2(gpa, rt);
     // try demoExecuteScriptFromHTML(gpa, rt);
@@ -208,15 +208,18 @@ fn first_QuickJS_test(rt: *zqjs.Runtime) !void {
     }
 }
 
-fn demoFirstGetValue(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== Minimal Test (Pure QuickJS) ===\n\n", .{});
+fn getValueFromQJS(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n=== Get Int Value from QJS -> Zig and double it\n\n", .{});
 
     const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
     ctx.setAllocator(&gpa);
 
     // Absolutely minimal JavaScript - no DOM, no bindings
-    const test_code = "const x = 1 + 1;";
+    const test_code =
+        \\const x = 1 + 1;
+        \\x;
+    ;
 
     const result = try ctx.eval(
         test_code,
@@ -224,10 +227,55 @@ fn demoFirstGetValue(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         .{},
     );
     defer ctx.freeValue(result);
-    const res_int = try ctx.toInt32(result);
-    std.debug.assert(res_int == 2);
+    std.debug.print("{}", .{result.u.int32});
 
-    z.print("✓ First test: {d}\n", .{res_int});
+    const res_x: i32 = try ctx.toInt32(result);
+    std.debug.assert(res_x * 2 == 4);
+
+    z.print("Double the returned int in Zig: {d}\n", .{res_x * 2});
+}
+
+fn demoESM(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n=== ESM Module Demo ===\n\n", .{});
+
+    // 1. CRITICAL: Enable the Module Loader (reads from disk)
+    rt.setModuleLoader();
+
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&allocator);
+
+    // 2. Install 'console.log' (so we can see output)
+    const console = ctx.newObject();
+    _ = try ctx.setPropertyStr(console, "log", ctx.newCFunction(js_consoleLog, "log", 1));
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    _ = try ctx.setPropertyStr(global, "console", console);
+
+    // 3. Read the entry point source code
+    const source = std.fs.cwd().readFileAlloc(allocator, "js/app.js", 1024 * 1024) catch |err| {
+        z.print("Error: Could not find 'app.js' in current directory.\n", .{});
+        return err;
+    };
+    defer allocator.free(source);
+
+    // 4. Evaluate as a MODULE
+    //    .type = .module tells QuickJS to treat top-level variables as scoped,
+    //    enable strict mode, and allow 'import' statements.
+    const val = try ctx.eval(
+        source,
+        "js/apps.js",
+        .{ .type = .module },
+    );
+    defer ctx.freeValue(val);
+
+    if (ctx.isException(val)) {
+        _ = ctx.checkAndPrintException();
+    }
+
+    // 5. Execute Module Jobs
+    //    Imports are resolved asynchronously. You must pump the job queue.
+    while ((try rt.executePendingJob()) != null) {}
 }
 
 fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {

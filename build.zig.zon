@@ -3,7 +3,12 @@
     .version = "0.1.0",
     .fingerprint = 0x1592e628bc011db,
     .minimum_zig_version = "0.15.1",
-    .dependencies = .{},
+    .dependencies = .{
+        .mailbox = .{
+            .url = "git+https://github.com/g41797/mailbox#d0187c156f0fd956f57f36320fda52e555ebaef5",
+            .hash = "mailbox-0.0.13-8ABL0gVeAAAVfcvotP06FEWeAW_gLUGCnUB2rlxNXdjB",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
