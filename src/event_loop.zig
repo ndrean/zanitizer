@@ -3,7 +3,7 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const utils = @import("utils.zig");
-// const js_simulateWork = utils.js_simulateWork;
+const AsyncBindings = @import("async_bindings_generated.zig");
 
 // Unique Class ID to safely store the *EventLoop pointer
 var event_loop_class_id: zqjs.ClassID = 0;
@@ -50,7 +50,7 @@ pub const EventLoop = struct {
     external_quit_flag: ?*std.atomic.Value(bool) = null,
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
-        // allocate on the HEAP!!!!!
+        // the secret!! -> allocate on the HEAP!!!!!
         const self = try allocator.create(EventLoop);
 
         self.* = .{
@@ -131,7 +131,7 @@ pub const EventLoop = struct {
         const global = ctx.getGlobalObject();
         defer ctx.freeValue(global);
 
-        // B. Create a hidden object holding our pointeranad set it to Global
+        // B. Create a hidden object holding our pointer and set it to Global
         const loop_ref = ctx.newObjectClass(event_loop_class_id);
         try ctx.setOpaque(loop_ref, self);
         _ = try ctx.setPropertyStr(
@@ -139,19 +139,6 @@ pub const EventLoop = struct {
             "__native_event_loop__",
             loop_ref,
         );
-
-        // Install timer APIs
-        const set_timeout_fn = ctx.newCFunction(js_setTimeout, "setTimeout", 2);
-        _ = try ctx.setPropertyStr(global, "setTimeout", set_timeout_fn);
-
-        const set_interval_fn = ctx.newCFunction(js_setInterval, "setInterval", 2);
-        _ = try ctx.setPropertyStr(global, "setInterval", set_interval_fn);
-
-        const clear_timeout_fn = ctx.newCFunction(js_clearTimeout, "clearTimeout", 1);
-        _ = try ctx.setPropertyStr(global, "clearTimeout", clear_timeout_fn);
-
-        const clear_interval_fn = ctx.newCFunction(js_clearTimeout, "clearInterval", 1);
-        _ = try ctx.setPropertyStr(global, "clearInterval", clear_interval_fn);
 
         // Install console (for convenience in testing/standalone event loop usage)
         const console_obj = ctx.newObject();
@@ -161,16 +148,11 @@ pub const EventLoop = struct {
         _ = try ctx.setPropertyStr(console_obj, "error", error_fn);
         _ = try ctx.setPropertyStr(global, "console", console_obj);
 
-        // Install fetch API
-        const fetch_fn = ctx.newCFunction(utils.js_fetch, "fetch", 1);
-        _ = try ctx.setPropertyStr(global, "fetch", fetch_fn);
-
-        // test
-        const simulateWork_fn = ctx.newCFunction(utils.js_simulateWork, "simulateWork", 1);
-        _ = try ctx.setPropertyStr(global, "simulateWork", simulateWork_fn);
+        // Install all generated bindings (timers + async workers)
+        try AsyncBindings.installAllBindings(ctx, global);
     }
 
-    fn addTimer(self: *EventLoop, ctx: zqjs.Context, callback: zqjs.Value, delay_ms: i64, is_interval: bool) !i32 {
+    pub fn addTimer(self: *EventLoop, ctx: zqjs.Context, callback: zqjs.Value, delay_ms: i64, is_interval: bool) !i32 {
         const now = std.time.milliTimestamp();
         const timer_id = self.next_timer_id;
         self.next_timer_id += 1;
@@ -187,7 +169,7 @@ pub const EventLoop = struct {
         return timer_id;
     }
 
-    fn cancelTimer(self: *EventLoop, timer_id: i32) void {
+    pub fn cancelTimer(self: *EventLoop, timer_id: i32) void {
         for (self.timers.items) |*timer| {
             if (timer.id == timer_id and !timer.is_cancelled) {
                 timer.is_cancelled = true;
@@ -295,6 +277,7 @@ pub const EventLoop = struct {
                     break;
                 }
             }
+            // the "double" NodeJS approach: process microtasks before and after I/O
             // flush pre-existing microtasks
             while (try self.rt.executePendingJob() != null) {}
             // check Timers
@@ -406,69 +389,3 @@ pub const EventLoop = struct {
         self.active_tasks += 1;
     }
 };
-
-fn js_setTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 2) return zqjs.EXCEPTION;
-
-    const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
-    const callback = argv[0];
-    if (!ctx.isFunction(callback)) return ctx.throwTypeError("Callback must be a function");
-
-    var interval: i32 = 0;
-    if (qjs.JS_ToInt32(ctx.ptr, &interval, argv[1]) != 0) return zqjs.EXCEPTION;
-    if (interval < 0) interval = 0;
-
-    const id = loop.addTimer(
-        ctx,
-        callback,
-        interval,
-        false,
-    ) catch return ctx.throwInternalError("Failed to add timer");
-    return ctx.newInt32(id);
-}
-
-fn js_setInterval(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 2) return zqjs.EXCEPTION;
-
-    const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
-    const callback = argv[0];
-    if (!ctx.isFunction(callback)) return ctx.throwTypeError("Callback must be a function");
-
-    var interval: i32 = 0;
-    if (qjs.JS_ToInt32(ctx.ptr, &interval, argv[1]) != 0) return zqjs.EXCEPTION;
-    if (interval < 0) interval = 0;
-
-    const id = loop.addTimer(
-        ctx,
-        callback,
-        interval,
-        true,
-    ) catch return ctx.throwInternalError("Failed to add timer");
-    return ctx.newInt32(id);
-}
-
-fn js_clearTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 1) return zqjs.UNDEFINED;
-    const loop = EventLoop.getFromContext(ctx) orelse return zqjs.UNDEFINED;
-
-    var id: i32 = 0;
-    if (qjs.JS_ToInt32(ctx.ptr, &id, argv[0]) == 0) loop.cancelTimer(id);
-    return zqjs.UNDEFINED;
-}
-
-// fn js_consoleLog(ctx: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-//     var i: c_int = 0;
-//     while (i < argc) : (i += 1) {
-//         const str = qjs.JS_ToCString(ctx, argv[@intCast(i)]);
-//         if (str != null) {
-//             defer qjs.JS_FreeCString(ctx, str);
-//             if (i > 0) z.print(" ", .{});
-//             z.print("{s}", .{str});
-//         }
-//     }
-//     z.print("\n", .{});
-//     return zqjs.UNDEFINED;
-// }

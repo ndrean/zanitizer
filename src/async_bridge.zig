@@ -4,28 +4,20 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 
-/// A generic task structure that carries your specific Payload
-pub fn GenericTask(comptime Payload: type) type {
-    return struct {
-        loop: *EventLoop,
-        ctx: zqjs.Context,
-        resolve: zqjs.Value,
-        reject: zqjs.Value,
-        payload: Payload,
-    };
-}
-
-/// The generic wrapper generator
-/// Payload: The type of data your parser returns (e.g., struct, string, number)
-/// parseFn: Runs on Main Thread. Converts JS args -> Payload
-/// workFn:  Runs on Worker Thread. Converts Payload -> Result String (or error)
+/// The Bridge: Connects a JS Call -> Zig Parser -> Thread Pool -> JS Promise
 pub fn bindAsync(
     comptime Payload: type,
-    comptime parseFn: fn (ctx: zqjs.Context, args: []const zqjs.Value) anyerror!Payload,
+    // 1. Parser: Runs on Main Thread (JS Context -> Zig Data)
+    //    DESIGN: We pass EventLoop so the parser has direct access to the heap-persisted allocator
+    comptime parseFn: fn (loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) anyerror!Payload,
+    // 2. Worker: Runs on Thread Pool (Zig Data -> Result String)
     comptime workFn: fn (allocator: std.mem.Allocator, payload: Payload) anyerror![]u8,
 ) qjs.JSCFunction {
-    const binder = struct {
-        // This is the actual C-compatible function QuickJS calls
+
+    // We generate a custom C-Function struct for this specific task type
+    const Binder = struct {
+
+        // This is the actual C-function exposed to QuickJS
         fn callback(
             ctx_ptr: ?*qjs.JSContext,
             _: qjs.JSValue,
@@ -34,37 +26,34 @@ pub fn bindAsync(
         ) callconv(.c) qjs.JSValue {
             const ctx = zqjs.Context{ .ptr = ctx_ptr };
 
-            // 1. Get EventLoop (Boilerplate removed)
+            // A. Boilerplate: Get Event Loop ONCE (fetched here, passed to parser)
             const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
 
-            // 2. Prepare Arguments Slice (Zig-style)
-            // We cast the C pointer to a Zig slice for easier handling in the parser
+            // B. Boilerplate: Argument Slicing
             const args = if (argc > 0) argv[0..@intCast(argc)] else &[_]zqjs.Value{};
             const safe_args: []const zqjs.Value = @ptrCast(args);
 
-            // 3. Parse Arguments (User Logic)
-            const payload = parseFn(ctx, safe_args) catch |err| {
-                // If parsing fails, throw JS exception immediately
+            // C. USER LOGIC: Parse Arguments
+            //    CRITICAL: Pass 'loop' so parser can use loop.allocator directly
+            //    This is the allocator created by EventLoop.create() - persisted on the heap
+            const payload = parseFn(loop, ctx, safe_args) catch |err| {
                 if (err == error.OutOfMemory) return ctx.throwOutOfMemory();
-                // Assume parser set a JS exception if it returned a different error,
-                // or throw a generic one if not.
+                // If the parser didn't throw a JS exception already, throw a generic one
                 if (!ctx.hasException()) return ctx.throwTypeError("Invalid arguments");
                 return zqjs.EXCEPTION;
             };
-            // Note: If payload needs freeing on error beyond this point, user logic handles it?
-            // Actually, we transfer ownership to the worker task below.
 
-            // 4. Create Promise (Boilerplate removed)
+            // D. Boilerplate: Create Promise
             var resolving_funcs: [2]qjs.JSValue = undefined;
             const promise = qjs.JS_NewPromiseCapability(ctx_ptr, &resolving_funcs);
             if (ctx.isException(promise)) {
-                // If payload has a destructor, we technically leak it here unless Payload handles it.
-                // For simple types/duped strings, we might need a `freePayload` fn if we want to be 100% safe.
+                // Technically we leak 'payload' here if it owns memory,
+                // but this case (Promise creation failure) is catastrophic anyway.
                 return promise;
             }
 
-            // 5. Create Generic Task
-            const task_data = GenericTask(Payload){
+            // E. Pack data for the thread
+            const task_data = GenericTask{
                 .loop = loop,
                 .ctx = ctx,
                 .resolve = resolving_funcs[0],
@@ -72,62 +61,63 @@ pub fn bindAsync(
                 .payload = payload,
             };
 
-            // 6. Spawn Worker
+            // F. Spawn Worker
             loop.spawnWorker(workerWrapper, task_data) catch {
                 qjs.JS_FreeValue(ctx_ptr, resolving_funcs[0]);
                 qjs.JS_FreeValue(ctx_ptr, resolving_funcs[1]);
                 qjs.JS_FreeValue(ctx_ptr, promise);
-                // Also free payload if needed? Complex without a destructor trait.
                 return ctx.throwInternalError("Failed to spawn worker");
             };
 
             return promise;
         }
 
-        // The generic worker wrapper that runs on the thread
-        fn workerWrapper(task: GenericTask(Payload)) void {
-            // Run user work function
-            // We pass the loop allocator so the user can allocate the result string
+        // The Task Data Structure
+        const GenericTask = struct {
+            loop: *EventLoop,
+            ctx: zqjs.Context,
+            resolve: zqjs.Value,
+            reject: zqjs.Value,
+            payload: Payload,
+        };
+
+        // The Worker Wrapper (Runs on Thread)
+        fn workerWrapper(task: GenericTask) void {
+            // Run the user's work function
+            // We pass the loop's allocator so the user can allocate the result string
             const result_or_err = workFn(task.loop.allocator, task.payload);
 
-            // Handle Result
-            switch (result_or_err) {
-                .ok => |success_msg| {
+            if (result_or_err) |success_msg| {
+                // Success case
+                task.loop.enqueueTask(.{
+                    .ctx = task.ctx,
+                    .resolve = task.resolve,
+                    .reject = task.reject,
+                    .result = .{ .success = success_msg },
+                });
+            } else |err| {
+                // Error case
+                const err_msg = std.fmt.allocPrint(task.loop.allocator, "{s}", .{@errorName(err)}) catch {
+                    // OOM while formatting error - use stack literal
+                    const fallback = task.loop.allocator.dupe(u8, "Unknown Error (OOM)") catch return;
                     task.loop.enqueueTask(.{
                         .ctx = task.ctx,
                         .resolve = task.resolve,
                         .reject = task.reject,
-                        .result = .{ .success = success_msg },
+                        .result = .{ .failure = fallback },
                     });
-                },
-                .err => |err| {
-                    // 1. Try to format the specific Zig error
-                    var final_msg: []u8 = undefined;
+                    return;
+                };
 
-                    if (std.fmt.allocPrint(task.loop.allocator, "{s}", .{@errorName(err)})) |msg| {
-                        final_msg = msg;
-                    } else |_| {
-                        // 2. Fallback: specific error allocation failed (OOM)
-                        // We try to dupe a generic error message so 'enqueueTask' has something to free.
-                        final_msg = task.loop.allocator.dupe(u8, "Unknown Error (OOM)") catch {
-                            // 3. Catastrophic OOM: We cannot allocate ANY string.
-                            // We simply return here. The Promise will hang (never settle),
-                            // but this prevents a double-free crash or segfault.
-                            return;
-                        };
-                    }
-
-                    // 4. Enqueue the task with the valid 'final_msg'
-                    task.loop.enqueueTask(.{
-                        .ctx = task.ctx,
-                        .resolve = task.resolve,
-                        .reject = task.reject,
-                        .result = .{ .failure = final_msg }, // FIX: Use final_msg, not err_msg
-                    });
-                },
+                task.loop.enqueueTask(.{
+                    .ctx = task.ctx,
+                    .resolve = task.resolve,
+                    .reject = task.reject,
+                    .result = .{ .failure = err_msg },
+                });
             }
         }
     };
 
-    return binder.callback;
+    return Binder.callback;
 }

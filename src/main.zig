@@ -72,7 +72,7 @@ fn demoParallelExecution(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void 
         \\async function runDemo() {
         \\  let start = Date.now();
         \\  
-        \\  // 1. SEQUENTIAL (The "Slow" Way)
+        \\  // 1. SEQUENTIAL
         \\  console.log("🐌 Starting SEQUENTIAL tasks (await one by one)...");
         \\  await simulateWork(1000);
         \\  console.log("   - Task 1 done after :", Date.now()-start);
@@ -81,7 +81,7 @@ fn demoParallelExecution(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void 
         \\  const seqTime = Date.now() - start;
         \\  console.log(`🐌 Sequential Total: ${seqTime}ms (Expected ~2000ms)\n`);
         \\
-        \\  // 2. PARALLEL (The "Fast" Way)
+        \\  // 2. PARALLEL
         \\  start = Date.now();
         \\  console.log("🚀 Starting PARALLEL tasks (Promise.all)...");
         \\  
@@ -131,7 +131,7 @@ pub fn main() !void {
 
     // var event_loop = try EventLoop.init(gpa, rt);
     // defer event_loop.deinit();
-    try demoParallelExecution(gpa, rt);
+    // try demoParallelExecution(gpa, rt);
 
     // try first_QuickJS_test(rt);
     // try demoFirstGetValue(gpa, rt);
@@ -139,7 +139,7 @@ pub fn main() !void {
     // try demoVirtualDOM_1(gpa, rt);
     // try demoVirtualDOM_2(gpa, rt);
     // try demoExecuteScriptFromHTML(gpa, rt);
-    // try demoNativeBridge(ctx);
+    // try demoNativeBridge(gpa, rt);
 
     try demoEventLoop(gpa, rt);
     // try demoZigToAsyncJS(gpa, rt);
@@ -560,8 +560,12 @@ fn demoVirtualDOM_2(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 }
 
 /// Demo: Native Bridge - Passing data between QuickJS and Zig
-fn demoNativeBridge(ctx: zqjs.Context) !void {
+fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
+
+    const ctx = zqjs.Context.init(rt);
+    errdefer ctx.deinit();
+    ctx.setAllocator(&gpa);
 
     // NativeBridge.installNativeBridge(ctx, &gpa);
     // Test 1: Process regular array
@@ -573,14 +577,8 @@ fn demoNativeBridge(ctx: zqjs.Context) !void {
         \\console.log("Result from Zig:", result);
         \\result;
     ;
-    const result1 = z.qjs.JS_Eval(
-        ctx,
-        test1,
-        test1.len,
-        "<test1>",
-        0,
-    );
-    defer z.qjs.JS_FreeValue(ctx, result1);
+    const result1 = try ctx.eval(test1, "<test1>", .{});
+    defer ctx.freeValue(result1);
 
     // Test 2: Transform array (return new array)
     z.print("\n--- Test 2: Transform Array (Return New Array) ---\n", .{});
@@ -591,14 +589,8 @@ fn demoNativeBridge(ctx: zqjs.Context) !void {
         \\console.log("Result from Zig:", output);
         \\output;
     ;
-    const result2 = z.qjs.JS_Eval(
-        ctx,
-        test2,
-        test2.len,
-        "<test2>",
-        0,
-    );
-    defer z.qjs.JS_FreeValue(ctx, result2);
+    const result2 = try ctx.eval(test2, "<test2>", .{});
+    defer ctx.freeValue(result2);
 
     // Test 3: TypedArray (zero-copy performance)
     z.print("\n--- Test 3: TypedArray (Zero-Copy) ---\n", .{});
@@ -609,14 +601,8 @@ fn demoNativeBridge(ctx: zqjs.Context) !void {
         \\console.log("Result from Zig (zero-copy!):", result);
         \\result;
     ;
-    const result3 = z.qjs.JS_Eval(
-        ctx,
-        test3,
-        test3.len,
-        "<test3>",
-        0,
-    );
-    defer z.qjs.JS_FreeValue(ctx, result3);
+    const result3 = try ctx.eval(test3, "<test3>", .{});
+    defer ctx.freeValue(result3);
 
     // Test 4: Process object
     z.print("\n--- Test 4: Process Object ---\n", .{});
@@ -627,14 +613,8 @@ fn demoNativeBridge(ctx: zqjs.Context) !void {
         \\console.log("Result from Zig:", result);
         \\result;
     ;
-    const result4 = z.qjs.JS_Eval(
-        ctx,
-        test4,
-        test4.len,
-        "<test4>",
-        0,
-    );
-    defer z.qjs.JS_FreeValue(ctx, result4);
+    const result4 = try ctx.eval(test4, "<test4>", .{});
+    defer ctx.freeValue(result4);
 
     // Test 5: Process text
     z.print("\n--- Test 5: Text Processing ---\n", .{});
@@ -645,14 +625,8 @@ fn demoNativeBridge(ctx: zqjs.Context) !void {
         \\console.log("Cleaned by Zig:", clean);
         \\clean;
     ;
-    const result5 = z.qjs.JS_Eval(
-        ctx,
-        test5,
-        test5.len,
-        "<test5>",
-        0,
-    );
-    defer z.qjs.JS_FreeValue(ctx, result5);
+    const result5 = try ctx.eval(test5, "<test5>", .{});
+    defer ctx.freeValue(result5);
 
     z.print("\n✅ Native bridge working!\n", .{});
     z.print("  • JavaScript can call Zig functions\n", .{});
@@ -664,7 +638,7 @@ fn demoNativeBridge(ctx: zqjs.Context) !void {
 
 // /// Demo: Event Loop with setTimeout/setInterval
 fn demoEventLoop(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n** Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
+    z.print("\n=== Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
     const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
     ctx.setAllocator(&gpa);
