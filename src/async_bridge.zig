@@ -2,22 +2,80 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const EventLoop = @import("event_loop.zig").EventLoop;
+const EL = @import("event_loop.zig");
+const EventLoop = EL.EventLoop;
+const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
-/// The Bridge: Connects a JS Call -> Zig Parser -> Thread Pool -> JS Promise
+/// Standard String binding (UTF-8)
+/// Worker returns []u8 -> JS receives String
 pub fn bindAsync(
     comptime Payload: type,
-    // 1. Parser: Runs on Main Thread (JS Context -> Zig Data)
-    //    DESIGN: We pass EventLoop so the parser has direct access to the heap-persisted allocator
-    comptime parseFn: fn (loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) anyerror!Payload,
-    // 2. Worker: Runs on Thread Pool (Zig Data -> Result String)
-    comptime workFn: fn (allocator: std.mem.Allocator, payload: Payload) anyerror![]u8,
+    comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
+    comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
 ) qjs.JSCFunction {
+    return bindAsyncInternal(Payload, parseFn, workFn, false);
+}
 
-    // We generate a custom C-Function struct for this specific task type
+/// Binary binding (ArrayBuffer)
+/// Worker returns []u8 -> JS receives ArrayBuffer
+pub fn bindAsyncBuffer(
+    comptime Payload: type,
+    comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
+    comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
+) qjs.JSCFunction {
+    return bindAsyncInternal(Payload, parseFn, workFn, true);
+}
+
+/// JSON Auto-Serialization Binding
+/// Worker returns arbitrary Zig Type -> Bridge serializes to JSON String -> JS receives String
+pub fn bindAsyncJson(
+    comptime Payload: type,
+    comptime Result: type,
+    comptime parseFn: fn (loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) anyerror!Payload,
+    comptime workFn: fn (allocator: std.mem.Allocator, payload: Payload) anyerror!Result,
+) qjs.JSCFunction {
+    const Wrapper = struct {
+        fn wrappedWorkFn(outer_allocator: std.mem.Allocator, payload: Payload) anyerror![]u8 {
+            // Setup Arena for temporary Worker allocations (Result struct)
+            var arena = std.heap.ArenaAllocator.init(outer_allocator);
+            defer arena.deinit();
+            const arena_alloc = arena.allocator();
+
+            // Run User Logic (using Arena Allocator)
+            // 'result_struct' and all its fields are allocated inside the arena.
+            const result_struct = workFn(arena_alloc, payload) catch |err| {
+                if (Payload == []u8 or Payload == []const u8) {
+                    outer_allocator.free(payload);
+                }
+                return err;
+            };
+
+            var out: std.Io.Writer.Allocating = .init(outer_allocator);
+            try std.json.Stringify.value(result_struct, .{ .whitespace = .indent_2 }, &out.writer);
+
+            if (Payload == []u8 or Payload == []const u8) {
+                outer_allocator.free(payload);
+            }
+
+            return out.toOwnedSlice();
+        }
+    };
+
+    // Wrapper to adapt the user's struct-returning function to the required []u8 signature
+
+    // Use standard UTF-8 binding since JSON is text
+    return bindAsync(Payload, parseFn, Wrapper.wrappedWorkFn);
+}
+
+// --- Internal Generic Generator ---
+
+fn bindAsyncInternal(
+    comptime Payload: type,
+    comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
+    comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
+    comptime is_binary: bool,
+) qjs.JSCFunction {
     const Binder = struct {
-
-        // This is the actual C-function exposed to QuickJS
         fn callback(
             ctx_ptr: ?*qjs.JSContext,
             _: qjs.JSValue,
@@ -26,33 +84,25 @@ pub fn bindAsync(
         ) callconv(.c) qjs.JSValue {
             const ctx = zqjs.Context{ .ptr = ctx_ptr };
 
-            // A. Boilerplate: Get Event Loop ONCE (fetched here, passed to parser)
-            const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+            // [FIX] Thread-safe context retrieval
+            const rc = RuntimeContext.get(ctx);
+            const loop = rc.loop;
 
-            // B. Boilerplate: Argument Slicing
             const args = if (argc > 0) argv[0..@intCast(argc)] else &[_]zqjs.Value{};
             const safe_args: []const zqjs.Value = @ptrCast(args);
 
-            // C. USER LOGIC: Parse Arguments
-            //    CRITICAL: Pass 'loop' so parser can use loop.allocator directly
-            //    This is the allocator created by EventLoop.create() - persisted on the heap
+            // Parse Arguments
             const payload = parseFn(loop, ctx, safe_args) catch |err| {
                 if (err == error.OutOfMemory) return ctx.throwOutOfMemory();
-                // If the parser didn't throw a JS exception already, throw a generic one
                 if (!ctx.hasException()) return ctx.throwTypeError("Invalid arguments");
                 return zqjs.EXCEPTION;
             };
 
-            // D. Boilerplate: Create Promise
+            // Create Promise
             var resolving_funcs: [2]qjs.JSValue = undefined;
             const promise = qjs.JS_NewPromiseCapability(ctx_ptr, &resolving_funcs);
-            if (ctx.isException(promise)) {
-                // Technically we leak 'payload' here if it owns memory,
-                // but this case (Promise creation failure) is catastrophic anyway.
-                return promise;
-            }
+            if (ctx.isException(promise)) return promise;
 
-            // E. Pack data for the thread
             const task_data = GenericTask{
                 .loop = loop,
                 .ctx = ctx,
@@ -61,7 +111,6 @@ pub fn bindAsync(
                 .payload = payload,
             };
 
-            // F. Spawn Worker
             loop.spawnWorker(workerWrapper, task_data) catch {
                 qjs.JS_FreeValue(ctx_ptr, resolving_funcs[0]);
                 qjs.JS_FreeValue(ctx_ptr, resolving_funcs[1]);
@@ -72,7 +121,6 @@ pub fn bindAsync(
             return promise;
         }
 
-        // The Task Data Structure
         const GenericTask = struct {
             loop: *EventLoop,
             ctx: zqjs.Context,
@@ -81,24 +129,24 @@ pub fn bindAsync(
             payload: Payload,
         };
 
-        // The Worker Wrapper (Runs on Thread)
         fn workerWrapper(task: GenericTask) void {
-            // Run the user's work function
-            // We pass the loop's allocator so the user can allocate the result string
             const result_or_err = workFn(task.loop.allocator, task.payload);
 
-            if (result_or_err) |success_msg| {
-                // Success case
+            if (result_or_err) |success_data| {
+                // Select the correct union variant based on is_binary flag
+                const res_variant = if (is_binary)
+                    EL.AsyncTask.TaskResult{ .success_bin = success_data }
+                else
+                    EL.AsyncTask.TaskResult{ .success_utf8 = success_data };
+
                 task.loop.enqueueTask(.{
                     .ctx = task.ctx,
                     .resolve = task.resolve,
                     .reject = task.reject,
-                    .result = .{ .success = success_msg },
+                    .result = res_variant,
                 });
             } else |err| {
-                // Error case
                 const err_msg = std.fmt.allocPrint(task.loop.allocator, "{s}", .{@errorName(err)}) catch {
-                    // OOM while formatting error - use stack literal
                     const fallback = task.loop.allocator.dupe(u8, "Unknown Error (OOM)") catch return;
                     task.loop.enqueueTask(.{
                         .ctx = task.ctx,

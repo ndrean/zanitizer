@@ -1,6 +1,5 @@
 //! Build-time QuickJS binding generator
 //! Generates type-safe wrappers using wrapper.zig types consistently
-//! Refactored to use RuntimeContext for isolation.
 //!
 //! Usage: zig run tools/gen_bindings.zig -- src/bindings_generated.zig
 
@@ -10,12 +9,13 @@ const BindingSpec = struct {
     name: []const u8,
     zig_func_name: []const u8,
     kind: enum { static, method }, // static = on document, method = on prototype
+    // TODO: add `accessor` (getter/setter) instead of the functional approach
     args: []const ArgType,
     return_type: ReturnType,
 };
 
 const ArgType = union(enum) {
-    allocator, // Uses rc.allocator
+    allocator, // std.mem.Allocator (retrieved from context, hidden from JS)
 
     // SOURCES
     this_element, // *HTMLElement from 'this'
@@ -166,7 +166,7 @@ const bindings = [_]BindingSpec{
         .zig_func_name = "z.setInnerHTML",
         .kind = .method,
         .args = &.{ .this_element, .string },
-        .return_type = .element,
+        .return_type = .element, // Returns the element itself (or new root)
     },
     .{
         .name = "innerHTML",
@@ -204,7 +204,6 @@ pub fn main() !void {
         \\const w = @import("wrapper.zig");
         \\const qjs = z.qjs;
         \\const DOMBridge = @import("dom_bridge.zig").DOMBridge;
-        \\const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
         \\
         \\
     );
@@ -260,7 +259,6 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
         \\    argv: [*c]qjs.JSValue,
         \\) callconv(.c) qjs.JSValue {{
         \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
-        \\    const rc = RuntimeContext.get(ctx);
         \\
     , .{ func.zig_func_name, func.name });
 
@@ -279,25 +277,21 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     for (func.args) |arg| {
         switch (arg) {
             .this_element, .this_node => uses_this = true,
-            .string, .document, .document_root, .element, .node => uses_ctx = true,
-            // Allocator removed from uses_ctx because we use rc.allocator now
+            .string, .allocator, .document, .document_root, .element, .node => uses_ctx = true,
             else => {},
         }
     }
     if (!uses_this) {
         try writer.writeAll("    _ = this_val;\n");
     }
-
     // Suppress ctx usage check if nothing uses it
+    // ctx is used if: args use it, or return type needs wrapping
     const return_needs_ctx = (func.return_type == .element or func.return_type == .node or
         func.return_type == .optional_element or func.return_type == .optional_node or
         func.return_type == .string or func.return_type == .error_string or func.return_type == .optional_string or
         func.return_type == .int32 or func.return_type == .uint32 or func.return_type == .boolean);
-
-    // Note: 'rc' uses ctx, so ctx is almost always used now.
-    // We'll keep the suppression logic just in case, but updated.
     if (!uses_ctx and !return_needs_ctx) {
-        // try writer.writeAll("    _ = ctx;\n"); // Context is used for RuntimeContext.get(ctx)
+        try writer.writeAll("    _ = ctx;\n");
     }
 
     // 3. EXTRACT ARGUMENTS
@@ -307,30 +301,27 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     for (func.args, 0..) |arg, i| {
         switch (arg) {
             .allocator => {
-                // [FIX] Use rc.allocator (Thread-local allocator)
-                try writer.print("    const arg{d} = rc.allocator;\n", .{i});
+                // UPDATE: Use ctx.getAllocator() directly
+                try writer.print("    const arg{d} = ctx.getAllocator();\n", .{i});
                 allocator_idx = i;
             },
             .this_element => {
-                // [FIX] Use rc.classes.dom_node
                 try writer.print(
-                    \\    const elem_ptr{d} = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+                    \\    const elem_ptr{d} = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
                     \\    if (elem_ptr{d} == null) return w.EXCEPTION;
                     \\    const arg{d}: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr{d}));
                     \\
                 , .{ i, i, i, i });
             },
             .this_node => {
-                // [FIX] Use rc.classes.dom_node
                 try writer.print(
-                    \\    const node_ptr{d} = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+                    \\    const node_ptr{d} = qjs.JS_GetOpaque(this_val, z.dom_class_id.*);
                     \\    if (node_ptr{d} == null) return w.EXCEPTION;
                     \\    const arg{d}: *z.DomNode = @ptrCast(@alignCast(node_ptr{d}));
                     \\
                 , .{ i, i, i, i });
             },
             .document => {
-                // [FIX] Use rc.classes.dom_node
                 try writer.print(
                     \\    const global{d} = ctx.getGlobalObject();
                     \\    defer ctx.freeValue(global{d});
@@ -338,14 +329,13 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
                     \\    defer ctx.freeValue(doc_obj{d});
                     \\    const native_doc{d} = ctx.getPropertyStr(doc_obj{d}, "_native_doc");
                     \\    defer ctx.freeValue(native_doc{d});
-                    \\    const doc_ptr{d} = qjs.JS_GetOpaque(native_doc{d}, rc.classes.dom_node);
+                    \\    const doc_ptr{d} = qjs.JS_GetOpaque(native_doc{d}, z.dom_class_id.*);
                     \\    if (doc_ptr{d} == null) return w.EXCEPTION;
                     \\    const arg{d}: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr{d}));
                     \\
                 , .{ i, i, i, i, i, i, i, i, i, i, i, i, i });
             },
             .document_root => {
-                // [FIX] Use rc.classes.dom_node
                 try writer.print(
                     \\    const global{d} = ctx.getGlobalObject();
                     \\    defer ctx.freeValue(global{d});
@@ -353,7 +343,7 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
                     \\    defer ctx.freeValue(doc_obj{d});
                     \\    const native_doc{d} = ctx.getPropertyStr(doc_obj{d}, "_native_doc");
                     \\    defer ctx.freeValue(native_doc{d});
-                    \\    const doc_ptr{d} = qjs.JS_GetOpaque(native_doc{d}, rc.classes.dom_node);
+                    \\    const doc_ptr{d} = qjs.JS_GetOpaque(native_doc{d}, z.dom_class_id.*);
                     \\    if (doc_ptr{d} == null) return w.EXCEPTION;
                     \\    const doc{d}: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr{d}));
                     \\    const root{d} = z.documentRoot(doc{d});
@@ -363,9 +353,8 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
                 , .{ i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i, i });
             },
             .element => {
-                // [FIX] Use rc.classes.dom_node
                 try writer.print(
-                    \\    const elem_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], rc.classes.dom_node);
+                    \\    const elem_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], z.dom_class_id.*);
                     \\    if (elem_arg_ptr{d} == null) return ctx.throwTypeError("Argument {d} must be a DOM Element");
                     \\    const arg{d}: *z.HTMLElement = @ptrCast(@alignCast(elem_arg_ptr{d}));
                     \\
@@ -373,9 +362,8 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
                 js_arg_idx += 1;
             },
             .node => {
-                // [FIX] Use rc.classes.dom_node
                 try writer.print(
-                    \\    const node_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], rc.classes.dom_node);
+                    \\    const node_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], z.dom_class_id.*);
                     \\    if (node_arg_ptr{d} == null) return ctx.throwTypeError("Argument {d} must be a DOM Node");
                     \\    const arg{d}: *z.DomNode = @ptrCast(@alignCast(node_arg_ptr{d}));
                     \\
@@ -453,7 +441,7 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     // 5. RETURN VALUE
     switch (func.return_type) {
         .void_type => try writer.writeAll("    return w.UNDEFINED;\n"),
-
+        // UPDATE: Replace ctx_ptr with ctx in these calls
         .element => try writer.writeAll("    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;\n"),
         .node => try writer.writeAll("    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;\n"),
 
@@ -473,9 +461,9 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
         .boolean => try writer.writeAll("    return ctx.newBool(result);\n"),
 
         .document, .error_document => {
-            // [FIX] Use rc.classes.dom_node instead of z.dom_class_id.*
+            // Document creation might still use manual objects if wrapDocument isn't in DOMBridge yet
             try writer.writeAll(
-                \\    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(rc.classes.dom_node));
+                \\    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(z.dom_class_id.*));
                 \\    _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
                 \\    return doc_obj;
                 \\

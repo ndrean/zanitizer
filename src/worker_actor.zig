@@ -15,6 +15,7 @@ pub const WorkerActor = struct {
     mailbox: Mailbox(WorkerMessage),
 
     pub fn init(allocator: std.mem.Allocator) !*WorkerActor {
+        std.debug.print("[WorkerActor] init---\n", .{});
         const self = try allocator.create(WorkerActor);
         self.* = .{
             .allocator = allocator,
@@ -51,10 +52,10 @@ pub const WorkerActor = struct {
         // 2. The Event Loop
         while (running) {
             // A. Execute any ready JS tasks (Microtasks/Promises)
-            _ = rt.executePendingJob();
+            _ = try rt.executePendingJob();
 
             // B. Process async task results (if any completed)
-            loop.processAsyncTasks() catch {};
+            loop.processAsyncTasks(); // catch {};
 
             // C. Check Timers (returns time to next timer in ms, or null if none)
             const next_timer_ms = loop.processTimers() catch null;

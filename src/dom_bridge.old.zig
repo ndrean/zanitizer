@@ -1,8 +1,10 @@
 const std = @import("std");
 const z = @import("root.zig");
-const w = @import("wrapper.zig");
+const w = @import("wrapper.zig"); // Your new safe wrapper
 const bindings = @import("bindings_generated.zig");
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+
+// Global Class ID (shared across contexts)
+pub var dom_class_id: w.ClassID = 0;
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -18,15 +20,12 @@ pub const DOMBridge = struct {
 
     // 2. INIT (Register Class & Create internal Doc)
     pub fn init(allocator: std.mem.Allocator, ctx: w.Context) !DOMBridge {
-        // [FIX] Retrieve the Thread-Local RuntimeContext
-        const rc = RuntimeContext.get(ctx);
-        const rt = ctx.getRuntime();
+        // Register the class once per Runtime
+        if (dom_class_id == 0) {
+            const rt = ctx.getRuntime();
+            dom_class_id = rt.newClassID();
 
-        // Register class ONLY if not already registered for this runtime
-        if (rc.classes.dom_node == 0) {
-            rc.classes.dom_node = rt.newClassID();
-
-            try rt.newClass(rc.classes.dom_node, .{
+            try rt.newClass(dom_class_id, .{
                 .class_name = "DOMNode",
                 .finalizer = domFinalizer,
             });
@@ -49,30 +48,24 @@ pub const DOMBridge = struct {
     // 3. INSTALLATION (Connect JS objects to Zig)
     pub fn installAPIs(self: *DOMBridge) !void {
         const ctx = self.ctx;
-        const rc = RuntimeContext.get(ctx);
-
         const global = ctx.getGlobalObject();
         defer ctx.freeValue(global);
 
         // A. Setup Prototype (Methods shared by all nodes)
         const proto = ctx.newObject();
-
         // Install generated methods (appendChild, etc.)
         bindings.installMethodBindings(ctx.ptr, proto);
 
-        // [FIX] Use local ID
-        ctx.setClassProto(rc.classes.dom_node, proto);
+        // Register this prototype for our Class ID
+        ctx.setClassProto(dom_class_id, proto);
 
         // B. Install Global APIs
-        try self.createDocumentAPI(global, rc.classes.dom_node);
+        try self.createDocumentAPI(global);
         try self.createWindowAPI(global);
         try self.createConsoleAPI(global);
-
-        const fn_val = ctx.newCFunction(js_reportResult, "sendToHost", 1);
-        try ctx.setPropertyStr(global, "sendToHost", fn_val);
     }
 
-    fn createDocumentAPI(self: *DOMBridge, global: w.Value, class_id: w.ClassID) !void {
+    fn createDocumentAPI(self: *DOMBridge, global: w.Value) !void {
         const ctx = self.ctx;
         const doc_obj = ctx.newObject();
 
@@ -95,8 +88,8 @@ pub const DOMBridge = struct {
         }
 
         // 4. Store Native Pointer (Hidden _native_doc)
-        // [FIX] Use local ID
-        const opaque_obj = ctx.newObjectClass(class_id);
+        // This is crucial for static bindings to find the C document
+        const opaque_obj = ctx.newObjectClass(dom_class_id);
         try ctx.setOpaque(opaque_obj, self.doc);
         try ctx.setPropertyStr(doc_obj, "_native_doc", opaque_obj);
 
@@ -142,9 +135,7 @@ pub const DOMBridge = struct {
     // --- WRAPPERS (Helpers for bindings) ---
 
     pub fn wrapElement(ctx: w.Context, element: *z.HTMLElement) !w.Value {
-        // [FIX] Get ID from context
-        const rc = RuntimeContext.get(ctx);
-        const obj = ctx.newObjectClass(rc.classes.dom_node);
+        const obj = ctx.newObjectClass(dom_class_id);
         try ctx.setOpaque(obj, element);
 
         // Add convenience properties like tagName
@@ -156,35 +147,11 @@ pub const DOMBridge = struct {
     }
 
     pub fn wrapNode(ctx: w.Context, node: *z.DomNode) !w.Value {
-        // [FIX] Get ID from context
-        const rc = RuntimeContext.get(ctx);
-        const obj = ctx.newObjectClass(rc.classes.dom_node);
+        const obj = ctx.newObjectClass(dom_class_id);
         try ctx.setOpaque(obj, node);
         return obj;
     }
 };
-
-fn js_reportResult(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    const ctx = z.wrapper.Context{ .ptr = ctx_ptr };
-    if (argc < 1) return z.wrapper.UNDEFINED;
-
-    const str = ctx.toCString(argv[0]) catch "???";
-    std.debug.print("[HOST MSG] {s}\n", .{str});
-    ctx.freeCString(str);
-
-    // 1. Get the Context State
-    const rc = RuntimeContext.get(ctx);
-
-    // 2. Free old result if exists
-    if (rc.last_result) |old_val| {
-        ctx.freeValue(old_val);
-    }
-
-    // 3. Store new result (Duplicate it so it survives!)
-    rc.last_result = ctx.dupValue(argv[0]);
-
-    return z.wrapper.UNDEFINED;
-}
 
 // --- NATIVE CALLBACKS (Using Wrapper API) ---
 
@@ -192,13 +159,12 @@ fn js_querySelector(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, a
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
 
-    // [FIX] Get RuntimeContext
-    const rc = RuntimeContext.get(ctx);
-
+    // 1. Get Selector
     const selector_str = ctx.toCString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeCString(selector_str);
     const selector = std.mem.span(selector_str);
 
+    // 2. Get Document (via global.document._native_doc)
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
     const doc_obj = ctx.getPropertyStr(global, "document");
@@ -206,13 +172,12 @@ fn js_querySelector(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, a
     const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
     defer ctx.freeValue(native_doc);
 
-    // [FIX] Use rc.classes.dom_node
-    const doc_ptr = ctx.getOpaque2(native_doc, rc.classes.dom_node);
+    const doc_ptr = ctx.getOpaque2(native_doc, dom_class_id);
     if (doc_ptr == null) return w.EXCEPTION;
     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
 
-    // [FIX] Use rc.allocator (Thread-safe)
-    const allocator = rc.allocator;
+    // 3. Execute Query
+    const allocator = ctx.getAllocator();
 
     // We need a root to search from
     _ = z.documentRoot(doc) orelse return w.NULL;
@@ -230,9 +195,6 @@ fn js_querySelectorAll(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
 
-    // [FIX] Get RuntimeContext
-    const rc = RuntimeContext.get(ctx);
-
     const selector_str = ctx.toCString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeCString(selector_str);
     const selector = std.mem.span(selector_str);
@@ -244,21 +206,18 @@ fn js_querySelectorAll(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int
     const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
     defer ctx.freeValue(native_doc);
 
-    // [FIX] Use rc.classes.dom_node
-    const doc_ptr = ctx.getOpaque2(native_doc, rc.classes.dom_node);
+    const doc_ptr = ctx.getOpaque2(native_doc, dom_class_id);
     if (doc_ptr == null) return w.EXCEPTION;
     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
 
-    // [FIX] Use rc.allocator
-    const allocator = rc.allocator;
-
+    const allocator = ctx.getAllocator();
     const elements = z.querySelectorAll(allocator, doc, selector) catch return w.EXCEPTION;
     defer allocator.free(elements);
 
     const array = ctx.newArray();
     for (elements, 0..) |elem, i| {
         const elem_obj = DOMBridge.wrapElement(ctx, elem) catch continue;
-        ctx.setPropertyUint32(array, @intCast(i), elem_obj) catch {};
+        ctx.setPropertyUint32(array, @intCast(i), elem_obj) catch {}; // setProperty consumes elem_obj ref
     }
     return array;
 }

@@ -23,20 +23,20 @@ pub const UNINITIALIZED = Value{ .tag = qjs.JS_TAG_UNINITIALIZED, .u = .{ .int32
 // pub const EXCEPTION = qjs.JS_EXCEPTION;
 
 // !! Context also defines
-pub inline fn isUndefined(val: qjs.JSValue) bool {
+pub inline fn isUndefined(val: Value) bool {
     return qjs.JS_IsUndefined(val);
     // QuickJS-ng headers usually return bool directly or int
 }
 
-pub inline fn isNull(val: qjs.JSValue) bool {
+pub inline fn isNull(val: Value) bool {
     return qjs.JS_IsNull(val);
 }
 
-pub inline fn isException(val: qjs.JSValue) bool {
+pub inline fn isException(val: Value) bool {
     return qjs.JS_IsException(val);
 }
 
-pub inline fn isFunction(ctx: ?*qjs.JSContext, val: qjs.JSValue) bool {
+pub inline fn isFunction(ctx: ?*qjs.JSContext, val: Value) bool {
     return qjs.JS_IsFunction(ctx, val);
 }
 
@@ -198,6 +198,7 @@ pub const Runtime = struct {
         return qjs.JS_DupValueRT(self.ptr, val);
     }
 
+    // Classes =========================================================================
     /// Register a custom class with the runtime.
     ///
     /// Example:
@@ -264,7 +265,7 @@ pub const Runtime = struct {
     //         return error.NewClassFailed;
     // }
 
-    // Job queue management
+    // Job queue management =========================================================
     pub inline fn isJobPending(self: *const Runtime) bool {
         return qjs.JS_IsJobPending(self.ptr);
     }
@@ -277,6 +278,7 @@ pub const Runtime = struct {
         return Context{ .ptr = pctx };
     }
 
+    // Memory Usage Tracking ========================================================
     pub const MemoryUsage = packed struct {
         malloc_size: i64,
         malloc_limit: i64,
@@ -394,13 +396,8 @@ pub const Runtime = struct {
         qjs.JS_SetHostPromiseRejectionTracker(self.ptr, js_promise_rejection_tracker, null);
     }
 
-    // Shared ArrayBuffer support
-    // pub inline fn setSharedArrayBufferFunctions(self: Runtime, functions: *const qjs.JSSharedArrayBufferFunctions) void {
-    //     qjs.JS_SetSharedArrayBufferFunctions(self.ptr, functions);
-    // }
-
     // Host callbacks
-    pub inline fn setInterruptHandler(self: Runtime, cb: ?qjs.JSInterruptHandler, ptr: ?*anyopaque) void {
+    pub inline fn setInterruptHandler(self: Runtime, cb: ?*const qjs.JSInterruptHandler, ptr: ?*anyopaque) void {
         qjs.JS_SetInterruptHandler(self.ptr, cb, ptr);
     }
 
@@ -408,82 +405,115 @@ pub const Runtime = struct {
         qjs.JS_SetCanBlock(self.ptr, can_block);
     }
 
-    // pub inline fn setHostPromiseRejectionTracker(self: Runtime, cb: ?qjs.JSHostPromiseRejectionTracker, ptr: ?*anyopaque) void {
-    //     qjs.JS_SetHostPromiseRejectionTracker(self.ptr, cb, ptr);
-    // }
+    // Module system- ================================================================
+    /// Enable ES6 Module Loading (import/export).
+    /// Supports relative paths and automatically appends '.js' if missing.
+    pub fn enableModuleLoader(self: *Runtime) void {
+        // We pass the Runtime's allocator to the C-callbacks via the opaque pointer
+        qjs.JS_SetModuleLoaderFunc(
+            self.ptr,
+            js_module_normalize,
+            js_module_loader,
+            @ptrCast(&self.allocator),
+        );
+    }
 
-    // Module system
-    // pub inline fn setModuleLoaderFunc(
-    //     self: Runtime,
-    //     module_normalize: ?qjs.JSModuleNormalizeFunc,
-    //     module_loader: ?qjs.JSModuleLoaderFunc,
-    //     ptr: ?*anyopaque,
-    // ) void {
-    //     qjs.JS_SetModuleLoaderFunc(self.ptr, module_normalize, module_loader, ptr);
-    // }
+    fn js_module_normalize(ctx: ?*qjs.JSContext, base_ptr: [*c]const u8, req_name_ptr: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) [*c]u8 {
+        if (base_ptr == null) {
+            return qjs.js_strdup(ctx, req_name_ptr);
+        }
 
-    // Runtime finalizer
-    // pub inline fn addRuntimeFinalizer(self: Runtime, finalizer: qjs.JSRuntimeFinalizer, arg: ?*anyopaque) !void {
-    //     const ret = qjs.JS_AddRuntimeFinalizer(self.ptr, finalizer, arg);
-    //     if (ret < 0) return error.AddFinalizerFailed;
-    // }
-
-    // 1. The C-Compatible Loader Function
-    fn js_module_loader(ctx: ?*qjs.JSContext, module_name: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef {
-        // Recover the context wrapper: we passed '&self.allocator' in setModuleLoader
         const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
         const allocator = allocator_ptr.*;
 
-        const name_span = std.mem.span(module_name);
+        // Zig slices for path.resolve
+        const req_name_slice = std.mem.span(req_name_ptr);
+        const base_slice = std.mem.span(base_ptr);
+        const base_dir = std.fs.path.dirname(base_slice) orelse ".";
+
+        // Zig owned
+        var resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, req_name_slice }) catch {
+            // On OOM or error, return null (or throw JS error if desired)
+            return null;
+        };
+        errdefer allocator.free(resolved_path);
+
+        if (!fileExists(resolved_path)) {
+            const with_ext = std.fmt.allocPrint(allocator, "{s}.js", .{resolved_path}) catch return null;
+            // If the .js version exists, use it. Otherwise, keep original (and fail in loader)
+            if (fileExists(with_ext)) {
+                allocator.free(resolved_path);
+                resolved_path = with_ext;
+            } else {
+                allocator.free(with_ext);
+            }
+        }
+
+        // Return to QuickJS allocation + adding null terminator. GC by QJS
+        const result = qjs.js_strndup(ctx, resolved_path.ptr, resolved_path.len);
+
+        // We are done with Zig's copy
+        allocator.free(resolved_path);
+
+        return result;
+    }
+
+    // Helper: Simple file existence check
+    fn fileExists(path: []const u8) bool {
+        const file = std.fs.cwd().openFile(path, .{ .mode = .read_only }) catch return false;
+        file.close();
+        return true;
+    }
+
+    // The C-Compatible Loader Function
+    fn js_module_loader(ctx: ?*qjs.JSContext, module_name_ptr: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef {
+        // Recover the context wrapper: we passed '&self.allocator' in setModuleLoader
+        const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+        const allocator = allocator_ptr.*;
+        // Zig slice for module name
+        const module_name_slice = std.mem.span(module_name_ptr);
 
         // Sanity check: prevent directory traversal in production!
 
-        const source = std.fs.cwd().readFileAlloc(
+        const source = std.fs.cwd().readFileAllocOptions(
             allocator,
-            name_span,
-            1_000_000,
-        ) catch {
-            _ = qjs.JS_ThrowReferenceError(ctx, "Could not load module '%s'", module_name);
+            module_name_slice,
+            1024 * 1024,
+            null, // No specific alignment
+            std.mem.Alignment.fromByteUnits(1),
+            0 // Sentinel value: \0
+            ,
+        ) catch |err| {
+            _ = qjs.JS_ThrowReferenceError(ctx, "Failed to load module '%s': %s", module_name_ptr, @errorName(err).ptr);
             return null;
         };
+
         defer allocator.free(source);
+
+        // const source = std.fs.cwd().readFileAlloc(
+        //     allocator,
+        //     name_span,
+        //     1_000_000,
+        // ) catch {
+        //     _ = qjs.JS_ThrowReferenceError(ctx, "Could not load module '%s'", module_name);
+        //     return null;
+        // };
+        // defer allocator.free(source);
 
         // Compile the module
         // JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
+        const flags = qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY;
         const func_val = qjs.JS_Eval(
             ctx,
             source.ptr,
             source.len,
-            module_name,
-            qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
+            module_name_ptr,
+            flags,
         );
 
         if (qjs.JS_IsException(func_val)) return null;
 
-        // return qjs.JS_VALUE_GET_PTR(func_val).module; <- C macro way
         return @ptrCast(func_val.u.ptr);
-    }
-
-    fn js_module_normalize(ctx: ?*qjs.JSContext, base: [*c]const u8, name: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) [*c]u8 {
-        if (base == null) {
-            return qjs.js_strdup(ctx, name);
-        }
-
-        const name_slice = std.mem.span(name);
-
-        const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-        const allocator = allocator_ptr.*;
-
-        const base_slice = std.mem.span(base);
-        const base_dir = std.fs.path.dirname(base_slice) orelse ".";
-
-        const resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch {
-            // On OOM or error, return null (or throw JS error if desired)
-            return null;
-        };
-        defer allocator.free(resolved_path); // Free Zig memory when done
-
-        return qjs.js_strndup(ctx, resolved_path.ptr, resolved_path.len);
     }
 
     /// Set the module loader function for ES6 modules.
@@ -568,7 +598,7 @@ pub const Context = packed struct {
     }
 
     pub inline fn newBool(_: Context, val: bool) Value {
-        return qjs.JSValue{
+        return Value{
             .tag = @as(i64, @bitCast(@as(c_longlong, qjs.JS_TAG_BOOL))),
             .u = qjs.JSValueUnion{
                 .int32 = @as(c_int, @intFromBool(val)),
@@ -1057,6 +1087,10 @@ pub const Context = packed struct {
         return qjs.JS_PromiseResult(self.ptr, promise);
     }
 
+    pub inline fn newPromiseCapability(self: Context, resolving_funcs: []anyopaque) Value {
+        return qjs.JS_NewPromiseCapability(self.ptr, resolving_funcs);
+    }
+
     // JSON methods
     pub inline fn parseJSON(self: Context, buf: []const u8, filename: [*:0]const u8) Value {
         return qjs.JS_ParseJSON(self.ptr, buf.ptr, buf.len, filename);
@@ -1072,6 +1106,59 @@ pub const Context = packed struct {
         const result = qjs.JS_JSONStringify(self.ptr, obj, undef, undef);
         if (self.isException(result)) return error.JSONStringifyFailed;
         return result;
+    }
+
+    /// Calls a global JS function with a Zig argument and returns a Zig struct.
+    ///
+    /// ## Example
+    /// You defined a JS function `myFunction()`. It takes a JSON-serializable object and returns another JSON-serializable object.
+    /// ```zig
+    /// const user: std.json.Parsed(ResultType) = try ctx.callAsJson(ResultType, "myFunction", result_type_instance);
+    /// ```
+    ///
+    /// Caller must run `result.deinit()` and use `result.value` of type `ResultType`.
+    pub fn callAsJson(self: Context, allocator: std.mem.Allocator, comptime ResultType: type, func_name: [:0]const u8, arg_payload: anytype) !std.json.Parsed(ResultType) {
+        // 1. Serialize Zig Arg -> JSON String
+        var out: std.Io.Writer.Allocating = .init(allocator);
+        try std.json.Stringify.value(arg_payload, .{ .whitespace = .indent_2 }, &out.writer);
+
+        const z_parsed = try out.toOwnedSliceSentinel(0);
+        defer allocator.free(z_parsed);
+        const json_slice = z_parsed[0 .. z_parsed.len - 1];
+
+        // 2. Parse JSON -> JS Object
+        const arg_js = self.parseJSON(json_slice, "<arg>");
+        defer self.freeValue(arg_js);
+        if (self.isException(arg_js)) return error.SerializationFailed;
+
+        // 3. Find Function
+        const global = self.getGlobalObject();
+        defer self.freeValue(global);
+        const func = self.getPropertyStr(global, func_name);
+        defer self.freeValue(func);
+        if (!self.isFunction(func)) return error.FunctionNotFound;
+
+        // 4. Call Function
+        const args = [_]Value{arg_js};
+        const result_js = self.call(func, global, &args);
+        defer self.freeValue(result_js);
+
+        if (self.isException(result_js)) {
+            _ = self.checkAndPrintException(); // Helper to print stack trace
+            return error.JSException;
+        }
+
+        // 5. Serialize JS Result -> JSON String
+        const result_json = self.jsonStringifySimple(result_js) catch return error.SerializationFailed;
+        defer self.freeValue(result_json);
+
+        const result_str = self.toZString(result_json) catch return error.SerializationFailed;
+        defer self.freeZString(result_str);
+
+        // 6. Deserialize JSON -> Zig Result
+        const parsed = std.json.parseFromSlice(ResultType, allocator, result_str, .{ .allocate = .alloc_always, .ignore_unknown_fields = true }) catch return error.DeserializationFailed;
+
+        return parsed;
     }
 
     // Atom handling
@@ -1125,7 +1212,54 @@ pub const Context = packed struct {
         return ptab[0..len];
     }
 
-    pub inline fn freePropertyEnum(self: Context, tab: []PropertyEnum) void {
+    /// Introspects a JS Value and prints its properties.
+    /// Useful for debugging or generic object handling.
+    pub fn inspectObject(self: Context, obj: Value) !void {
+        // 1. Handle non-objects gracefully
+        if (!self.isObject(obj)) {
+            const str = try self.toZString(obj);
+            defer self.freeZString(str);
+            std.debug.print("Value: {s}\n", .{str});
+            return;
+        }
+
+        // 2. Get all enumerable properties
+        const flags = qjs.JS_GPN_STRING_MASK | qjs.JS_GPN_ENUM_ONLY;
+        var ptab: [*c]qjs.JSPropertyEnum = undefined;
+        var len: u32 = 0;
+
+        if (qjs.JS_GetOwnPropertyNames(self.ptr, &ptab, &len, obj, @intCast(flags)) < 0) {
+            return error.JSException;
+        }
+        defer qjs.JS_FreePropertyEnum(self.ptr, ptab, len);
+
+        std.debug.print("Object Dump ({} properties):\n", .{len});
+
+        // 3. Iterate
+        var i: u32 = 0;
+        while (i < len) : (i += 1) {
+            const prop = ptab[i];
+
+            // Get Key
+            const key_val = qjs.JS_AtomToValue(self.ptr, prop.atom);
+            const key_str = try self.toZString(key_val);
+            defer {
+                self.freeZString(key_str);
+                qjs.JS_FreeValue(self.ptr, key_val);
+            }
+
+            // Get Value
+            const val = qjs.JS_GetProperty(self.ptr, obj, prop.atom);
+            defer qjs.JS_FreeValue(self.ptr, val);
+
+            const val_str = try self.toZString(val);
+            defer self.freeZString(val_str);
+
+            std.debug.print("{s}: {s}\n", .{ key_str, val_str });
+        }
+    }
+
+    pub inline fn freePropertyEnum(self: Context, tab: []qjs.JSPropertyEnum) void {
         // Cast back to C pointer for freeing
         qjs.JS_FreePropertyEnum(self.ptr, @ptrCast(tab.ptr), @intCast(tab.len));
     }

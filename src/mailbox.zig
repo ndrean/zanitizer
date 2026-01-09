@@ -13,7 +13,7 @@ pub fn Mailbox(comptime T: type) type {
 
         pub fn init(allocator: std.mem.Allocator) Self {
             return .{
-                .queue = std.ArrayList(T).init(allocator),
+                .queue = .{},
                 .allocator = allocator,
             };
         }
@@ -21,7 +21,7 @@ pub fn Mailbox(comptime T: type) type {
         pub fn deinit(self: *Self) void {
             self.mutex.lock();
             defer self.mutex.unlock();
-            self.queue.deinit();
+            self.queue.deinit(self.allocator);
         }
 
         /// Push a message and wake up receiver
@@ -31,7 +31,7 @@ pub fn Mailbox(comptime T: type) type {
 
             if (self.closed) return error.MailboxClosed;
 
-            try self.queue.append(msg);
+            try self.queue.append(self.allocator, msg);
             self.cond.signal(); // Wake up one waiting thread
         }
 

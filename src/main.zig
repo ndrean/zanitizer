@@ -1,22 +1,26 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("root.zig");
+const zqjs = z.wrapper;
 const event_loop_mod = @import("event_loop.zig");
 const EventLoop = event_loop_mod.EventLoop;
-const AsyncTask = event_loop_mod.AsyncTask;
-const NativeBridge = @import("js_native_bridge.zig");
-const zqjs = z.wrapper;
 const DOMBridge = z.dom_bridge.DOMBridge;
+const RCtx = @import("runtime_context.zig").RuntimeContext;
+const utils = @import("utils.zig");
+const ScriptEngine = @import("script_engine.zig").ScriptEngine;
+const parseCSV = @import("csv_parser.zig");
+
+const AsyncTask = event_loop_mod.AsyncTask;
+const AsyncBridge = @import("async_bridge.zig");
+// const NativeBridge = @import("js_native_bridge.zig");
 const Pt = @import("Point.zig");
 const js_consoleLog = @import("utils.zig").js_consoleLog;
-const AsyncBridge = @import("async_bridge.zig");
 
 const native_os = builtin.os.tag;
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
 pub var app_should_quit = std.atomic.Value(bool).init(false);
+
+// toggle the flag
 fn handleSigInt(_: c_int) callconv(.c) void {
-    // Just toggle the flag. Don't do complex work here.
     app_should_quit.store(true, .seq_cst);
 }
 // Setup function to call at start of main()
@@ -39,136 +43,56 @@ pub fn setupSignalHandler() void {
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
 }
 
-fn parseSimulate(ctx: zqjs.Context, args: []const zqjs.Value) !u64 {
-    if (args.len < 1) {
-        _ = ctx.throwTypeError("simulateWork requires 1 argument (ms)");
-        return error.InvalidArgs;
-    }
-    // Return the delay as u64 (the Payload)
-    return try ctx.toInt64(args[0]);
-}
-
-// on ThreadPool
-fn doSimulate(allocator: std.mem.Allocator, delay_ms: u64) ![]u8 {
-    // Blocking work
-    std.time.sleep(delay_ms * 1_000_000);
-
-    // Return result (must be allocated with 'allocator')
-    return std.fmt.allocPrint(allocator, "✅ Waited {d}ms via Generic Bridge!", .{delay_ms});
-}
-
-fn demoParallelExecution(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== Parallel Execution Demo ===\n\n", .{});
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-    ctx.setAllocator(&allocator);
-
-    const event_loop = try EventLoop.create(allocator, rt);
-    defer event_loop.destroy();
-    event_loop.linkSignalFlag(&app_should_quit);
-    try event_loop.install(ctx);
-
-    const code =
-        \\async function runDemo() {
-        \\  let start = Date.now();
-        \\  
-        \\  // 1. SEQUENTIAL
-        \\  console.log("🐌 Starting SEQUENTIAL tasks (await one by one)...");
-        \\  await simulateWork(1000);
-        \\  console.log("   - Task 1 done after :", Date.now()-start);
-        \\  await simulateWork(1000);
-        \\  console.log("   - Task 2 done after :", Date.now()-start);
-        \\  const seqTime = Date.now() - start;
-        \\  console.log(`🐌 Sequential Total: ${seqTime}ms (Expected ~2000ms)\n`);
-        \\
-        \\  // 2. PARALLEL
-        \\  start = Date.now();
-        \\  console.log("🚀 Starting PARALLEL tasks (Promise.all)...");
-        \\  
-        \\  // Launch both immediately!
-        \\  const p1 = simulateWork(1000);
-        \\  const p2 = simulateWork(1000);
-        \\  const p3 = simulateWork(1000);
-        \\
-        \\  // Wait for all to finish
-        \\  await Promise.all([p1, p2, p3]);
-        \\  
-        \\  const parTime = Date.now() - start;
-        \\  console.log(`🚀 Parallel Total: ${parTime}ms (Expected ~1000ms)`);
-        \\}
-        \\
-        \\runDemo();
-    ;
-
-    const res = try ctx.eval(code, "<parallel_demo>", .{});
-    defer ctx.freeValue(res);
-
-    try event_loop.run(.Script);
+fn setupAllocator() std.mem.Allocator {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const c_alloc = std.heap.c_allocator;
+    defer _ = debug_allocator.deinit();
+    return switch (builtin.mode) {
+        .Debug, .ReleaseSafe => debug_allocator.allocator(),
+        .ReleaseFast, .ReleaseSmall => c_alloc,
+    };
 }
 
 pub fn main() !void {
-    const gpa, const is_debug = gpa: {
-        if (native_os == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
-        };
-    };
-    defer if (is_debug) {
-        _ = debug_allocator.deinit();
-    };
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
 
-    // std.debug.print("Zig JSValue Size: {d}\n", .{@sizeOf(zqjs.Value)});
     setupSignalHandler();
 
-    // all QuickJS memory now goes through Zig allocator
-    const rt = try zqjs.Runtime.init(gpa);
+    // try first_QuickJS_test();
+    // try getValueFromQJSinZig();
+    // try simpleESM();
+    try importModule(allocator);
+    try test_event_loop(allocator);
+    try promise_scope(allocator);
+    try async_task_sequence_AB(allocator);
+    try async_task_sequence_ABCDEFGH(allocator);
+    try execute_Simple_Script_In_HTML();
+    try execute_Async_Script_In_HTML_And_Pass_To_Zig();
+    try execute_Passing_Binary_Data_from_Zig_to_JS_Async();
+    try firstJSONPass();
+    try simplifiedJSONPass(allocator);
+    try async_CSV_JSON_Parser(allocator);
+    try async_CSV_Tuple_Parser(allocator);
+    try JS_Proxy_And_Generators(allocator);
+}
+
+fn first_QuickJS_test() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+
+    const rt = try zqjs.Runtime.init(allocator);
     defer {
-        // Force garbage collection before destroying runtime
         rt.runGC();
         rt.deinit();
     }
-    rt.setRuntimeOpaque(rt);
 
-    try demoESM(gpa, rt);
-    try demoParallelExecution(gpa, rt);
-    try runDemoClass(gpa, rt);
-
-    try first_QuickJS_test(rt);
-    try getValueFromQJS(gpa, rt);
-    // try demoVirtualDOM_1(gpa, rt);
-    // try demoVirtualDOM_2(gpa, rt);
-    // try demoExecuteScriptFromHTML(gpa, rt);
-    // try demoNativeBridge(gpa, rt);
-
-    try demoEventLoop(gpa, rt);
-    // try demoZigToAsyncJS(gpa, rt);
-    // Test both local and global EventLoop patterns
-    // try runWithLocalEventLoops(gpa, rt);
-    // try runWithLocalEventLoops(gpa, rt);
-    // try runWithGlobalEventLoop(gpa, rt);
-    // try demoQuickJSProxyAndStreams(ctx);
-    // const css_content = try zexplore_example_com(gpa, "https://www.example.com");
-    // defer gpa.free(css_content);
-    // try demoSimpleParsing(gpa);
-    // try demoTemplate(gpa);
-    // try demoParserReUse(gpa);
-    // try demoStreamParser(gpa);
-    // try demoInsertAdjacentElement(gpa);
-    // try demoInsertAdjacentHTML(gpa);
-    // try demoSetInnerHTML(gpa);
-    // try demoSearchComparison(gpa);
-    // try demoSuspiciousAttributes(gpa);
-    // try demoNormalizer(gpa);
-    // try normalizeString_DOM_parsing_bencharmark(gpa);
-    // try serverSideRenderingBenchmark(gpa);
-
-}
-
-fn first_QuickJS_test(rt: *zqjs.Runtime) !void {
     const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
-    z.print("\n=== Executing JavaScript simple code ------\n", .{});
+
+    z.print("\n=== Executing JavaScript simple code --------------------------------\n", .{});
 
     // Simple arithmetic
     {
@@ -208,12 +132,23 @@ fn first_QuickJS_test(rt: *zqjs.Runtime) !void {
     }
 }
 
-fn getValueFromQJS(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== Get Int Value from QJS -> Zig and double it\n\n", .{});
+fn getValueFromQJSinZig() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+
+    const rt = try zqjs.Runtime.init(allocator);
+    defer {
+        rt.runGC();
+        rt.deinit();
+    }
 
     const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
-    ctx.setAllocator(&gpa);
+
+    z.print("\n=== Get Int Value from QJS -> Zig and double it---------------------------\n\n", .{});
+
+    // ctx.setAllocator(&allocator);
 
     // Absolutely minimal JavaScript - no DOM, no bindings
     const test_code =
@@ -227,7 +162,6 @@ fn getValueFromQJS(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         .{},
     );
     defer ctx.freeValue(result);
-    std.debug.print("{}", .{result.u.int32});
 
     const res_x: i32 = try ctx.toInt32(result);
     std.debug.assert(res_x * 2 == 4);
@@ -235,31 +169,53 @@ fn getValueFromQJS(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("Double the returned int in Zig: {d}\n", .{res_x * 2});
 }
 
-fn demoESM(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== ESM Module Demo ===\n\n", .{});
+// ESM Modules ----------------------------------------------------------------
 
-    // 1. CRITICAL: Enable the Module Loader (reads from disk)
+fn simpleESM() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+
+    const rt = try zqjs.Runtime.init(allocator);
+    defer {
+        rt.runGC();
+        rt.deinit();
+    }
+
+    // !! Enable the Module Loader (reads from disk)
     rt.setModuleLoader();
 
     const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
-    ctx.setAllocator(&allocator);
 
-    // 2. Install 'console.log' (so we can see output)
-    const console = ctx.newObject();
-    _ = try ctx.setPropertyStr(console, "log", ctx.newCFunction(js_consoleLog, "log", 1));
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    _ = try ctx.setPropertyStr(global, "console", console);
+    var loop = try EventLoop.create(allocator, rt);
+    defer loop.destroy();
 
-    // 3. Read the entry point source code
+    // Allocates, zeroes classes, and links to context automatically.
+    const rc = try RCtx.create(allocator, ctx, loop);
+    defer rc.destroy();
+
+    z.print("\n=== ESM Module Demo --------------------------------\n\n", .{});
+
+    // find where to register the DOM Class ID
+    var dom = try DOMBridge.init(allocator, ctx);
+    defer dom.deinit();
+    try dom.installAPIs();
+    try loop.install(ctx);
+
+    // Manual Install 'console.log' works
+    // const console = ctx.newObject();
+    // _ = try ctx.setPropertyStr(console, "log", ctx.newCFunction(js_consoleLog, "log", 1));
+    // const global = ctx.getGlobalObject();
+    // defer ctx.freeValue(global);
+    // _ = try ctx.setPropertyStr(global, "console", console);
+
     const source = std.fs.cwd().readFileAlloc(allocator, "js/app.js", 1024 * 1024) catch |err| {
         z.print("Error: Could not find 'app.js' in current directory.\n", .{});
         return err;
     };
     defer allocator.free(source);
 
-    // 4. Evaluate as a MODULE
     //    .type = .module tells QuickJS to treat top-level variables as scoped,
     //    enable strict mode, and allow 'import' statements.
     const val = try ctx.eval(
@@ -273,17 +229,57 @@ fn demoESM(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         _ = ctx.checkAndPrintException();
     }
 
-    // 5. Execute Module Jobs
-    //    Imports are resolved asynchronously. You must pump the job queue.
+    // Execute Module Jobs
+    // Imports are resolved asynchronously. You must pump the job queue.
     while ((try rt.executePendingJob()) != null) {}
 }
 
-fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    // Note: Don't deinit ctx here - it's owned by main() and shared across demos
-    z.print("\n=== Extracting and Executing Scripts ------\n", .{});
+fn importModule(allocator: std.mem.Allocator) !void {
+    z.print("\n=== Import Module Demo --------------------------------\n\n", .{});
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const source = std.fs.cwd().readFileAlloc(
+        allocator,
+        "js/import_test.js",
+        1024 * 1024,
+    ) catch |err| {
+        z.print("Error: Could not  find 'js/import_test.js'\n", .{});
+        return err;
+    };
+
+    defer allocator.free(source);
+
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
+
+    // 2. Evaluate as Module
+    // Our loader will see 'import ... from "js/vendor/es-toolkit.min.js"'
+    // and automatically load that file too.
+    const val = try engine.evalModule(c_source, "import_test.js");
+    defer engine.ctx.freeValue(val);
+
+    // Imports are resolved asynchronously
+    try engine.run();
+}
+
+// Execute Scripts in HTML ----------------------------------------------------
+fn execute_Simple_Script_In_HTML() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+
+    const rt = try zqjs.Runtime.init(allocator);
+    defer {
+        rt.runGC();
+        rt.deinit();
+    }
 
     const ctx = zqjs.Context.init(rt);
     defer ctx.deinit();
+
+    // Note: Don't deinit ctx here - it's owned by main() and shared across demos
+    z.print("\n=== Extracting and Executing Scripts --------------------------------\n\n", .{});
 
     // Create HTML with embedded JavaScript
     // Note: <script> tags in <head> might be removed by the HTML parser
@@ -312,8 +308,8 @@ fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !v
     // parse and extract <script> contents
     const doc = try z.createDocFromString(html);
     defer z.destroyDocument(doc);
-    // const node = z.documentRoot(doc).?;
-    // try z.prettyPrint(allocator, node);
+    const node = z.documentRoot(doc).?;
+    try z.prettyPrint(allocator, node);
 
     // Find all <script> elements
     const scripts = try z.querySelectorAll(allocator, doc, "script");
@@ -375,13 +371,849 @@ fn demoExecuteScriptFromHTML(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !v
     z.print("\n", .{});
 }
 
-// NOTE: Bindings are now split into static (document) and method (prototype)
-// Static bindings are installed on document via DOMBridge.createDocumentAPI
-// Method bindings are installed on prototype via DOMBridge.installAPIs
+// EVENT LOOP =================================================================
+fn promise_scope(allocator: std.mem.Allocator) !void {
+    const promise_test =
+        \\// Create a Promise
+        \\const promise = new Promise((resolve, reject) => {
+        \\  // Simulate async operation
+        \\  return resolve("Promise resolved!");
+        \\});
+        \\
+        \\let result = "pending";
+        \\sendToHost(result);
+        \\promise.then(value => {
+        \\  console.log("[JS] Promise before:", value);
+        \\  result = value;
+        \\}).then(() => {
+        \\  console.log("[JS] Promise final:", result);
+        \\  sendToHost(result);
+        \\  return result;
+        \\});
+    ;
+
+    z.print("\n=== Promise & scope & returned value --------------------------\n\n", .{});
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    const val2 = try engine.ctx.eval(promise_test, "<promise>", .{});
+    defer engine.ctx.freeValue(val2);
+
+    try engine.run(); // Run event loop to process promise jobs
+
+    std.debug.assert(engine.ctx.isPromise(val2));
+
+    const p_res = engine.ctx.promiseResult(val2);
+    defer engine.ctx.freeValue(p_res);
+    const res2_str = try engine.ctx.toZString(p_res);
+    defer engine.ctx.freeZString(res2_str);
+
+    try std.testing.expectEqualStrings(res2_str, "Promise resolved!");
+    z.print("[Zig] Promise Result: {s}\n\n", .{res2_str});
+}
+
+fn async_task_sequence_AB(allocator: std.mem.Allocator) !void {
+    const src =
+        \\const runner1 = () => {
+        \\  let str = '';
+        \\  return new Promise((resolve, reject) => {
+        \\    setTimeout(() => {
+        \\        str += 'B';
+        \\        resolve(str);
+        \\    }, 0);
+        \\    Promise.resolve().then(() => str += 'A');
+        \\  });
+        \\};
+        \\runner1().then(res => {
+        \\  console.log("[JS] :" + res);
+        \\  return res;
+        \\});
+    ;
+
+    z.print("\n=== Async Task Sequence 1 --------------------------------\n\n", .{});
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    const val = try engine.eval(src, "test.js");
+    try engine.run();
+    defer engine.ctx.freeValue(val);
+
+    std.debug.assert(engine.ctx.isPromise(val));
+
+    const p_res = engine.ctx.promiseResult(val);
+    defer engine.ctx.freeValue(p_res);
+    const txt = try engine.ctx.toZString(p_res);
+    defer engine.ctx.freeZString(txt);
+
+    try std.testing.expectEqualSlices(u8, "AB", txt);
+    z.print("[Zig] ✅expects 'AB', found: {s}\n", .{txt});
+}
+
+fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator) !void {
+    const src =
+        \\const runner2 = () => {
+        \\    let str = '';
+        \\    return new Promise((resolve, reject) => {
+        \\        setTimeout(() => str += 'B', 0);
+        \\        Promise.resolve().then(() => str += 'A');
+        \\        setTimeout(() => {
+        \\            setTimeout(() => {
+        \\                setTimeout(() => {
+        \\                    str += 'H';
+        \\                    resolve(str);
+        \\                }, 0);
+        \\                str += 'D';
+        \\                Promise.resolve().then(() => str += 'E');
+        \\                Promise.resolve().then(() => str += 'F');
+        \\                Promise.resolve().then(() => str += 'G');
+        \\            }, 0);
+        \\            Promise.resolve().then(() => str += 'C');
+        \\        }, 100);
+        \\    });
+        \\};
+        \\runner2().then(res => {
+        \\  console.log("[JS] " + res);
+        \\  return res;
+        \\});
+    ;
+
+    z.print("\n=== Async Task Sequence 2 -----------------------------------------\n\n", .{});
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const val = try engine.eval(src, "test.js");
+    defer engine.ctx.freeValue(val);
+    try engine.run(); // EventLoop run
+
+    std.debug.assert(engine.ctx.isPromise(val));
+
+    const p_res = engine.ctx.promiseResult(val);
+    defer engine.ctx.freeValue(p_res);
+    const txt = try engine.ctx.toZString(p_res);
+    defer engine.ctx.freeZString(txt);
+
+    try std.testing.expectEqualStrings(txt, "ABCDEFGH");
+
+    z.print("[Zig] ✅ expects 'ABCDEFGH', found: {s}\n", .{txt});
+}
+
+// Event Loop Demo: setTimeout, setInterval, async/await ----------------------
+fn test_event_loop(allocator: std.mem.Allocator) !void {
+    z.print("\n=== Event Loop Demo: setTimeout & setInterval --------------------------\n\n", .{});
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    // Test 1: Simple setTimeout
+    z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set a Global 'count=42'\n", .{});
+    const timeout_test =
+        \\globalThis.count = 0;
+        \\start = Date.now();
+        \\setTimeout(() => {
+        \\  globalThis.count = 42;
+        \\  console.log("🟢 Get final 'count' after setTimeout of 500ms fired: count = " + globalThis.count, "after: ", Date.now()-start, "ms");
+        \\}, 500);
+        \\globalThis.count; // Should be 0 initially
+    ;
+
+    const result1 = try engine.eval(timeout_test, "<timeout_test>");
+    defer engine.ctx.freeValue(result1);
+    try engine.run();
+
+    const initial_count: i32 = try engine.ctx.toInt32(result1);
+
+    z.print("🟢 Get initial 'count' (before timeout): {d}\n", .{initial_count});
+
+    // Test 2: setInterval with clearInterval
+    z.print("\n🟡 Execute \x1b[1m setInterval \x1b[0m of 200ms with 5 iterations", .{});
+    const interval_test =
+        \\let counter = 0;
+        \\start = Date.now(); 
+        \\const intervalId = setInterval(() => {
+        \\  counter++;
+        \\  console.log("🟡 Got Interval tick #", counter, ", expected after ", counter * 200 , ", got after ", Date.now()-start, "ms");
+        \\  if (counter >= 5) {
+        \\    clearInterval(intervalId);
+        \\    console.log("🟡 Interval cleared; expected  after ", counter * 200, ", got after ",Date.now()-start, "ms");
+        \\  }
+        \\}, 200);
+        \\intervalId;
+    ;
+
+    const result2 = try engine.eval(interval_test, "<interval_test>");
+    defer engine.ctx.freeValue(result2);
+
+    // Test 3: Multiple timers with different delays
+    z.print("\n⚪️ Start multiple timers (100ms, 300ms, 700ms)\n", .{});
+    const multiple_timers =
+        \\start = Date.now();
+        \\setTimeout(() => console.log("⚪️ Timer 1 expected after: 100ms", ", fired after: ", Date.now()-start, "ms"), 100);
+        \\setTimeout(() => console.log("⚪️ Timer 2 expected after: 300ms", ", fired after: ", Date.now()-start, "ms"), 300);
+        \\setTimeout(() => console.log("⚪️ Timer 3 expected after: 700ms", ", fired after: ", Date.now()-start, "ms"), 700);
+        \\"Timers scheduled";
+    ;
+
+    const result3 = try engine.eval(multiple_timers, "<multiple>");
+    defer engine.ctx.freeValue(result3);
+
+    const scheduled_msg = z.qjs.JS_ToCString(engine.ctx.ptr, result3);
+    if (scheduled_msg != null) {
+        defer z.qjs.JS_FreeCString(engine.ctx.ptr, scheduled_msg);
+        z.print("{s}\n", .{scheduled_msg});
+    }
+
+    // Test 4: Async/await with setTimeout (simulating async operations)
+    z.print("\n🔵 Execute \x1b[1mAsync/await\x1b[0m mocked as a setTimeout of 900ms ---\n", .{});
+    const async_test_0 =
+        \\async function delayedGreeting(txt, ms) {
+        \\  return new Promise((resolve) => {
+        \\    setTimeout(() => resolve(`🔵 ${txt} !`), ms);
+        \\  });
+        \\}
+        \\(async () => {
+        \\  start = Date.now();  
+        \\  console.log("🔵 Starting first async operation...IIEE");
+        \\  const delay = 900;
+        \\
+        \\  const msg = await delayedGreeting("Zig runs async QuickJS", delay);
+        \\  console.log("🔵 Async result ", msg, "received after ", Date.now()-start, "ms");
+        \\})();
+    ;
+
+    const async_test_1 =
+        \\async function delayedGreeting(txt, ms) {
+        \\  return new Promise((resolve) => {
+        \\    return setTimeout(() => resolve(`🟣 Hello, ${txt}!`), ms);
+        \\  });
+        \\}
+        \\
+        \\  start = Date.now();  
+        \\  console.log("🟣 Starting second chained async operation....");
+        \\  let delay = 850;
+        \\
+        \\  delayedGreeting("Async ZiggyQuickJS", delay).then(msg => {
+        \\     console.log("🟣 Async result ", msg, "received after ", Date.now()-start, "ms");
+        \\  });
+    ;
+
+    const async_test_2 =
+        \\async function delayedError(ms) {
+        \\  return new Promise((_, reject) => {
+        \\    setTimeout(() => reject(new Error("🔴 Failed")), ms);
+        \\  });
+        \\}
+        \\start = Date.now();
+        \\delay = 500;
+        \\console.log("🔴 Starting failing async operation....");
+        \\
+        \\delayedError(delay).catch((err) => {
+        \\  console.log(
+        \\    "🔴 Async error received after ",
+        \\    Date.now() - start,
+        \\    "ms:",
+        \\    err.message
+        \\  );
+        \\ });
+    ;
+
+    // _ = async_test_0; // Avoid unused variable warning
+
+    const result4 = try engine.eval(async_test_0, "<async0>");
+    defer engine.ctx.freeValue(result4);
+
+    const result5 = try engine.eval(async_test_1, "<async1>");
+    defer engine.ctx.freeValue(result5);
+    const result6 = try engine.eval(async_test_2, "<async2>");
+    // catch |err| {
+    //     // 1. Check if QuickJS has an exception pending
+    //     if (ctx.checkAndPrintException()) {
+    //         // This will print: "SyntaxError: Identifier 'delay' has already been declared"
+    //         return err;
+    //     }
+    //     return err; // Propagate unknown errors
+    // };
+    defer engine.ctx.freeValue(result6);
+
+    // Run the event loop to process all timers
+    z.print("\n[Zig] 🔄 Running event loop...\n\n", .{});
+    const now = std.time.milliTimestamp();
+    try engine.run();
+
+    // Verify final count value
+    const global = engine.ctx.getGlobalObject();
+    defer engine.ctx.freeValue(global);
+    const count_prop = engine.ctx.getPropertyStr(global, "count");
+    defer engine.ctx.freeValue(count_prop);
+
+    const final_count = try engine.ctx.toInt32(count_prop);
+    z.print("🟢 Check Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
+
+    const elapsed = std.time.milliTimestamp() - now;
+    z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n\n", .{elapsed});
+}
+// ---------------------------------------------------------------------------
+
+// Passing data JS -> Zig via Async Script Execution
+fn execute_Async_Script_In_HTML_And_Pass_To_Zig() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const allocator = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+
+    const rt = try zqjs.Runtime.init(allocator);
+    defer {
+        rt.runGC();
+        rt.deinit();
+    }
+
+    // !! Enable the Module Loader (reads from disk)
+    // rt.setModuleLoader();
+
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+
+    var loop = try EventLoop.create(allocator, rt);
+    defer loop.destroy();
+
+    // Context state: Allocates, zeroes classes, and links to context automatically.
+    const rc = try RCtx.create(allocator, ctx, loop);
+    defer rc.destroy();
+    try loop.install(ctx);
+
+    // Install libaries and APIs
+    var dom = try DOMBridge.init(allocator, ctx);
+    defer dom.deinit();
+    try dom.installAPIs(); // 'console'
+    try loop.install(ctx); // timers + async bindings
+
+    // Note: Don't deinit ctx here - it's owned by main() and shared across demos
+    z.print("\n=== Executing Async Script and passing data JS -> Zig ------------------------\n\n", .{});
+
+    // Possible use of:
+    //  - 'globalThis' to pass data back and forth. Comment out in this demo.
+    //  - or use `return` values.
+    //  - or use `sendToHost` helper function from 'dom_bridge' to pass data back to Zig immediately.
+
+    const html =
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<body>
+        \\  <h1>Test</h1>
+        \\  <script>
+        \\    //globalThis.result = null; // 'global' can be used to store data
+        \\    async function greet(name) {
+        \\      return new Promise(resolve => setTimeout(() => resolve({message: `Hello, ${name}!`}), 1000));
+        \\    }
+        \\    sendToHost("⏳ Going to process async call");
+        \\    greet("QuickJS from Zig")
+        \\    .then(msg => {
+        \\       console.log("[JS] ✅  callback received: ", JSON.stringify(msg));
+        \\       //globalThis.result = msg; // store in globalThis
+        \\       return msg;
+        \\    })
+        \\    .then((msg) => {
+        \\      sendToHost("⌛️ Processed async call")
+        \\      return msg;
+        \\    });  
+        \\  </script>
+        \\  <p>Content</p>
+        \\</body>
+        \\</html>
+    ;
+
+    // parse and extract <script> content
+    const doc = try z.createDocFromString(html);
+    defer z.destroyDocument(doc);
+    const node = z.documentRoot(doc).?;
+    try z.prettyPrint(allocator, node);
+
+    const script_elt = try z.querySelector(allocator, doc, "script");
+    const content = z.textContent_zc(z.elementToNode(script_elt.?));
+
+    // returns a Promise immediately
+    const result = try ctx.eval(
+        content,
+        "<async_script>",
+        .{}, // Default flags: type = .global
+    );
+    defer ctx.freeValue(result);
+
+    if (z.isException(result)) {
+        _ = ctx.checkAndPrintException();
+    }
+
+    // Run Event Loop (Resolves the Promises)
+    // The Promise object sitting in 'result' changes state to FULFILLED here.
+    try loop.run(.Script);
+
+    // const last_result_str = try ctx.toZString(rc.last_result.?);
+    // std.debug.print("Last result: {s}\n", .{last_result_str});
+    // defer ctx.freeZString(last_result_str);
+
+    std.debug.assert(ctx.isPromise(result));
+
+    const state = ctx.promiseState(result);
+    if (state == .Rejected) {
+        const reason = ctx.promiseResult(result);
+        defer ctx.freeValue(reason);
+        z.print("[Zig] ❌  Promise Rejected!\n", .{});
+
+        // Print the actual JS error (e.g., "TypeError: ...")
+        const err_str = try ctx.toZString(reason);
+        defer ctx.freeZString(err_str);
+        z.print("[Zig] ❌  Promise Rejected! Reason: {s}\n", .{err_str});
+        return;
+    }
+
+    std.debug.assert(state == .Fulfilled);
+
+    const p_res = ctx.promiseResult(result);
+    defer ctx.freeValue(p_res);
+
+    if (ctx.isString(p_res)) {
+        // Handle String Return (e.g. msg.message)
+        const str = try ctx.toZString(p_res);
+        defer ctx.freeZString(str);
+        z.print("[Zig] ✅  Received String: \"{s}\"\n", .{str});
+    } else if (ctx.isObject(p_res)) {
+        // Handle Object Return (e.g. the full msg object)
+        z.print("[Zig] ✅  Received Object:\n", .{});
+        try ctx.inspectObject(p_res);
+    } else if (ctx.isNumber(p_res)) {
+        // Handle Numbers
+        z.print("[Zig] ✅  Received Number: {d}\n", .{try ctx.toInt64(p_res)});
+    } else {
+        // Fallback
+        z.print("[Zig] ✅  Received Other (Tag: {d})\n", .{p_res.tag});
+    }
+
+    // rt.allocator.free(rc.last_result.?);
+
+    // [Alternatively], access data via 'globalThis'
+    // const global = ctx.getGlobalObject();
+    // defer ctx.freeValue(global);
+    // const received_data_val = ctx.getPropertyStr(global, "result");
+    // defer ctx.freeValue(received_data_val);
+    // if (ctx.isNull(received_data_val) or ctx.isUndefined(received_data_val)) {
+    // z.print("[Zig] ⚠️ Result is null/undefined. Did the async operation finish?\n", .{});
+    // } else {
+    //     const received_data_str = ctx.toZString(received_data_val) catch {
+    //         z.print("[Zig] ❌ Failed to convert result to string\n", .{});
+    //         return;
+    //     };
+    //     defer ctx.freeZString(received_data_str);
+    //     z.print("\n[Zig] ✅ Final Result received in Zig via Global: {s}\n\n", .{received_data_str});
+    // }
+}
+
+// ----------------------------------------------------------------
+
+fn execute_Passing_Binary_Data_from_Zig_to_JS_Async() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const rt = try zqjs.Runtime.init(allocator);
+    defer rt.deinit();
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&allocator);
+
+    var loop = try EventLoop.create(allocator, rt);
+    defer loop.destroy();
+    const rc = try RCtx.create(allocator, ctx, loop);
+    defer rc.destroy();
+
+    // Install Standard Libs
+    var dom = try DOMBridge.init(allocator, ctx);
+    defer dom.deinit();
+    try dom.installAPIs();
+    try loop.install(ctx);
+
+    // --- INSTALL CUSTOM BINARY BINDING ---
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+
+    // Create the C-Function using bindAsyncBuffer
+    const bin_fn = AsyncBridge.bindAsyncBuffer(
+        usize,
+        parseSizeArgs,
+        generateBinaryDataOfNumbersModulo255,
+    );
+
+    // Install as 'generateBinaryDataOfNumbersModulo255'
+    try z.utils.installFn(
+        ctx,
+        bin_fn,
+        global,
+        "getBinaryData",
+        "getBinaryData",
+        1,
+    );
+
+    z.print("\n=== Passing Binary Data From Zig to JS (ArrayBuffer) -------------------\n\n", .{});
+
+    const html =
+        \\<!DOCTYPE html>
+        \\<body>
+        \\  <script>
+        \\    console.log("Requesting 1024 bytes...");
+        \\    try {
+        \\      getBinaryData(1024).then(buffer => {
+        \\        sendToHost("Checking received binary data"); // immediate Zig notification
+        \\        // 1. Verify Type
+        \\        if (buffer instanceof ArrayBuffer) {
+        \\          console.log("[JS] ✅  Received ArrayBuffer!");
+        \\        } else {
+        \\          console.log("[JS] ❌ Error: Expected ArrayBuffer, got " + typeof buffer);
+        \\        }
+        \\
+        \\        // 2. Verify Content
+        \\        console.log("Byte Length: " + buffer.byteLength);
+        \\        
+        \\        const view = new Uint8Array(buffer);
+        \\        console.log("[JS] First byte: " + view[0]);   // Should be 0
+        \\        console.log("[JS] Second byte: " + view[1]);  // Should be 1
+        \\        console.log("[JS] 254th byte: " + view[254]); // Should be 254
+        \\        console.log("[JS] 255th byte: " + view[255]); // Should be 0
+        \\        console.log("[JS] Last byte: " + view[1023]); // Should be 1023 % 255
+        \\        sendToHost("Check complete");
+        \\        return "Done";
+        \\      })
+        \\    } catch (err) {
+        \\        console.error("Error calling getBinaryData:", err);
+        \\    }
+        \\  </script>
+        \\</body>
+    ;
+
+    const doc = try z.createDocFromString(html);
+    defer z.destroyDocument(doc);
+    const script_elt = try z.querySelector(allocator, doc, "script");
+    const content = z.textContent_zc(z.elementToNode(script_elt.?));
+
+    const result = try ctx.eval(content, "<async_binary>", .{});
+    defer ctx.freeValue(result);
+    if (z.isException(result)) _ = ctx.checkAndPrintException();
+
+    // Run Loop to process worker result
+    try loop.run(.Script);
+}
+
+fn generateBinaryDataOfNumbersModulo255(allocator: std.mem.Allocator, size: usize) ![]u8 {
+    // Allocate a buffer
+    const buffer = try allocator.alloc(u8, size);
+
+    // Fill with pattern (0, 1, 2...)
+    for (buffer, 0..) |*b, i| {
+        b.* = @intCast(i % 255);
+    }
+
+    return buffer;
+}
+fn parseSizeArgs(_: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !usize {
+    if (args.len < 1) return error.InvalidArgs;
+    var size: i32 = 0;
+    if (ctx.toInt32(args[0])) |val| {
+        size = val;
+    } else |_| return error.InvalidArgs;
+
+    if (size < 0) return error.InvalidArgs;
+    return @intCast(size);
+}
+
+// ----------------------------------------------------------------
+// A Zig struct to represente a User object
+const User = struct {
+    id: i32,
+    username: []const u8,
+    role: []const u8,
+    active: bool,
+};
+
+fn jsonZStringify(allocator: std.mem.Allocator, user: User) ![:0]u8 {
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    try std.json.Stringify.value(user, .{ .whitespace = .indent_2 }, &out.writer);
+    return try out.toOwnedSliceSentinel(0);
+}
+
+fn firstJSONPass() !void {
+    // --- Standard Setup ---
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const rt = try zqjs.Runtime.init(allocator);
+    defer rt.deinit();
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&allocator);
+
+    // no need the full EventLoop for this sync demo,
+    // but we install the console for debugging.
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+
+    const console = ctx.newObject();
+    const log_fn = ctx.newCFunction(z.utils.js_consoleLog, "log", 1);
+    _ = try ctx.setPropertyStr(console, "log", log_fn);
+    _ = try ctx.setPropertyStr(global, "console", console);
+
+    z.print("\n=== Zig_User{{}} -> JSON -> JS -> JSON -> Zig_User{{}} (JSON Object Passing) ------------\n\n", .{});
+
+    // Create Zig Data
+    const my_user = User{
+        .id = 101,
+        .username = "zig_fan",
+        .role = "guest",
+        .active = false,
+    };
+
+    // serailize Zig_struct into JSON_String
+    const parsed = try jsonZStringify(allocator, my_user);
+    defer allocator.free(parsed);
+
+    // const json_str = try allocator.dupeZ(u8, parsed);
+    // defer allocator.free(json_str);
+    const json_parsed = parsed[0 .. parsed.len - 1]; // remove sentinel
+
+    // parse JSON String -> quickJS JS_Object
+    const js_obj = ctx.parseJSON(json_parsed, "<json_loader>");
+    defer ctx.freeValue(js_obj);
+
+    if (ctx.isException(js_obj)) {
+        z.print("[Zig] ❌ Failed to parse JSON\n", .{});
+        return;
+    }
+
+    // Call the JS Function
+    const js_code =
+        \\function upgradeUser(user) {
+        \\    console.log("[JS]  🔹  Received user: " + JSON.stringify(user));
+        \\
+        \\    // Modify the object directly
+        \\    user.username = user.username.toUpperCase();
+        \\    user.role = "ADMIN"; 
+        \\    user.active = true;
+        \\    return user;
+        \\}
+    ;
+    const eval_ret = try ctx.eval(js_code, "<init>", .{});
+    ctx.freeValue(eval_ret);
+
+    // Get the function from global scope
+    const func_name = "upgradeUser";
+    const func_val = ctx.getPropertyStr(global, func_name);
+    defer ctx.freeValue(func_val);
+
+    if (!ctx.isFunction(func_val)) {
+        z.print("[Zig] ❌ Could not find function '{s}'\n", .{func_name});
+        return;
+    }
+
+    // Call it: upgradeUser(js_obj)
+    const args = [_]zqjs.Value{js_obj};
+    const result_obj = ctx.call(func_val, global, &args);
+    defer ctx.freeValue(result_obj);
+
+    std.debug.assert(ctx.isObject(result_obj));
+
+    if (ctx.isException(result_obj)) {
+        _ = ctx.checkAndPrintException();
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // STEP 5: Inspect the Result in Zig
+    // ---------------------------------------------------------
+    z.print("\n[Zig] 🔸  Result Object:\n", .{});
+
+    // wrapper helper iterates over all properties
+    try ctx.inspectObject(result_obj);
+
+    const val = try ctx.jsonStringifySimple(result_obj);
+    defer ctx.freeValue(val);
+    const val_str = try ctx.toZString(val);
+    defer ctx.freeZString(val_str);
+    const re_parsed = try std.json.parseFromSlice(User, allocator, val_str, .{});
+    defer re_parsed.deinit();
+    std.debug.print("[Zig] ✅  User{{}}.username: {s}\n", .{re_parsed.value.username});
+
+    // Or extract specific fields manually
+    const name_prop = ctx.getPropertyStr(result_obj, "username");
+    defer ctx.freeValue(name_prop);
+    const name_str = try ctx.toZString(name_prop);
+    defer ctx.freeZString(name_str);
+
+    z.print("\n✅ Direct verification from JS object: Username is now '{s}'\n", .{name_str});
+}
+
+fn simplifiedJSONPass(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Zig_User{{}} -> JSON -> JS -> JSON -> Zig_User{{}} (JSON Object Passing) ---------------\n\n", .{});
+
+    // Zig Data
+    const my_user = User{
+        .id = 101,
+        .username = "zig_fan",
+        .role = "guest",
+        .active = false,
+    };
+
+    const js_code =
+        \\function upgradeUser(user) {
+        \\    console.log("[JS]  🔹 Received user " + JSON.stringify(user));
+        \\    user.username = user.username.toUpperCase();
+        \\    user.role = "ADMIN"; 
+        \\    return user;
+        \\}
+    ;
+
+    const res = try engine.eval(js_code, "init.js");
+    engine.ctx.freeValue(res);
+
+    const result = try engine.call(User, "upgradeUser", my_user);
+    defer result.deinit();
+
+    const u = result.value;
+
+    z.print("[Zig] 🔸  Returned User{{}}:\n", .{});
+    inline for (std.meta.fields(User)) |f| {
+        switch (f.type) {
+            []const u8 => z.print("{s}: {s}\n", .{ f.name, @field(u, f.name) }),
+            else => z.print("{s}: {any}\n", .{ f.name, @field(u, f.name) }),
+        }
+    }
+
+    // try engine.run(); <-- for async event loop processing
+}
+
+// CSV Parser ----------------------------------------------------------------
+const Product = struct {
+    id: i32,
+    name: []const u8,
+    price: f64,
+    in_stock: bool,
+};
+
+// allocate CSV string in Loop allocator
+fn parseCSVArg(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) ![]u8 {
+    if (args.len < 1) return error.InvalidArgs;
+    // We must copy the string because the thread needs to own the memory.
+    // ctx.toZString uses a buffer that might be freed by QJS GC.
+    const str = try ctx.toZString(args[0]);
+    defer ctx.freeZString(str);
+
+    return loop.allocator.dupe(u8, str);
+}
+
+// 2. Worker: Calls the generic logic
+fn workerParseProducts(allocator: std.mem.Allocator, csv_text: []u8) ![]Product {
+    z.print("[Worker] Parsing.....\n", .{});
+    return parseCSV.parseCSVtoJSON(Product, allocator, csv_text);
+}
+
+fn async_CSV_JSON_Parser(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Zig Native CSV_as_JSON parser worker called from JS ------------------\n\n", .{});
+
+    // 1. Create the binding
+    // bindAsyncJson takes care of serializing []Product -> JSON String
+    const js_fn = AsyncBridge.bindAsyncJson([]u8, // Payload Type (The raw CSV string)
+        []Product, // Return Type (The List of Structs)
+        parseCSVArg, // Argument Parser
+        workerParseProducts // The Worker
+    );
+
+    // 2. Register it
+    try engine.registerFunction("parseProducts", js_fn, 1);
+
+    // 3. JS Code
+    const script =
+        \\{
+        \\ const csv = `101,Laptop,999.50,true
+        \\              102,Mouse,25.00,true
+        \\              103,Monitor,150.00,false
+        \\              104,Keyboard,45.75,true`
+        \\;
+        \\
+        \\ console.log("[JS] ⏳ Parsing CSV in background task...");
+        \\
+        \\ parseProducts(csv).then(jsonString => {
+        \\     // The bridge returns a JSON string to keep the transport light
+        \\     const products = JSON.parse(jsonString);
+        \\     
+        \\     console.log("[JS] ✅ Parsed " + products.length + " items:");
+        \\     products.forEach(p => {
+        \\         console.log(`[JS] ${p.name}: $${p.price}`);
+        \\     });
+        \\ });
+        \\}
+    ;
+
+    const res = try engine.eval(script, "test.js");
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+// ----------------------------------------------------------------
+
+fn workerParseTupleProducts(allocator: std.mem.Allocator, csv_text: []u8) ![]parseCSV.ProductRow {
+    // defer allocator.free(csv_text); // Clean up payload
+    z.print("[Worker] Parsing.....\n", .{});
+    return parseCSV.parseCSVToTuples(allocator, csv_text);
+}
+
+fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Zig Native CSV_as_Tuple parser worker called from JS --------------\n\n", .{});
+
+    // 1. Create the binding
+    // bindAsyncJson takes care of serializing []Product -> JSON String
+    const js_fn = AsyncBridge.bindAsyncJson([]u8, // Payload Type (The raw CSV string)
+        []parseCSV.ProductRow, // Return Type (The List of Structs)
+        parseCSVArg, // Argument Parser
+        workerParseTupleProducts // The Worker
+    );
+
+    // 2. Register it
+    try engine.registerFunction("parseProducts", js_fn, 1);
+
+    const script =
+        \\const csv_data = `101,Laptop,999.50
+        \\                  102,Mouse,25.00
+        \\                  103,Monitor,150.00
+        \\                  104,Keyboard,45.75`
+        \\;
+        \\console.log("[JS] ⏳ Parsing CSV in background task...");
+        \\
+        \\parseProducts(csv_data).then(jsonStr => {
+        \\   // 1. Parse the lightweight JSON
+        \\   const rows = JSON.parse(jsonStr); 
+        \\   console.log(`[JS] ✅ Loaded ${rows.length} rows`);
+        \\   // 2. Iterate with Destructuring (Restores "Column Names" visually)
+        \\   rows.forEach(([id, name, price]) => {
+        \\     // Now you can use variables 'id', 'name', 'price' naturally
+        \\     console.log(`[JS] Item #${id}: ${name} costs $${price}`);
+        \\   })
+        \\});
+    ;
+
+    // Or map it to objects if you really need to pass it to a UI library
+    // const uiData = rows.map(([id, name, price]) => ({ id, name, price }));
+    const res = try engine.eval(script, "test2.js");
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+
+// Virtual DOM Bridge Tests --------------------------------------------------
 
 /// Test the auto-generated QuickJS bindings
 fn demoVirtualDOM_1(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== Testing Auto-Generated Bindings ===\n\n", .{});
+    z.print("\n=== Testing Auto-Generated Bindings --------------\n\n", .{});
 
     const ctx = zqjs.Context.init(rt);
     errdefer ctx.deinit();
@@ -607,6 +1439,7 @@ fn demoVirtualDOM_2(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     rt.runGC();
 }
 
+// ---------------------------------------------------------------------------
 /// Demo: Native Bridge - Passing data between QuickJS and Zig
 fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
@@ -682,189 +1515,24 @@ fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
     z.print("  • Heavy computation runs at native speed\n\n", .{});
 }
 
-/// Console.log implementation for QuickJS
+// ---------------------------------------------------------------------------
 
-// /// Demo: Event Loop with setTimeout/setInterval
-fn demoEventLoop(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== Event Loop Demo: setTimeout & setInterval ------\n\n", .{});
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-    ctx.setAllocator(&gpa);
+// Proxy & Generators --------------------------------------------------------
+fn JS_Proxy_And_Generators(allocator: std.mem.Allocator) !void {
+    z.print("\n=== Proxy & Generators ------------------------------\n\n", .{});
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
 
-    // Initialize event loop
-    var event_loop = try EventLoop.create(gpa, rt);
-    defer event_loop.destroy();
-    event_loop.linkSignalFlag(&app_should_quit);
-
-    // Install timer APIs (setTimeout, setInterval, clearTimeout, clearInterval)
-    // Note: console.log is installed by install
-    try event_loop.install(ctx);
-
-    // Test 1: Simple setTimeout
-    z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set a Global 'count=42'\n", .{});
-    const timeout_test =
-        \\globalThis.count = 0;
-        \\start = Date.now();
-        \\setTimeout(() => {
-        \\  globalThis.count = 42;
-        \\  console.log("🟢 Get final 'count' after setTimeout of 500ms fired: count = " + globalThis.count, "after: ", Date.now()-start, "ms");
-        \\}, 500);
-        \\globalThis.count; // Should be 0 initially
-    ;
-
-    const result1 = try ctx.eval(timeout_test, "<timeout_test>", .{});
-    defer ctx.freeValue(result1);
-
-    const initial_count: i32 = try ctx.toInt32(result1);
-
-    z.print("🟢 Get initial 'count' (before timeout): {d}\n", .{initial_count});
-
-    // Test 2: setInterval with clearInterval
-    z.print("\n🟡 Execute \x1b[1m setInterval \x1b[0m of 200ms with 5 iterations", .{});
-    const interval_test =
-        \\let counter = 0;
-        \\start = Date.now(); 
-        \\const intervalId = setInterval(() => {
-        \\  counter++;
-        \\  console.log("🟡 Got Interval tick #", counter, ", expected after ", counter * 200 , ", got after ", Date.now()-start, "ms");
-        \\  if (counter >= 5) {
-        \\    clearInterval(intervalId);
-        \\    console.log("🟡 Interval cleared; expected  after ", counter * 200, ", got after ",Date.now()-start, "ms");
-        \\  }
-        \\}, 200);
-        \\intervalId;
-    ;
-
-    const result2 = try ctx.eval(interval_test, "<interval_test>", .{});
-    defer ctx.freeValue(result2);
-
-    // Test 3: Multiple timers with different delays
-    z.print("\n⚪️ Start multiple timers (100ms, 300ms, 700ms)\n", .{});
-    const multiple_timers =
-        \\start = Date.now();
-        \\setTimeout(() => console.log("⚪️ Timer 1 expected after: 100ms", ", fired after: ", Date.now()-start, "ms"), 100);
-        \\setTimeout(() => console.log("⚪️ Timer 2 expected after: 300ms", ", fired after: ", Date.now()-start, "ms"), 300);
-        \\setTimeout(() => console.log("⚪️ Timer 3 expected after: 700ms", ", fired after: ", Date.now()-start, "ms"), 700);
-        \\"Timers scheduled";
-    ;
-
-    const result3 = try ctx.eval(multiple_timers, "<multiple>", .{});
-    defer ctx.freeValue(result3);
-
-    const scheduled_msg = z.qjs.JS_ToCString(ctx.ptr, result3);
-    if (scheduled_msg != null) {
-        defer z.qjs.JS_FreeCString(ctx.ptr, scheduled_msg);
-        z.print("{s}\n", .{scheduled_msg});
-    }
-
-    // Test 4: Async/await with setTimeout (simulating async operations)
-    z.print("\n🔵 Execute \x1b[1mAsync/await\x1b[0m mocked as a setTimeout of 900ms ---\n", .{});
-    const async_test_0 =
-        \\async function delayedGreeting(txt, ms) {
-        \\  return new Promise((resolve) => {
-        \\    setTimeout(() => resolve(`🔵 ${txt} !`), ms);
-        \\  });
-        \\}
-        \\(async () => {
-        \\  start = Date.now();  
-        \\  console.log("🔵 Starting first async operation...IIEE");
-        \\  const delay = 900;
-        \\
-        \\  const msg = await delayedGreeting("Zig runs async QuickJS", delay);
-        \\  console.log("🔵 Async result ", msg, "received after ", Date.now()-start, "ms");
-        \\})();
-    ;
-
-    const async_test_1 =
-        \\async function delayedGreeting(txt, ms) {
-        \\  return new Promise((resolve) => {
-        \\    return setTimeout(() => resolve(`🟣 Hello, ${txt}!`), ms);
-        \\  });
-        \\}
-        \\
-        \\  start = Date.now();  
-        \\  console.log("🟣 Starting second chained async operation....");
-        \\  let delay = 850;
-        \\
-        \\  delayedGreeting("Async ZiggyQuickJS", delay).then(msg => {
-        \\     console.log("🟣 Async result ", msg, "received after ", Date.now()-start, "ms");
-        \\  });
-    ;
-
-    const async_test_2 =
-        \\async function delayedError(ms) {
-        \\  return new Promise((_, reject) => {
-        \\    setTimeout(() => reject(new Error("🔴 Failed")), ms);
-        \\  });
-        \\}
-        \\start = Date.now();
-        \\delay = 500;
-        \\console.log("🔴 Starting failing async operation....");
-        \\
-        \\delayedError(delay).catch((err) => {
-        \\  console.log(
-        \\    "🔴 Async error received after ",
-        \\    Date.now() - start,
-        \\    "ms:",
-        \\    err.message
-        \\  );
-        \\ });
-    ;
-
-    // _ = async_test_0; // Avoid unused variable warning
-
-    const result4 = try ctx.eval(async_test_0, "<async0>", .{});
-    defer ctx.freeValue(result4);
-
-    const result5 = try ctx.eval(async_test_1, "<async1>", .{});
-    defer ctx.freeValue(result5);
-
-    const result6 = try ctx.eval(async_test_2, "<async2>", .{});
-    // catch |err| {
-    //     // 1. Check if QuickJS has an exception pending
-    //     if (ctx.checkAndPrintException()) {
-    //         // This will print: "SyntaxError: Identifier 'delay' has already been declared"
-    //         return err;
-    //     }
-    //     return err; // Propagate unknown errors
-    // };
-    defer ctx.freeValue(result6);
-
-    // Run the event loop to process all timers
-    z.print("\n[Zig] 🔄 Running event loop...\n\n", .{});
-    const now = std.time.milliTimestamp();
-    try event_loop.run(.Script);
-
-    // Verify final count value
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-
-    const count_prop = ctx.getPropertyStr(global, "count");
-    defer ctx.freeValue(count_prop);
-
-    const final_count = try ctx.toInt32(count_prop);
-    z.print("🟢 Check Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
-
-    const elapsed = std.time.milliTimestamp() - now;
-    z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n\n", .{elapsed});
-}
-
-/// Demo: QuickJS Proxy and Async/Streams Support
-fn demoQuickJSProxyAndStreams(ctx: ?*z.qjs.JSContext) !void {
-    z.print("\n=== QuickJS Advanced Features: Proxy & Async ------\n\n", .{});
-
-    // Note: console.log is already installed globally in main()
-
-    // Test 1: ES6 Proxy - intercept property access
+    // Proxy - intercept property access--------------
     const proxy_test =
         \\// Create a reactive object using Proxy
         \\const handler = {
         \\  get: function(target, prop) {
-        \\    console.log(`Getting property: ${prop}`);
+        \\    console.log(`[JS] Getting property: ${prop}`);
         \\    return target[prop];
         \\  },
         \\  set: function(target, prop, value) {
-        \\    console.log(`Setting ${prop} = ${value}`);
+        \\    console.log(`[JS] Setting ${prop} = ${value}`);
         \\    target[prop] = value;
         \\    return true;
         \\  }
@@ -879,124 +1547,19 @@ fn demoQuickJSProxyAndStreams(ctx: ?*z.qjs.JSContext) !void {
         \\// Test setter
         \\proxy.version = "0.16.0";
         \\
-        \\"Proxy test complete";
     ;
 
     z.print("--- Test 1: ES6 Proxy ---\n", .{});
-    const result1 = z.qjs.JS_Eval(ctx, proxy_test, proxy_test.len, "<proxy>", 0);
-    defer z.qjs.JS_FreeValue(ctx, result1);
 
-    if (z.qjs.JS_IsException(result1) != 0) {
-        const exception = z.qjs.JS_GetException(ctx);
-        defer z.qjs.JS_FreeValue(ctx, exception);
-        const error_str = z.qjs.JS_ToCString(ctx, exception);
-        if (error_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, error_str);
-            z.print("Error: {s}\n", .{error_str});
-        }
-    } else {
-        const result_str = z.qjs.JS_ToCString(ctx, result1);
-        if (result_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, result_str);
-            z.print("Result: {s}\n\n", .{result_str});
-        }
-    }
+    const val1 = try engine.ctx.eval(proxy_test, "<proxy>", .{});
+    defer engine.ctx.freeValue(val1);
 
-    // Test 2: Promise support (basic async)
-    const promise_test =
-        \\// Create a Promise
-        \\const promise = new Promise((resolve, reject) => {
-        \\  // Simulate async operation
-        \\  resolve("Promise resolved!");
-        \\});
-        \\
-        \\let result = "pending";
-        \\promise.then(value => {
-        \\  result = value;
-        \\  console.log("Promise:", value);
-        \\});
-        \\
-        \\// Note: QuickJS executes promises synchronously unless you use the event loop
-        \\result;
-    ;
+    const result1_str = try engine.ctx.toZString(val1);
+    defer engine.ctx.freeZString(result1_str);
 
-    z.print("--- Test 2: Promise Support ---\n", .{});
-    const result2 = z.qjs.JS_Eval(ctx, promise_test, promise_test.len, "<promise>", 0);
-    defer z.qjs.JS_FreeValue(ctx, result2);
+    z.print("Result: {s}\n\n", .{result1_str});
 
-    if (z.qjs.JS_IsException(result2) != 0) {
-        const exception = z.qjs.JS_GetException(ctx);
-        defer z.qjs.JS_FreeValue(ctx, exception);
-        const error_str = z.qjs.JS_ToCString(ctx, exception);
-        if (error_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, error_str);
-            z.print("Error: {s}\n", .{error_str});
-        }
-    } else {
-        // Execute pending jobs (needed for promises)
-        _ = z.qjs.JS_ExecutePendingJob(z.qjs.JS_GetRuntime(ctx), null);
-
-        const result_str = z.qjs.JS_ToCString(ctx, result2);
-        if (result_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, result_str);
-            z.print("Result: {s}\n\n", .{result_str});
-        }
-    }
-
-    // Test 3: Async/Await (requires promise job execution)
-    const async_test =
-        \\async function fetchData() {
-        \\  return "Data from async function";
-        \\}
-        \\
-        \\let asyncResult = "not executed";
-        \\
-        \\(async () => {
-        \\  asyncResult = await fetchData();
-        \\  console.log("Async result:", asyncResult);
-        \\})();
-        \\
-        \\"Async function created";
-    ;
-
-    z.print("--- Test 3: Async/Await ---\n", .{});
-    const result3 = z.qjs.JS_Eval(ctx, async_test, async_test.len, "<async>", 0);
-    defer z.qjs.JS_FreeValue(ctx, result3);
-
-    if (z.qjs.JS_IsException(result3) != 0) {
-        const exception = z.qjs.JS_GetException(ctx);
-        defer z.qjs.JS_FreeValue(ctx, exception);
-        const error_str = z.qjs.JS_ToCString(ctx, exception);
-        if (error_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, error_str);
-            z.print("Error: {s}\n", .{error_str});
-        }
-    } else {
-        // Execute all pending promise jobs
-        var ctx_ptr: ?*z.qjs.JSContext = undefined;
-        while (z.qjs.JS_ExecutePendingJob(z.qjs.JS_GetRuntime(ctx), &ctx_ptr) > 0) {}
-
-        const result_str = z.qjs.JS_ToCString(ctx, result3);
-        if (result_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, result_str);
-            z.print("Sync result: {s}\n", .{result_str});
-        }
-
-        // Check the async result variable
-        const global = z.qjs.JS_GetGlobalObject(ctx);
-        defer z.qjs.JS_FreeValue(ctx, global);
-
-        const async_result_val = z.qjs.JS_GetPropertyStr(ctx, global, "asyncResult");
-        defer z.qjs.JS_FreeValue(ctx, async_result_val);
-
-        const async_result_str = z.qjs.JS_ToCString(ctx, async_result_val);
-        if (async_result_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, async_result_str);
-            z.print("Async variable value: {s}\n\n", .{async_result_str});
-        }
-    }
-
-    // Test 4: Generator functions
+    // Test: Generator functions
     const generator_test =
         \\function* numberGenerator() {
         \\  yield 1;
@@ -1016,115 +1579,14 @@ fn demoQuickJSProxyAndStreams(ctx: ?*z.qjs.JSContext) !void {
         \\JSON.stringify(values);
     ;
 
-    z.print("--- Test 4: Generator Functions ---\n", .{});
-    const result4 = z.qjs.JS_Eval(ctx, generator_test, generator_test.len, "<generator>", 0);
-    defer z.qjs.JS_FreeValue(ctx, result4);
+    z.print("--- Generator Functions ---\n", .{});
+    const val2 = try engine.ctx.eval(generator_test, "<generator>", .{});
+    defer engine.ctx.freeValue(val2);
 
-    if (z.qjs.JS_IsException(result4) != 0) {
-        const exception = z.qjs.JS_GetException(ctx);
-        defer z.qjs.JS_FreeValue(ctx, exception);
-        const error_str = z.qjs.JS_ToCString(ctx, exception);
-        if (error_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, error_str);
-            z.print("Error: {s}\n", .{error_str});
-        }
-    } else {
-        const result_str = z.qjs.JS_ToCString(ctx, result4);
-        if (result_str != null) {
-            defer z.qjs.JS_FreeCString(ctx, result_str);
-            z.print("Generator output: {s}\n\n", .{result_str});
-        }
-    }
+    const res2_str = try engine.ctx.toZString(val2);
+    defer engine.ctx.freeZString(res2_str);
 
-    z.print("✅ QuickJS supports:\n", .{});
-    z.print("  • ES6 Proxy (for reactive programming)\n", .{});
-    z.print("  • Promises (with job queue execution)\n", .{});
-    z.print("  • Async/Await (requires pending job execution)\n", .{});
-    z.print("  • Generators (yield/next pattern)\n", .{});
-    z.print("  • Symbol, WeakMap, WeakSet, etc.\n\n", .{});
-}
-
-// Demo: Async Task Infrastructure
-fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n[Zig] Passing data between Zig and Async Task\n\n", .{});
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-
-    // Initialize event loop
-    var event_loop = try EventLoop.init(allocator, rt);
-    defer event_loop.deinit();
-
-    try event_loop.install(ctx);
-
-    // Test: Manually enqueue an async task (simulating worker thread completion)
-
-    const promise_test =
-        \\globalThis.testPassed = false;
-        \\globalThis.receivedData = null;
-        \\
-        \\const promise = new Promise((resolve, reject) => {
-        \\  globalThis._testResolve = resolve;
-        \\  globalThis._testReject = reject;
-        \\});
-        \\
-        \\promise.then(data => {
-        \\  console.log("Promise resolved with data passed from Zig: ", data);
-        \\  globalThis.receivedData = data;
-        \\  globalThis.testPassed = true;
-        \\}).catch(err => {
-        \\  console.log("Promise rejected with:", err);
-        \\}).then(() => {
-        \\  setTimeout(() => console.log("✅Test completed!"), 100);
-        \\});
-    ;
-
-    const result1 = try ctx.eval(
-        promise_test,
-        "<promise_test>",
-        .{},
-    );
-    defer ctx.freeValue(result1);
-
-    // Get the resolve function
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-
-    const resolve_fn = ctx.getPropertyStr(global, "_testResolve");
-    defer ctx.freeValue(resolve_fn);
-
-    // Passing data from Zig to JS
-    const test_data = try allocator.dupe(u8, "Hello from Zig in Async Task!");
-
-    const async_task = AsyncTask{
-        .ctx = ctx,
-        .resolve = ctx.dupValue(resolve_fn),
-        .reject = zqjs.UNDEFINED,
-        .result = .{ .success = test_data },
-    };
-
-    z.print("Enqueueing async task...\n", .{});
-    event_loop.enqueueTask(async_task);
-
-    z.print("🔁 Running event loop...\n", .{});
-    try event_loop.run(.Script);
-
-    const test_passed_val = ctx.getPropertyStr(global, "testPassed");
-    defer ctx.freeValue(test_passed_val);
-
-    const test_passed = try ctx.toBool(test_passed_val);
-    z.print("🟢 Did the test pass ? {}\n", .{test_passed});
-
-    // Get the received data
-    const received_data_val = ctx.getPropertyStr(global, "receivedData");
-    defer ctx.freeValue(received_data_val);
-
-    if (!ctx.isNull(received_data_val)) {
-        const data_str = try ctx.toZString(received_data_val);
-        defer ctx.freeZString(data_str);
-        z.print("🟢 Received data: {s}\n\n", .{data_str});
-    } else {
-        z.print("🔴 No data received (promise may not have resolved)\n\n", .{});
-    }
+    z.print("Generator output: {s}\n\n", .{res2_str});
 }
 
 // ============================================================================
@@ -1417,6 +1879,276 @@ pub fn runDemoClass(_: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 
     z.print("=== Demo Complete ===\n", .{});
 }
+
+fn parseSimulate(ctx: zqjs.Context, args: []const zqjs.Value) !u64 {
+    if (args.len < 1) {
+        _ = ctx.throwTypeError("simulateWork requires 1 argument (ms)");
+        return error.InvalidArgs;
+    }
+    // Return the delay as u64 (the Payload)
+    return try ctx.toInt64(args[0]);
+}
+
+// on ThreadPool
+fn doSimulate(allocator: std.mem.Allocator, delay_ms: u64) ![]u8 {
+    // Blocking work
+    std.time.sleep(delay_ms * 1_000_000);
+
+    // Return result (must be allocated with 'allocator')
+    return std.fmt.allocPrint(allocator, "✅ Waited {d}ms via Generic Bridge!", .{delay_ms});
+}
+
+fn demoWorker(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    const JSWorkerModule = @import("js_worker.zig");
+
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&gpa);
+
+    var loop = try EventLoop.create(gpa, rt);
+    defer loop.destroy();
+
+    // 2. Install Features (Console, Worker Class)
+    try loop.install(ctx);
+    try JSWorkerModule.registerWorkerClass(ctx); // <-- "new Worker()"
+
+    // 3. Define the Test Script (Main Thread JS)
+    const test_script =
+        \\ console.log("[Main] Spawning worker...");
+        \\ const w = new Worker("js/worker.js", { type: 'module' });
+        \\
+        \\ // listener for messages from worker
+        \\ w.onmessage = (e) => {
+        \\     console.log("[Main] Received from worker:", JSON.stringify(e.data));
+        \\     if (e.data.result === 30) {
+        \\         console.log("[Main] TEST PASSED ✅");
+        \\         w.terminate(); // Cleanup
+        \\     }
+        \\ };
+        \\
+        \\ // Give worker a moment to boot (for logs)
+        \\ setTimeout(() => {
+        \\     console.log("[Main] Sending task...");
+        \\     w.postMessage({ op: 'calc', a: 10, b: 20 });
+        \\ }, 500);
+    ;
+
+    const res = try ctx.eval(test_script, "js/main.js", .{});
+    defer ctx.freeValue(res);
+
+    if (ctx.isException(res)) {
+        _ = ctx.checkAndPrintException();
+    }
+
+    // 5. Enter Loop (Runs until worker is terminated and timers clear)
+    try loop.run(.Script);
+
+    std.debug.print("Exited cleanly.\n", .{});
+}
+
+fn demoParallelExecution(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n=== Parallel Execution Demo ===\n\n", .{});
+
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+    ctx.setAllocator(&allocator);
+
+    const event_loop = try EventLoop.create(allocator, rt);
+    defer event_loop.destroy();
+    event_loop.linkSignalFlag(&app_should_quit);
+
+    try event_loop.install(ctx);
+
+    const code =
+        \\async function runDemo() {
+        \\  let start = Date.now();
+        \\  
+        \\  // 1. SEQUENTIAL
+        \\  console.log("🐌 Starting SEQUENTIAL tasks (await one by one)...");
+        \\  await simulateWork(1000);
+        \\  console.log("   - Task 1 done after :", Date.now()-start);
+        \\  await simulateWork(1000);
+        \\  console.log("   - Task 2 done after :", Date.now()-start);
+        \\  const seqTime = Date.now() - start;
+        \\  console.log(`🐌 Sequential Total: ${seqTime}ms (Expected ~2000ms)\n`);
+        \\
+        \\  // 2. PARALLEL
+        \\  start = Date.now();
+        \\  console.log("🚀 Starting PARALLEL tasks (Promise.all)...");
+        \\  
+        \\  // Launch both immediately!
+        \\  const p1 = simulateWork(1000);
+        \\  const p2 = simulateWork(1000);
+        \\  const p3 = simulateWork(1000);
+        \\
+        \\  // Wait for all to finish
+        \\  await Promise.all([p1, p2, p3]);
+        \\  
+        \\  const parTime = Date.now() - start;
+        \\  console.log(`🚀 Parallel Total: ${parTime}ms (Expected ~1000ms)`);
+        \\}
+        \\
+        \\runDemo();
+    ;
+
+    const res = try ctx.eval(code, "<parallel_demo>", .{});
+    defer ctx.freeValue(res);
+
+    try event_loop.run(.Script);
+}
+
+// Demo: Async Task Infrastructure
+fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+    z.print("\n[Zig] Passing data between Zig and Async Task\n\n", .{});
+
+    // Initialize event loop
+    var event_loop = try EventLoop.create(allocator, rt);
+    defer event_loop.destroy();
+
+    const ctx = zqjs.Context.init(rt);
+    defer ctx.deinit();
+
+    try event_loop.install(ctx);
+
+    // Test: Manually enqueue an async task (simulating worker thread completion)
+
+    const promise_test =
+        \\globalThis.testPassed = false;
+        \\globalThis.receivedData = null;
+        \\
+        \\const promise = new Promise((resolve, reject) => {
+        \\  globalThis._testResolve = resolve;
+        \\  globalThis._testReject = reject;
+        \\});
+        \\
+        \\promise.then(data => {
+        \\  console.log("Promise resolved with data passed from Zig: ", data);
+        \\  globalThis.receivedData = data;
+        \\  globalThis.testPassed = true;
+        \\}).catch(err => {
+        \\  console.log("Promise rejected with:", err);
+        \\}).then(() => {
+        \\  setTimeout(() => console.log("✅Test completed!"), 100);
+        \\});
+    ;
+
+    const result1 = try ctx.eval(
+        promise_test,
+        "<promise_test>",
+        .{},
+    );
+    defer ctx.freeValue(result1);
+
+    // Get the resolve function
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+
+    const resolve_fn = ctx.getPropertyStr(global, "_testResolve");
+    defer ctx.freeValue(resolve_fn);
+
+    // Passing data from Zig to JS
+    const test_data = try allocator.dupe(u8, "Hello from Zig in Async Task!");
+
+    const async_task = AsyncTask{
+        .ctx = ctx,
+        .resolve = ctx.dupValue(resolve_fn),
+        .reject = zqjs.UNDEFINED,
+        .result = .{ .success = test_data },
+    };
+
+    z.print("Enqueueing async task...\n", .{});
+    // event_loop.active_tasks += 1;
+    event_loop.enqueueTask(async_task);
+
+    z.print("🔁 Running event loop...\n", .{});
+    try event_loop.run(.Script);
+
+    const test_passed_val = ctx.getPropertyStr(global, "testPassed");
+    defer ctx.freeValue(test_passed_val);
+
+    const test_passed = try ctx.toBool(test_passed_val);
+    z.print("🟢 Did the test pass ? {}\n", .{test_passed});
+
+    // Get the received data
+    const received_data_val = ctx.getPropertyStr(global, "receivedData");
+    defer ctx.freeValue(received_data_val);
+
+    if (!ctx.isNull(received_data_val)) {
+        const data_str = try ctx.toZString(received_data_val);
+        defer ctx.freeZString(data_str);
+        z.print("🟢 Received data: {s}\n\n", .{data_str});
+    } else {
+        z.print("🔴 No data received (promise may not have resolved)\n\n", .{});
+    }
+}
+
+// fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+//     z.print("\n[Zig] Passing data between Zig and Async Task\n\n", .{});
+
+//     // 1. Init Context & Loop
+//     const ctx = zqjs.Context.init(rt);
+//     defer ctx.deinit();
+
+//     var event_loop = try EventLoop.create(allocator, rt);
+//     defer event_loop.destroy();
+
+//     try event_loop.install(ctx);
+
+//     // 2. Create a Promise in JS and expose its resolve/reject to Global
+//     const promise_setup =
+//         \\globalThis.receivedData = null;
+//         \\
+//         \\// Create a promise that we will resolve from Zig
+//         \\const promise = new Promise((resolve, reject) => {
+//         \\  globalThis._testResolve = resolve;
+//         \\  globalThis._testReject = reject;
+//         \\});
+//         \\
+//         \\promise.then(data => {
+//         \\  console.log("Promise resolved with:", data);
+//         \\  globalThis.receivedData = data;
+//         \\});
+//     ;
+
+//     const res = try ctx.eval(promise_setup, "<setup>", .{});
+//     defer ctx.freeValue(res);
+
+//     // 3. Get the resolve function from JS
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+//     const resolve_fn = ctx.getPropertyStr(global, "_testResolve");
+//     defer ctx.freeValue(resolve_fn);
+
+//     // 4. Create the Task
+//     const test_data = try allocator.dupe(u8, "Hello from Zig!");
+//     const async_task = AsyncTask{
+//         .ctx = ctx,
+//         .resolve = ctx.dupValue(resolve_fn), // Keep a strong ref for the loop
+//         .reject = zqjs.UNDEFINED,
+//         .result = .{ .success = test_data },
+//     };
+
+//     z.print("Enqueueing task directly...\n", .{});
+
+//     event_loop.enqueueTask(async_task);
+
+//     // 5. Run Loop
+//     z.print("🔁 Running event loop...\n", .{});
+//     try event_loop.run(.Script);
+
+//     // 6. Verify Result
+//     const received_val = ctx.getPropertyStr(global, "receivedData");
+//     defer ctx.freeValue(received_val);
+
+//     if (!ctx.isNull(received_val)) {
+//         const str = try ctx.toZString(received_val);
+//         defer ctx.freeZString(str);
+//         z.print("🟢 Success! JS received: {s}\n\n", .{str});
+//     } else {
+//         z.print("🔴 Failure: Data was null\n\n", .{});
+//     }
+// }
+// const css_content = try zexplore_example_com(gpa, "https://www.example.com");
 
 /// use `parseString` or `createDocFromString` to create a document with a BODY element populated by the input string
 fn demoSimpleParsing(_: std.mem.Allocator) !void {

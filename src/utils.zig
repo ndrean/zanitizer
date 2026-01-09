@@ -5,6 +5,11 @@ const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const Worker = @import("Worker.zig");
 
+pub fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
+    const named_fn = ctx.newCFunction(func, name, len);
+    _ = try ctx.setPropertyStr(obj, prop, named_fn);
+}
+
 pub fn js_consoleLog(ctx: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     var i: c_int = 0;
     while (i < argc) : (i += 1) {

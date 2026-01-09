@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/gen_bindings.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = optimize,
         }),
     });
 
@@ -123,10 +123,24 @@ pub fn build(b: *std.Build) void {
     const gen_bindings_step = b.step("gen-bindings", "Generate QuickJS bindings code");
     gen_bindings_step.dependOn(&gen_bindings_run.step);
 
+    // Code generator for Async QuickJS bindings
+    const gen_async_bindings = b.addExecutable(.{
+        .name = "gen_async_bindings",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/gen_async_bindings.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const gen_async_bindings_run = b.addRunArtifact(gen_async_bindings);
+    gen_async_bindings_run.addArg("src/async_bindings_generated.zig");
+    const gen_async_bindings_step = b.step("gen-async-bindings", "Generate Async QuickJS bindings code");
+    gen_async_bindings_step.dependOn(&gen_async_bindings_run.step);
+
     // SINGLE TEST TARGET - this runs ALL tests from all modules
     const lib_test = b.step("test", "Run units tests");
 
-    const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
+    // const coverage = b.option(bool, "test-coverage", "Generate test coverage") orelse false;
 
     var unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -146,17 +160,17 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibrary(zexplorer_lib);
     unit_tests.linkLibC();
 
-    if (coverage) {
-        // with kcov
-        unit_tests.setExecCmd(&[_]?[]const u8{
-            "kcov",
-            "--clean",
-            "--include-path=src/modules/",
-            "--exclude-path=lexbor_src_master/,lexbor_master_dist/,src/misc-files/",
-            "kcov-output", // output dir for kcov
-            null, // to get zig to use the --test-cmd-bin flag
-        });
-    }
+    // if (coverage) {
+    //     // with kcov
+    //     unit_tests.setExecCmd(&[_]?[]const u8{
+    //         "kcov",
+    //         "--clean",
+    //         "--include-path=src/modules/",
+    //         "--exclude-path=lexbor_src_master/,lexbor_master_dist/,src/misc-files/",
+    //         "kcov-output", // output dir for kcov
+    //         null, // to get zig to use the --test-cmd-bin flag
+    //     });
+    // }
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     run_unit_tests.skip_foreign_checks = true;

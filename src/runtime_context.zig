@@ -1,0 +1,52 @@
+const std = @import("std");
+const z = @import("root.zig");
+const zqjs = z.wrapper;
+const qjs = z.qjs;
+const EventLoop = @import("event_loop.zig").EventLoop;
+
+pub const RuntimeContext = struct {
+    allocator: std.mem.Allocator,
+    loop: *EventLoop,
+
+    // Central Registry of Class IDs for this Runtime
+    classes: struct {
+        dom_node: zqjs.ClassID = 0,
+        worker: zqjs.ClassID = 0,
+        event_loop: zqjs.ClassID = 0,
+    } = .{},
+    // for data coming from JS to Zig
+    last_result: ?zqjs.Value = null,
+
+    /// Install this struct into the JS Context
+    /// Static Factory: Allocates, Initializes, and Installs the Context state.
+    pub fn create(allocator: std.mem.Allocator, ctx: zqjs.Context, loop: *EventLoop) !*RuntimeContext {
+        const self = try allocator.create(RuntimeContext);
+
+        // Initialize fields (ensures .classes is zeroed)
+        self.* = .{
+            .allocator = allocator,
+            .loop = loop,
+            .classes = .{},
+        };
+
+        // Install into QuickJS immediately
+        // qjs.JS_SetContextOpaque(ctx.ptr, self);
+        ctx.setContextOpaque(self);
+
+        return self;
+    }
+
+    /// Cleanup function
+    pub fn destroy(self: *RuntimeContext) void {
+        const alloc = self.allocator;
+        alloc.destroy(self);
+    }
+
+    /// Retrieve this struct from the JS Context
+    pub fn get(ctx: zqjs.Context) *RuntimeContext {
+        const ptr = qjs.JS_GetContextOpaque(ctx.ptr);
+        // const ptr = ctx.getContextOpaque(ctx.ptr);
+        if (ptr == null) @panic("RuntimeContext not installed on Context!");
+        return @ptrCast(@alignCast(ptr));
+    }
+};

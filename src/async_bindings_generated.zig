@@ -2,9 +2,8 @@
 // DO NOT EDIT MANUALLY
 
 const AutoBridge = @import("auto_bridge.zig");
-const Worker = @import("Worker.zig");
+const Worker = @import("Worker.zig"); 
 const zqjs = @import("wrapper.zig");
-const Timers = @import("timers.zig");
 
 // Auto-generated async bindings
 /// fetch() -> Promise<string>
@@ -29,18 +28,8 @@ pub const js_readFile = AutoBridge.bindAsyncAuto(
 );
 
 
-/// Install all EventLoop bindings (standard + async)
+/// Install Async Worker bindings
 pub fn installAllBindings(ctx: zqjs.Context, global: zqjs.Value) !void {
-    // Standard EventLoop APIs (timers)
-    const setTimeout_fn = ctx.newCFunction(Timers.js_setTimeout, "setTimeout", 2);
-    _ = try ctx.setPropertyStr(global, "setTimeout", setTimeout_fn);
-    const setInterval_fn = ctx.newCFunction(Timers.js_setInterval, "setInterval", 2);
-    _ = try ctx.setPropertyStr(global, "setInterval", setInterval_fn);
-    const clearTimeout_fn = ctx.newCFunction(Timers.js_clearTimeout, "clearTimeout", 1);
-    _ = try ctx.setPropertyStr(global, "clearTimeout", clearTimeout_fn);
-    const clearInterval_fn = ctx.newCFunction(Timers.js_clearTimeout, "clearInterval", 1);
-    _ = try ctx.setPropertyStr(global, "clearInterval", clearInterval_fn);
-
     // Async worker APIs
     const fetch_fn = ctx.newCFunction(js_fetch, "fetch", 1);
     _ = try ctx.setPropertyStr(global, "fetch", fetch_fn);

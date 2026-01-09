@@ -1,11 +1,4 @@
-//! JavaScript Worker API implementation
-//! Provides `new Worker(scriptPath)` with standard Worker API
-//!
-//! Architecture:
-//! - Main thread creates Worker instance (JavaScript object)
-//! - Worker instance spawns OS thread with isolated QuickJS runtime
-//! - Communication via two mailboxes (main→worker, worker→main)
-//! - Events: 'message', 'error', 'messageerror'
+//! JavaScript Worker API implementation - Decoupled & Simplified
 
 const std = @import("std");
 const z = @import("root.zig");
@@ -14,384 +7,380 @@ const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const Mailbox = z.Mailbox;
 
-/// Message types for inter-thread communication
 pub const WorkerMessage = struct {
-    tag: enum {
-        PostMessage, // Data from main thread or worker thread
-        Terminate, // Terminate worker thread
-        Error, // Error occurred in worker
-    },
-    data: []u8, // JSON-serialized data or error message
+    tag: enum { PostMessage, Terminate, Error },
+    data: []u8,
 };
 
-/// Worker thread state (lives in worker thread)
-pub const WorkerThread = struct {
+/// The "Shared State" (Bridge Pattern)
+const WorkerCore = struct {
     allocator: std.mem.Allocator,
-    script_path: []const u8,
-    inbox: *Mailbox(WorkerMessage), // Messages FROM main thread
-    outbox: *Mailbox(WorkerMessage), // Messages TO main thread
-    terminate_flag: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    ref_count: std.atomic.Value(usize),
+    inbox: Mailbox(WorkerMessage),
+    outbox: Mailbox(WorkerMessage),
+    terminate_flag: std.atomic.Value(bool),
+    script_path: [:0]const u8,
 
-    pub fn run(self: *WorkerThread) void {
-        defer {
+    pub fn init(allocator: std.mem.Allocator, script_path: []const u8) !*WorkerCore {
+        std.debug.print("[WorkerCore] Init\n", .{});
+        const self = try allocator.create(WorkerCore);
+        self.* = .{
+            .allocator = allocator,
+            .ref_count = std.atomic.Value(usize).init(1),
+            .inbox = Mailbox(WorkerMessage).init(allocator),
+            .outbox = Mailbox(WorkerMessage).init(allocator),
+            .terminate_flag = std.atomic.Value(bool).init(false),
+            .script_path = try allocator.dupeZ(u8, script_path),
+        };
+        std.debug.print("[Core] Initialized count: 1\n", .{});
+        return self;
+    }
+
+    pub fn retain(self: *WorkerCore) void {
+        const prev = self.ref_count.fetchAdd(1, .seq_cst);
+        std.debug.print("[Core] Retain. New count: {}\n", .{prev + 1});
+    }
+
+    pub fn release(self: *WorkerCore) void {
+        const prev = self.ref_count.fetchSub(1, .seq_cst);
+        std.debug.print("[Core] Release. Prev count: {}\n", .{prev});
+        if (prev == 1) {
+            std.debug.print("[Core] RefCount 0. Destroying resources.\n", .{});
+            self.inbox.deinit();
+            self.outbox.deinit();
             self.allocator.free(self.script_path);
             self.allocator.destroy(self);
         }
+    }
 
-        // Setup isolated JavaScript environment
-        const rt = zqjs.Runtime.init(self.allocator) catch return;
+    pub fn signalTerminate(self: *WorkerCore) void {
+        std.debug.print("[Core] signalTerminate called\n", .{});
+        if (self.terminate_flag.load(.seq_cst)) return;
+        self.terminate_flag.store(true, .seq_cst);
+        std.debug.print("[Core] Flag stored. Sending wake message to INBOX...\n", .{});
+        const empty = self.allocator.alloc(u8, 0) catch return;
+        self.inbox.send(.{ .tag = .Terminate, .data = empty }) catch {};
+    }
+};
+
+const WorkerThread = struct {
+    pub fn run(core: *WorkerCore) void {
+        defer core.release();
+        std.debug.print("[Thread] STARTING\n", .{});
+
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+
+        const rt = zqjs.Runtime.init(allocator) catch return;
         defer rt.deinit();
 
-        // Install interrupt handler for graceful termination
-        rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
+        rt.setInterruptHandler(js_interrupt_handler, @ptrCast(core));
 
-        const ctx = zqjs.Context.init(&rt);
+        const ctx = zqjs.Context.init(rt);
         defer ctx.deinit();
+        ctx.setAllocator(&allocator);
 
-        var loop = EventLoop.create(self.allocator, &rt) catch return;
+        var loop = EventLoop.create(allocator, rt) catch return;
         defer loop.destroy();
         loop.install(ctx) catch return;
 
-        // Install Worker global APIs (postMessage, close)
-        self.installWorkerGlobals(ctx) catch return;
+        installWorkerGlobals(ctx, core, loop) catch return;
 
-        // Load and execute worker script
-        const script = self.loadScript() catch |err| {
-            self.sendError(@errorName(err)) catch {};
+        const script = std.fs.cwd().readFileAlloc(allocator, core.script_path, std.math.maxInt(usize)) catch |err| {
+            sendError(core, @errorName(err)) catch {};
             return;
         };
-        defer self.allocator.free(script);
+        defer allocator.free(script);
 
-        const result = ctx.eval(script, self.script_path, .{}) catch |err| {
-            self.sendError(@errorName(err)) catch {};
+        const result = ctx.eval(script, core.script_path, .{}) catch |err| {
+            sendError(core, @errorName(err)) catch {};
             return;
         };
         ctx.freeValue(result);
 
-        // Event loop
+        std.debug.print("[Thread] Waiting for messages...\n", .{});
+
         var running = true;
         while (running) {
-            // Execute pending JS tasks
-            _ = rt.executePendingJob();
+            _ = rt.executePendingJob() catch {};
+            _ = loop.processAsyncTasks();
 
-            // Process async tasks
-            loop.processAsyncTasks() catch {};
-
-            // Process timers and get next deadline
-            const next_timer_ms = loop.processTimers() catch null;
-            const wait_ms: i64 = next_timer_ms orelse 100;
+            const wait_ms: i64 = loop.processTimers() catch 100;
             const timeout_ns = @as(u64, @intCast(@max(wait_ms, 0))) * std.time.ns_per_ms;
 
-            // Wait for messages from main thread
-            if (self.inbox.receive(timeout_ns)) |msg| {
-                defer self.allocator.free(msg.data);
-
+            if (core.inbox.receive(timeout_ns)) |msg| {
+                defer core.allocator.free(msg.data);
                 switch (msg.tag) {
-                    .PostMessage => {
-                        // Fire 'onmessage' event
-                        self.fireMessageEvent(ctx, msg.data) catch {};
-                    },
+                    .PostMessage => fireMessageEvent(ctx, msg.data) catch {},
                     .Terminate => {
+                        std.debug.print("[Thread] Received TERMINATE signal.\n", .{});
                         running = false;
                     },
-                    .Error => {}, // Shouldn't receive this in worker
+                    .Error => {},
                 }
             } else |err| {
-                switch (err) {
-                    error.Timeout => {}, // Continue loop
-                    error.MailboxClosed => running = false,
-                    else => {},
-                }
+                if (err == error.MailboxClosed) running = false;
             }
+
+            if (core.terminate_flag.load(.seq_cst)) running = false;
         }
-    }
-
-    fn loadScript(self: *WorkerThread) ![]u8 {
-        const file = try std.fs.cwd().openFile(self.script_path, .{});
-        defer file.close();
-        return try file.readToEndAlloc(self.allocator, 10 * 1024 * 1024);
-    }
-
-    fn installWorkerGlobals(self: *WorkerThread, ctx: zqjs.Context) !void {
-        const global = ctx.getGlobalObject();
-        defer ctx.freeValue(global);
-
-        // Store WorkerThread pointer in context opaque
-        ctx.setContextOpaque(self);
-
-        // postMessage(data) - Send message to main thread
-        const post_message_fn = ctx.newCFunction(js_postMessage, "postMessage", 1);
-        _ = try ctx.setPropertyStr(global, "postMessage", post_message_fn);
-
-        // close() - Terminate worker from inside
-        const close_fn = ctx.newCFunction(js_close, "close", 0);
-        _ = try ctx.setPropertyStr(global, "close", close_fn);
-    }
-
-    fn fireMessageEvent(_: *WorkerThread, ctx: zqjs.Context, data: []const u8) !void {
-        const global = ctx.getGlobalObject();
-        defer ctx.freeValue(global);
-
-        // Get onmessage handler
-        const onmessage = ctx.getPropertyStr(global, "onmessage");
-        defer ctx.freeValue(onmessage);
-
-        if (!ctx.isFunction(onmessage)) return;
-
-        // Create event object: { data: <parsed> }
-        const event_obj = ctx.newObject();
-        defer ctx.freeValue(event_obj);
-
-        // Parse data as JSON
-        const data_val = ctx.parseJSON(data, "<message>");
-        const is_error = ctx.isException(data_val);
-
-        if (is_error) {
-            // Fallback to plain string if JSON parse fails
-            const str_val = ctx.newString(data);
-            _ = try ctx.setPropertyStr(event_obj, "data", str_val);
-        } else {
-            defer ctx.freeValue(data_val);
-            _ = try ctx.setPropertyStr(event_obj, "data", data_val);
-        }
-
-        // Call onmessage(event)
-        const result = ctx.call(onmessage, global, &[_]zqjs.Value{event_obj});
-        defer ctx.freeValue(result);
-    }
-
-    fn sendError(self: *WorkerThread, error_msg: []const u8) !void {
-        const copy = try self.allocator.dupe(u8, error_msg);
-        errdefer self.allocator.free(copy);
-        try self.outbox.send(.{ .tag = .Error, .data = copy });
     }
 };
 
-/// Interrupt handler for QuickJS runtime (allows graceful termination)
-fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
-    const ptr = opaque_ptr orelse return 0;
-    const self: *WorkerThread = @ptrCast(@alignCast(ptr));
-    // Return non-zero to interrupt JS execution
-    return if (self.terminate_flag.load(.seq_cst)) 1 else 0;
+fn installWorkerGlobals(ctx: zqjs.Context, core: *WorkerCore, loop: *EventLoop) !void {
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+
+    try registerWorkerClass(ctx);
+    loop.worker_core = @ptrCast(core);
+
+    try installFn(ctx, js_postMessage, global, "postMessage", "postMessage", 1);
+    try installFn(ctx, js_close, global, "close", "close", 0);
+    try installFn(ctx, js_importScripts, global, "importScripts", "importScripts", 1);
 }
 
-/// JavaScript-side Worker instance (lives in main thread)
+fn fireMessageEvent(ctx: zqjs.Context, data: []const u8) !void {
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+
+    const onmessage = ctx.getPropertyStr(global, "onmessage");
+    defer ctx.freeValue(onmessage);
+
+    if (!ctx.isFunction(onmessage)) return;
+
+    const event_obj = ctx.newObject();
+    defer ctx.freeValue(event_obj);
+
+    const data_val = ctx.readObject(data, .{});
+    if (ctx.isException(data_val)) return;
+
+    _ = try ctx.setPropertyStr(event_obj, "data", data_val);
+    const result = ctx.call(onmessage, global, &[_]zqjs.Value{event_obj});
+    defer ctx.freeValue(result);
+}
+
+fn sendError(core: *WorkerCore, error_msg: []const u8) !void {
+    const copy = try core.allocator.dupe(u8, error_msg);
+    errdefer core.allocator.free(copy);
+    try core.outbox.send(.{ .tag = .Error, .data = copy });
+}
+
+fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
+    const named_fn = ctx.newCFunction(func, name, len);
+    _ = try ctx.setPropertyStr(obj, prop, named_fn);
+}
+
+fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
+    const ptr = opaque_ptr orelse return 0;
+    const core: *WorkerCore = @ptrCast(@alignCast(ptr));
+    return if (core.terminate_flag.load(.seq_cst)) 1 else 0;
+}
+
+threadlocal var worker_class_id: qjs.JSClassID = 0;
+
 pub const JSWorker = struct {
-    allocator: std.mem.Allocator,
-    thread: std.Thread,
-    inbox: Mailbox(WorkerMessage), // Messages FROM worker thread
-    outbox: Mailbox(WorkerMessage), // Messages TO worker thread
-    worker_thread: *WorkerThread, // Reference to worker thread state
-
-    // Event handlers (stored as JSValue)
+    core: *WorkerCore,
     ctx: zqjs.Context,
-    onmessage: zqjs.Value,
-    onerror: zqjs.Value,
+    self_ref: zqjs.Value,
+    loop: ?*EventLoop,
 
-    pub fn create(allocator: std.mem.Allocator, ctx: zqjs.Context, script_path: []const u8) !*JSWorker {
+    pub fn create(
+        allocator: std.mem.Allocator,
+        loop: *EventLoop,
+        ctx: zqjs.Context,
+        script_path: []const u8,
+        obj: zqjs.Value,
+    ) !*JSWorker {
+        std.debug.print("[JSWorker] Create\n", .{});
+        const core = try WorkerCore.init(allocator, script_path);
+        errdefer core.release();
+
         const self = try allocator.create(JSWorker);
-        errdefer allocator.destroy(self);
-
-        // Create worker thread state first
-        const worker_thread = try allocator.create(WorkerThread);
-        errdefer allocator.destroy(worker_thread);
-
         self.* = .{
-            .allocator = allocator,
-            .thread = undefined,
-            .inbox = Mailbox(WorkerMessage).init(allocator),
-            .outbox = Mailbox(WorkerMessage).init(allocator),
-            .worker_thread = worker_thread,
+            .core = core,
             .ctx = ctx,
-            .onmessage = z.jsUndefined,
-            .onerror = z.jsUndefined,
+            .self_ref = obj,
+            .loop = loop,
         };
 
-        // Duplicate refs for event handlers
-        self.onmessage = ctx.dupValue(z.jsUndefined);
-        self.onerror = ctx.dupValue(z.jsUndefined);
-
-        // Initialize worker thread state
-        worker_thread.* = .{
-            .allocator = allocator,
-            .script_path = try allocator.dupe(u8, script_path),
-            .inbox = &self.outbox, // Worker reads from main's outbox
-            .outbox = &self.inbox, // Worker writes to main's inbox
-        };
-
-        // Spawn worker thread
-        self.thread = try std.Thread.spawn(.{}, WorkerThread.run, .{worker_thread});
+        core.retain();
+        const thread = try std.Thread.spawn(.{}, WorkerThread.run, .{core});
+        thread.detach();
 
         return self;
     }
 
-    pub fn destroy(self: *JSWorker) void {
-        // Send terminate message
-        self.terminate() catch {};
-
-        // Wait for thread to finish
-        self.thread.join();
-
-        // Cleanup
-        self.ctx.freeValue(self.onmessage);
-        self.ctx.freeValue(self.onerror);
-        self.inbox.deinit();
-        self.outbox.deinit();
-        self.allocator.destroy(self);
+    pub fn detachLoop(self: *JSWorker) void {
+        self.loop = null;
     }
 
     pub fn postMessage(self: *JSWorker, data: []const u8) !void {
-        const copy = try self.allocator.dupe(u8, data);
-        errdefer self.allocator.free(copy);
-        try self.outbox.send(.{ .tag = .PostMessage, .data = copy });
+        const copy = try self.core.allocator.dupe(u8, data);
+        errdefer self.core.allocator.free(copy);
+        try self.core.inbox.send(.{ .tag = .PostMessage, .data = copy });
     }
 
-    pub fn terminate(self: *JSWorker) !void {
-        // Set terminate flag to interrupt JS execution
-        self.worker_thread.terminate_flag.store(true, .seq_cst);
+    pub fn terminate(self: *JSWorker) void {
+        std.debug.print("[JSWorker] Terminate called\n", .{});
+        self.core.signalTerminate();
 
-        // THEN send mailbox message to wake up the thread if it's sleeping
-        const empty = try self.allocator.alloc(u8, 0);
-        try self.outbox.send(.{ .tag = .Terminate, .data = empty });
+        if (!self.ctx.isUndefined(self.self_ref)) {
+            self.self_ref = zqjs.UNDEFINED;
+            if (self.loop) |l| {
+                l.unregisterWorker(self);
+                self.loop = null;
+            }
+        }
     }
 
-    /// Check for messages from worker thread (called from main event loop)
     pub fn poll(self: *JSWorker) !void {
+        if (self.ctx.isUndefined(self.self_ref)) return;
+
+        const protect = self.ctx.dupValue(self.self_ref);
+        defer self.ctx.freeValue(protect);
+
         while (true) {
-            // Non-blocking receive
-            const msg = self.inbox.receive(0) catch |err| {
-                if (err == error.Timeout) return; // No more messages
+            const msg = self.core.outbox.receive(0) catch |err| {
+                if (err == error.Timeout) return;
                 return err;
             };
-            defer self.allocator.free(msg.data);
+            defer self.core.allocator.free(msg.data);
 
             switch (msg.tag) {
                 .PostMessage => {
-                    if (!self.ctx.isFunction(self.onmessage)) continue;
+                    const onmessage = self.ctx.getPropertyStr(self.self_ref, "onmessage");
+                    defer self.ctx.freeValue(onmessage);
 
-                    // Create event: { data: <parsed> }
+                    if (!self.ctx.isFunction(onmessage)) continue;
+
                     const event = self.ctx.newObject();
                     defer self.ctx.freeValue(event);
 
-                    // Parse JSON
-                    const data_val = self.ctx.parseJSON(msg.data, "<worker-message>");
-                    const is_error = self.ctx.isException(data_val);
+                    const data_val = self.ctx.readObject(msg.data, .{});
+                    if (self.ctx.isException(data_val)) continue;
 
-                    if (is_error) {
-                        const str_val = self.ctx.newString(msg.data);
-                        _ = try self.ctx.setPropertyStr(event, "data", str_val);
-                    } else {
-                        defer self.ctx.freeValue(data_val);
-                        _ = try self.ctx.setPropertyStr(event, "data", data_val);
-                    }
-
-                    // Call onmessage(event)
-                    const result = self.ctx.call(self.onmessage, z.jsUndefined, &[_]zqjs.Value{event});
+                    _ = try self.ctx.setPropertyStr(event, "data", data_val);
+                    const result = self.ctx.call(onmessage, self.self_ref, &[_]zqjs.Value{event});
                     defer self.ctx.freeValue(result);
                 },
                 .Error => {
-                    if (!self.ctx.isFunction(self.onerror)) continue;
+                    const onerror = self.ctx.getPropertyStr(self.self_ref, "onerror");
+                    defer self.ctx.freeValue(onerror);
 
-                    // Create error event: { message: <error> }
+                    if (!self.ctx.isFunction(onerror)) continue;
+
                     const event = self.ctx.newObject();
                     defer self.ctx.freeValue(event);
 
                     const msg_val = self.ctx.newString(msg.data);
-                    defer self.ctx.freeValue(msg_val);
-
                     _ = try self.ctx.setPropertyStr(event, "message", msg_val);
-
-                    // Call onerror(event)
-                    const result = self.ctx.call(self.onerror, z.jsUndefined, &[_]zqjs.Value{event});
+                    const result = self.ctx.call(onerror, self.self_ref, &[_]zqjs.Value{event});
                     defer self.ctx.freeValue(result);
                 },
-                .Terminate => {}, // Shouldn't receive in main thread
+                .Terminate => {},
             }
         }
     }
+
+    pub fn destroy(self: *JSWorker) void {
+        std.debug.print("[JSWorker] Destroy (Finalizer)\n", .{});
+        const alloc = self.core.allocator;
+        self.core.release();
+        alloc.destroy(self);
+    }
 };
 
-// ============================================================================
-// QuickJS C Functions (Worker thread global API)
-// ============================================================================
-
-/// postMessage(data) - Worker thread sends message to main thread
 fn js_postMessage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
 
-    const worker_thread = ctx.getContextOpaque(WorkerThread) orelse return ctx.throwInternalError("Worker context not found");
+    const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+    const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+    const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
 
-    // Serialize data to JSON
-    const json_str = ctx.jsonStringifySimple(argv[0]) catch return ctx.throwError("Failed to serialize message");
-    defer ctx.freeValue(json_str);
-
-    const json_cstr = ctx.toCString(json_str) catch return z.jsException;
-    defer ctx.freeCString(json_cstr);
-
-    const json_slice = std.mem.span(json_cstr);
-    const copy = worker_thread.allocator.dupe(u8, json_slice) catch return ctx.throwError("Out of memory");
-
-    worker_thread.outbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
-        worker_thread.allocator.free(copy);
-        return ctx.throwError("Failed to send message");
+    const binary_data = ctx.writeObject(argv[0], .{}) catch return ctx.throwInternalError("Failed to serialize message");
+    const copy = core.allocator.dupe(u8, binary_data) catch {
+        ctx.free(@ptrCast(binary_data.ptr));
+        return ctx.throwOutOfMemory();
     };
+    ctx.free(@ptrCast(binary_data.ptr));
 
-    return z.jsUndefined;
+    core.outbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
+        core.allocator.free(copy);
+        return ctx.throwInternalError("Failed to send message");
+    };
+    return zqjs.UNDEFINED;
 }
 
-/// close() - Worker thread terminates itself
 fn js_close(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    const worker_thread = ctx.getContextOpaque(WorkerThread) orelse return ctx.throwInternalError("Worker context not found");
+    const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+    const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+    const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
 
-    const empty = worker_thread.allocator.alloc(u8, 0) catch return ctx.throwError("Out of memory");
-    worker_thread.inbox.close();
-    worker_thread.allocator.free(empty);
-
-    return z.jsUndefined;
+    core.terminate_flag.store(true, .seq_cst);
+    std.debug.print("[js_close] Worker requested close.\n", .{});
+    return zqjs.UNDEFINED;
 }
 
-// ============================================================================
-// QuickJS C Functions (Main thread Worker class)
-// ============================================================================
+fn js_importScripts(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    if (argc < 1) return ctx.throwTypeError("importScripts requires at least one argument");
+    const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+    const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+    const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
 
-/// new Worker(scriptPath)
+    var i: c_int = 0;
+    while (i < argc) : (i += 1) {
+        const path_cstr = ctx.toCString(argv[@intCast(i)]) catch return zqjs.EXCEPTION;
+        defer ctx.freeCString(path_cstr);
+        const path = std.mem.span(path_cstr);
+
+        const script = std.fs.cwd().readFileAlloc(core.allocator, path, std.math.maxInt(usize)) catch return ctx.throwTypeError("Read file failed");
+        defer core.allocator.free(script);
+
+        const result = ctx.eval(script, path_cstr, .{}) catch return ctx.throwError();
+        ctx.freeValue(result);
+    }
+    return zqjs.UNDEFINED;
+}
+
 pub fn js_Worker_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     if (argc < 1) return ctx.throwTypeError("Worker constructor requires scriptPath argument");
 
     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
 
-    // Get script path
-    const path_cstr = ctx.toCString(argv[0]) catch return z.jsException;
+    const path_cstr = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeCString(path_cstr);
     const script_path = std.mem.span(path_cstr);
 
-    // Create Worker instance
-    const worker = JSWorker.create(loop.allocator, ctx, script_path) catch return ctx.throwError("Failed to create worker");
-
-    // Create JavaScript object from new_target
-    const obj = ctx.newObjectProtoClass(new_target, worker_class_id);
-    if (ctx.isException(obj)) {
-        worker.destroy();
-        return obj;
+    var proto = ctx.getPropertyStr(new_target, "prototype");
+    if (ctx.isException(proto) or ctx.isUndefined(proto)) {
+        if (ctx.isException(proto)) _ = ctx.getException();
+        proto = ctx.getClassProto(loop.worker_class_id);
     }
+    defer ctx.freeValue(proto);
 
-    // Attach worker pointer as opaque data
-    qjs.JS_SetOpaque(obj, worker);
+    const obj = ctx.newObjectProtoClass(proto, loop.worker_class_id);
+    if (ctx.isException(obj)) return obj;
 
-    // Register worker for polling in event loop
-    loop.registerWorker(worker) catch {
+    const worker = JSWorker.create(loop.allocator, loop, ctx, script_path, obj) catch {
         ctx.freeValue(obj);
-        worker.destroy();
-        return ctx.throwError("Failed to register worker");
+        return ctx.throwError();
     };
 
+    _ = qjs.JS_SetOpaque(obj, worker);
+
+    loop.registerWorker(worker) catch {
+        worker.destroy();
+        ctx.freeValue(obj);
+        return ctx.throwError();
+    };
     return obj;
 }
 
-/// worker.postMessage(data)
 pub fn js_Worker_postMessage(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
@@ -400,75 +389,1044 @@ pub fn js_Worker_postMessage(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: 
     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
     const w: *JSWorker = @ptrCast(@alignCast(worker));
 
-    // Serialize to JSON
-    const json_str = ctx.jsonStringifySimple(argv[0]) catch return ctx.throwError("Failed to serialize message");
-    defer ctx.freeValue(json_str);
+    const binary_data = ctx.writeObject(argv[0], .{}) catch return ctx.throwError();
+    const copy = w.core.allocator.dupe(u8, binary_data) catch {
+        ctx.free(@ptrCast(binary_data.ptr));
+        return ctx.throwOutOfMemory();
+    };
+    ctx.free(@ptrCast(binary_data.ptr));
 
-    const json_cstr = ctx.toCString(json_str) catch return z.jsException;
-    defer ctx.freeCString(json_cstr);
-
-    w.postMessage(std.mem.span(json_cstr)) catch return ctx.throwError("Failed to send message");
-
-    return z.jsUndefined;
+    w.core.inbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
+        w.core.allocator.free(copy);
+        return ctx.throwError();
+    };
+    return zqjs.UNDEFINED;
 }
 
-/// worker.terminate()
 pub fn js_Worker_terminate(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    std.debug.print("[js_Worker_terminate] Called from JS.\n", .{});
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-
     const worker = qjs.JS_GetOpaque(this, worker_class_id);
     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
     const w: *JSWorker = @ptrCast(@alignCast(worker));
-
-    w.terminate() catch return ctx.throwError("Failed to terminate worker");
-
-    return z.jsUndefined;
+    w.terminate();
+    return zqjs.UNDEFINED;
 }
 
-// ============================================================================
-// Class Registration
-// ============================================================================
+fn workerGCMark(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue, mark_func: ?*const qjs.JS_MarkFunc) callconv(.c) void {
+    _ = rt_ptr;
+    _ = val;
+    _ = mark_func;
+}
 
-var worker_class_id: qjs.JSClassID = 0;
+fn workerFinalizer(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
+    _ = rt_ptr;
+    std.debug.print("[Finalizer] Worker object finalizing.\n", .{});
+    const ptr = qjs.JS_GetOpaque(val, worker_class_id);
+    if (ptr) |p| {
+        const w: *JSWorker = @ptrCast(@alignCast(p));
+        if (w.loop) |l| l.unregisterWorker(w);
+        w.destroy();
+    }
+}
 
 pub fn registerWorkerClass(ctx: zqjs.Context) !void {
-    // Allocate class ID
-    qjs.JS_NewClassID(&worker_class_id);
+    const rt = ctx.getRuntime();
+    const loop = EventLoop.getFromContext(ctx) orelse return error.NoEventLoop;
 
-    // Define class
-    var class_def = std.mem.zeroes(qjs.JSClassDef);
-    class_def.class_name = "Worker";
-    class_def.finalizer = workerFinalizer;
+    loop.worker_class_id = rt.newClassID();
+    worker_class_id = loop.worker_class_id;
 
-    _ = qjs.JS_NewClass(qjs.JS_GetRuntime(ctx.ptr), worker_class_id, &class_def);
+    try rt.newClass(loop.worker_class_id, .{
+        .class_name = "Worker",
+        .finalizer = workerFinalizer,
+        .gc_mark = workerGCMark,
+    });
 
-    // Create prototype
     const proto = ctx.newObject();
     defer ctx.freeValue(proto);
 
-    // Add methods to prototype
-    const postMessage_fn = ctx.newCFunction(js_Worker_postMessage, "postMessage", 1);
-    _ = try ctx.setPropertyStr(proto, "postMessage", postMessage_fn);
+    try installFn(ctx, js_Worker_postMessage, proto, "postMessage", "postMessage", 1);
+    try installFn(ctx, js_Worker_terminate, proto, "terminate", "terminate", 0);
 
-    const terminate_fn = ctx.newCFunction(js_Worker_terminate, "terminate", 0);
-    _ = try ctx.setPropertyStr(proto, "terminate", terminate_fn);
+    ctx.setClassProto(loop.worker_class_id, proto);
 
-    // Set class prototype
-    qjs.JS_SetClassProto(ctx.ptr, worker_class_id, proto);
-
-    // Create constructor
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
 
     const ctor = ctx.newCFunctionConstructor(js_Worker_constructor, "Worker", 1);
+    _ = try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
+    _ = try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor));
     _ = try ctx.setPropertyStr(global, "Worker", ctor);
 }
+// //! JavaScript Worker API implementation - Decoupled & Simplified
 
-fn workerFinalizer(rt: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
-    _ = rt;
-    const worker = qjs.JS_GetOpaque(val, worker_class_id);
-    if (worker) |w| {
-        const worker_ptr: *JSWorker = @ptrCast(@alignCast(w));
-        worker_ptr.destroy();
-    }
-}
+// const std = @import("std");
+// const z = @import("root.zig");
+// const zqjs = z.wrapper;
+// const qjs = z.qjs;
+// const EventLoop = @import("event_loop.zig").EventLoop;
+// const Mailbox = z.Mailbox;
+
+// pub const WorkerMessage = struct {
+//     tag: enum { PostMessage, Terminate, Error },
+//     data: []u8,
+// };
+
+// /// The "Shared State" (Bridge Pattern)
+// const WorkerCore = struct {
+//     allocator: std.mem.Allocator,
+//     ref_count: std.atomic.Value(usize),
+//     inbox: Mailbox(WorkerMessage),
+//     outbox: Mailbox(WorkerMessage),
+//     terminate_flag: std.atomic.Value(bool),
+//     script_path: [:0]const u8,
+
+//     pub fn init(allocator: std.mem.Allocator, script_path: []const u8) !*WorkerCore {
+//         std.debug.print("[WorkerCore] Init\n", .{});
+//         const self = try allocator.create(WorkerCore);
+//         self.* = .{
+//             .allocator = allocator,
+//             .ref_count = std.atomic.Value(usize).init(1),
+//             .inbox = Mailbox(WorkerMessage).init(allocator),
+//             .outbox = Mailbox(WorkerMessage).init(allocator),
+//             .terminate_flag = std.atomic.Value(bool).init(false),
+//             .script_path = try allocator.dupeZ(u8, script_path),
+//         };
+//         std.debug.print("[Core] Initialized count: 1\n", .{});
+//         return self;
+//     }
+
+//     pub fn retain(self: *WorkerCore) void {
+//         const prev = self.ref_count.fetchAdd(1, .seq_cst);
+//         std.debug.print("[Core] Retain. New count: {}\n", .{prev + 1});
+//     }
+
+//     pub fn release(self: *WorkerCore) void {
+//         const prev = self.ref_count.fetchSub(1, .seq_cst);
+//         std.debug.print("[Core] Release. Prev count: {}\n", .{prev});
+//         if (prev == 1) {
+//             std.debug.print("[Core] RefCount 0. Destroying resources.\n", .{});
+//             self.inbox.deinit();
+//             self.outbox.deinit();
+//             self.allocator.free(self.script_path);
+//             self.allocator.destroy(self);
+//         }
+//     }
+
+//     pub fn signalTerminate(self: *WorkerCore) void {
+//         std.debug.print("[Core] signalTerminate called\n", .{});
+//         if (self.terminate_flag.load(.seq_cst)) return;
+//         self.terminate_flag.store(true, .seq_cst);
+
+//         std.debug.print("[Core] Flag stored. Sending wake message to INBOX...\n", .{});
+//         const empty = self.allocator.alloc(u8, 0) catch return;
+
+//         // [FIX] Send to INBOX so the Worker Thread wakes up
+//         self.inbox.send(.{ .tag = .Terminate, .data = empty }) catch {};
+//     }
+// };
+
+// const WorkerThread = struct {
+//     pub fn run(core: *WorkerCore) void {
+//         defer core.release();
+
+//         std.debug.print("[Thread] STARTING\n", .{});
+
+//         // Use GPA for QuickJS compatibility
+//         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//         defer _ = gpa.deinit();
+//         const allocator = gpa.allocator();
+
+//         const rt = zqjs.Runtime.init(allocator) catch return;
+//         defer rt.deinit();
+
+//         rt.setInterruptHandler(js_interrupt_handler, @ptrCast(core));
+
+//         const ctx = zqjs.Context.init(rt);
+//         defer ctx.deinit();
+//         ctx.setAllocator(&allocator);
+
+//         var loop = EventLoop.create(allocator, rt) catch return;
+//         defer loop.destroy();
+//         loop.install(ctx) catch return;
+
+//         installWorkerGlobals(ctx, core, loop) catch return;
+
+//         const script = std.fs.cwd().readFileAlloc(allocator, core.script_path, std.math.maxInt(usize)) catch |err| {
+//             sendError(core, @errorName(err)) catch {};
+//             return;
+//         };
+//         defer allocator.free(script);
+
+//         const result = ctx.eval(script, core.script_path, .{}) catch |err| {
+//             sendError(core, @errorName(err)) catch {};
+//             return;
+//         };
+//         ctx.freeValue(result);
+
+//         std.debug.print("[Thread] Waiting for messages...\n", .{});
+
+//         var running = true;
+//         while (running) {
+//             _ = rt.executePendingJob() catch {};
+//             _ = loop.processAsyncTasks();
+
+//             const wait_ms: i64 = loop.processTimers() catch 100;
+//             const timeout_ns = @as(u64, @intCast(@max(wait_ms, 0))) * std.time.ns_per_ms;
+
+//             if (core.inbox.receive(timeout_ns)) |msg| {
+//                 defer core.allocator.free(msg.data);
+//                 switch (msg.tag) {
+//                     .PostMessage => fireMessageEvent(ctx, msg.data) catch {},
+//                     .Terminate => {
+//                         std.debug.print("[Thread] Received TERMINATE signal.\n", .{});
+//                         running = false;
+//                     },
+//                     .Error => {},
+//                 }
+//             } else |err| {
+//                 if (err == error.MailboxClosed) running = false;
+//             }
+
+//             if (core.terminate_flag.load(.seq_cst)) running = false;
+//         }
+//         std.debug.print("[Thread] Exiting run loop.\n", .{});
+//     }
+// };
+
+// fn installWorkerGlobals(ctx: zqjs.Context, core: *WorkerCore, loop: *EventLoop) !void {
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+
+//     try registerWorkerClass(ctx);
+//     loop.worker_core = @ptrCast(core);
+
+//     try installFn(ctx, js_postMessage, global, "postMessage", "postMessage", 1);
+//     try installFn(ctx, js_close, global, "close", "close", 0);
+//     try installFn(ctx, js_importScripts, global, "importScripts", "importScripts", 1);
+// }
+
+// fn fireMessageEvent(ctx: zqjs.Context, data: []const u8) !void {
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+
+//     const onmessage = ctx.getPropertyStr(global, "onmessage");
+//     defer ctx.freeValue(onmessage);
+
+//     if (!ctx.isFunction(onmessage)) return;
+
+//     const event_obj = ctx.newObject();
+//     defer ctx.freeValue(event_obj);
+
+//     const data_val = ctx.readObject(data, .{});
+//     if (ctx.isException(data_val)) return;
+
+//     _ = try ctx.setPropertyStr(event_obj, "data", data_val);
+//     const result = ctx.call(onmessage, global, &[_]zqjs.Value{event_obj});
+//     defer ctx.freeValue(result);
+// }
+
+// fn sendError(core: *WorkerCore, error_msg: []const u8) !void {
+//     const copy = try core.allocator.dupe(u8, error_msg);
+//     errdefer core.allocator.free(copy);
+//     try core.outbox.send(.{ .tag = .Error, .data = copy });
+// }
+
+// fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
+//     const named_fn = ctx.newCFunction(func, name, len);
+//     _ = try ctx.setPropertyStr(obj, prop, named_fn);
+// }
+
+// fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
+//     const ptr = opaque_ptr orelse return 0;
+//     const core: *WorkerCore = @ptrCast(@alignCast(ptr));
+//     return if (core.terminate_flag.load(.seq_cst)) 1 else 0;
+// }
+
+// // --- JS Wrapper (Main Thread) ---
+
+// threadlocal var worker_class_id: qjs.JSClassID = 0;
+
+// pub const JSWorker = struct {
+//     core: *WorkerCore,
+//     ctx: zqjs.Context,
+//     self_ref: zqjs.Value,
+//     loop: ?*EventLoop,
+
+//     pub fn create(
+//         allocator: std.mem.Allocator,
+//         loop: *EventLoop,
+//         ctx: zqjs.Context,
+//         script_path: []const u8,
+//         obj: zqjs.Value,
+//     ) !*JSWorker {
+//         std.debug.print("[JSWorker] Create\n", .{});
+//         const core = try WorkerCore.init(allocator, script_path);
+//         errdefer core.release();
+
+//         const self = try allocator.create(JSWorker);
+//         self.* = .{
+//             .core = core,
+//             .ctx = ctx,
+//             // [FIX] Borrowed Reference. Wrapper cannot outlive 'obj'.
+//             .self_ref = obj,
+//             .loop = loop,
+//         };
+
+//         core.retain();
+//         const thread = try std.Thread.spawn(.{}, WorkerThread.run, .{core});
+//         thread.detach();
+
+//         return self;
+//     }
+
+//     pub fn detachLoop(self: *JSWorker) void {
+//         self.loop = null;
+//     }
+
+//     pub fn postMessage(self: *JSWorker, data: []const u8) !void {
+//         const copy = try self.core.allocator.dupe(u8, data);
+//         errdefer self.core.allocator.free(copy);
+//         // Send to INBOX (Main -> Worker)
+//         try self.core.inbox.send(.{ .tag = .PostMessage, .data = copy });
+//     }
+
+//     pub fn terminate(self: *JSWorker) void {
+//         std.debug.print("[JSWorker] Terminate called\n", .{});
+//         self.core.signalTerminate();
+
+//         if (!self.ctx.isUndefined(self.self_ref)) {
+//             // [FIX] Just unpin logic. Do NOT call freeValue (Borrowed Ref).
+//             self.self_ref = zqjs.UNDEFINED;
+
+//             if (self.loop) |l| {
+//                 l.unregisterWorker(self);
+//                 self.loop = null;
+//             }
+//         }
+//     }
+
+//     pub fn poll(self: *JSWorker) !void {
+//         if (self.ctx.isUndefined(self.self_ref)) return;
+
+//         // Keep-Alive: Protect object while running poll callbacks
+//         const protect = self.ctx.dupValue(self.self_ref);
+//         defer self.ctx.freeValue(protect);
+
+//         while (true) {
+//             // Read from OUTBOX (Worker -> Main)
+//             const msg = self.core.outbox.receive(0) catch |err| {
+//                 if (err == error.Timeout) return;
+//                 return err;
+//             };
+//             defer self.core.allocator.free(msg.data);
+
+//             switch (msg.tag) {
+//                 .PostMessage => {
+//                     const onmessage = self.ctx.getPropertyStr(self.self_ref, "onmessage");
+//                     defer self.ctx.freeValue(onmessage);
+
+//                     if (!self.ctx.isFunction(onmessage)) continue;
+
+//                     const event = self.ctx.newObject();
+//                     defer self.ctx.freeValue(event);
+
+//                     const data_val = self.ctx.readObject(msg.data, .{});
+//                     if (self.ctx.isException(data_val)) continue;
+
+//                     _ = try self.ctx.setPropertyStr(event, "data", data_val);
+//                     const result = self.ctx.call(onmessage, self.self_ref, &[_]zqjs.Value{event});
+//                     defer self.ctx.freeValue(result);
+//                 },
+//                 .Error => {
+//                     const onerror = self.ctx.getPropertyStr(self.self_ref, "onerror");
+//                     defer self.ctx.freeValue(onerror);
+
+//                     if (!self.ctx.isFunction(onerror)) continue;
+
+//                     const event = self.ctx.newObject();
+//                     defer self.ctx.freeValue(event);
+
+//                     const msg_val = self.ctx.newString(msg.data);
+//                     _ = try self.ctx.setPropertyStr(event, "message", msg_val);
+//                     const result = self.ctx.call(onerror, self.self_ref, &[_]zqjs.Value{event});
+//                     defer self.ctx.freeValue(result);
+//                 },
+//                 .Terminate => {
+//                     // Thread acknowledged termination, safe to ignore here
+//                 },
+//             }
+//         }
+//     }
+
+//     pub fn destroy(self: *JSWorker) void {
+//         std.debug.print("[JSWorker] Destroy (Finalizer)\n", .{});
+//         const alloc = self.core.allocator;
+//         self.core.release();
+//         alloc.destroy(self);
+//     }
+// };
+
+// // ... C Functions ...
+
+// fn js_postMessage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
+
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+//     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+//     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+//     const binary_data = ctx.writeObject(argv[0], .{}) catch return ctx.throwInternalError("Failed to serialize message");
+//     const copy = core.allocator.dupe(u8, binary_data) catch {
+//         ctx.free(@ptrCast(binary_data.ptr));
+//         return ctx.throwOutOfMemory();
+//     };
+//     ctx.free(@ptrCast(binary_data.ptr));
+
+//     // Worker sending to Main -> OUTBOX
+//     core.outbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
+//         core.allocator.free(copy);
+//         return ctx.throwInternalError("Failed to send message");
+//     };
+//     return zqjs.UNDEFINED;
+// }
+
+// fn js_close(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+//     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+//     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+//     core.terminate_flag.store(true, .seq_cst);
+//     std.debug.print("[js_close] Worker requested close.\n", .{});
+//     return zqjs.UNDEFINED;
+// }
+
+// fn js_importScripts(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("importScripts requires at least one argument");
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+//     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+//     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+//     var i: c_int = 0;
+//     while (i < argc) : (i += 1) {
+//         const path_cstr = ctx.toCString(argv[@intCast(i)]) catch return zqjs.EXCEPTION;
+//         defer ctx.freeCString(path_cstr);
+//         const path = std.mem.span(path_cstr);
+
+//         const script = std.fs.cwd().readFileAlloc(core.allocator, path, std.math.maxInt(usize)) catch return ctx.throwTypeError("Read file failed");
+//         defer core.allocator.free(script);
+
+//         const result = ctx.eval(script, path_cstr, .{}) catch return ctx.throwError();
+//         ctx.freeValue(result);
+//     }
+//     return zqjs.UNDEFINED;
+// }
+
+// // ... Main Thread Constructor ...
+
+// pub fn js_Worker_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("Worker constructor requires scriptPath argument");
+
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+
+//     const path_cstr = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
+//     defer ctx.freeCString(path_cstr);
+//     const script_path = std.mem.span(path_cstr);
+
+//     // Create the JS Object FIRST (Standard QuickJS Constructor Pattern)
+//     var proto = ctx.getPropertyStr(new_target, "prototype");
+//     if (ctx.isException(proto) or ctx.isUndefined(proto)) {
+//         if (ctx.isException(proto)) _ = ctx.getException();
+//         proto = ctx.getClassProto(loop.worker_class_id);
+//     }
+//     defer ctx.freeValue(proto);
+
+//     const obj = ctx.newObjectProtoClass(proto, loop.worker_class_id);
+//     if (ctx.isException(obj)) return obj;
+
+//     // Now pass 'obj' to the create function
+//     const worker = JSWorker.create(loop.allocator, loop, ctx, script_path, obj) catch {
+//         ctx.freeValue(obj);
+//         return ctx.throwError();
+//     };
+
+//     _ = qjs.JS_SetOpaque(obj, worker);
+
+//     loop.registerWorker(worker) catch {
+//         worker.destroy();
+//         ctx.freeValue(obj);
+//         return ctx.throwError();
+//     };
+//     return obj;
+// }
+
+// pub fn js_Worker_postMessage(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
+
+//     const worker = qjs.JS_GetOpaque(this, worker_class_id);
+//     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
+//     const w: *JSWorker = @ptrCast(@alignCast(worker));
+
+//     const binary_data = ctx.writeObject(argv[0], .{}) catch return ctx.throwError();
+//     const copy = w.core.allocator.dupe(u8, binary_data) catch {
+//         ctx.free(@ptrCast(binary_data.ptr));
+//         return ctx.throwOutOfMemory();
+//     };
+//     ctx.free(@ptrCast(binary_data.ptr));
+
+//     // Main -> Worker uses INBOX
+//     w.core.inbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
+//         w.core.allocator.free(copy);
+//         return ctx.throwError();
+//     };
+//     return zqjs.UNDEFINED;
+// }
+
+// pub fn js_Worker_terminate(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     std.debug.print("[js_Worker_terminate] Called from JS.\n", .{});
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     const worker = qjs.JS_GetOpaque(this, worker_class_id);
+//     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
+//     const w: *JSWorker = @ptrCast(@alignCast(worker));
+//     w.terminate();
+//     return zqjs.UNDEFINED;
+// }
+
+// fn workerGCMark(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue, mark_func: ?*const qjs.JS_MarkFunc) callconv(.c) void {
+//     _ = rt_ptr;
+//     _ = val;
+//     _ = mark_func;
+// }
+
+// fn workerFinalizer(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
+//     _ = rt_ptr;
+//     std.debug.print("[Finalizer] Worker object finalizing.\n", .{});
+//     const ptr = qjs.JS_GetOpaque(val, worker_class_id);
+//     if (ptr) |p| {
+//         const w: *JSWorker = @ptrCast(@alignCast(p));
+//         if (w.loop) |l| l.unregisterWorker(w);
+//         w.destroy();
+//     }
+// }
+
+// pub fn registerWorkerClass(ctx: zqjs.Context) !void {
+//     const rt = ctx.getRuntime();
+//     const loop = EventLoop.getFromContext(ctx) orelse return error.NoEventLoop;
+
+//     loop.worker_class_id = rt.newClassID();
+//     worker_class_id = loop.worker_class_id;
+
+//     try rt.newClass(loop.worker_class_id, .{
+//         .class_name = "Worker",
+//         .finalizer = workerFinalizer,
+//         .gc_mark = workerGCMark,
+//     });
+
+//     const proto = ctx.newObject();
+//     defer ctx.freeValue(proto);
+
+//     try installFn(ctx, js_Worker_postMessage, proto, "postMessage", "postMessage", 1);
+//     try installFn(ctx, js_Worker_terminate, proto, "terminate", "terminate", 0);
+
+//     // [FIX] No getter/setter definition. JS handles properties.
+
+//     ctx.setClassProto(loop.worker_class_id, proto);
+
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+
+//     const ctor = ctx.newCFunctionConstructor(js_Worker_constructor, "Worker", 1);
+//     _ = try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
+//     _ = try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor));
+//     _ = try ctx.setPropertyStr(global, "Worker", ctor);
+// }
+// //! JavaScript Worker API implementation - Decoupled & Simplified
+
+// const std = @import("std");
+// const z = @import("root.zig");
+// const zqjs = z.wrapper;
+// const qjs = z.qjs;
+// const EventLoop = @import("event_loop.zig").EventLoop;
+// const Mailbox = z.Mailbox;
+
+// pub const WorkerMessage = struct {
+//     tag: enum { PostMessage, Terminate, Error },
+//     data: []u8,
+// };
+
+// /// The "Shared State" (Bridge Pattern)
+// const WorkerCore = struct {
+//     allocator: std.mem.Allocator,
+//     ref_count: std.atomic.Value(usize),
+//     inbox: Mailbox(WorkerMessage),
+//     outbox: Mailbox(WorkerMessage),
+//     terminate_flag: std.atomic.Value(bool),
+//     script_path: [:0]const u8,
+
+//     pub fn init(allocator: std.mem.Allocator, script_path: []const u8) !*WorkerCore {
+//         std.debug.print("[WorkerCore] Init\n", .{});
+//         const self = try allocator.create(WorkerCore);
+//         self.* = .{
+//             .allocator = allocator,
+//             .ref_count = std.atomic.Value(usize).init(1),
+//             .inbox = Mailbox(WorkerMessage).init(allocator),
+//             .outbox = Mailbox(WorkerMessage).init(allocator),
+//             .terminate_flag = std.atomic.Value(bool).init(false),
+//             .script_path = try allocator.dupeZ(u8, script_path),
+//         };
+//         std.debug.print("[Core] Initialized count: 1\n", .{});
+//         return self;
+//     }
+
+//     pub fn retain(self: *WorkerCore) void {
+//         const prev = self.ref_count.fetchAdd(1, .seq_cst);
+//         std.debug.print("[Core] Retain. New count: {}\n", .{prev + 1});
+//     }
+
+//     pub fn release(self: *WorkerCore) void {
+//         const prev = self.ref_count.fetchSub(1, .seq_cst);
+//         std.debug.print("[Core] Release. Prev count: {}\n", .{prev});
+//         if (prev == 1) {
+//             std.debug.print("[Core] RefCount 0. Destroying resources.\n", .{});
+//             self.inbox.deinit();
+//             self.outbox.deinit();
+//             self.allocator.free(self.script_path);
+//             self.allocator.destroy(self);
+//         }
+//     }
+
+//     pub fn signalTerminate(self: *WorkerCore) void {
+//         std.debug.print("[Core] signalTerminate called\n", .{});
+//         if (self.terminate_flag.load(.seq_cst)) return;
+//         self.terminate_flag.store(true, .seq_cst);
+
+//         std.debug.print("[Core] Flag stored. Sending wake message to INBOX...\n", .{});
+//         const empty = self.allocator.alloc(u8, 0) catch return;
+
+//         // [FIX] Send to INBOX so the Worker Thread (which listens to Inbox) wakes up!
+//         // Previously this was sending to outbox, so the thread never saw it.
+//         self.inbox.send(.{ .tag = .Terminate, .data = empty }) catch {};
+//     }
+// };
+
+// const WorkerThread = struct {
+//     pub fn run(core: *WorkerCore) void {
+//         defer core.release();
+
+//         std.debug.print("[Thread] STARTING\n", .{});
+
+//         // Use GPA for QuickJS compatibility
+//         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+//         defer _ = gpa.deinit();
+//         const allocator = gpa.allocator();
+
+//         const rt = zqjs.Runtime.init(allocator) catch return;
+//         defer rt.deinit();
+
+//         rt.setInterruptHandler(js_interrupt_handler, @ptrCast(core));
+
+//         const ctx = zqjs.Context.init(rt);
+//         defer ctx.deinit();
+//         ctx.setAllocator(&allocator);
+
+//         var loop = EventLoop.create(allocator, rt) catch return;
+//         defer loop.destroy();
+//         loop.install(ctx) catch return;
+
+//         installWorkerGlobals(ctx, core, loop) catch return;
+
+//         const script = std.fs.cwd().readFileAlloc(allocator, core.script_path, std.math.maxInt(usize)) catch |err| {
+//             sendError(core, @errorName(err)) catch {};
+//             return;
+//         };
+//         defer allocator.free(script);
+
+//         const result = ctx.eval(script, core.script_path, .{}) catch |err| {
+//             sendError(core, @errorName(err)) catch {};
+//             return;
+//         };
+//         ctx.freeValue(result);
+
+//         std.debug.print("[Thread] Waiting for messages...\n", .{});
+
+//         var running = true;
+//         while (running) {
+//             _ = rt.executePendingJob() catch {};
+//             _ = loop.processAsyncTasks();
+
+//             const wait_ms: i64 = loop.processTimers() catch 100;
+//             const timeout_ns = @as(u64, @intCast(@max(wait_ms, 0))) * std.time.ns_per_ms;
+
+//             // Worker listens to INBOX (Main -> Worker)
+//             if (core.inbox.receive(timeout_ns)) |msg| {
+//                 defer core.allocator.free(msg.data);
+//                 switch (msg.tag) {
+//                     .PostMessage => fireMessageEvent(ctx, msg.data) catch {},
+//                     .Terminate => {
+//                         std.debug.print("[Thread] Received TERMINATE signal.\n", .{});
+//                         running = false;
+//                     },
+//                     .Error => {},
+//                 }
+//             } else |err| {
+//                 if (err == error.MailboxClosed) running = false;
+//             }
+
+//             if (core.terminate_flag.load(.seq_cst)) running = false;
+//         }
+//         std.debug.print("[Thread] Exiting run loop.\n", .{});
+//     }
+// };
+
+// fn installWorkerGlobals(ctx: zqjs.Context, core: *WorkerCore, loop: *EventLoop) !void {
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+
+//     try registerWorkerClass(ctx);
+//     loop.worker_core = @ptrCast(core);
+
+//     try installFn(ctx, js_postMessage, global, "postMessage", "postMessage", 1);
+//     try installFn(ctx, js_close, global, "close", "close", 0);
+//     try installFn(ctx, js_importScripts, global, "importScripts", "importScripts", 1);
+// }
+
+// fn fireMessageEvent(ctx: zqjs.Context, data: []const u8) !void {
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+
+//     const onmessage = ctx.getPropertyStr(global, "onmessage");
+//     defer ctx.freeValue(onmessage);
+
+//     if (!ctx.isFunction(onmessage)) return;
+
+//     const event_obj = ctx.newObject();
+//     defer ctx.freeValue(event_obj);
+
+//     const data_val = ctx.readObject(data, .{});
+//     if (ctx.isException(data_val)) return;
+
+//     _ = try ctx.setPropertyStr(event_obj, "data", data_val);
+//     const result = ctx.call(onmessage, global, &[_]zqjs.Value{event_obj});
+//     defer ctx.freeValue(result);
+// }
+
+// fn sendError(core: *WorkerCore, error_msg: []const u8) !void {
+//     const copy = try core.allocator.dupe(u8, error_msg);
+//     errdefer core.allocator.free(copy);
+//     try core.outbox.send(.{ .tag = .Error, .data = copy });
+// }
+
+// fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
+//     const named_fn = ctx.newCFunction(func, name, len);
+//     _ = try ctx.setPropertyStr(obj, prop, named_fn);
+// }
+
+// fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
+//     const ptr = opaque_ptr orelse return 0;
+//     const core: *WorkerCore = @ptrCast(@alignCast(ptr));
+//     return if (core.terminate_flag.load(.seq_cst)) 1 else 0;
+// }
+
+// // --- JS Wrapper (Main Thread) ---
+
+// threadlocal var worker_class_id: qjs.JSClassID = 0;
+
+// pub const JSWorker = struct {
+//     core: *WorkerCore,
+//     ctx: zqjs.Context,
+//     self_ref: zqjs.Value,
+//     loop: ?*EventLoop,
+
+//     pub fn create(
+//         allocator: std.mem.Allocator,
+//         loop: *EventLoop,
+//         ctx: zqjs.Context,
+//         script_path: []const u8,
+//         obj: zqjs.Value,
+//     ) !*JSWorker {
+//         std.debug.print("[JSWorker] Create\n", .{});
+//         const core = try WorkerCore.init(allocator, script_path);
+//         errdefer core.release();
+
+//         const self = try allocator.create(JSWorker);
+//         self.* = .{
+//             .core = core,
+//             .ctx = ctx,
+//             .self_ref = obj, // Borrowed reference
+//             .loop = loop,
+//         };
+
+//         core.retain();
+//         const thread = try std.Thread.spawn(.{}, WorkerThread.run, .{core});
+//         thread.detach();
+
+//         return self;
+//     }
+
+//     pub fn detachLoop(self: *JSWorker) void {
+//         self.loop = null;
+//     }
+
+//     pub fn postMessage(self: *JSWorker, data: []const u8) !void {
+//         const copy = try self.core.allocator.dupe(u8, data);
+//         errdefer self.core.allocator.free(copy);
+//         // Send to INBOX (Main -> Worker)
+//         try self.core.inbox.send(.{ .tag = .PostMessage, .data = copy });
+//     }
+
+//     pub fn terminate(self: *JSWorker) void {
+//         std.debug.print("[JSWorker] Terminate called\n", .{});
+//         self.core.signalTerminate();
+
+//         if (!self.ctx.isUndefined(self.self_ref)) {
+//             self.self_ref = zqjs.UNDEFINED;
+
+//             if (self.loop) |l| {
+//                 l.unregisterWorker(self);
+//                 self.loop = null;
+//             }
+//         }
+//     }
+
+//     pub fn poll(self: *JSWorker) !void {
+//         if (self.ctx.isUndefined(self.self_ref)) return;
+
+//         // Keep-Alive: Protect object while running poll callbacks
+//         const protect = self.ctx.dupValue(self.self_ref);
+//         defer self.ctx.freeValue(protect);
+
+//         while (true) {
+//             // Read from OUTBOX (Worker -> Main)
+//             const msg = self.core.outbox.receive(0) catch |err| {
+//                 if (err == error.Timeout) return;
+//                 return err;
+//             };
+//             defer self.core.allocator.free(msg.data);
+
+//             switch (msg.tag) {
+//                 .PostMessage => {
+//                     const onmessage = self.ctx.getPropertyStr(self.self_ref, "onmessage");
+//                     defer self.ctx.freeValue(onmessage);
+
+//                     if (!self.ctx.isFunction(onmessage)) continue;
+
+//                     const event = self.ctx.newObject();
+//                     defer self.ctx.freeValue(event);
+
+//                     const data_val = self.ctx.readObject(msg.data, .{});
+//                     if (self.ctx.isException(data_val)) continue;
+
+//                     _ = try self.ctx.setPropertyStr(event, "data", data_val);
+//                     const result = self.ctx.call(onmessage, self.self_ref, &[_]zqjs.Value{event});
+//                     defer self.ctx.freeValue(result);
+//                 },
+//                 .Error => {
+//                     const onerror = self.ctx.getPropertyStr(self.self_ref, "onerror");
+//                     defer self.ctx.freeValue(onerror);
+
+//                     if (!self.ctx.isFunction(onerror)) continue;
+
+//                     const event = self.ctx.newObject();
+//                     defer self.ctx.freeValue(event);
+
+//                     const msg_val = self.ctx.newString(msg.data);
+//                     _ = try self.ctx.setPropertyStr(event, "message", msg_val);
+//                     const result = self.ctx.call(onerror, self.self_ref, &[_]zqjs.Value{event});
+//                     defer self.ctx.freeValue(result);
+//                 },
+//                 .Terminate => {
+//                     // This case would only happen if Worker sent a .Terminate to Main,
+//                     // which isn't standard behavior, but safe to ignore.
+//                 },
+//             }
+//         }
+//     }
+
+//     pub fn destroy(self: *JSWorker) void {
+//         std.debug.print("[JSWorker] Destroy (Finalizer)\n", .{});
+//         const alloc = self.core.allocator;
+//         self.core.release();
+//         alloc.destroy(self);
+//     }
+// };
+
+// // ... C Functions ...
+
+// fn js_postMessage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
+
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+//     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+//     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+//     const binary_data = ctx.writeObject(argv[0], .{}) catch return ctx.throwInternalError("Failed to serialize message");
+//     const copy = core.allocator.dupe(u8, binary_data) catch {
+//         ctx.free(@ptrCast(binary_data.ptr));
+//         return ctx.throwOutOfMemory();
+//     };
+//     ctx.free(@ptrCast(binary_data.ptr));
+
+//     // Worker sending to Main -> OUTBOX
+//     core.outbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
+//         core.allocator.free(copy);
+//         return ctx.throwInternalError("Failed to send message");
+//     };
+//     return zqjs.UNDEFINED;
+// }
+
+// fn js_close(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+//     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+//     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+//     core.terminate_flag.store(true, .seq_cst);
+//     std.debug.print("[js_close] Worker requested close.\n", .{});
+//     return zqjs.UNDEFINED;
+// }
+
+// fn js_importScripts(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("importScripts requires at least one argument");
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+//     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
+//     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+//     var i: c_int = 0;
+//     while (i < argc) : (i += 1) {
+//         const path_cstr = ctx.toCString(argv[@intCast(i)]) catch return zqjs.EXCEPTION;
+//         defer ctx.freeCString(path_cstr);
+//         const path = std.mem.span(path_cstr);
+
+//         const script = std.fs.cwd().readFileAlloc(core.allocator, path, std.math.maxInt(usize)) catch return ctx.throwTypeError("Read file failed");
+//         defer core.allocator.free(script);
+
+//         const result = ctx.eval(script, path_cstr, .{}) catch return ctx.throwError();
+//         ctx.freeValue(result);
+//     }
+//     return zqjs.UNDEFINED;
+// }
+
+// // ... Main Thread Constructor ...
+
+// pub fn js_Worker_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("Worker constructor requires scriptPath argument");
+
+//     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+
+//     const path_cstr = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
+//     defer ctx.freeCString(path_cstr);
+//     const script_path = std.mem.span(path_cstr);
+
+//     var proto = ctx.getPropertyStr(new_target, "prototype");
+//     if (ctx.isException(proto) or ctx.isUndefined(proto)) {
+//         if (ctx.isException(proto)) _ = ctx.getException();
+//         proto = ctx.getClassProto(loop.worker_class_id);
+//     }
+//     defer ctx.freeValue(proto);
+
+//     const obj = ctx.newObjectProtoClass(proto, loop.worker_class_id);
+//     if (ctx.isException(obj)) return obj;
+
+//     const worker = JSWorker.create(loop.allocator, loop, ctx, script_path, obj) catch {
+//         ctx.freeValue(obj);
+//         return ctx.throwError();
+//     };
+
+//     _ = qjs.JS_SetOpaque(obj, worker);
+
+//     loop.registerWorker(worker) catch {
+//         worker.destroy();
+//         ctx.freeValue(obj);
+//         return ctx.throwError();
+//     };
+//     return obj;
+// }
+
+// pub fn js_Worker_postMessage(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
+
+//     const worker = qjs.JS_GetOpaque(this, worker_class_id);
+//     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
+//     const w: *JSWorker = @ptrCast(@alignCast(worker));
+
+//     const binary_data = ctx.writeObject(argv[0], .{}) catch return ctx.throwError();
+//     const copy = w.core.allocator.dupe(u8, binary_data) catch {
+//         ctx.free(@ptrCast(binary_data.ptr));
+//         return ctx.throwOutOfMemory();
+//     };
+//     ctx.free(@ptrCast(binary_data.ptr));
+
+//     // Main -> Worker uses INBOX
+//     w.core.inbox.send(.{ .tag = .PostMessage, .data = copy }) catch {
+//         w.core.allocator.free(copy);
+//         return ctx.throwError();
+//     };
+//     return zqjs.UNDEFINED;
+// }
+
+// pub fn js_Worker_terminate(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+//     std.debug.print("[js_Worker_terminate] Called from JS.\n", .{});
+//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     const worker = qjs.JS_GetOpaque(this, worker_class_id);
+//     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
+//     const w: *JSWorker = @ptrCast(@alignCast(worker));
+//     w.terminate();
+//     return zqjs.UNDEFINED;
+// }
+
+// fn workerGCMark(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue, mark_func: ?*const qjs.JS_MarkFunc) callconv(.c) void {
+//     _ = rt_ptr;
+//     _ = val;
+//     _ = mark_func;
+// }
+
+// fn workerFinalizer(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
+//     _ = rt_ptr;
+//     std.debug.print("[Finalizer] Worker object finalizing.\n", .{});
+//     const ptr = qjs.JS_GetOpaque(val, worker_class_id);
+//     if (ptr) |p| {
+//         const w: *JSWorker = @ptrCast(@alignCast(p));
+//         if (w.loop) |l| l.unregisterWorker(w);
+//         w.destroy();
+//     }
+// }
+
+// pub fn registerWorkerClass(ctx: zqjs.Context) !void {
+//     const rt = ctx.getRuntime();
+//     const loop = EventLoop.getFromContext(ctx) orelse return error.NoEventLoop;
+
+//     loop.worker_class_id = rt.newClassID();
+//     worker_class_id = loop.worker_class_id;
+
+//     try rt.newClass(loop.worker_class_id, .{
+//         .class_name = "Worker",
+//         .finalizer = workerFinalizer,
+//         .gc_mark = workerGCMark,
+//     });
+
+//     const proto = ctx.newObject();
+//     defer ctx.freeValue(proto);
+
+//     try installFn(ctx, js_Worker_postMessage, proto, "postMessage", "postMessage", 1);
+//     try installFn(ctx, js_Worker_terminate, proto, "terminate", "terminate", 0);
+
+//     ctx.setClassProto(loop.worker_class_id, proto);
+
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+
+//     const ctor = ctx.newCFunctionConstructor(js_Worker_constructor, "Worker", 1);
+//     _ = try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
+//     _ = try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor));
+//     _ = try ctx.setPropertyStr(global, "Worker", ctor);
+// }
