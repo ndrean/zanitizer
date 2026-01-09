@@ -106,13 +106,14 @@ The primitives exposed stay as close as possible to `JavaScript` semantics.
 
 ## ⚠️ Challenges
 
+Plenty!
+
 - Partial Browser APIs - fetch via `libcurl`
-- Module System - Need to implement import/export
 - No planned WASM support - Would need separate runtime integration
   
-## QuickJS & Lexbor integration status
+## Examples
 
-An example of `JavaScript` code running DOM primitives, executed by `Zig`!
+**Use DOM primitives in JavaScript code executed by `Zig`**
 
 ```js
 console.log("\nLet's populate the DOM!\n");
@@ -128,8 +129,6 @@ for (let i = 1; i<4; i++) {
 container.appendChild(list);
 const body = document.bodyElement();
 body.appendChild(container);
-console.log("\n✓ Document tree properly built!\n");
-
 ```
 
 And the Zig code to run this snippet:
@@ -157,8 +156,6 @@ The output is shown below
 ```txt
 Let's populate the DOM!
 
-Document tree properly built!
-
 <body>
     <ul>
         <li id="1">
@@ -172,6 +169,87 @@ Document tree properly built!
         </li>
     </ul>
 </body>
+```
+
+**Import JavaScript libraries**: `es-toolkit`
+
+Download the `es-toolikt` library:
+
+```sh
+ curl -L https://cdn.jsdelivr.net/npm/es-toolkit@1.43.0/+esm  -o es-toolkit.min.js
+```
+
+The JavaScript module _js/import_test.js_:
+
+```js
+import * as Module from "js/vendor/es-toolkit.min.js";
+
+console.log("\n[JS] 🚀 Testing external library: es-toolkit\n");
+console.log(
+  "\nimport ESM module: https://cdn.jsdelivr.net/npm/es-toolkit@1.43.0/+esm \n"
+);
+console.log(Object.keys(Module).join(", "));
+console.log("\n");
+
+// 1. Test 'mean' function
+const numbers = [10, 50, 5, 100, 2];
+const m = Module.mean(numbers);
+console.log(`[JS] ✅ Mean value is: ${m}\n`);
+
+// 2. Test 'chunk' function
+const list = [1, 2, 3, 4, 5, 6];
+const chunks = Module.chunk(list, 2);
+console.log(`[JS] ✅ Chunked array: ${JSON.stringify(chunks)}`);
+// Should be [[1,2], [3,4], [5,6]]
+```
+
+The output is:
+
+```txt
+[JS] 🚀 Testing external library: es-toolkit
+
+
+import ESM module: https://cdn.jsdelivr.net/npm/es-toolkit@1.43.0/+esm
+
+AbortError, Mutex, Semaphore, TimeoutError, after, ary, ... zip, zipObject, zipWith
+
+
+[JS] ✅ Mean value is: 33.4
+
+[JS] ✅ Chunked array: [[1,2],[3,4],[5,6]]
+-----------------------------------------
+```
+
+The Zig code ot run this:
+
+```zig
+fn importModule(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const source = std.fs.cwd().readFileAlloc(
+        allocator,
+        "js/import_test.js",
+        1024 * 1024,
+    ) catch |err| {
+        z.print("Error: Could not  find 'js/import_test.js'\n", .{});
+        return err;
+    };
+
+    defer allocator.free(source);
+
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
+
+    // 2. Evaluate as Module
+    // Our loader will see 'import ... from "js/vendor/es-toolkit.min.js"'
+    // and automatically load that file too.
+    const val = try engine.evalModule(c_source, "import_test.js");
+    defer engine.ctx.freeValue(val);
+
+    // Imports are resolved asynchronously
+    try engine.run();
+}
 ```
 
 This project exposes a significant / essential subset of all available `lexbor` functions:
