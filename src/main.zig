@@ -66,7 +66,7 @@ pub fn main() !void {
     // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
     // try first_QuickJS_test();
     // try getValueFromQJSinZig();
-    try simpleESM();
+    // try simpleESM();
     // try importModule(allocator);
     // try test_event_loop(allocator);
     // try promise_scope(allocator);

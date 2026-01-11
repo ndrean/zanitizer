@@ -133,12 +133,12 @@ fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs
                         if (key_cstr != null) qjs.JS_FreeCString(ctx.ptr, key_cstr);
                         if (val_cstr != null) qjs.JS_FreeCString(ctx.ptr, val_cstr);
 
-                        // [CRASH FIX] Commented out as requested/observed
+                        // [CRASH FIX]
                         // qjs.JS_FreeAtom(ctx.ptr, atom);
 
                         qjs.JS_FreeValue(ctx.ptr, val);
                     }
-                    qjs.js_free(ctx.ptr, props);
+                    qjs.JS_FreePropertyEnum(ctx.ptr, props, len);
                     data.headers = list.toOwnedSlice(loop.allocator) catch &[_][]const u8{};
                 }
             }

@@ -1314,7 +1314,7 @@ pub const Context = packed struct {
     };
 
     pub const PropertyEnum = extern struct {
-        is_enumerable: bool,
+        is_enumerable: c_int, // C is 4 bytes, not Z-bool (1 byte)
         atom: Atom,
     };
 

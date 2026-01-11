@@ -16,6 +16,8 @@ const BindingSpec = struct {
 
 const ArgType = union(enum) {
     allocator, // Uses rc.allocator
+    context, // <--- Passes 'ctx' to Zig function
+    callback, // <-- passes raw JS_Value
 
     // SOURCES
     this_element, // *HTMLElement from 'this'
