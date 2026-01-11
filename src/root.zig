@@ -12,7 +12,9 @@ pub const qjs = @cImport({
 pub const wrapper = @import("wrapper.zig");
 
 // Mailbox for inter-thread communication (Worker pattern)
-pub const mailbox = @import("mailbox");
+// pub const mailbox = @import("mailbox");
+
+pub const curl = @import("curl");
 
 // Local mailbox implementation for Workers
 pub const Mailbox = @import("mailbox.zig").Mailbox;

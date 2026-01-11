@@ -8,6 +8,9 @@ pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
     loop: *EventLoop,
 
+    // Worker-specific data (null for main thread)
+    worker_core: ?*anyopaque = null,
+
     // Central Registry of Class IDs for this Runtime
     classes: struct {
         dom_node: zqjs.ClassID = 0,

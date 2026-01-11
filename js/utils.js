@@ -1,5 +1,4 @@
 // js/utils.js
-console.log("[Utils] Loading library...");
 
 var MathLib = {
   add: function (a, b) {
@@ -10,4 +9,4 @@ var MathLib = {
   },
 };
 
-console.log("[Utils] Library loaded!");
+console.log("[Utils] 🟢 MathLib library loaded!");

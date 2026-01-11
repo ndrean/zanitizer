@@ -1,3 +1,8 @@
+//! AutoBridge: Automatic Async Binding Generator for QuickJS
+//! Generates async bindings with automatic argument parsing
+//! based on Payload struct field types.
+//!
+//!
 const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
@@ -5,20 +10,21 @@ const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const AsyncBridge = @import("async_bridge.zig");
 
-/// AUTOMATIC async binding generator
 /// Generates parser function at compile-time by inspecting Payload struct fields
 ///
 /// DESIGN:
 /// - Parser is generated based on struct field order and types
-/// - JavaScript args[i] maps to Payload.field[i]
-/// - String fields are automatically heap-allocated (using loop.allocator)
+/// - Map JavaScript args[i] -> Payload.field[i]
+/// - String fields are automatically _heap-allocated_ (using loop.allocator)
 /// - Worker function must free owned string fields
 ///
 /// ⚠️ CRITICAL MEMORY CONTRACT:
 /// AutoBridge allocates memory for ALL string fields in your Payload struct.
 /// Your worker function MUST free these fields, or you will leak memory!
 ///
-/// Example:
+/// ## Example:
+///
+/// ```zig
 ///   const FileTask = struct {
 ///       path: []const u8,      // ← AutoBridge allocates this
 ///       content: []const u8,   // ← AutoBridge allocates this
@@ -29,18 +35,13 @@ const AsyncBridge = @import("async_bridge.zig");
 ///       defer allocator.free(task.content);  // ← YOU MUST FREE!
 ///       // ... do work ...
 ///   }
-///
-/// LIMITATIONS:
+///   pub const writeFile = AutoBridge.bindAsyncAuto(FileTask, doWriteFile);
+///```
+/// ## LIMITATIONS:
 /// - Field order MUST match JavaScript argument order
 /// - No support for complex objects (use manual parser for those)
 /// - No support for optional arguments (all fields required)
 /// - No support for variadic arguments
-///
-/// USAGE:
-///   const FileTask = struct { path: []const u8 };
-///   fn doReadFile(allocator: Allocator, p: FileTask) ![]u8 { ... }
-///   pub const readFile = AutoBridge.bindAsyncAuto(FileTask, doReadFile);
-///
 pub fn bindAsyncAuto(
     comptime Payload: type,
     comptime workFn: fn (allocator: std.mem.Allocator, payload: Payload) anyerror![]u8,
@@ -169,6 +170,10 @@ fn isStringType(comptime T: type) bool {
     return T == []const u8 or T == []u8;
 }
 
+fn isBooleanType(comptime T: type) bool {
+    return T == bool;
+}
+
 // ============================================================================
 // Type Converters (Runtime)
 // ============================================================================
@@ -219,8 +224,10 @@ fn parseFloat(comptime T: type, ctx: zqjs.Context, arg: zqjs.Value) !T {
 }
 
 /// Parse string from JS value
-/// CRITICAL: Allocates heap memory using loop.allocator
-/// Worker function MUST free this memory!
+///
+/// ⚠️  Allocates heap memory using loop.allocator
+///
+/// ❗️Worker function MUST free this memory
 fn parseString(loop: *EventLoop, ctx: zqjs.Context, arg: zqjs.Value) ![]const u8 {
     if (!ctx.isString(arg)) {
         _ = ctx.throwTypeError("Expected string");
@@ -232,7 +239,7 @@ fn parseString(loop: *EventLoop, ctx: zqjs.Context, arg: zqjs.Value) ![]const u8
     defer ctx.freeCString(temp_str);
 
     // CRITICAL: Deep copy to heap
-    // This crosses the memory boundary: JS temp -> Zig heap
+    // cross memory boundary: JS temp -> Zig heap
     const heap_str = try loop.allocator.dupe(u8, std.mem.span(temp_str));
 
     return heap_str;
@@ -243,4 +250,100 @@ fn parseBoolean(ctx: zqjs.Context, arg: zqjs.Value) bool {
     // JS_ToBool returns: 1 (true), 0 (false), or -1 (exception)
     const val = qjs.JS_ToBool(ctx.ptr, arg);
     return val == 1;
+}
+
+// ============================================================================
+// Public Parser Generator (for use with bindAsyncJson)
+// ============================================================================
+
+/// Generate a parser function for a given Payload type
+/// This is used by the code generator to create parsers for bindAsyncJson
+///
+/// Returns a function with signature:
+/// fn(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !Payload
+pub fn genParser(comptime Payload: type) fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload {
+    const type_info = @typeInfo(Payload);
+    switch (type_info) {
+        .@"struct" => {},
+        else => @compileError("Payload must be a struct, got: " ++ @typeName(Payload)),
+    }
+
+    const Parser = struct {
+        fn parse(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !Payload {
+            // Use the same logic as bindAsyncAuto
+            if (args.len == 1 and ctx.isObject(args[0])) {
+                return try parseFromObject(loop, ctx, args[0]);
+            } else {
+                return try parseFromPositional(loop, ctx, args);
+            }
+        }
+
+        fn parseFromObject(loop: *EventLoop, ctx: zqjs.Context, obj: zqjs.Value) !Payload {
+            const fields = std.meta.fields(Payload);
+            var payload: Payload = undefined;
+
+            inline for (fields) |field| {
+                const T = field.type;
+                const prop = ctx.getPropertyStr(obj, field.name ++ "");
+                defer ctx.freeValue(prop);
+
+                if (ctx.isUndefined(prop)) {
+                    _ = ctx.throwTypeError("Missing required property: " ++ field.name);
+                    return error.MissingProperty;
+                }
+
+                if (comptime isIntegerType(T)) {
+                    @field(payload, field.name) = try parseInteger(T, ctx, prop);
+                } else if (comptime isFloatType(T)) {
+                    @field(payload, field.name) = try parseFloat(T, ctx, prop);
+                } else if (comptime isStringType(T)) {
+                    @field(payload, field.name) = try parseString(loop, ctx, prop);
+                } else if (T == bool) {
+                    @field(payload, field.name) = parseBoolean(ctx, prop);
+                } else {
+                    @compileError(std.fmt.comptimePrint(
+                        "Unsupported type in Payload field '{s}': {s}",
+                        .{ field.name, @typeName(T) },
+                    ));
+                }
+            }
+
+            return payload;
+        }
+
+        fn parseFromPositional(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !Payload {
+            const fields = std.meta.fields(Payload);
+
+            if (args.len < fields.len) {
+                _ = ctx.throwTypeError("Not enough arguments");
+                return error.InvalidArgCount;
+            }
+
+            var payload: Payload = undefined;
+
+            inline for (fields, 0..) |field, i| {
+                const arg = args[i];
+                const T = field.type;
+
+                if (comptime isIntegerType(T)) {
+                    @field(payload, field.name) = try parseInteger(T, ctx, arg);
+                } else if (comptime isFloatType(T)) {
+                    @field(payload, field.name) = try parseFloat(T, ctx, arg);
+                } else if (comptime isStringType(T)) {
+                    @field(payload, field.name) = try parseString(loop, ctx, arg);
+                } else if (T == bool) {
+                    @field(payload, field.name) = parseBoolean(ctx, arg);
+                } else {
+                    @compileError(std.fmt.comptimePrint(
+                        "Unsupported type in Payload field '{s}': {s}",
+                        .{ field.name, @typeName(T) },
+                    ));
+                }
+            }
+
+            return payload;
+        }
+    };
+
+    return Parser.parse;
 }

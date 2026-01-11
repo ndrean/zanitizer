@@ -14,6 +14,8 @@ const AsyncTask = event_loop_mod.AsyncTask;
 const AsyncBridge = @import("async_bridge.zig");
 // const NativeBridge = @import("js_native_bridge.zig");
 const Pt = @import("Point.zig");
+const Pt2 = @import("Point2.zig");
+const JSWorker = @import("js_worker.zig");
 const js_consoleLog = @import("utils.zig").js_consoleLog;
 
 const native_os = builtin.os.tag;
@@ -60,22 +62,49 @@ pub fn main() !void {
 
     setupSignalHandler();
 
+    // try demoCustomPointClass(allocator);
+    // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
     // try first_QuickJS_test();
     // try getValueFromQJSinZig();
-    // try simpleESM();
-    try importModule(allocator);
-    try test_event_loop(allocator);
-    try promise_scope(allocator);
-    try async_task_sequence_AB(allocator);
-    try async_task_sequence_ABCDEFGH(allocator);
-    try execute_Simple_Script_In_HTML();
-    try execute_Async_Script_In_HTML_And_Pass_To_Zig();
-    try execute_Passing_Binary_Data_from_Zig_to_JS_Async();
-    try firstJSONPass();
-    try simplifiedJSONPass(allocator);
-    try async_CSV_JSON_Parser(allocator);
+    try simpleESM();
+    // try importModule(allocator);
+    // try test_event_loop(allocator);
+    // try promise_scope(allocator);
+    // try async_task_sequence_AB(allocator);
+    // try async_task_sequence_ABCDEFGH(allocator);
+    // try execute_Simple_Script_In_HTML();
+    // try execute_Async_Script_In_HTML_And_Pass_To_Zig();
+    // try execute_Passing_Binary_Data_from_Zig_to_JS_Async();
+    // try firstJSONPass();
+    // try simplifiedJSONPass(allocator);
     try async_CSV_Tuple_Parser(allocator);
-    try JS_Proxy_And_Generators(allocator);
+    // try JS_Proxy_And_Generators(allocator);
+    try async_Fetch_API_Demo(allocator);
+    try async_CSV_JSON_Parser(allocator);
+    try demoWorker(allocator);
+}
+
+fn demoWorker(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Worker Thread Demo -------------------------\n\n", .{});
+
+    // We must register the Worker class in the Main Engine
+    // try JSWorker.registerWorkerClass(engine.ctx);
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/main_with_worker.js", 1024 * 1024);
+    defer allocator.free(source);
+
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
+
+    const val = try engine.evalModule(c_source, "main_with_worker.js");
+
+    engine.ctx.freeValue(val);
+
+    // Run Main Loop (Handles Worker messages)
+    try engine.run();
 }
 
 fn first_QuickJS_test() !void {
@@ -170,7 +199,7 @@ fn getValueFromQJSinZig() !void {
 }
 
 // ESM Modules ----------------------------------------------------------------
-
+// [TODO] Rework using ScriptEngine
 fn simpleESM() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     const allocator = debug_allocator.allocator();
@@ -232,6 +261,8 @@ fn simpleESM() !void {
     // Execute Module Jobs
     // Imports are resolved asynchronously. You must pump the job queue.
     while ((try rt.executePendingJob()) != null) {}
+
+    try loop.run(.Script);
 }
 
 fn importModule(allocator: std.mem.Allocator) !void {
@@ -1109,7 +1140,7 @@ fn parseCSVArg(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) ![
 
 // 2. Worker: Calls the generic logic
 fn workerParseProducts(allocator: std.mem.Allocator, csv_text: []u8) ![]Product {
-    z.print("[Worker] Parsing.....\n", .{});
+    z.print("[Worker] JSON Parsing.....\n", .{});
     return parseCSV.parseCSVtoJSON(Product, allocator, csv_text);
 }
 
@@ -1161,7 +1192,7 @@ fn async_CSV_JSON_Parser(allocator: std.mem.Allocator) !void {
 
 fn workerParseTupleProducts(allocator: std.mem.Allocator, csv_text: []u8) ![]parseCSV.ProductRow {
     // defer allocator.free(csv_text); // Clean up payload
-    z.print("[Worker] Parsing.....\n", .{});
+    z.print("[Worker] Tuple Parsing.....\n", .{});
     return parseCSV.parseCSVToTuples(allocator, csv_text);
 }
 
@@ -1209,6 +1240,143 @@ fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator) !void {
     try engine.run();
 }
 
+// Fetch API -------------------------------------------------------------
+
+fn async_Fetch_API_Demo(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Async Fetch API Demo ----------------------------------------\n\n", .{});
+
+    const script =
+        \\console.log("🔵 Starting Fetch API demo...");
+        \\fetch("https://jsonplaceholder.typicode.com/todos/1")
+        \\  .then((response) => {
+        \\    console.log("🔵 Response received, status:", response.status);
+        \\    const text = response.text();
+        \\    console.log("🔵 Body text:", text.substring(0, 100));
+        \\    const data = JSON.parse(text);
+        \\    console.log("🔵 JSON Data:", JSON.stringify(data, null, 2));
+        \\  })
+        \\  .catch(err => {
+        \\    console.error("🔴 Fetch error:", err);
+        \\  });
+        \\
+        \\fetch("https://jsonplaceholder.typicode.com/posts", {
+        \\  method: 'POST',
+        \\  body: JSON.stringify({
+        \\    title: 'foo',
+        \\    body: 'bar',
+        \\    userId: 1,
+        \\  }),
+        \\  headers: {
+        \\    'Content-type': 'application/json; charset=UTF-8',
+        \\  },
+        \\})
+        \\  .then((response) => response.json())
+        \\  .then((json) => console.log("🔵 POST Response JSON:", JSON.stringify(json)))
+        \\  .catch(err => {
+        \\    console.error("🔴 Fetch error:", err);
+        \\  });
+    ;
+
+    const res = try engine.eval(script, "<fetch>");
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+
+// Install Custom Class -------------------------------------------------
+pub fn demoCustomPointClass(allocator: std.mem.Allocator) !void {
+    z.print("\n=== Custom Class Demo (Point) -------------------\n", .{});
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    try Pt.install(engine.rt, engine.ctx);
+
+    // ========================================================================
+    // TEST IN JAVASCRIPT
+    // ========================================================================
+
+    const code =
+        \\console.log("1. Creating Point(3, 4)...");
+        \\const pt = new Point(3, 4);
+        \\
+        \\console.log("2. Calculating distance...");
+        \\const d = pt.distance();
+        \\console.log(`   Distance is: ${d}`);
+        \\
+        \\console.log("3. Testing Getter/Setter...");
+        \\console.log(`   Original X: ${pt.x}`);
+        \\pt.x = 5;
+        \\console.log(`   New X: ${pt.x}`);
+        \\console.log(`   Original Y: ${pt.y}`);
+        \\pt.y = 12;
+        \\console.log(`   New Y: ${pt.y}`);
+        \\console.log(`   New Distance: ${pt.distance()}`);
+        \\console.log(`.  Point(${pt.x}, ${pt.y})`);
+        \\
+        \\console.log("4. Cleanup...");
+        \\
+    ;
+
+    const res = try engine.eval(code, "<demo>");
+
+    if (engine.ctx.isException(res)) {
+        _ = engine.ctx.checkAndPrintException();
+    }
+    engine.ctx.freeValue(res);
+
+    // Force GC to show finalizer running
+    // engine.rt.runGC();
+}
+
+// Install Custom Class with ClassBuilder (Auto-generated) -----------------
+pub fn demoPoint2Class(allocator: std.mem.Allocator) !void {
+    z.print("\n=== ClassBuilder Demo (Point2 - Auto-generated!) -------------------\n", .{});
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    try Pt2.register(engine.ctx);
+
+    // ========================================================================
+    // TEST IN JAVASCRIPT
+    // ========================================================================
+
+    const code =
+        \\console.log("1. Creating Point({ x: 3, y: 4 })...");
+        \\const pt = new Point({ x: 3, y: 4 });
+        \\
+        \\console.log("2. Calculating distance...");
+        \\const d = pt.distance();
+        \\console.log(`   Distance is: ${d}`);
+        \\
+        \\console.log("3. Testing Auto-generated Getters/Setters...");
+        \\console.log(`   Original X: ${pt.x}`);
+        \\pt.x = 5;
+        \\console.log(`   New X: ${pt.x}`);
+        \\console.log(`   Original Y: ${pt.y}`);
+        \\pt.y = 12;
+        \\console.log(`   New Y: ${pt.y}`);
+        \\console.log(`   New Distance: ${pt.distance()}`);
+        \\
+        \\console.log("4. Testing Auto-generated toString()...");
+        \\console.log(`   ${pt.toString()}`);
+        \\
+        \\console.log("5. Cleanup...");
+        \\
+    ;
+
+    const res = try engine.eval(code, "<demo>");
+
+    if (engine.ctx.isException(res)) {
+        _ = engine.ctx.checkAndPrintException();
+    }
+    engine.ctx.freeValue(res);
+
+    // z.print("=== Demo Complete ===\n", .{});
+}
 // Virtual DOM Bridge Tests --------------------------------------------------
 
 /// Test the auto-generated QuickJS bindings
@@ -1817,69 +1985,6 @@ fn demoAsyncTaskInfrastructureGlobal(allocator: std.mem.Allocator, rt: *zqjs.Run
     z.print("  - Event loop integrates async tasks with timers\n", .{});
 }
 
-pub fn runDemoClass(_: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    z.print("\n=== Custom Class Demo (Point) ===\n", .{});
-
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-    ctx.setAllocator(&rt.allocator);
-
-    {
-        const console = ctx.newObject();
-        // defer ctx.freeValue(console);
-
-        // Create log function
-        const log_fn = ctx.newCFunction(js_consoleLog, "log", 1);
-        // Attach to console object
-        _ = try ctx.setPropertyStr(console, "log", log_fn);
-
-        // Attach console to global
-        const global = ctx.getGlobalObject();
-        defer ctx.freeValue(global);
-        _ = try ctx.setPropertyStr(global, "console", console);
-    }
-
-    try Pt.install(rt, ctx);
-
-    // ========================================================================
-    // TEST IN JAVASCRIPT
-    // ========================================================================
-
-    const code =
-        \\console.log("1. Creating Point(3, 4)...");
-        \\const pt = new Point(3, 4);
-        \\
-        \\console.log("2. Calculating distance...");
-        \\const d = pt.distance();
-        \\console.log(`   Distance is: ${d}`);
-        \\
-        \\console.log("3. Testing Getter/Setter...");
-        \\console.log(`   Original X: ${pt.x}`);
-        \\pt.x = 5;
-        \\console.log(`   New X: ${pt.x}`);
-        \\console.log(`   Original Y: ${pt.y}`);
-        \\pt.y = 12;
-        \\console.log(`   New Y: ${pt.y}`);
-        \\console.log(`   New Distance: ${pt.distance()}`);
-        \\console.log(`.  Point(${pt.x}, ${pt.y})`);
-        \\
-        \\console.log("4. Force GC cleanup...");
-        \\
-    ;
-
-    const res = try ctx.eval(code, "<demo>", .{});
-
-    if (ctx.isException(res)) {
-        _ = ctx.checkAndPrintException();
-    }
-    ctx.freeValue(res);
-
-    // Force GC to show finalizer running
-    rt.runGC();
-
-    z.print("=== Demo Complete ===\n", .{});
-}
-
 fn parseSimulate(ctx: zqjs.Context, args: []const zqjs.Value) !u64 {
     if (args.len < 1) {
         _ = ctx.throwTypeError("simulateWork requires 1 argument (ms)");
@@ -1896,54 +2001,6 @@ fn doSimulate(allocator: std.mem.Allocator, delay_ms: u64) ![]u8 {
 
     // Return result (must be allocated with 'allocator')
     return std.fmt.allocPrint(allocator, "✅ Waited {d}ms via Generic Bridge!", .{delay_ms});
-}
-
-fn demoWorker(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
-    const JSWorkerModule = @import("js_worker.zig");
-
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-    ctx.setAllocator(&gpa);
-
-    var loop = try EventLoop.create(gpa, rt);
-    defer loop.destroy();
-
-    // 2. Install Features (Console, Worker Class)
-    try loop.install(ctx);
-    try JSWorkerModule.registerWorkerClass(ctx); // <-- "new Worker()"
-
-    // 3. Define the Test Script (Main Thread JS)
-    const test_script =
-        \\ console.log("[Main] Spawning worker...");
-        \\ const w = new Worker("js/worker.js", { type: 'module' });
-        \\
-        \\ // listener for messages from worker
-        \\ w.onmessage = (e) => {
-        \\     console.log("[Main] Received from worker:", JSON.stringify(e.data));
-        \\     if (e.data.result === 30) {
-        \\         console.log("[Main] TEST PASSED ✅");
-        \\         w.terminate(); // Cleanup
-        \\     }
-        \\ };
-        \\
-        \\ // Give worker a moment to boot (for logs)
-        \\ setTimeout(() => {
-        \\     console.log("[Main] Sending task...");
-        \\     w.postMessage({ op: 'calc', a: 10, b: 20 });
-        \\ }, 500);
-    ;
-
-    const res = try ctx.eval(test_script, "js/main.js", .{});
-    defer ctx.freeValue(res);
-
-    if (ctx.isException(res)) {
-        _ = ctx.checkAndPrintException();
-    }
-
-    // 5. Enter Loop (Runs until worker is terminated and timers clear)
-    try loop.run(.Script);
-
-    std.debug.print("Exited cleanly.\n", .{});
 }
 
 fn demoParallelExecution(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {

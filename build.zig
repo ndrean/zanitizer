@@ -40,10 +40,13 @@ pub fn build(b: *std.Build) void {
 
     // const quickjs_dep = b.dependency("quickjs", .{ .target = target, .optimize = optimize });
 
-    const mailbox = b.dependency("mailbox", .{
-        .target = target,
-        .optimize = optimize,
-    });
+    // const mailbox = b.dependency("mailbox", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+
+    const dep_curl = b.dependency("curl", .{ .target = target, .optimize = optimize });
+    const curl_module = dep_curl.module("curl");
 
     const zexplorer_lib = b.addLibrary(.{
         .name = "zexplorer",
@@ -64,20 +67,22 @@ pub fn build(b: *std.Build) void {
     zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibC();
 
-    const zexplorer_module = b.addModule(
-        "zexplorer",
-        .{
-            .root_source_file = b.path("src/root.zig"),
-            .target = target,
-            .optimize = optimize,
+    const zexplorer_module = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "curl", .module = curl_module },
         },
-    );
-
-    // Add mailbox as an importable module
-    zexplorer_module.addImport("mailbox", mailbox.module("mailbox"));
+    });
 
     // Link the module to the wrapper library: get C dependencies
     zexplorer_module.linkLibrary(zexplorer_lib);
+
+    // Link curl's C library to the module so it can find curl.h
+    // The curl module depends on libcurl which needs to be linked
+    zexplorer_module.link_libc = true;
+
     b.installArtifact(zexplorer_lib);
 
     // Examples executable
@@ -87,10 +92,12 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zhtml-examples", .module = zexplorer_module },
+                .{ .name = "curl", .module = curl_module },
+            },
         }),
     });
-
-    exe.root_module.addImport("zhtml-examples", zexplorer_module);
     exe.addObjectFile(lexbor_static_lib_path);
     exe.addIncludePath(lexbor_src_path);
     exe.addIncludePath(quickjs_src_path);

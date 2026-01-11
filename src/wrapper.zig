@@ -129,6 +129,8 @@ pub const Runtime = struct {
         const runtime = try allocator.create(Runtime);
         runtime.allocator = allocator;
         runtime.ptr = qjs.JS_NewRuntime2(&malloc_functions, @constCast(runtime));
+        // Store pointer to Runtime in opaque so finalizers can access it
+        qjs.JS_SetRuntimeOpaque(runtime.ptr, runtime);
         return runtime;
     }
 
@@ -502,6 +504,7 @@ pub const Runtime = struct {
 
         // Compile the module
         // JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
+
         const flags = qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY;
         const func_val = qjs.JS_Eval(
             ctx,

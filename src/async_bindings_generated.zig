@@ -2,39 +2,22 @@
 // DO NOT EDIT MANUALLY
 
 const AutoBridge = @import("auto_bridge.zig");
-const Worker = @import("Worker.zig"); 
+const AsyncBridge = @import("async_bridge.zig");
+const workers = @import("workers.zig");
 const zqjs = @import("wrapper.zig");
 
 // Auto-generated async bindings
-/// fetch() -> Promise<string>
-/// Auto-generated async binding
-pub const js_fetch = AutoBridge.bindAsyncAuto(
-    Worker.FetchPayload,
-    Worker.workerFetch,
-);
-
-/// simulateWork() -> Promise<string>
-/// Auto-generated async binding
-pub const js_simulateWork = AutoBridge.bindAsyncAuto(
-    Worker.SimulateWorkPayload,
-    Worker.workerSimulateAsync,
-);
-
 /// readFile() -> Promise<string>
 /// Auto-generated async binding
 pub const js_readFile = AutoBridge.bindAsyncAuto(
-    Worker.ReadFilePayload,
-    Worker.workerReadFile,
+    workers.ReadFilePayload,
+    workers.workerReadFile,
 );
 
 
 /// Install Async Worker bindings
 pub fn installAllBindings(ctx: zqjs.Context, global: zqjs.Value) !void {
     // Async worker APIs
-    const fetch_fn = ctx.newCFunction(js_fetch, "fetch", 1);
-    _ = try ctx.setPropertyStr(global, "fetch", fetch_fn);
-    const simulateWork_fn = ctx.newCFunction(js_simulateWork, "simulateWork", 1);
-    _ = try ctx.setPropertyStr(global, "simulateWork", simulateWork_fn);
     const readFile_fn = ctx.newCFunction(js_readFile, "readFile", 1);
     _ = try ctx.setPropertyStr(global, "readFile", readFile_fn);
 }

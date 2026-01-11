@@ -11,28 +11,30 @@ const AsyncBindingSpec = struct {
     payload_type: []const u8, // e.g., "Worker.FetchPayload"
     worker_func: []const u8, // e.g., "Worker.workerFetch"
     arg_count: usize, // Number of JS arguments
+    result_type: ?[]const u8 = null, // Optional: for bindAsyncJson (e.g., "FetchResult")
 };
 
 /// Async worker bindings (using auto_bridge)
 const async_bindings = [_]AsyncBindingSpec{
-    .{
-        .name = "fetch",
-        .payload_type = "Worker.FetchPayload",
-        .worker_func = "Worker.workerFetch",
-        .arg_count = 1,
-    },
-    .{
-        .name = "simulateWork",
-        .payload_type = "Worker.SimulateWorkPayload",
-        .worker_func = "Worker.workerSimulateAsync",
-        .arg_count = 1,
-    },
+    // .{
+    //     .name = "fetch",
+    //     .payload_type = "workers.FetchPayload",
+    //     .worker_func = "workers.workerFetch",
+    //     .arg_count = 1,
+    //     .result_type = "workers.FetchResult",
+    // },
     .{
         .name = "readFile",
-        .payload_type = "Worker.ReadFilePayload",
-        .worker_func = "Worker.workerReadFile",
+        .payload_type = "workers.ReadFilePayload",
+        .worker_func = "workers.workerReadFile",
         .arg_count = 1,
     },
+    // .{
+    //     .name = "simulateWork",
+    //     .payload_type = "workers.SimulateWorkPayload",
+    //     .worker_func = "workers.workerSimulateAsync",
+    //     .arg_count = 1,
+    // },
     // Add more async bindings here as needed
 };
 
@@ -64,7 +66,8 @@ pub fn main() !void {
         \\// DO NOT EDIT MANUALLY
         \\
         \\const AutoBridge = @import("auto_bridge.zig");
-        \\const Worker = @import("Worker.zig"); 
+        \\const AsyncBridge = @import("async_bridge.zig");
+        \\const workers = @import("workers.zig");
         \\const zqjs = @import("wrapper.zig");
         \\
         \\
@@ -73,23 +76,49 @@ pub fn main() !void {
     // Generate bindings
     try stdout.writeAll("// Auto-generated async bindings\n");
     for (async_bindings) |binding| {
-        try stdout.print(
-            \\/// {s}() -> Promise<string>
-            \\/// Auto-generated async binding
-            \\pub const js_{s} = AutoBridge.bindAsyncAuto(
-            \\    {s},
-            \\    {s},
-            \\);
-            \\
-            \\
-        ,
-            .{
-                binding.name,
-                binding.name,
-                binding.payload_type,
-                binding.worker_func,
-            },
-        );
+        if (binding.result_type) |result_type| {
+            // Use bindAsyncJson with AutoBridge.genParser for structured return types
+            try stdout.print(
+                \\/// {s}() -> Promise<object>
+                \\/// Auto-generated async binding (JSON)
+                \\pub const js_{s} = AsyncBridge.bindAsyncJson(
+                \\    {s},
+                \\    {s},
+                \\    AutoBridge.genParser({s}),
+                \\    {s},
+                \\);
+                \\
+                \\
+            ,
+                .{
+                    binding.name,
+                    binding.name,
+                    binding.payload_type,
+                    result_type,
+                    binding.payload_type,
+                    binding.worker_func,
+                },
+            );
+        } else {
+            // Use bindAsyncAuto for string return types
+            try stdout.print(
+                \\/// {s}() -> Promise<string>
+                \\/// Auto-generated async binding
+                \\pub const js_{s} = AutoBridge.bindAsyncAuto(
+                \\    {s},
+                \\    {s},
+                \\);
+                \\
+                \\
+            ,
+                .{
+                    binding.name,
+                    binding.name,
+                    binding.payload_type,
+                    binding.worker_func,
+                },
+            );
+        }
     }
 
     // Generate installer function

@@ -4,9 +4,13 @@
     .fingerprint = 0x1592e628bc011db,
     .minimum_zig_version = "0.15.1",
     .dependencies = .{
-        .mailbox = .{
-            .url = "git+https://github.com/g41797/mailbox#d0187c156f0fd956f57f36320fda52e555ebaef5",
-            .hash = "mailbox-0.0.13-8ABL0gVeAAAVfcvotP06FEWeAW_gLUGCnUB2rlxNXdjB",
+        // .mailbox = .{
+        //     .url = "git+https://github.com/g41797/mailbox#d0187c156f0fd956f57f36320fda52e555ebaef5",
+        //     .hash = "mailbox-0.0.13-8ABL0gVeAAAVfcvotP06FEWeAW_gLUGCnUB2rlxNXdjB",
+        // },
+        .curl = .{
+            .url = "https://github.com/jiacai2050/zig-curl/archive/refs/tags/v0.3.2.tar.gz",
+            .hash = "curl-0.3.2-P4tT4SXPAACuV6f5eyh4jG_1SspjWwMm_vRJfoKrQep5",
         },
     },
     .paths = .{

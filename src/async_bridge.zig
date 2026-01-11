@@ -7,6 +7,7 @@ const EventLoop = EL.EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
 /// Standard String binding (UTF-8)
+///
 /// Worker returns []u8 -> JS receives String
 pub fn bindAsync(
     comptime Payload: type,
@@ -17,7 +18,8 @@ pub fn bindAsync(
 }
 
 /// Binary binding (ArrayBuffer)
-/// Worker returns []u8 -> JS receives ArrayBuffer
+///
+/// Worker returns []u8 -> JS receives _ArrayBuffer_
 pub fn bindAsyncBuffer(
     comptime Payload: type,
     comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
@@ -27,6 +29,7 @@ pub fn bindAsyncBuffer(
 }
 
 /// JSON Auto-Serialization Binding
+///
 /// Worker returns arbitrary Zig Type -> Bridge serializes to JSON String -> JS receives String
 pub fn bindAsyncJson(
     comptime Payload: type,
@@ -44,20 +47,35 @@ pub fn bindAsyncJson(
             // Run User Logic (using Arena Allocator)
             // 'result_struct' and all its fields are allocated inside the arena.
             const result_struct = workFn(arena_alloc, payload) catch |err| {
-                if (Payload == []u8 or Payload == []const u8) {
-                    outer_allocator.free(payload);
-                }
+                freePayload(outer_allocator, payload);
                 return err;
             };
 
             var out: std.Io.Writer.Allocating = .init(outer_allocator);
             try std.json.Stringify.value(result_struct, .{ .whitespace = .indent_2 }, &out.writer);
 
+            freePayload(outer_allocator, payload);
+
+            return try out.toOwnedSlice();
+        }
+
+        fn freePayload(allocator: std.mem.Allocator, payload: Payload) void {
+            // Free simple string payloads
             if (Payload == []u8 or Payload == []const u8) {
-                outer_allocator.free(payload);
+                allocator.free(payload);
+                return;
             }
 
-            return out.toOwnedSlice();
+            // Free struct payloads with string fields
+            const type_info = @typeInfo(Payload);
+            if (type_info == .@"struct") {
+                inline for (std.meta.fields(Payload)) |field| {
+                    const T = field.type;
+                    if (T == []u8 or T == []const u8) {
+                        allocator.free(@field(payload, field.name));
+                    }
+                }
+            }
         }
     };
 
@@ -73,8 +91,9 @@ fn bindAsyncInternal(
     comptime Payload: type,
     comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
     comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
-    comptime is_binary: bool,
+    comptime is_binary_: bool,
 ) qjs.JSCFunction {
+    const is_binary = is_binary_;
     const Binder = struct {
         fn callback(
             ctx_ptr: ?*qjs.JSContext,

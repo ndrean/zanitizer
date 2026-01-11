@@ -36,6 +36,11 @@ pub const AsyncTask = struct {
         success_utf8: []u8,
         success_bin: []u8,
         failure: []u8,
+        custom: struct {
+            data: *anyopaque,
+            callback: *const fn (ctx: zqjs.Context, data: *anyopaque) void,
+            destroy: *const fn (allocator: std.mem.Allocator, data: *anyopaque) void,
+        },
     };
 };
 
@@ -105,6 +110,9 @@ pub const EventLoop = struct {
                     .success_utf8 => |data| self.allocator.free(data),
                     .success_bin => |data| self.allocator.free(data),
                     .failure => |msg| self.allocator.free(msg),
+                    .custom => |payload| {
+                        payload.destroy(self.allocator, payload.data);
+                    },
                 }
             }
             self.task_queue.deinit(self.allocator);
@@ -199,6 +207,9 @@ pub const EventLoop = struct {
                 .success_utf8 => |data| self.allocator.free(data),
                 .success_bin => |data| self.allocator.free(data),
                 .failure => |msg| self.allocator.free(msg),
+                .custom => |payload| {
+                    payload.destroy(self.allocator, payload.data);
+                },
             }
             return;
         };
@@ -224,6 +235,10 @@ pub const EventLoop = struct {
             defer task.ctx.freeValue(task.resolve);
             defer task.ctx.freeValue(task.reject);
             switch (task.result) {
+                .custom => |payload| {
+                    // execute the function pointer stored in the task
+                    payload.callback(task.ctx, payload.data);
+                },
                 .success_utf8 => |data| {
                     defer self.allocator.free(data);
                     const js_str = task.ctx.newString(data);

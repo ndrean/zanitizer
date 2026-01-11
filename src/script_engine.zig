@@ -7,6 +7,10 @@ const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge; // Assuming your DOM logic is here
+const async_bindings = @import("async_bindings_generated.zig");
+const JSWorker = @import("js_worker.zig");
+const FetchBridge = @import("fetch_bridge.zig").FetchBridge;
+const AsyncBridge = @import("async_bridge.zig");
 
 pub const ScriptEngine = struct {
     allocator: std.mem.Allocator,
@@ -37,10 +41,30 @@ pub const ScriptEngine = struct {
         // Allocates, zeroes classes, and sets the opaque pointer
         self.rc = try RuntimeContext.create(allocator, self.ctx, self.loop);
 
-        // 4. Install Bridges & APIs
+        // 2. Install Bridges (timers)
+        try self.loop.install(self.ctx);
+
+        // DOM
         self.dom = try DOMBridge.init(allocator, self.ctx);
         try self.dom.installAPIs(); // console, etc.
-        try self.loop.install(self.ctx); // setTimeout, etc.
+
+        // Worker class
+        try JSWorker.registerWorkerClass(self.ctx);
+
+        // Fetch Bridge
+        try FetchBridge.install(self.ctx);
+
+        // // 5. Install Async Worker Bindings
+        // const global = self.ctx.getGlobalObject();
+        // defer self.ctx.freeValue(global);
+
+        // // Install custom fetch (builds Response object, no double JSON)
+        // const fetch_fn = self.ctx.newCFunction(workers.js_fetch, "fetch", 1);
+        // _ = try self.ctx.setPropertyStr(global, "fetch", fetch_fn);
+
+        // // Install other async bindings (readFile, etc.)
+        // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
+        // _ = try self.ctx.setPropertyStr(global, "readFile", readFile_fn);
 
         return self;
     }
@@ -58,6 +82,7 @@ pub const ScriptEngine = struct {
 
         // 4. Context
         self.ctx.deinit();
+        std.Thread.sleep(10 * std.time.ns_per_ms);
 
         // 5. Runtime (GC and destroy)
         self.rt.runGC();
@@ -79,7 +104,11 @@ pub const ScriptEngine = struct {
             code,
             filename,
             .{ .type = .global },
-        ) catch return error.JSException; // Catch internal wrapper errors
+        ) catch {
+            // The exception is still in the context, print it before returning
+            _ = self.ctx.checkAndPrintException();
+            return error.JSException;
+        };
 
         // Check for JS-level exceptions (syntax errors, throw new Error(), etc.)
         if (self.ctx.isException(val)) {
@@ -193,11 +222,17 @@ pub const ScriptEngine = struct {
 
     pub fn evalModule(self: *ScriptEngine, code: [:0]const u8, filename: [:0]const u8) !zqjs.Value {
         // Use JS_EVAL_TYPE_MODULE
-        const flags = qjs.JS_EVAL_TYPE_MODULE;
+        const flags: c_int = @intCast(qjs.JS_EVAL_TYPE_MODULE);
 
         // Raw call to avoid wrapper defaults if wrapper.eval forces GLOBAL
         const len = code.len;
-        const val = qjs.JS_Eval(self.ctx.ptr, code.ptr, len, filename.ptr, @intCast(flags));
+        const val = qjs.JS_Eval(
+            self.ctx.ptr,
+            code.ptr,
+            len,
+            filename.ptr,
+            flags,
+        );
 
         if (self.ctx.isException(val)) {
             _ = self.ctx.checkAndPrintException();
@@ -215,3 +250,27 @@ pub const ScriptEngine = struct {
         _ = try self.ctx.setPropertyStr(global, name, js_fn);
     }
 };
+
+// ============================================================================
+// Custom Fetch Binding - Builds Response object directly (no double JSON)
+// ============================================================================
+
+/// Payload for custom fetch
+const FetchPayload = struct {
+    url: []const u8,
+};
+
+/// Parser for fetch arguments
+fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !FetchPayload {
+    if (args.len < 1) {
+        _ = ctx.throwTypeError("fetch() requires a URL");
+        return error.InvalidArgs;
+    }
+
+    const url_str = try ctx.toZString(args[0]);
+    defer ctx.freeZString(url_str);
+
+    return FetchPayload{
+        .url = try loop.allocator.dupe(u8, url_str),
+    };
+}
