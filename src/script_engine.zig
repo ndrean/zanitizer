@@ -18,7 +18,7 @@ pub const ScriptEngine = struct {
     ctx: zqjs.Context,
     loop: *EventLoop,
     rc: *RuntimeContext,
-    dom: DOMBridge, // Or *DOMBridge if you allocate it on heap
+    dom: DOMBridge, // VALUE!! to own the DOMBridge struct so DOMBridge deinit its content and ScriptEngine
 
     /// Initialize the entire JS Environment on the heap
     pub fn init(allocator: std.mem.Allocator) !*ScriptEngine {
@@ -41,16 +41,16 @@ pub const ScriptEngine = struct {
         // Allocates, zeroes classes, and sets the opaque pointer
         self.rc = try RuntimeContext.create(allocator, self.ctx, self.loop);
 
-        // 2. Install Bridges (timers)
-        try self.loop.install(self.ctx);
-
-        // DOM
         self.dom = try DOMBridge.init(allocator, self.ctx);
-        try self.dom.installAPIs(); // console, etc.
 
+        self.rc.dom_bridge = @ptrCast(@alignCast(&self.dom));
+
+        // Install Bridges (timers)
+        try self.loop.install(self.ctx);
+        // install DOM APIs
+        try self.dom.installAPIs(); // console, etc.
         // Worker class
         try JSWorker.registerWorkerClass(self.ctx);
-
         // Fetch Bridge
         try FetchBridge.install(self.ctx);
 
@@ -94,6 +94,7 @@ pub const ScriptEngine = struct {
 
     /// Run the Event Loop until completion (or until empty)
     pub fn run(self: *ScriptEngine) !void {
+        while ((try self.rt.executePendingJob()) != null) {}
         try self.loop.run(.Script);
     }
 

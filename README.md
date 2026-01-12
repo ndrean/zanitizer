@@ -108,62 +108,148 @@ Plenty!
   
 ## Examples
 
-**Use DOM primitives in JavaScript code executed by `Zig`**
+**Use Reactive DOM primitives in async JavaScript code executed by `Zig`**
 
 ```js
-console.log("\nLet's populate the DOM!\n");
+const btn = document.createElement("button");
+const form = document.createElement("form");
+form.appendChild(btn);
+document.body.appendChild(form);
 
-const list = document.createElement("ul");
+const mylist = document.createElement("ul");
+for (let i = 1; i < 3; i++) {
+  const item = document.createElement("li");
+  item.setContentAsText("Item " + i * 10);
+  item.setAttribute("id", i);
+  mylist.appendChild(item);
+}
+document.body.appendChild(mylist);
+console.log("[JS] Initial document", document.body.innerHTML);
 
-for (let i = 1; i<4; i++) {
-    const item = document.createElement("li");
-    item.setContentAsText("Item " + i * 10);
-    list.appendChild(item);
+// --------------------------------------------------------------------
+// DOM Event Listener with Delayed action with Timer
+// --------------------------------------------------------------------
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault(); // Prevent actual form submission
+  console.log("[JS] ⌛️ 📝 Form Submitted! Event Type:", e.type);
+});
+
+console.log("[JS] Submit the form! ⏳");
+setTimeout(() => {
+  form.dispatchEvent("submit");
+  console.log("[JS] Final HTML: ", document.body.innerHTML);
+}, 1000);
+
+// --------------------------------------------------------------------
+// Simple reactive object
+// --------------------------------------------------------------------
+
+function createReactiveObject(target, callback) {
+  return new Proxy(target, {
+    set(obj, prop, value) {
+      const oldValue = obj[prop];
+      obj[prop] = value;
+
+      // Trigger callback on change
+      if (oldValue !== value) {
+        const prop_id = prop === "name" ? "#1" : prop === "age" ? "#2" : null;
+        document.querySelector(prop_id).setContentAsText(value); // Normal DOM update
+        callback(prop, oldValue, value);
+      }
+
+      return true;
+    },
+
+    get(obj, prop) {
+      return obj[prop];
+    },
+  });
 }
 
-container.appendChild(list);
-const body = document.bodyElement();
-body.appendChild(container);
+// Instantiate the data and update the DOM
+const data = { name: "John", age: 30 };
+document.querySelector("#1").setContentAsText(data.name);
+document.querySelector("#2").setContentAsText(data.age);
+console.log("[JS] Direct DOM update: ", document.body.innerHTML);
+
+// Reactive function
+const reactiveData = createReactiveObject(data, (prop, oldVal, newVal) => {
+  console.log("[JS] reaction:", document.body.innerHTML);
+});
+
+// 1. First reaction via property change
+reactiveData.name = "Jane";
+
+// Second reaction trigger via Event Listener to change age
+btn.addEventListener("click", (e) => {
+  console.log("[JS] ⚡️ Button Clicked! Event Type:", e.type);
+  reactiveData.age *= 2;
+});
+
+console.log("[JS] Click the button! ✅");
+btn.dispatchEvent("click");
+```
+
+The output:
+
+```txt
+[JS] Initial document <form><button></button></form><ul><li id="1">Item 10</li><li id="2">Item 20</li></ul>
+
+[JS] Direct DOM injection:  <form><button></button></form><ul><li id="1">John</li><li id="2">30</li></ul>
+
+[JS] Reaction: change 'name' <form><button></button></form><ul><li id="1">Jane</li><li id="2">30</li></ul>
+
+[JS] Click the button! ✅
+[JS] ⚡️ Button Clicked! Event Type: click
+[JS] Reaction: change 'age' <form><button></button></form><ul><li id="1">Jane</li><li id="2">60</li></ul>
+
+[JS] Submit the form! ⏳
+[JS] ⌛️ 📝 Form Submitted! Event Type: submit
+[JS] Final HTML:  <form><button></button></form><ul><li id="1">Jane</li><li id="2">60</li></ul>
+
+[Zig-serialized-DOM-string]
+<html>
+  <head>
+  </head>
+  <body>
+    <form>
+      <button>
+      </button>
+    </form>
+    <ul>
+      <li id="1">
+        "Jane"
+      </li>
+      <li id="2">
+        "60"
+      </li>
+    </ul>
+  </body>
+</html>
 ```
 
 And the Zig code to run this snippet:
 
 ```zig
-const ctx = w.Context.init(rt);
-errdefer ctx.deinit();
-ctx.setAllocator(&allocator);
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
 
-var bridge = try DOMBridge.init(allocator, ctx);
-defer ctx.deinit();
-defer bridge.deinit();  
-try bridge.installAPIs();
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/dom_event_listener.js", 1024);
+    defer allocator.free(source);
 
-// 'html' is the JavaScript snippet above 
-const result = try ctx.eval(html,"<ssr>",.{});
-defer ctx.freeValue(result);
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
 
-const root = z.bodyNode(bridge.doc).?;
-try z.prettyPrint(allocator, root);
-```
+    const val = try engine.evalModule(c_source, "dom_event_listener.js");
 
-The output is shown below
+    engine.ctx.freeValue(val);
 
-```txt
-Let's populate the DOM!
+    // Run Main Loop (Handles Events)
+    try engine.run();
 
-<body>
-    <ul>
-        <li id="1">
-            "Item 10"
-        </li>
-        <li id="2">
-            "Item 20"
-        </li>
-        <li id="3">
-            "Item 30"
-        </li>
-    </ul>
-</body>
+    const body_node = z.documentRoot(engine.dom.doc);
+    try z.prettyPrint(allocator, body_node.?);
 ```
 
 **Import JavaScript libraries**: `es-toolkit`

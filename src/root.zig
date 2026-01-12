@@ -10,6 +10,10 @@ pub const qjs = @cImport({
 
 // Import wrapper for cleaner QuickJS API
 pub const wrapper = @import("wrapper.zig");
+pub const dom_Bridge = @import("dom_bridge.zig");
+
+pub const addEventListener = dom_bridge.addEventListener;
+pub const dispatchEvent = dom_bridge.dispatchEvent;
 
 // Mailbox for inter-thread communication (Worker pattern)
 // pub const mailbox = @import("mailbox");

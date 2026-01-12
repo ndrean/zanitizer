@@ -6,18 +6,26 @@
 
 const std = @import("std");
 
+const BindingKind = enum { static, method, property };
 const BindingSpec = struct {
     name: []const u8,
-    zig_func_name: []const u8,
-    kind: enum { static, method }, // static = on document, method = on prototype
-    args: []const ArgType,
-    return_type: ReturnType,
+    kind: BindingKind, // static = on document, method = on prototype
+
+    zig_func_name: []const u8 = "",
+    args: []const ArgType = &.{},
+    return_type: ReturnType = .void_type,
+
+    getter: []const u8 = "", // e.g. "z.innerHTML"
+    setter: []const u8 = "", // e.g. "z.setInnerHTML"
+    prop_type: ReturnType = .void_type, // Type of the property (e.g. .string)
+    prop_this: ArgType = .this_element, // What 'this' maps to (.this_element or .this_node)
 };
 
 const ArgType = union(enum) {
     allocator, // Uses rc.allocator
     context, // <--- Passes 'ctx' to Zig function
     callback, // <-- passes raw JS_Value
+    dom_bridge,
 
     // SOURCES
     this_element, // *HTMLElement from 'this'
@@ -35,7 +43,8 @@ const ArgType = union(enum) {
 };
 
 const ReturnType = union(enum) {
-    void_type,
+    void_type, // Returns void (no error check)
+    void_with_error, // Returns !void (generates 'catch return w.EXCEPTION')
     element, // *HTMLElement
     optional_element, // ?*HTMLElement
     node, // *DomNode
@@ -55,6 +64,22 @@ const ReturnType = union(enum) {
 
 // Define the bindings to generate
 const bindings = [_]BindingSpec{
+    .{
+        .name = "addEventListener",
+        .zig_func_name = "z.addEventListener",
+        .kind = .method,
+        // Pass Context first, then 'this' (Node), then Event Name, then Function
+        .args = &.{ .context, .dom_bridge, .this_node, .string, .callback },
+        .return_type = .void_with_error,
+    },
+    // Optional: Dispatch for manual testing
+    .{
+        .name = "dispatchEvent",
+        .zig_func_name = "z.dispatchEvent",
+        .kind = .method,
+        .args = &.{ .context, .dom_bridge, .this_node, .string },
+        .return_type = .void_with_error,
+    },
     // Document methods (Static on document object)
     .{
         .name = "createElement",
@@ -147,7 +172,7 @@ const bindings = [_]BindingSpec{
         .zig_func_name = "z.removeAttribute",
         .kind = .method,
         .args = &.{ .this_element, .string },
-        .return_type = .void_type,
+        .return_type = .void_with_error,
     },
     .{
         .name = "textContent",
@@ -161,22 +186,18 @@ const bindings = [_]BindingSpec{
         .zig_func_name = "z.setContentAsText",
         .kind = .method,
         .args = &.{ .this_node, .string },
-        .return_type = .void_type,
+        .return_type = .void_with_error,
     },
-    .{
-        .name = "setInnerHTML",
-        .zig_func_name = "z.setInnerHTML",
-        .kind = .method,
-        .args = &.{ .this_element, .string },
-        .return_type = .element,
-    },
+
     .{
         .name = "innerHTML",
-        .zig_func_name = "z.innerHTML",
-        .kind = .method,
-        .args = &.{ .allocator, .this_element },
-        .return_type = .error_string,
+        .kind = .property,
+        .getter = "z.innerHTML",
+        .setter = "z.setInnerHTML",
+        .prop_type = .error_string, // returns ![]u8
+        .prop_this = .this_element,
     },
+    // Add more bindings: 'id', 'className', 'children', etc.
 };
 
 pub fn main() !void {
@@ -229,7 +250,20 @@ pub fn main() !void {
     try stdout.writeAll("pub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
     for (bindings) |binding| {
         if (binding.kind == .method) {
+            // Install Method
             try stdout.print("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"{s}\", qjs.JS_NewCFunction(ctx, js_{s}, \"{s}\", {d}));\n", .{ binding.name, binding.name, binding.name, countJsArgs(binding.args) });
+        } else if (binding.kind == .property) {
+            // Install Property
+            try stdout.print(
+                \\    {{
+                \\        const atom = qjs.JS_NewAtom(ctx, "{s}");
+                \\        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_{s}, "get_{s}", 0, qjs.JS_CFUNC_getter, 0);
+                \\        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_{s}, "set_{s}", 1, qjs.JS_CFUNC_setter, 0);
+                \\        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+                \\        qjs.JS_FreeAtom(ctx, atom);
+                \\    }}
+                \\
+            , .{ binding.name, binding.name, binding.name, binding.name, binding.name });
         }
     }
     try stdout.writeAll("}\n");
@@ -252,6 +286,92 @@ fn countJsArgs(args: []const ArgType) usize {
 }
 
 fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
+
+    // Handle property bindings
+    // 1. HANDLE PROPERTIES
+    if (func.kind == .property) {
+
+        // --- GENERATE GETTER ------------------------------------------------
+        try writer.print(
+            \\
+            \\// Property Getter for {s}
+            \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+            \\    _ = argc; _ = argv;
+            \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+            \\    const rc = RuntimeContext.get(ctx);
+            \\
+        , .{ func.name, func.name });
+
+        // 1. Extract 'this'
+        const cast_type = if (func.prop_this == .this_element) "*z.HTMLElement" else "*z.DomNode";
+        try writer.print(
+            \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+            \\    if (ptr == null) return w.EXCEPTION;
+            \\    const this_arg: {s} = @ptrCast(@alignCast(ptr));
+            \\
+        , .{cast_type});
+
+        // 2. Call Zig Getter
+        if (func.prop_type == .error_string or func.prop_type == .string) {
+            try writer.print("    const result = {s}(rc.allocator, this_arg)", .{func.getter});
+        } else {
+            try writer.print("    const result = {s}(this_arg)", .{func.getter});
+        }
+
+        // 3. Catch & Marshal
+        if (func.prop_type == .error_string) {
+            try writer.writeAll(" catch return w.EXCEPTION;\n");
+            try writer.writeAll("    defer rc.allocator.free(result);\n");
+            try writer.writeAll("    return ctx.newString(result);\n");
+        } else if (func.prop_type == .string) {
+            try writer.writeAll(";\n");
+            try writer.writeAll("    defer rc.allocator.free(result);\n");
+            try writer.writeAll("    return ctx.newString(result);\n");
+        } else if (func.prop_type == .boolean) {
+            try writer.writeAll(";\n    return ctx.newBool(result);\n");
+        } else {
+            try writer.writeAll(";\n    return w.UNDEFINED;\n");
+        }
+        try writer.writeAll("}\n");
+
+        // --- GENERATE SETTER ------------------------------------------------
+        try writer.print(
+            \\
+            \\// Property Setter for {s}
+            \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+            \\    _ = argc;
+            \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+            \\    const rc = RuntimeContext.get(ctx);
+            \\
+        , .{ func.name, func.name });
+
+        // 1. Extract 'this'
+        try writer.print(
+            \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+            \\    if (ptr == null) return w.EXCEPTION;
+            \\    const this_arg: {s} = @ptrCast(@alignCast(ptr));
+            \\
+        , .{cast_type});
+
+        // 2. Extract Value (From argv[0]!)
+        if (func.prop_type == .error_string or func.prop_type == .string) {
+            try writer.writeAll(
+                \\    const val = argv[0];
+                \\    const val_str = ctx.toZString(val) catch return w.EXCEPTION;
+                \\    defer ctx.freeZString(val_str);
+                \\
+            );
+            try writer.print("    {s}(this_arg, val_str) catch return w.EXCEPTION;\n", .{func.setter});
+        } else if (func.prop_type == .boolean) {
+            try writer.writeAll("    const val_bool = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;\n");
+            try writer.print("    {s}(this_arg, val_bool);\n", .{func.setter});
+        }
+
+        try writer.writeAll("    return w.UNDEFINED;\n}\n");
+        return; // DONE
+    }
+
+    // --- GENERATE FUNCTION BINDING ---
     try writer.print(
         \\
         \\/// Generated wrapper for {s}
@@ -283,6 +403,7 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
             .this_element, .this_node => uses_this = true,
             .string, .document, .document_root, .element, .node => uses_ctx = true,
             // Allocator removed from uses_ctx because we use rc.allocator now
+
             else => {},
         }
     }
@@ -308,6 +429,18 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
 
     for (func.args, 0..) |arg, i| {
         switch (arg) {
+            .dom_bridge => {
+                // rc is already defined at the top of the generated function
+                try writer.print("    const arg{d}: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));\n", .{i});
+            },
+            .context => {
+                try writer.print("    const arg{d} = ctx;\n", .{i});
+                // No js_arg_idx increment (internal arg)
+            },
+            .callback => {
+                try writer.print("    const arg{d} = argv[{d}];\n", .{ i, js_arg_idx });
+                js_arg_idx += 1;
+            },
             .allocator => {
                 // [FIX] Use rc.allocator (Thread-local allocator)
                 try writer.print("    const arg{d} = rc.allocator;\n", .{i});
@@ -419,11 +552,13 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     try writer.writeAll("    // Call native Zig function\n");
 
     // Special case: setAttribute returns a value we need to discard
+    // TODO: refactor to return !void from Zig side
     const is_set_attribute = std.mem.eql(u8, func.name, "setAttribute");
 
-    if (func.return_type != .void_type) {
+    if (func.return_type != .void_type and func.return_type != .void_with_error) {
         try writer.writeAll("    const result = ");
-    } else if (is_set_attribute) {
+    } else if (is_set_attribute and func.return_type == .void_type) {
+        // Only discard if it's the legacy void_type setAttribute
         try writer.writeAll("    _ = ");
     } else {
         try writer.writeAll("    ");
@@ -438,23 +573,28 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     try writer.writeAll(")");
 
     // Catch errors for non-void returns that are errors
-    if (func.return_type == .element or func.return_type == .node or func.return_type == .error_string or func.return_type == .error_document) {
+    if (func.return_type == .element or func.return_type == .node or func.return_type == .error_string or func.return_type == .error_document or func.return_type == .void_with_error) {
         try writer.writeAll(" catch return w.EXCEPTION");
     } else if (func.return_type == .void_type and !is_set_attribute) {
         // For void functions, only catch errors for specific functions we know return errors
         const is_remove_attr = std.mem.eql(u8, func.name, "removeAttribute");
         const is_set_content = std.mem.eql(u8, func.name, "setContentAsText");
         const is_set_inner = std.mem.eql(u8, func.name, "setInnerHTML");
+        const is_add_evt = std.mem.eql(u8, func.name, "addEventListener");
+        const is_dispatch = std.mem.eql(u8, func.name, "dispatchEvent");
 
-        if (is_remove_attr or is_set_content or is_set_inner) {
+        if (is_remove_attr or is_set_content or is_set_inner or is_add_evt or is_dispatch) {
             try writer.writeAll(" catch return w.EXCEPTION");
         }
+        // if (is_remove_attr or is_set_content or is_set_inner) {
+        //     try writer.writeAll(" catch return w.EXCEPTION");
+        // }
     }
     try writer.writeAll(";\n\n");
 
     // 5. RETURN VALUE
     switch (func.return_type) {
-        .void_type => try writer.writeAll("    return w.UNDEFINED;\n"),
+        .void_type, .void_with_error => try writer.writeAll("    return w.UNDEFINED;\n"),
 
         .element => try writer.writeAll("    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;\n"),
         .node => try writer.writeAll("    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;\n"),

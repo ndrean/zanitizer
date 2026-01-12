@@ -3,10 +3,12 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
+const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 
 pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
     loop: *EventLoop,
+    dom_bridge: ?*anyopaque = null, // !!! circular ref with ScriptEngine, so use anyopaque
 
     // Worker-specific data (null for main thread)
     worker_core: ?*anyopaque = null,
@@ -41,13 +43,14 @@ pub const RuntimeContext = struct {
 
     /// Cleanup function
     pub fn destroy(self: *RuntimeContext) void {
-        const alloc = self.allocator;
-        alloc.destroy(self);
+        self.allocator.destroy(self);
     }
 
     /// Retrieve this struct from the JS Context
     pub fn get(ctx: zqjs.Context) *RuntimeContext {
-        const ptr = qjs.JS_GetContextOpaque(ctx.ptr);
+        // const ptr = qjs.JS_GetContextOpaque(ctx.ptr);
+        const ptr = ctx.getContextOpaque(RuntimeContext);
+
         // const ptr = ctx.getContextOpaque(ctx.ptr);
         if (ptr == null) @panic("RuntimeContext not installed on Context!");
         return @ptrCast(@alignCast(ptr));

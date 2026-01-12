@@ -1,5 +1,6 @@
 const std = @import("std");
 const z = @import("root.zig");
+const zqjs = z.wrapper;
 const w = @import("wrapper.zig");
 const bindings = @import("bindings_generated.zig");
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
@@ -8,6 +9,7 @@ pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
     ctx: w.Context,
     doc: *z.HTMLDocument,
+    registry: std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))), // events registry
 
     // 1. FINALIZER (Lexbor owns the nodes, we just detach)
     fn domFinalizer(rt_ptr: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
@@ -22,7 +24,7 @@ pub const DOMBridge = struct {
         const rc = RuntimeContext.get(ctx);
         const rt = ctx.getRuntime();
 
-        // Register class ONLY if not already registered for this runtime
+        // Register class ONLY if not already registered for this runtime ????
         if (rc.classes.dom_node == 0) {
             rc.classes.dom_node = rt.newClassID();
 
@@ -39,11 +41,26 @@ pub const DOMBridge = struct {
             .allocator = allocator,
             .ctx = ctx,
             .doc = doc,
+            .registry = std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))).init(allocator),
         };
     }
 
     pub fn deinit(self: *DOMBridge) void {
         z.destroyDocument(self.doc);
+        var it = self.registry.iterator();
+        while (it.next()) |node_entry| {
+            var event_it = node_entry.value_ptr.iterator();
+            while (event_it.next()) |event_entry| {
+                for (event_entry.value_ptr.items) |listener| {
+                    // Release the JS callback
+                    self.ctx.freeValue(listener.callback);
+                }
+                event_entry.value_ptr.deinit(self.allocator);
+            }
+            node_entry.value_ptr.deinit();
+        }
+        self.registry.deinit();
+        // self.allocator.destroy(self); // BUG! ScriptEngine cleans DOMBridge struct
     }
 
     // 3. INSTALLATION (Connect JS objects to Zig)
@@ -68,6 +85,7 @@ pub const DOMBridge = struct {
         try self.createWindowAPI(global);
         try self.createConsoleAPI(global);
 
+        // Host Communication API Helper (sendToHost)
         const fn_val = ctx.newCFunction(js_reportResult, "sendToHost", 1);
         try ctx.setPropertyStr(global, "sendToHost", fn_val);
     }
@@ -163,6 +181,76 @@ pub const DOMBridge = struct {
         return obj;
     }
 };
+
+const Listener = struct {
+    callback: zqjs.Value,
+};
+
+// Registry: NodeID -> EventName -> List[Listener]
+// var event_registry: std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))) = undefined;
+
+// pub fn initRegistry(allocator: std.mem.Allocator) void {
+//     event_registry = std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))).init(allocator);
+// }
+
+pub fn addEventListener(
+    ctx: zqjs.Context,
+    self: *DOMBridge, // via rc.dom_bridge
+    node: *z.DomNode,
+    event: []const u8,
+    callback: zqjs.Value,
+) !void {
+    const node_id = @intFromPtr(node);
+
+    // Get/Create Node Entry
+    var node_entry = try self.registry.getOrPut(node_id);
+    // allocator will be received from rc.allocator
+    if (!node_entry.found_existing) {
+        node_entry.value_ptr.* = std.StringHashMap(std.ArrayList(Listener)).init(self.allocator);
+    }
+
+    // Get/Create Event Type Entry (eg "click")
+    var event_entry = try node_entry.value_ptr.getOrPut(event);
+    if (!event_entry.found_existing) {
+        event_entry.value_ptr.* = .{};
+    }
+
+    // Store Callback
+    // CRITICAL: Increment refcount so the function isn't garbage collected!
+    const dup_cb = ctx.dupValue(callback);
+    try event_entry.value_ptr.append(self.allocator, .{ .callback = dup_cb });
+}
+
+pub fn dispatchEvent(ctx: zqjs.Context, self: *DOMBridge, node: *z.DomNode, event: []const u8) !void {
+    const node_id = @intFromPtr(node);
+
+    if (self.registry.getPtr(node_id)) |node_map| {
+        if (node_map.getPtr(event)) |listeners| {
+            const prev_def_fn = ctx.newCFunction(js_preventDefault, "preventDefault", 0);
+            defer ctx.freeValue(prev_def_fn);
+
+            for (listeners.items) |l| {
+                // set { type: "click" } )
+                const event_obj = ctx.newObject();
+                defer ctx.freeValue(event_obj);
+                _ = try ctx.setPropertyStr(event_obj, "type", ctx.newString(event));
+
+                // 2. Set 'target' (The node itself!)
+                // We wrap the node again so JS sees 'e.target === btn'
+                // (Optimization: In a real engine, we'd cache this wrapper)
+                const target_obj = DOMBridge.wrapNode(ctx, node) catch zqjs.NULL;
+                _ = try ctx.setPropertyStr(event_obj, "target", target_obj);
+
+                // 3. Set 'preventDefault'
+                _ = try ctx.setPropertyStr(event_obj, "preventDefault", ctx.dupValue(prev_def_fn));
+
+                // Call the JS function
+                const ret = ctx.call(l.callback, zqjs.UNDEFINED, &.{event_obj});
+                ctx.freeValue(ret); // Ignore result, but free it
+            }
+        }
+    }
+}
 
 fn js_reportResult(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     const ctx = z.wrapper.Context{ .ptr = ctx_ptr };
@@ -274,4 +362,11 @@ fn js_consoleLog(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv
     }
     z.print("\n", .{});
     return w.UNDEFINED;
+}
+
+// A dummy implementation of preventDefault to stop JS from crashing
+fn js_preventDefault(_: ?*z.qjs.JSContext, _: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    // In a real browser, this sets a 'defaultPrevented' flag.
+    // For a headless scraper, a no-op is often sufficient to satisfy the script.
+    return z.wrapper.UNDEFINED;
 }

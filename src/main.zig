@@ -62,6 +62,7 @@ pub fn main() !void {
 
     setupSignalHandler();
 
+    try eventListener(allocator);
     // try demoCustomPointClass(allocator);
     // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
     // try first_QuickJS_test();
@@ -79,9 +80,31 @@ pub fn main() !void {
     // try simplifiedJSONPass(allocator);
     try async_CSV_Tuple_Parser(allocator);
     // try JS_Proxy_And_Generators(allocator);
-    try async_Fetch_API_Demo(allocator);
+    // try async_Fetch_API_Demo(allocator);
     try async_CSV_JSON_Parser(allocator);
     try demoWorker(allocator);
+}
+
+fn eventListener(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== DOM Event Listener Demo -------------------------\n\n", .{});
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/dom_event_listener.js", 1024 * 1024);
+    defer allocator.free(source);
+
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
+
+    const val = try engine.evalModule(c_source, "dom_event_listener.js");
+
+    engine.ctx.freeValue(val);
+
+    // Run Main Loop (Handles Events)
+    try engine.run();
+    const body_node = z.documentRoot(engine.dom.doc);
+    try z.prettyPrint(allocator, body_node.?);
 }
 
 fn demoWorker(allocator: std.mem.Allocator) !void {

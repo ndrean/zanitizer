@@ -8,6 +8,52 @@ const qjs = z.qjs;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
+/// Generated wrapper for z.addEventListener
+pub fn js_addEventListener(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.EXCEPTION;
+    const arg0 = ctx;
+    const arg1: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+    const node_ptr2 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (node_ptr2 == null) return w.EXCEPTION;
+    const arg2: *z.DomNode = @ptrCast(@alignCast(node_ptr2));
+    const arg3 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg3);
+    const arg4 = argv[1];
+    // Call native Zig function
+    z.addEventListener(arg0, arg1, arg2, arg3, arg4) catch return w.EXCEPTION;
+
+    return w.UNDEFINED;
+}
+
+/// Generated wrapper for z.dispatchEvent
+pub fn js_dispatchEvent(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.EXCEPTION;
+    const arg0 = ctx;
+    const arg1: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+    const node_ptr2 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (node_ptr2 == null) return w.EXCEPTION;
+    const arg2: *z.DomNode = @ptrCast(@alignCast(node_ptr2));
+    const arg3 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg3);
+    // Call native Zig function
+    z.dispatchEvent(arg0, arg1, arg2, arg3) catch return w.EXCEPTION;
+
+    return w.UNDEFINED;
+}
 
 /// Generated wrapper for z.createElement
 pub fn js_createElement(
@@ -46,7 +92,8 @@ pub fn js_documentRoot(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     _ = this_val;
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
@@ -60,7 +107,11 @@ pub fn js_documentRoot(
     // Call native Zig function
     const result = z.documentRoot(arg0);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |node| {
+        return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION;
+    } else {
+        return w.NULL;
+    }
 }
 
 /// Generated wrapper for z.bodyElement
@@ -72,7 +123,8 @@ pub fn js_bodyElement(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     _ = this_val;
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
@@ -86,7 +138,11 @@ pub fn js_bodyElement(
     // Call native Zig function
     const result = z.bodyElement(arg0);
 
-    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |elem| {
+        return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION;
+    } else {
+        return w.NULL;
+    }
 }
 
 /// Generated wrapper for z.ownerDocument
@@ -98,7 +154,8 @@ pub fn js_ownerDocument(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
@@ -166,7 +223,11 @@ pub fn js_getElementById(
     // Call native Zig function
     const result = z.getElementById(arg0, arg1);
 
-    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |elem| {
+        return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION;
+    } else {
+        return w.NULL;
+    }
 }
 
 /// Generated wrapper for z.appendChild
@@ -200,14 +261,19 @@ pub fn js_firstChild(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
     // Call native Zig function
     const result = z.firstChild(arg0);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |node| {
+        return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION;
+    } else {
+        return w.NULL;
+    }
 }
 
 /// Generated wrapper for z.parentNode
@@ -219,14 +285,19 @@ pub fn js_parentNode(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
     // Call native Zig function
     const result = z.parentNode(arg0);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+    if (result) |node| {
+        return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION;
+    } else {
+        return w.NULL;
+    }
 }
 
 /// Generated wrapper for z.removeNode
@@ -238,7 +309,8 @@ pub fn js_remove(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
@@ -289,7 +361,11 @@ pub fn js_getAttribute(
     // Call native Zig function
     const result = z.getAttribute_zc(arg0, arg1);
 
-    if (result) |str| { return ctx.newString(str); } else { return w.NULL; }
+    if (result) |str| {
+        return ctx.newString(str);
+    } else {
+        return w.NULL;
+    }
 }
 
 /// Generated wrapper for z.removeAttribute
@@ -322,7 +398,8 @@ pub fn js_textContent(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
@@ -353,48 +430,34 @@ pub fn js_setContentAsText(
     return w.UNDEFINED;
 }
 
-/// Generated wrapper for z.setInnerHTML
-pub fn js_setInnerHTML(
-    ctx_ptr: ?*qjs.JSContext,
-    this_val: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
+// Property Getter for innerHTML
+pub fn js_get_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    _ = argv;
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    if (argc < 1) return w.EXCEPTION;
-    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
-    if (elem_ptr0 == null) return w.EXCEPTION;
-    const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
-    const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
-    defer ctx.freeZString(arg1);
-    // Call native Zig function
-    const result = z.setInnerHTML(arg0, arg1) catch return w.EXCEPTION;
-
-    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;
-}
-
-/// Generated wrapper for z.innerHTML
-pub fn js_innerHTML(
-    ctx_ptr: ?*qjs.JSContext,
-    this_val: qjs.JSValue,
-    argc: c_int,
-    argv: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
-    const rc = RuntimeContext.get(ctx);
-    _ = argc; _ = argv;
-    const arg0 = rc.allocator;
-    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
-    if (elem_ptr1 == null) return w.EXCEPTION;
-    const arg1: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr1));
-    // Call native Zig function
-    const result = z.innerHTML(arg0, arg1) catch return w.EXCEPTION;
-
-    defer arg0.free(result);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.innerHTML(rc.allocator, this_arg) catch return w.EXCEPTION;
+    defer rc.allocator.free(result);
     return ctx.newString(result);
 }
 
+// Property Setter for innerHTML
+pub fn js_set_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const val = argv[0];
+    const val_str = ctx.toZString(val) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+    _ = z.setInnerHTML(this_arg, val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
 
 // Install static bindings (document-level factories)
 pub fn installStaticBindings(ctx: ?*qjs.JSContext, doc_obj: qjs.JSValue) void {
@@ -408,6 +471,8 @@ pub fn installStaticBindings(ctx: ?*qjs.JSContext, doc_obj: qjs.JSValue) void {
 
 // Install method bindings (shared via prototype)
 pub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "addEventListener", qjs.JS_NewCFunction(ctx, js_addEventListener, "addEventListener", 1));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "dispatchEvent", qjs.JS_NewCFunction(ctx, js_dispatchEvent, "dispatchEvent", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "appendChild", qjs.JS_NewCFunction(ctx, js_appendChild, "appendChild", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "firstChild", qjs.JS_NewCFunction(ctx, js_firstChild, "firstChild", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "parentNode", qjs.JS_NewCFunction(ctx, js_parentNode, "parentNode", 0));
@@ -417,6 +482,11 @@ pub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "removeAttribute", qjs.JS_NewCFunction(ctx, js_removeAttribute, "removeAttribute", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "textContent", qjs.JS_NewCFunction(ctx, js_textContent, "textContent", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "setContentAsText", qjs.JS_NewCFunction(ctx, js_setContentAsText, "setContentAsText", 1));
-    _ = qjs.JS_SetPropertyStr(ctx, proto, "setInnerHTML", qjs.JS_NewCFunction(ctx, js_setInnerHTML, "setInnerHTML", 1));
-    _ = qjs.JS_SetPropertyStr(ctx, proto, "innerHTML", qjs.JS_NewCFunction(ctx, js_innerHTML, "innerHTML", 0));
+    {
+        const atom = qjs.JS_NewAtom(ctx, "innerHTML");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_innerHTML, "get_innerHTML", 0, qjs.JS_CFUNC_getter, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_innerHTML, "set_innerHTML", 1, qjs.JS_CFUNC_setter, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
 }
