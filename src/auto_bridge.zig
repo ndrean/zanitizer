@@ -93,7 +93,7 @@ pub fn bindAsyncAuto(
                 } else if (comptime isFloatType(T)) {
                     @field(payload, field.name) = try parseFloat(T, ctx, prop);
                 } else if (comptime isStringType(T)) {
-                    @field(payload, field.name) = try parseString(loop, ctx, prop);
+                    @field(payload, field.name) = try parseFromString(loop, ctx, prop);
                 } else if (T == bool) {
                     @field(payload, field.name) = parseBoolean(ctx, prop);
                 } else {
@@ -130,7 +130,7 @@ pub fn bindAsyncAuto(
                 } else if (comptime isFloatType(T)) {
                     @field(payload, field.name) = try parseFloat(T, ctx, arg);
                 } else if (comptime isStringType(T)) {
-                    @field(payload, field.name) = try parseString(loop, ctx, arg);
+                    @field(payload, field.name) = try parseFromString(loop, ctx, arg);
                 } else if (T == bool) {
                     @field(payload, field.name) = parseBoolean(ctx, arg);
                 } else {
@@ -228,7 +228,7 @@ fn parseFloat(comptime T: type, ctx: zqjs.Context, arg: zqjs.Value) !T {
 /// ⚠️  Allocates heap memory using loop.allocator
 ///
 /// ❗️Worker function MUST free this memory
-fn parseString(loop: *EventLoop, ctx: zqjs.Context, arg: zqjs.Value) ![]const u8 {
+fn parseFromString(loop: *EventLoop, ctx: zqjs.Context, arg: zqjs.Value) ![]const u8 {
     if (!ctx.isString(arg)) {
         _ = ctx.throwTypeError("Expected string");
         return error.TypeError;
@@ -297,7 +297,7 @@ pub fn genParser(comptime Payload: type) fn (*EventLoop, zqjs.Context, []const z
                 } else if (comptime isFloatType(T)) {
                     @field(payload, field.name) = try parseFloat(T, ctx, prop);
                 } else if (comptime isStringType(T)) {
-                    @field(payload, field.name) = try parseString(loop, ctx, prop);
+                    @field(payload, field.name) = try parseFromString(loop, ctx, prop);
                 } else if (T == bool) {
                     @field(payload, field.name) = parseBoolean(ctx, prop);
                 } else {
@@ -330,7 +330,7 @@ pub fn genParser(comptime Payload: type) fn (*EventLoop, zqjs.Context, []const z
                 } else if (comptime isFloatType(T)) {
                     @field(payload, field.name) = try parseFloat(T, ctx, arg);
                 } else if (comptime isStringType(T)) {
-                    @field(payload, field.name) = try parseString(loop, ctx, arg);
+                    @field(payload, field.name) = try parseFromString(loop, ctx, arg);
                 } else if (T == bool) {
                     @field(payload, field.name) = parseBoolean(ctx, arg);
                 } else {

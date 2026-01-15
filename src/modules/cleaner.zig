@@ -149,7 +149,7 @@ test "string based normalize text behaviour" {
             \\</div>
         ;
 
-        const doc = try z.createDocFromString(html);
+        const doc = try z.parseHTML(allocator, html);
         defer z.destroyDocument(doc);
         const body = z.bodyElement(doc).?;
 

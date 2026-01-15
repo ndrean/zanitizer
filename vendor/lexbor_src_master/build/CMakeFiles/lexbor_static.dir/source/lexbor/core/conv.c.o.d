@@ -1,5 +1,5 @@
 CMakeFiles/lexbor_static.dir/source/lexbor/core/conv.c.o: \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/conv.c \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/conv.c \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/math.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/cdefs.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/_symbol_aliasing.h \
@@ -11,8 +11,8 @@ CMakeFiles/lexbor_static.dir/source/lexbor/core/conv.c.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/AvailabilityInternalLegacy.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/17/include/float.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/float.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/conv.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/base.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/conv.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/base.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/stdlib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/_stdlib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/_bounds.h \
@@ -117,9 +117,9 @@ CMakeFiles/lexbor_static.dir/source/lexbor/core/conv.c.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arm/limits.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arm/_limits.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/syslimits.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/def.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/types.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/def.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/types.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/17/include/stdbool.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/lexbor.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/dtoa.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/strtod.h
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/lexbor.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/dtoa.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/strtod.h

@@ -1,8 +1,8 @@
 CMakeFiles/lexbor_static.dir/source/lexbor/html/tokenizer/state_rawtext.c.o: \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/tokenizer/state_rawtext.c \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/tokenizer/state_rawtext.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/tokenizer.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/sbst.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/tokenizer/state_rawtext.c \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/tokenizer/state_rawtext.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/tokenizer.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/sbst.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/string.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/_string.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/_bounds.h \
@@ -38,7 +38,7 @@ CMakeFiles/lexbor_static.dir/source/lexbor/html/tokenizer/state_rawtext.c.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/secure/_strings.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/secure/_common.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/secure/_string.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/base.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/base.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/stdlib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/_stdlib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/wait.h \
@@ -116,35 +116,35 @@ CMakeFiles/lexbor_static.dir/source/lexbor/html/tokenizer/state_rawtext.c.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arm/limits.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arm/_limits.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/syslimits.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/def.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/types.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/def.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/types.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/17/include/stdbool.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/lexbor.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/array_obj.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/base.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/token.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/dobject.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/mem.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/array.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/str.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/mraw.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/bst.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/utils.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/token_attr.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/interfaces/attr.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/hash.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/ns/ns.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/shs.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/ns/const.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/interface.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/tag/const.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/interfaces/node.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/collection.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/exception.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/interfaces/event_target.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/interfaces/attr_const.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/dom/interfaces/document.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/tag/tag.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/tokenizer/error.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/html/tokenizer/state.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/str_res.h
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/lexbor.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/array_obj.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/base.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/token.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/dobject.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/mem.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/array.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/str.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/mraw.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/bst.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/utils.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/token_attr.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/interfaces/attr.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/hash.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/ns/ns.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/shs.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/ns/const.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/interface.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/tag/const.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/interfaces/node.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/collection.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/exception.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/interfaces/event_target.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/interfaces/attr_const.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/dom/interfaces/document.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/tag/tag.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/tokenizer/error.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/html/tokenizer/state.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/str_res.h

@@ -6,10 +6,18 @@
 
 const std = @import("std");
 
-const BindingKind = enum { static, method, property };
+const BindingKind = enum {
+    static,
+    method,
+    property,
+    boolean_attribute,
+    string_attribute,
+};
+
 const BindingSpec = struct {
     name: []const u8,
     kind: BindingKind, // static = on document, method = on prototype
+    attr_name: ?[]const u8 = null, // eg 'class'
 
     zig_func_name: []const u8 = "",
     args: []const ArgType = &.{},
@@ -120,7 +128,7 @@ const bindings = [_]BindingSpec{
         .name = "getElementById",
         .zig_func_name = "z.getElementById",
         .kind = .static,
-        .args = &.{ .document_root, .string },
+        .args = &.{ .document, .string },
         .return_type = .optional_element,
     },
 
@@ -158,7 +166,7 @@ const bindings = [_]BindingSpec{
         .zig_func_name = "z.setAttribute",
         .kind = .method,
         .args = &.{ .this_element, .string, .string },
-        .return_type = .void_type,
+        .return_type = .void_with_error,
     },
     .{
         .name = "getAttribute",
@@ -188,6 +196,37 @@ const bindings = [_]BindingSpec{
         .args = &.{ .this_node, .string },
         .return_type = .void_with_error,
     },
+    .{
+        .name = "parseHTML",
+        .kind = .static, // Static on Document
+        .zig_func_name = "z.parseHTML", // The wrapper that defaults options
+        .args = &.{ .allocator, .string },
+        .return_type = .error_document,
+    },
+    // Element.setHTML
+    .{
+        .name = "setHTML",
+        .kind = .method,
+        .zig_func_name = "z.setHTML", // Wrapper handling mode string
+        .args = &.{ .allocator, .this_element, .string }, // element, html
+        .return_type = .void_with_error,
+    },
+    .{
+        .name = "getHTML",
+        .kind = .method,
+        .zig_func_name = "z.getHTML",
+        .args = &.{ .allocator, .this_element }, // (allocator, this)
+        .return_type = .error_string,
+    },
+
+    // DOMParser.parseFromString
+    // .{
+    //     .name = "parseFromString",
+    //     .kind = .method, // On DOMParser prototype
+    //     .zig_func_name = "z.DOMParser.parseFromString",
+    //     .args = &.{ .allocator, .this_context, .string, .string }, // Needs context/this specific to DOMParser
+    //     .return_type = .document,
+    // },
 
     .{
         .name = "innerHTML",
@@ -197,6 +236,41 @@ const bindings = [_]BindingSpec{
         .prop_type = .error_string, // returns ![]u8
         .prop_this = .this_element,
     },
+    .{
+        .name = "disabled",
+        .kind = .boolean_attribute,
+        .zig_func_name = "", // Not needed, uses generic logic
+        .args = &.{}, // Not needed
+        .return_type = .void_type, // Not needed
+    },
+    .{
+        .name = "hidden",
+        .kind = .boolean_attribute,
+        .zig_func_name = "",
+        .args = &.{},
+        .return_type = .void_type,
+    },
+    .{
+        .name = "checked", // TODO !! normally for <input> elements only!
+        .kind = .boolean_attribute,
+        .zig_func_name = "",
+        .args = &.{},
+        .return_type = .void_type,
+    },
+    .{ .name = "id", .kind = .string_attribute },
+    .{ .name = "title", .kind = .string_attribute },
+    .{ .name = "lang", .kind = .string_attribute },
+    .{ .name = "dir", .kind = .string_attribute },
+    .{ .name = "role", .kind = .string_attribute },
+    .{ .name = "nonce", .kind = .string_attribute },
+    // .{
+    //     .name = "outerHTML",
+    //     .kind = .property,
+    //     .getter = "z.outerHTML",
+    //     .setter = "z.outerHTML",
+    //     .prop_type = .error_string,
+    //     .prop_this = .this_element,
+    // },
     // Add more bindings: 'id', 'className', 'children', etc.
 };
 
@@ -249,10 +323,7 @@ pub fn main() !void {
     try stdout.writeAll("\n// Install method bindings (shared via prototype)\n");
     try stdout.writeAll("pub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
     for (bindings) |binding| {
-        if (binding.kind == .method) {
-            // Install Method
-            try stdout.print("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"{s}\", qjs.JS_NewCFunction(ctx, js_{s}, \"{s}\", {d}));\n", .{ binding.name, binding.name, binding.name, countJsArgs(binding.args) });
-        } else if (binding.kind == .property) {
+        if (binding.kind == .property or binding.kind == .boolean_attribute or binding.kind == .boolean_attribute) {
             // Install Property
             try stdout.print(
                 \\    {{
@@ -264,8 +335,12 @@ pub fn main() !void {
                 \\    }}
                 \\
             , .{ binding.name, binding.name, binding.name, binding.name, binding.name });
+        } else if (binding.kind == .method) {
+            // Install Method
+            try stdout.print("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"{s}\", qjs.JS_NewCFunction(ctx, js_{s}, \"{s}\", {d}));\n", .{ binding.name, binding.name, binding.name, countJsArgs(binding.args) });
         }
     }
+
     try stdout.writeAll("}\n");
 
     // Write the accumulated output to file
@@ -369,6 +444,112 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
 
         try writer.writeAll("    return w.UNDEFINED;\n}\n");
         return; // DONE
+    }
+
+    // 1. HANDLE BOOLEAN ATTRIBUTES (e.g. .disabled, .hidden)
+    if (func.kind == .boolean_attribute) {
+
+        // --- GENERATE GETTER (z.hasAttribute) ---
+        try writer.print(
+            \\
+            \\// Boolean Getter for {s}
+            \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+            \\    _ = argc; _ = argv;
+            \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+            \\    const rc = RuntimeContext.get(ctx);
+            \\
+            \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+            \\    if (ptr == null) return w.EXCEPTION;
+            \\    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+            \\
+            \\    const is_present = z.hasAttribute(this_arg, "{s}");
+            \\    return ctx.newBool(is_present);
+            \\}}
+            \\
+        , .{ func.name, func.name, func.name }); // Use func.name as the attribute name
+
+        // --- GENERATE SETTER (z.setAttribute / z.removeAttribute) ---
+        try writer.print(
+            \\
+            \\// Boolean Setter for {s}
+            \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+            \\    _ = argc;
+            \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+            \\    const rc = RuntimeContext.get(ctx);
+            \\
+            \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+            \\    if (ptr == null) return w.EXCEPTION;
+            \\    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+            \\
+            \\    // Convert JS value to boolean
+            \\    const val = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;
+            \\
+            \\    if (val) {{
+            \\        z.setAttribute(this_arg, "{s}", "") catch return w.EXCEPTION;
+            \\    }} else {{
+            \\        z.removeAttribute(this_arg, "{s}") catch return w.EXCEPTION;
+            \\    }}
+            \\    return w.UNDEFINED;
+            \\}}
+            \\
+        , .{ func.name, func.name, func.name, func.name });
+
+        return; // Done
+    }
+
+    // 2. HANDLE STRING ATTRIBUTES (id, title, className, etc.)
+    if (func.kind == .string_attribute) {
+        // Determine the HTML attribute name (default to JS name if null)
+        const attr = if (func.attr_name) |n| n else func.name;
+
+        // --- GENERATE GETTER ---
+        try writer.print(
+            \\
+            \\// Reflected String Getter for {s} -> {s}
+            \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+            \\    _ = argc; _ = argv;
+            \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+            \\    const rc = RuntimeContext.get(ctx);
+            \\
+            \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+            \\    if (ptr == null) return w.EXCEPTION;
+            \\    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+            \\
+            \\    // Call getAttribute (returns allocated !?[]u8)
+            \\    const val_opt = z.getAttribute(rc.allocator, this_arg, "{s}") catch return w.EXCEPTION;
+            \\    if (val_opt) |val| {{
+            \\        defer rc.allocator.free(val);
+            \\        return ctx.newString(val);
+            \\    }}
+            \\    // Reflected attributes usually return empty string if missing (not null)
+            \\    return ctx.newString("");
+            \\}}
+            \\
+        , .{ func.name, attr, func.name, attr });
+
+        // --- GENERATE SETTER ---
+        try writer.print(
+            \\
+            \\// Reflected String Setter for {s} -> {s}
+            \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+            \\    _ = argc;
+            \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+            \\    const rc = RuntimeContext.get(ctx);
+            \\
+            \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+            \\    if (ptr == null) return w.EXCEPTION;
+            \\    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+            \\
+            \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+            \\    defer ctx.freeZString(val_str);
+            \\
+            \\    z.setAttribute(this_arg, "{s}", val_str) catch return w.EXCEPTION;
+            \\    return w.UNDEFINED;
+            \\}}
+            \\
+        , .{ func.name, attr, func.name, attr });
+
+        return;
     }
 
     // --- GENERATE FUNCTION BINDING ---
@@ -553,13 +734,10 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
 
     // Special case: setAttribute returns a value we need to discard
     // TODO: refactor to return !void from Zig side
-    const is_set_attribute = std.mem.eql(u8, func.name, "setAttribute");
+    // const is_set_attribute = std.mem.eql(u8, func.name, "setAttribute");
 
     if (func.return_type != .void_type and func.return_type != .void_with_error) {
         try writer.writeAll("    const result = ");
-    } else if (is_set_attribute and func.return_type == .void_type) {
-        // Only discard if it's the legacy void_type setAttribute
-        try writer.writeAll("    _ = ");
     } else {
         try writer.writeAll("    ");
     }
@@ -575,15 +753,16 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     // Catch errors for non-void returns that are errors
     if (func.return_type == .element or func.return_type == .node or func.return_type == .error_string or func.return_type == .error_document or func.return_type == .void_with_error) {
         try writer.writeAll(" catch return w.EXCEPTION");
-    } else if (func.return_type == .void_type and !is_set_attribute) {
+    } else if (func.return_type == .void_type) {
         // For void functions, only catch errors for specific functions we know return errors
+        const is_set_attribute = std.mem.eql(u8, func.name, "setAttribute");
         const is_remove_attr = std.mem.eql(u8, func.name, "removeAttribute");
         const is_set_content = std.mem.eql(u8, func.name, "setContentAsText");
         const is_set_inner = std.mem.eql(u8, func.name, "setInnerHTML");
         const is_add_evt = std.mem.eql(u8, func.name, "addEventListener");
         const is_dispatch = std.mem.eql(u8, func.name, "dispatchEvent");
 
-        if (is_remove_attr or is_set_content or is_set_inner or is_add_evt or is_dispatch) {
+        if (is_remove_attr or is_set_content or is_set_inner or is_add_evt or is_dispatch or is_set_attribute) {
             try writer.writeAll(" catch return w.EXCEPTION");
         }
         // if (is_remove_attr or is_set_content or is_set_inner) {

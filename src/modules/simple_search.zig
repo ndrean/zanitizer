@@ -239,23 +239,41 @@ pub fn stringEquals(first: []const u8, second: []const u8) bool {
 pub fn stringContains(where: []const u8, what: []const u8) bool {
     return std.mem.indexOf(u8, where, what) != null;
 }
+// ----------------------------------------------------------------------------
 
+/// Check if [parent] contains [child] in the DOM tree
+///
+/// [JS] Node.contains(childNode) equivalent
+pub fn contains(parent: *z.DomNode, child: *z.DomNode) bool {
+    // ! create a var because arg are cst, and type it optional for loop
+    var current: ?*z.DomNode = child;
+    while (current) |node| {
+        if (node == parent) {
+            return true;
+        }
+        current = z.parentNode(node);
+    }
+
+    return false;
+}
 /// [attrs] getElementById traversal DOM search
 ///
 /// Returns the first element with matching ID, or null if not found.
-pub fn getElementById(root_node: *z.DomNode, id: []const u8) ?*z.HTMLElement {
+pub fn getElementById(doc: *z.HTMLDocument, id: []const u8) ?*z.HTMLElement {
+    const root_node = z.bodyNode(doc) orelse return null;
+
     const IdContext = struct {
         target_id: []const u8,
         found_element: ?*z.HTMLElement = null,
         matcher: *const fn (*z.DomNode, *@This()) callconv(.c) c_int,
 
         fn implement(node: *z.DomNode, ctx: *@This()) callconv(.c) c_int {
-            const element = z.nodeToElement(node).?;
-            if (!z.hasAttribute(element, "id")) return z._CONTINUE;
-            const id_value = z.getElementId_zc(element);
+            const elt = z.nodeToElement(node).?;
+            if (!z.hasAttribute(elt, "id")) return z._CONTINUE;
+            const id_value = z.getElementId_zc(elt);
 
             if (stringEquals(id_value, ctx.target_id)) {
-                ctx.found_element = element;
+                ctx.found_element = elt;
                 return z._STOP;
             }
             return z._CONTINUE;
@@ -263,7 +281,11 @@ pub fn getElementById(root_node: *z.DomNode, id: []const u8) ?*z.HTMLElement {
     };
 
     var context = IdContext{ .target_id = id, .matcher = IdContext.implement };
-    return walker.genSearchElement(IdContext, root_node, &context);
+    return walker.genSearchElement(
+        IdContext,
+        root_node,
+        &context,
+    );
 }
 
 /// [attrs] getElementByClass traversal DOM search
@@ -326,7 +348,7 @@ pub fn getElementByAttribute(root_node: *z.DomNode, attr_name: []const u8, attr_
 ///
 /// Example:
 /// ```
-/// const doc = try z.createDocFromString("<form><input phx-click=\"increment\" disabled></form>");
+/// const doc = try z.parseHTML("<form><input phx-click=\"increment\" disabled></form>");
 /// defer z.destroyDocument(doc);
 /// try z.getElementByDataAttribute(root_node, "phx", "click", "increment");
 /// ```
@@ -371,7 +393,7 @@ test "getElementsByClassName with token-based matching" {
     const allocator = testing.allocator;
     const html = "<div><h1 class='title main'>Main Title</h1><p class='text main-text'>Paragraph</p><footer class='footer main-footer'>Footer</footer></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     // Should find only the h1 with "main" as a token
@@ -389,7 +411,7 @@ test "getElementsByTagName case sensitivity" {
     const allocator = testing.allocator;
     const html = "<div><p>Para 1</p><P>Para 2</P><span>Span</span></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     // Lexbor normalizes to uppercase
@@ -403,7 +425,7 @@ test "getElementsById exact matching" {
     const allocator = testing.allocator;
     const html = "<div><p id='test'>Found</p><p id='test-suffix'>Not found</p></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const results = try getElementsById(allocator, doc, "test");
@@ -418,7 +440,7 @@ test "getElementsByAttributeName finds any element with attribute" {
     const allocator = testing.allocator;
     const html = "<div><p id='foo'>Has ID</p><span data-value='bar'>Has data</span><div>No attributes</div></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const id_results = try getElementsByAttributeName(allocator, doc, "id");
@@ -438,7 +460,7 @@ test "comparison with CSS selectors" {
     const allocator = testing.allocator;
     const html = "<div><h1 class='title main'>Title</h1><p class='text main-text'>Para</p></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     // Walker-based search (token matching)
@@ -460,9 +482,10 @@ test "comparison with CSS selectors" {
 }
 
 test "single element functions return first match" {
+    const allocator = testing.allocator;
     const html = "<div><h1 class='main'>First</h1><h2 class='main'>Second</h2></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
 
@@ -479,15 +502,16 @@ test "single element functions return first match" {
 }
 
 test "getElementById" {
-    const doc = try z.createDocFromString("<div id=\"1\"><p ></p><span id=\"2\"></span></div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"1\"><p ></p><span id=\"2\"></span></div>");
     defer z.destroyDocument(doc);
-    const body = z.bodyNode(doc).?;
-    const element = getElementById(body, "2");
-    try testing.expect(z.tagFromElement(element.?) == .span);
+    const element = getElementById(doc, "2").?;
+    try testing.expect(z.tagFromElement(element) == .span);
 }
 
 test "getElementByClass" {
-    const doc = try z.createDocFromString("<div id=\"1\"><p class=\"test\"></p><span class=\"test\"></span></div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"1\"><p class=\"test\"></p><span class=\"test\"></span></div>");
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
     const element = getElementByClass(body, "test");
@@ -495,7 +519,8 @@ test "getElementByClass" {
 }
 
 test "getElementByAttribute" {
-    const doc = try z.createDocFromString("<div id=\"1\" data-test=\"value1\"><p ></p><span data-test=\"value2\"></span></div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"1\" data-test=\"value1\"><p ></p><span data-test=\"value2\"></span></div>");
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
     const element_2 = getElementByAttribute(body, "data-test", "value2");
@@ -505,17 +530,18 @@ test "getElementByAttribute" {
 }
 
 test "getElementByDataAttribute" {
-    const html =
+    const allocator = testing.allocator;
+    const html = 
         \\<div id="user" data-id="1234567890" data-user="carinaanand" data-date-of-birth>
         \\Carina Anand
         \\</div>
     ;
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
     const div = z.nodeToElement(z.firstChild(body).?).?;
 
-    const elt = getElementById(body, "user").?;
+    const elt = getElementById(doc, "user").?;
     try testing.expect(div == elt);
 
     const date_of_birth = try getElementByDataAttribute(
@@ -537,7 +563,8 @@ test "getElementByDataAttribute" {
 }
 
 test "getElementByTag" {
-    const doc = try z.createDocFromString("<div id=\"1\"><p class=\"test\"></p><span id=\"2\"></span></div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"1\"><p class=\"test\"></p><span id=\"2\"></span></div>");
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
     const element = getElementByTag(body, .span);

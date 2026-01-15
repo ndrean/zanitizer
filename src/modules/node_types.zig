@@ -84,6 +84,7 @@ pub inline fn isTypeFragment(node: *z.DomNode) bool {
 }
 
 test "type / name checking" {
+    const allocator = testing.allocator;
     const frag =
         \\<div>
         \\<!-- This is a comment -->
@@ -95,7 +96,7 @@ test "type / name checking" {
         \\</div>
     ;
 
-    const doc = try z.createDocFromString(frag);
+    const doc = try z.parseHTML(allocator, frag);
     defer z.destroyDocument(doc);
 
     const body_node = z.bodyNode(doc).?;

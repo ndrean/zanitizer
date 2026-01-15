@@ -1,7 +1,7 @@
 CMakeFiles/lexbor_static.dir/source/lexbor/core/print.c.o: \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/print.c \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/str.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/base.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/print.c \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/str.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/base.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/stdlib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/_stdlib.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/Availability.h \
@@ -114,14 +114,14 @@ CMakeFiles/lexbor_static.dir/source/lexbor/core/print.c.o: \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arm/limits.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/arm/_limits.h \
   /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/sys/syslimits.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/def.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/types.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/def.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/types.h \
   /Library/Developer/CommandLineTools/usr/lib/clang/17/include/stdbool.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/lexbor.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/mraw.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/mem.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/bst.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/dobject.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/array.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/utils.h \
-  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source/lexbor/core/print.h
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/lexbor.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/mraw.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/mem.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/bst.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/dobject.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/array.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/utils.h \
+  /Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source/lexbor/core/print.h

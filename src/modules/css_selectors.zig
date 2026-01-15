@@ -1,4 +1,6 @@
 //! CSS Selectors
+//!
+//! This is not thread safe.
 
 const std = @import("std");
 const z = @import("../root.zig");
@@ -32,7 +34,11 @@ extern "c" fn lxb_selectors_init(selectors: *z.CssSelectors) usize;
 extern "c" fn lxb_selectors_destroy(selectors: *z.CssSelectors, destroy_self: bool) ?*z.CssSelectors;
 
 // Parse selectors
-extern "c" fn lxb_css_selectors_parse(parser: *z.CssParser, selectors: [*]const u8, length: usize) ?*z.CssSelectorList;
+extern "c" fn lxb_css_selectors_parse(
+    parser: *z.CssParser,
+    selectors: [*]const u8,
+    length: usize,
+) ?*z.CssSelectorList;
 
 // Set options for selectors: MATCH_ROOT
 extern "c" fn lxb_selectors_opt_set_noi(selectors: *z.CssSelectors, opts: usize) void;
@@ -44,7 +50,17 @@ extern "c" fn lxb_selectors_find(selectors: *z.CssSelectors, root: *z.DomNode, l
     ctx: ?*anyopaque,
 ) callconv(.c) usize, ctx: ?*anyopaque) usize;
 
-extern "c" fn lxb_selectors_match_node(selectors: *z.CssSelectors, node: *z.DomNode, list: *z.CssSelectorList, callback: *const fn (*z.DomNode, *z.CssSelectorSpecificity, ?*anyopaque) callconv(.c) usize, ctx: ?*anyopaque) usize;
+extern "c" fn lxb_selectors_match_node(
+    selectors: *z.CssSelectors,
+    node: *z.DomNode,
+    list: *z.CssSelectorList,
+    callback: *const fn (
+        *z.DomNode,
+        *z.CssSelectorSpecificity,
+        ?*anyopaque,
+    ) callconv(.c) usize,
+    ctx: ?*anyopaque,
+) usize;
 
 // Cleanup selector list
 extern "c" fn lxb_css_selector_list_destroy_memory(list: *z.CssSelectorList) void;
@@ -123,19 +139,23 @@ pub const CssSelectorEngine = struct {
     pub fn parseSelector(self: *Self, selector: []const u8) !StoredSelector {
         if (!self.initialized) return Err.CssEngineNotInitialized;
 
+        // copy the selector string first to ensure stability if parser references it
+        const owned_selector = try self.allocator.dupe(u8, selector);
+        errdefer self.allocator.free(owned_selector);
+
         const selector_list = lxb_css_selectors_parse(
             self.css_parser,
-            selector.ptr,
-            selector.len,
+            owned_selector.ptr,
+            owned_selector.len,
         ) orelse return Err.CssSelectorParseFailed;
 
         // copy the selector string
-        const owned_selector = try self.allocator.dupe(u8, selector);
+        // const owned_selector = try self.allocator.dupe(u8, selector);
 
         return StoredSelector{
+            .allocator = self.allocator,
             .selector_list = selector_list,
             .original_selector = owned_selector,
-            .allocator = self.allocator,
         };
     }
 
@@ -148,9 +168,11 @@ pub const CssSelectorEngine = struct {
 
         // Not cached - compile and store it
         const parsed = try self.parseSelector(selector);
-        try self.selector_cache.put(selector, parsed);
+        errdefer parsed.deinit();
 
-        return self.selector_cache.getPtr(selector).?;
+        try self.selector_cache.put(parsed.original_selector, parsed);
+
+        return self.selector_cache.getPtr(parsed.original_selector).?;
     }
 
     /// [selectors] Find first matching node using cached selector
@@ -162,7 +184,6 @@ pub const CssSelectorEngine = struct {
         if (!self.initialized) return Err.CssEngineNotInitialized;
 
         var context = FirstNodeContext.init();
-
         const status = lxb_selectors_find(
             self.selectors,
             root_node,
@@ -197,6 +218,10 @@ pub const CssSelectorEngine = struct {
             findCallback,
             &context,
         );
+
+        if (context.oom_error) {
+            return error.OutOfMemory; // Correctly propagate OOM
+        }
 
         if (status != z._OK) {
             return Err.CssSelectorFindFailed;
@@ -242,22 +267,28 @@ pub const CssSelectorEngine = struct {
         // Use cached selector for better performance
         const _selector = try self.getOrParseSelector(selector);
 
-        var context = FindContext.init(self.allocator);
-        defer context.deinit();
+        var matched: bool = false;
+        const cb = struct {
+            fn matchCallback(_: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
+                const m: *bool = @ptrCast(@alignCast(ctx.?));
+                m.* = true;
+                return z._STOP;
+            }
+        }.matchCallback;
 
         const status = lxb_selectors_match_node(
             self.selectors,
             node,
             _selector.selector_list,
-            findCallback,
-            &context,
+            cb,
+            &matched,
         );
 
-        if (status != z._OK) {
+        if (status != z._OK and status != z._STOP) {
             return Err.CssSelectorMatchFailed;
         }
 
-        return context.results.items.len > 0;
+        return matched;
     }
 
     /// Find matching nodes (with caching and optional type filtering)
@@ -344,6 +375,7 @@ pub const CssSelectorEngine = struct {
 const FindContext = struct {
     allocator: std.mem.Allocator,
     results: std.ArrayList(*z.DomNode) = .empty,
+    oom_error: bool = false,
 
     fn init(allocator: std.mem.Allocator) FindContext {
         return FindContext{ .allocator = allocator };
@@ -357,8 +389,10 @@ const FindContext = struct {
 /// Callback function for lxb_selectors_find
 fn findCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
     const context: *FindContext = @ptrCast(@alignCast(ctx.?));
-    context.results.append(context.allocator, node) catch return z._STOP; // Return error status on allocation failure
-
+    context.results.append(context.allocator, node) catch {
+        context.oom_error = true;
+        return z._STOP;
+    };
     return z._OK;
 }
 
@@ -371,15 +405,6 @@ const FirstNodeContext = struct {
     }
 };
 
-// Special context for early stopping (elements)
-const FirstElementContext = struct {
-    first_element: ?*z.HTMLElement,
-
-    fn init() FirstElementContext {
-        return .{ .first_element = null };
-    }
-};
-
 /// Callback that stops after finding first node
 fn findFirstNodeCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
     const context: *FirstNodeContext = @ptrCast(@alignCast(ctx.?));
@@ -388,18 +413,6 @@ fn findFirstNodeCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*
     // Return a special status to indicate early stopping
     // Some lexbor implementations might use this pattern
     return 0x7FFFFFFF; // Large positive number to indicate early stop
-}
-
-/// Callback that stops after finding first element
-fn findFirstElementCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
-    const context: *FirstElementContext = @ptrCast(@alignCast(ctx.?));
-
-    if (z.nodeToElement(node)) |element| {
-        context.first_element = element;
-        return 0x7FFFFFFF; // Large positive number to indicate early stop
-    }
-
-    return z._OK; // Continue searching
 }
 
 //=============================================================================
@@ -482,7 +495,7 @@ test "CSS selector basic functionality" {
 
     // Create HTML document
     const html = "<div><p class='highlight'>Hello</p><p id='my-id'>World</p><span class='highlight'>Test</span></div>";
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     // Test class selector
@@ -516,7 +529,7 @@ test "querySelector vs querySelectorAll functionality" {
         \\  <p id='unique'>Unique paragraph</p>
         \\</div>
     ;
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     // Test 1: querySelector should return first match
@@ -563,7 +576,7 @@ test "CssSelectorEngine querySelector (low-level) functionality" {
         \\  <p class='second'>Second paragraph</p>
         \\</div>
     ;
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     var css_engine = try CssSelectorEngine.init(allocator);
@@ -622,7 +635,7 @@ test "querySelector performance vs querySelectorAll[0]" {
         \\  <p>Paragraph 12</p>
         \\</div>
     ;
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     // Method 1: Using querySelector (early stopping)
@@ -649,7 +662,7 @@ test "CSS selector engine reuse" {
     const allocator = testing.allocator;
 
     const html = "<article><h1>Title</h1><p>Para 1</p><p>Para 2</p><footer>End</footer></article>";
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
@@ -690,7 +703,7 @@ test "CSS selector nth-child functionality" {
         \\</ul>
     ;
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body_node = z.bodyNode(doc).?;
@@ -736,7 +749,7 @@ test "challenging CSS selectors - lexbor example" {
 
     // Exact HTML from lexbor example
     const html = "<div><p class='x z'> </p><p id='y'>abc</p></div>";
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
@@ -822,7 +835,7 @@ test "CSS selector edge cases" {
         _ = i;
         // z.print("\nTest case {}: {s}\n", .{ i + 1, test_case.description });
 
-        const doc = try z.createDocFromString(test_case.html);
+        const doc = try z.parseHTML(allocator, test_case.html);
         defer z.destroyDocument(doc);
 
         const body = z.bodyElement(doc).?;
@@ -842,7 +855,7 @@ test "CSS selector edge cases" {
 
 //     const html = "<div class='container'><div class='box red'>Red Box</div><div class='box blue'>Blue Box</div><p class='text'>Paragraph</p></div>";
 
-//     const doc = try z.createDocFromString(html);
+//     const doc = try z.parseHTML(html);
 //     defer z.destroyDocument(doc);
 
 //     const collection = z.createDefaultCollection(doc) orelse return error.CollectionCreateFailed;
@@ -915,7 +928,7 @@ test "CSS selector matchNode vs find vs matches" {
     const html =
         "<div class='container'><div class='box red'>Red Box</div><div class='box blue'>Blue Box</div><p class='text'>Paragraph</p></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body_node = z.bodyNode(doc).?;
@@ -991,7 +1004,7 @@ test "query vs filter behavior" {
 
     const html = "<div class='container'><div class='box'>Content</div><p class='text'>Para</p><p>Para2</p></div>";
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body_node = z.bodyNode(doc).?;
@@ -1050,7 +1063,7 @@ test "CSS selector caching performance" {
     const html = try html_buffer.toOwnedSlice(allocator);
     defer allocator.free(html);
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
@@ -1247,7 +1260,7 @@ test "multiple reuse css_engine" {
         .remove_whitespace_text_nodes = true,
     });
     defer allocator.free(normHTML);
-    const doc = try z.createDocFromString(normHTML);
+    const doc = try z.parseHTML(allocator, normHTML);
     defer z.destroyDocument(doc);
     const body_node = z.bodyNode(doc).?;
 

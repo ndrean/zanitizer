@@ -111,22 +111,36 @@ fn setAncestor(tag: z.HtmlTag, parent: z.HtmlTag) z.HtmlTag {
 
 /// [sanitize] Collect dangerous SVG attributes (simplified version without iteration)
 fn collectSvgDangerousAttributes(context: *SanitizeContext, element: *z.HTMLElement, tag_str: []const u8) !void {
-    // For now, we'll use a simplified approach and check common dangerous attributes
-    // This avoids the complexity of attribute iteration which requires allocator
-
-    // Check for dangerous event handlers
-    const dangerous_events = [_][]const u8{ "onclick", "onload", "onmouseover", "onbegin", "onend", "onfocusin", "onfocusout" };
-
-    for (dangerous_events) |event_attr| {
-        if (z.hasAttribute(element, event_attr)) {
-            try context.addAttributeToRemove(element, event_attr);
+    // We must iterate attributes to catch all on* handlers and namespaced attributes
+    const attrs = z.getAttributes_bf(context.allocator, element) catch return;
+    defer {
+        for (attrs) |attr| {
+            context.allocator.free(attr.name);
+            context.allocator.free(attr.value);
         }
+        context.allocator.free(attrs);
     }
 
-    // Check for dangerous href with javascript
-    if (z.getAttribute_zc(element, "href")) |href_value| {
-        if (std.mem.startsWith(u8, href_value, "javascript:")) {
-            try context.addAttributeToRemove(element, "href");
+    for (attrs) |attr| {
+        var should_remove = false;
+
+        // 1. Catch all event handlers
+        if (std.mem.startsWith(u8, attr.name, "on")) {
+            should_remove = true;
+        }
+        // 2. Catch javascript in href and xlink:href
+        else if (std.mem.eql(u8, attr.name, "href") or std.mem.eql(u8, attr.name, "xlink:href")) {
+            if (std.mem.startsWith(u8, attr.value, "javascript:")) {
+                should_remove = true;
+            }
+        }
+        // 3. Remove inline styles if configured (CSS injection vector)
+        else if (std.mem.eql(u8, attr.name, "style") and context.options.remove_styles) {
+            should_remove = true;
+        }
+
+        if (should_remove) {
+            try context.addAttributeToRemove(element, attr.name);
         }
     }
 
@@ -200,78 +214,55 @@ const AttributeAction = struct {
     needs_free: bool,
 };
 
-/// Stack memory configuration
-const STACK_ATTR_BUFFER_SIZE = 2048; // 2KB for attribute name storage
-const MAX_STACK_REMOVALS = 32; // Stack space for removal operations
-const MAX_STACK_TEMPLATES = 8; // Most documents have few templates
-
 // Context for simple_walk sanitization callback
 const SanitizeContext = struct {
     allocator: std.mem.Allocator,
     options: SanitizerOptions,
     parent: z.HtmlTag = .html,
 
-    // Stack attribute name storage
-    attr_name_buffer: [STACK_ATTR_BUFFER_SIZE]u8 = undefined,
-    attr_name_fba: std.heap.FixedBufferAllocator = undefined,
-
-    // Stack arrays
-    nodes_to_remove: [MAX_STACK_REMOVALS]*z.DomNode = undefined,
-    attributes_to_remove: [MAX_STACK_REMOVALS]AttributeAction = undefined,
-    template_nodes: [MAX_STACK_TEMPLATES]*z.DomNode = undefined,
-
-    // Counters
-    nodes_count: usize = 0,
-    attrs_count: usize = 0,
-    templates_count: usize = 0,
+    // Dynamic storage for operations
+    // We use ArrayLists to handle documents of any size/complexity safely
+    nodes_to_remove: std.ArrayListUnmanaged(*z.DomNode),
+    attributes_to_remove: std.ArrayListUnmanaged(AttributeAction),
+    template_nodes: std.ArrayListUnmanaged(*z.DomNode),
 
     fn init(alloc: std.mem.Allocator, opts: SanitizerOptions) @This() {
-        var self = @This(){
+        return @This(){
             .allocator = alloc,
             .options = opts,
+            .nodes_to_remove = .empty,
+            .attributes_to_remove = .empty,
+            .template_nodes = .empty,
         };
-        self.attr_name_fba = std.heap.FixedBufferAllocator.init(&self.attr_name_buffer);
-        return self;
     }
 
     fn deinit(self: *@This()) void {
-        // Stack-only cleanup - only free heap fallback attribute names
-        for (self.attributes_to_remove[0..self.attrs_count]) |action| {
+        for (self.attributes_to_remove.items) |action| {
             if (action.needs_free) {
                 self.allocator.free(action.attr_name);
             }
         }
+        self.attributes_to_remove.deinit(self.allocator);
+        self.nodes_to_remove.deinit(self.allocator);
+        self.template_nodes.deinit(self.allocator);
     }
 
     fn addNodeToRemove(self: *@This(), node: *z.DomNode) !void {
-        if (self.nodes_count >= MAX_STACK_REMOVALS) {
-            return error.TooManyNodesToRemove;
-        }
-        self.nodes_to_remove[self.nodes_count] = node;
-        self.nodes_count += 1;
+        try self.nodes_to_remove.append(self.allocator, node);
     }
 
     fn addAttributeToRemove(self: *@This(), element: *z.HTMLElement, attr_name: []const u8) !void {
-        if (self.attrs_count >= MAX_STACK_REMOVALS) {
-            return error.TooManyAttributesToRemove;
-        }
-
         const owned_name = try self.allocator.dupe(u8, attr_name);
 
-        self.attributes_to_remove[self.attrs_count] = AttributeAction{
+        try self.attributes_to_remove.append(self.allocator, AttributeAction{
             .element = element,
             .attr_name = owned_name,
             .needs_free = true,
-        };
-        self.attrs_count += 1;
+        });
     }
 
     fn addTemplate(self: *@This(), template_node: *z.DomNode) !void {
-        if (self.templates_count >= MAX_STACK_TEMPLATES) {
-            return error.TooManyTemplates;
-        }
-        self.template_nodes[self.templates_count] = template_node;
-        self.templates_count += 1;
+        try self.template_nodes.append(self.allocator, template_node);
     }
 };
 
@@ -494,16 +485,18 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
             {
                 should_remove = true;
             } else if (std.mem.startsWith(u8, attr_pair.value, "data:") and
-                (std.mem.indexOf(u8, attr_pair.value, "base64") != null or
-                    std.mem.startsWith(u8, attr_pair.value, "data:text/html") or
+                (std.mem.startsWith(u8, attr_pair.value, "data:text/html") or
                     std.mem.startsWith(u8, attr_pair.value, "data:text/javascript")))
             {
+                // Block dangerous data types.
+                // Note: We allow base64 images (e.g. data:image/png;base64) if they don't match above.
+                // If strictness is required, one could check for image/ mime types explicitly.
                 should_remove = true;
             } else if (std.mem.startsWith(u8, attr_pair.name, "on")) {
                 // Remove all event handlers
                 should_remove = true;
-            } else if (std.mem.eql(u8, attr_pair.name, "style")) {
-                // Remove inline styles
+            } else if (std.mem.eql(u8, attr_pair.name, "style") and context.options.remove_styles) {
+                // Remove inline styles based on options
                 should_remove = true;
             } else if (std.mem.eql(u8, attr_pair.name, "href") or std.mem.eql(u8, attr_pair.name, "src")) {
                 if (context.options.strict_uri_validation and !isSafeUri(attr_pair.value)) {
@@ -529,28 +522,36 @@ fn isValidTarget(value: []const u8) bool {
 }
 
 fn sanitizePostWalkOperations(allocator: std.mem.Allocator, context: *SanitizeContext, options: SanitizerOptions) (std.mem.Allocator.Error || z.Err)!void {
-    for (context.attributes_to_remove[0..context.attrs_count]) |action| {
+    // 1. Remove attributes first (safest operation)
+    for (context.attributes_to_remove.items) |action| {
         try z.removeAttribute(action.element, action.attr_name);
     }
 
-    for (context.nodes_to_remove[0..context.nodes_count]) |node| {
-        z.removeNode(node);
-        z.destroyNode(node);
-    }
-
-    for (context.template_nodes[0..context.templates_count]) |template_node| {
+    // 2. Process templates (recurse into them)
+    // We do this before destroying nodes, in case a template is inside a node to be destroyed.
+    // (Wasteful but safe from use-after-free).
+    for (context.template_nodes.items) |template_node| {
         try sanitizeTemplateContent(
             allocator,
             template_node,
             options,
         );
     }
+
+    // 3. Remove nodes in REVERSE order
+    // The walker usually discovers parents before children.
+    // If we destroy a parent first, the child is destroyed. Accessing the child later would be use-after-free.
+    // By popping from the end (children first), we ensure safe destruction.
+    while (context.nodes_to_remove.pop()) |node| {
+        z.removeNode(node);
+        z.destroyNode(node);
+    }
 }
 
 fn sanitizeTemplateContent(allocator: std.mem.Allocator, template_node: *z.DomNode, options: SanitizerOptions) (std.mem.Allocator.Error || z.Err)!void {
     const template = z.nodeToTemplate(template_node) orelse return;
-    const content = z.templateContent(template);
-    const content_node = z.fragmentToNode(content);
+    const content_node = z.templateContent(template);
+    // const content_node = z.fragmentToNode(content);
 
     var template_context = SanitizeContext.init(allocator, options);
     defer template_context.deinit();
@@ -626,7 +627,7 @@ test "iframe sandbox validation" {
         \\<iframe sandbox>Safe - empty sandbox, no src</iframe>
     ;
 
-    const doc = try z.createDocFromString(test_html);
+    const doc = try z.parseHTML(allocator, test_html);
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
 
@@ -641,7 +642,51 @@ test "iframe sandbox validation" {
 
     const expected = "<body><iframe sandbox src=\"https://example.com\">Safe iframe</iframe><iframe sandbox>Safe - empty sandbox, no src</iframe></body>";
     try testing.expectEqualStrings(expected, result);
+}
 
+test "sanitizer handles many nested and sequential nodes to remove" {
+    const allocator = testing.allocator;
+
+    // 1. Create a deeply nested structure where parent and child must be removed
+    // The sanitizer should remove the outer div (onclick), the p (onmouseover),
+    // and the script. The reverse-order destruction is critical here.
+    const nested_malicious = "<div onclick='alert(1)'><p onmouseover='alert(2)'><script>alert(3)</script><span>Safe</span></p></div>";
+
+    // 2. Create a long sequence of nodes to remove (more than the old fixed-size buffer of 32)
+    var many_malicious_sb: std.ArrayListUnmanaged(u8) = .empty;
+    defer many_malicious_sb.deinit(allocator);
+    const writer = many_malicious_sb.writer(allocator);
+    try writer.print("<div>", .{});
+    var i: usize = 0;
+    while (i < 50) : (i += 1) {
+        try writer.print("<script>var x = {};</script>", .{.{i}});
+    }
+    try writer.print("</div>", .{});
+    const many_malicious = try many_malicious_sb.toOwnedSlice(allocator);
+    defer allocator.free(many_malicious);
+
+    // Run strict sanitization on the nested malicious HTML
+    const doc1 = try z.parseHTMLUnsafe(allocator, nested_malicious, .strict);
+    defer z.destroyDocument(doc1);
+    // const body1 = z.bodyNode(doc1).?;
+    // try z.prettyPrint(allocator, body1);
+    // try z.sanitizeStrict(allocator, z.bodyNode(doc1).?);
+    const result1 = try z.innerHTML(allocator, z.bodyElement(doc1).?);
+    defer allocator.free(result1);
+
+    // The dangerous attributes and script tag should be removed, but the structure remains.
+    // The dangerous attributes (onclick, onmouseover) and script tag should be removed, but the structure remains.
+    try testing.expectEqualStrings("<div><p><span>Safe</span></p></div>", result1);
+
+    // Run strict sanitization on the HTML with many malicious nodes
+    const doc2 = try z.parseHTML(allocator, many_malicious);
+    defer z.destroyDocument(doc2);
+    try z.sanitizeStrict(allocator, z.bodyNode(doc2).?);
+    const result2 = try z.innerHTML(allocator, z.bodyElement(doc2).?);
+    defer allocator.free(result2);
+
+    // The outer div should remain, but all 50 script tags inside should be gone.
+    try testing.expectEqualStrings("<div></div>", result2);
 }
 
 test "comprehensive sanitization modes" {
@@ -694,10 +739,9 @@ test "comprehensive sanitization modes" {
         \\<template><script>alert('XSS');</script><li id="{}">Item-"{}"</li></template>
     ;
 
-
     // Test 1: .minimum mode (minimal sanitization - only truly dangerous content)
     {
-        const doc = try z.createDocFromString(comprehensive_malicious_html);
+        const doc = try z.parseHTML(allocator, comprehensive_malicious_html);
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
@@ -705,7 +749,6 @@ test "comprehensive sanitization modes" {
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
-
 
         // Should preserve most content including scripts and custom elements
         try testing.expect(std.mem.indexOf(u8, result, "script") != null);
@@ -725,7 +768,7 @@ test "comprehensive sanitization modes" {
 
     // Test 2: .strict mode (no custom elements, remove all dangerous content)
     {
-        const doc = try z.createDocFromString(comprehensive_malicious_html);
+        const doc = try z.parseHTML(allocator, comprehensive_malicious_html);
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
@@ -737,7 +780,6 @@ test "comprehensive sanitization modes" {
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
-
 
         // Should remove dangerous content
         try testing.expect(std.mem.indexOf(u8, result, "script") == null);
@@ -773,7 +815,7 @@ test "comprehensive sanitization modes" {
 
     // Test 3: .permissive mode (allow custom elements, still secure)
     {
-        const doc = try z.createDocFromString(comprehensive_malicious_html);
+        const doc = try z.parseHTML(allocator, comprehensive_malicious_html);
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
@@ -781,7 +823,6 @@ test "comprehensive sanitization modes" {
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
-
 
         // Should still remove dangerous content
         try testing.expect(std.mem.indexOf(u8, result, "script") == null);
@@ -813,7 +854,7 @@ test "comprehensive sanitization modes" {
 
     // Test 4: .custom mode (preserve comments, allow scripts, allow custom elements)
     {
-        const doc = try z.createDocFromString(comprehensive_malicious_html);
+        const doc = try z.parseHTML(allocator, comprehensive_malicious_html);
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
@@ -829,7 +870,6 @@ test "comprehensive sanitization modes" {
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
-
 
         // Should preserve comments and scripts
         try testing.expect(std.mem.indexOf(u8, result, "malicious comment") != null);

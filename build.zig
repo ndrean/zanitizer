@@ -154,8 +154,15 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "curl", .module = curl_module },
+            },
         }),
     });
+
+    unit_tests.addIncludePath(quickjs_src_path);
+    unit_tests.linkLibrary(qjs_lib);
+    unit_tests.linkLibC();
 
     // Add dependencies to test
     unit_tests.addCSourceFile(.{

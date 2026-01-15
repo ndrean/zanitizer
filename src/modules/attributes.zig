@@ -141,15 +141,15 @@ pub fn hasAttributes(element: *z.HTMLElement) bool {
 
 /// [attributes] Set the attribute name/value as strings
 ///
-/// Returns the created DomAttr or null if the attribute could not be set (e.g., memory allocation failure)
-pub fn setAttribute(element: *z.HTMLElement, name: []const u8, value: []const u8) ?*DomAttr {
-    return lxb_dom_element_set_attribute(
+/// [JS] `Element.setAttribute(name, value)` equivalent
+pub fn setAttribute(element: *z.HTMLElement, name: []const u8, value: []const u8) !void {
+    _ = lxb_dom_element_set_attribute(
         element,
         name.ptr,
         name.len,
         value.ptr,
         value.len,
-    );
+    ) orelse return error.AttributeSetFailed;
 }
 
 /// [attributes] Set many attributes name/value pairs on element
@@ -167,17 +167,10 @@ pub fn setAttribute(element: *z.HTMLElement, name: []const u8, value: []const u8
 /// try testing.expectEqualStrings("main", z.getAttribute(element, "id"));
 /// ---
 /// ```
-pub fn setAttributes(element: *z.HTMLElement, attrs: []const AttributePair) ?void {
+pub fn setAttributes(element: *z.HTMLElement, attrs: []const AttributePair) !void {
     for (attrs) |attr| {
-        _ = lxb_dom_element_set_attribute(
-            element,
-            attr.name.ptr,
-            attr.name.len,
-            attr.value.ptr,
-            attr.value.len,
-        ) orelse return null;
+        try setAttribute(element, attr.name, attr.value);
     }
-    return {};
 }
 
 // ----------------------------------------------------------
@@ -360,9 +353,9 @@ test "stringEquals and stringContains" {
 
 test "getAttribute and getAttribute_zc" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<div id=\"test\" class=\"main\">Hello</div>");
+    const doc = try z.parseHTML(allocator, "<div id=\"test\" class=\"main\">Hello</div>");
     defer z.destroyDocument(doc);
-    const element = z.getElementById(z.bodyNode(doc).?, "test").?;
+    const element = z.getElementById(doc, "test").?;
 
     // Test getAttribute (allocated)
     const id_alloc = try getAttribute(allocator, element, "id");
@@ -381,9 +374,10 @@ test "getAttribute and getAttribute_zc" {
 }
 
 test "hasAttribute and hasAttributes" {
-    const doc = try z.createDocFromString("<div id=\"test\" class=\"main\">Hello</div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"test\" class=\"main\">Hello</div>");
     defer z.destroyDocument(doc);
-    const element = z.getElementById(z.bodyNode(doc).?, "test").?;
+    const element = z.getElementById(doc, "test").?;
 
     try testing.expect(hasAttribute(element, "id"));
     try testing.expect(hasAttribute(element, "class"));
@@ -392,13 +386,13 @@ test "hasAttribute and hasAttributes" {
 }
 
 test "setAttribute and setAttributes" {
-    const doc = try z.createDocFromString("<div>Hello</div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div>Hello</div>");
     defer z.destroyDocument(doc);
     const element = z.firstElementChild(z.bodyElement(doc).?).?;
 
     // Test setAttribute
-    const attr_result = setAttribute(element, "id", "newid");
-    try testing.expect(attr_result != null); // Should succeed
+    try setAttribute(element, "id", "newid");
     const id = getAttribute_zc(element, "id");
     try testing.expectEqualStrings("newid", id.?);
 
@@ -407,8 +401,7 @@ test "setAttribute and setAttributes" {
         .{ .name = "class", .value = "test-class" },
         .{ .name = "data-test", .value = "value" },
     };
-    const attrs_result = setAttributes(element, &attrs);
-    try testing.expect(attrs_result != null); // Should succeed
+    try setAttributes(element, &attrs);
 
     const class_val = getAttribute_zc(element, "class");
     const data_val = getAttribute_zc(element, "data-test");
@@ -417,9 +410,10 @@ test "setAttribute and setAttributes" {
 }
 
 test "removeAttribute" {
-    const doc = try z.createDocFromString("<div id=\"test\" class=\"main\">Hello</div>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"test\" class=\"main\">Hello</div>");
     defer z.destroyDocument(doc);
-    const element = z.getElementById(z.bodyNode(doc).?, "test").?;
+    const element = z.getElementById(doc, "test").?;
 
     try testing.expect(hasAttribute(element, "class"));
     try removeAttribute(element, "class");
@@ -429,7 +423,7 @@ test "removeAttribute" {
 
 test "getElementId functions" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<div id=\"test123\">Hello</div>");
+    const doc = try z.parseHTML(allocator, "<div id=\"test123\">Hello</div>");
     defer z.destroyDocument(doc);
     const element = z.firstElementChild(z.bodyElement(doc).?).?;
 
@@ -449,9 +443,9 @@ test "getElementId functions" {
 
 test "getAttributes_bf" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<div id=\"test\" class=\"main\" data-value=\"123\">Hello</div>");
+    const doc = try z.parseHTML(allocator, "<div id=\"test\" class=\"main\" data-value=\"123\">Hello</div>");
     defer z.destroyDocument(doc);
-    const element = z.getElementById(z.bodyNode(doc).?, "test").?;
+    const element = z.getElementById(doc, "test").?;
 
     const attrs = try getAttributes_bf(allocator, element);
     defer {

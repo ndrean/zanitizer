@@ -1,4 +1,4 @@
-LEXBOR_VERSION = master
+LEXBOR_VERSION = 2.7.0
 LEXBOR_DIR = vendor/lexbor_src_${LEXBOR_VERSION}
 LEXBOR_LIB = $(LEXBOR_DIR)/build/liblexbor_static.a
 

@@ -9,6 +9,7 @@ pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
     loop: *EventLoop,
     dom_bridge: ?*anyopaque = null, // !!! circular ref with ScriptEngine, so use anyopaque
+    global_document: ?*z.HTMLDocument = null,
 
     // Worker-specific data (null for main thread)
     worker_core: ?*anyopaque = null,
@@ -18,6 +19,7 @@ pub const RuntimeContext = struct {
         dom_node: zqjs.ClassID = 0,
         worker: zqjs.ClassID = 0,
         event_loop: zqjs.ClassID = 0,
+        // document_fragment: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

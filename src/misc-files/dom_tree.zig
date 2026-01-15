@@ -425,7 +425,7 @@ const TupleParser = struct {
         }
     }
 
-    fn parseString(self: *TupleParser) ![]const u8 {
+    fn parseFromString(self: *TupleParser) ![]const u8 {
         self.skipWhitespace();
 
         if (self.advance() != '"') return error.ExpectedQuote;
@@ -477,19 +477,19 @@ const TupleParser = struct {
 
         if (self.peek() == '"') {
             // Text node - just a quoted string
-            const text = try self.parseString();
+            const text = try self.parseFromString();
             try result.appendSlice(allocator, text);
         } else if (self.peek() == '{') {
             _ = self.advance(); // Skip '{'
             self.skipWhitespace();
 
             // Parse first element (tag name or "comment")
-            const first_elem = try self.parseString();
+            const first_elem = try self.parseFromString();
 
             if (std.mem.eql(u8, first_elem, "comment")) {
                 // Comment node: {"comment", "text"}
                 try self.expectChar(',');
-                const comment_text = try self.parseString();
+                const comment_text = try self.parseFromString();
                 try result.appendSlice(allocator, "<!--");
                 try result.appendSlice(allocator, comment_text);
                 try result.appendSlice(allocator, "-->");
@@ -515,9 +515,9 @@ const TupleParser = struct {
 
                     // Parse attribute: {"name", "value"}
                     try self.expectChar('{');
-                    const attr_name = try self.parseString();
+                    const attr_name = try self.parseFromString();
                     try self.expectChar(',');
-                    const attr_value = try self.parseString();
+                    const attr_value = try self.parseFromString();
                     try self.expectChar('}');
 
                     try result.append(allocator, ' ');

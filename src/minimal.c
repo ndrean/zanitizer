@@ -10,6 +10,13 @@
  * without accessing internal structures.
  */
 
+// Cast HTML Document -> DOM Document
+// Required because lxb_dom_interface_document is a C macro/inline
+lxb_dom_document_t *lexbor_html_interface_document_wrapper(lxb_html_document_t *doc)
+{
+  return lxb_dom_interface_document(doc);
+}
+
 // Get the node from a generic object
 lxb_dom_node_t *lexbor_dom_interface_node_wrapper(void *obj)
 {
@@ -75,8 +82,9 @@ lxb_dom_document_fragment_t *lexbor_html_template_content_wrapper(lxb_html_templ
 // Create a template element using the standard document interface which creates the Tag_id and content access.
 lxb_html_template_element_t *lexbor_html_create_template_element_wrapper(lxb_html_document_t *document)
 {
+
   // Create template element using the standard element creation method
-  lxb_dom_element_t *element = lxb_dom_document_create_element(
+  lxb_dom_element_t *element = lxb_html_document_create_element(
       lxb_dom_interface_document(document),
       (const lxb_char_t *)"template",
       8,
@@ -85,6 +93,13 @@ lxb_html_template_element_t *lexbor_html_create_template_element_wrapper(lxb_htm
   if (element == NULL)
   {
     return NULL;
+  }
+
+  lxb_dom_node_t *node = lxb_dom_interface_node(element);
+  if (node->local_name != LXB_TAG_TEMPLATE)
+  {
+    // Force set the tag if needed
+    node->local_name = LXB_TAG_TEMPLATE;
   }
 
   // Cast to template interface
@@ -129,4 +144,3 @@ lxb_html_template_element_t *lexbor_node_to_template_wrapper(lxb_dom_node_t *nod
 
   return NULL;
 }
-

@@ -22,14 +22,15 @@ pub fn classList_zc(element: *z.HTMLElement) []const u8 {
 }
 
 test "classList_zc" {
-    const doc = try z.createDocFromString("<p id=\"1\" class= \"bold main\"></p><p id=\"2\"></p>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p id=\"1\" class= \"bold main\"></p><p id=\"2\"></p>");
     defer z.destroyDocument(doc);
-    const element1 = z.getElementById(z.bodyNode(doc).?, "1");
-    const class_list = classList_zc(element1.?);
+    const element1 = z.getElementById(doc, "1").?;
+    const class_list = classList_zc(element1);
     try testing.expectEqualStrings("bold main", class_list);
 
-    const element2 = z.getElementById(z.bodyNode(doc).?, "2");
-    const class_list2 = classList_zc(element2.?);
+    const element2 = z.getElementById(doc, "2").?;
+    const class_list2 = classList_zc(element2);
     try testing.expectEqualStrings("", class_list2);
 }
 
@@ -57,14 +58,16 @@ pub fn hasClass(element: *z.HTMLElement, class_name: []const u8) bool {
 }
 
 test "hasClass" {
-    const doc = try z.createDocFromString("<p id=\"1\" class= \"bold main\"></p><p id=\"2\"></p>");
+    const allocator = testing.allocator;
+
+    const doc = try z.parseHTML(allocator, "<p id=\"1\" class= \"bold main\"></p><p id=\"2\"></p>");
     defer z.destroyDocument(doc);
-    const element1 = z.getElementById(z.bodyNode(doc).?, "1");
+    const element1 = z.getElementById(doc, "1");
     try testing.expect(hasClass(element1.?, "bold"));
     try testing.expect(hasClass(element1.?, "main"));
     try testing.expect(!hasClass(element1.?, "italic"));
 
-    const element2 = z.getElementById(z.bodyNode(doc).?, "2");
+    const element2 = z.getElementById(doc, "2");
     try testing.expect(!hasClass(element2.?, "bold"));
 }
 
@@ -87,14 +90,14 @@ pub fn classListAsString(allocator: std.mem.Allocator, element: *z.HTMLElement) 
 test "classListAsString" {
     const allocator = testing.allocator;
 
-    const doc = try z.createDocFromString("<p id=\"1\" class= \"bold main\"></p><p id=\"2\"></p>");
+    const doc = try z.parseHTML(allocator, "<p id=\"1\" class= \"bold main\"></p><p id=\"2\"></p>");
     defer z.destroyDocument(doc);
-    const element1 = z.getElementById(z.bodyNode(doc).?, "1");
+    const element1 = z.getElementById(doc, "1");
     const class_string = try classListAsString(allocator, element1.?);
     defer allocator.free(class_string);
     try testing.expectEqualStrings("bold main", class_string);
 
-    const element2 = z.getElementById(z.bodyNode(doc).?, "2");
+    const element2 = z.getElementById(doc, "2");
     const class_string2 = try classListAsString(allocator, element2.?);
     defer allocator.free(class_string2);
     try testing.expectEqualStrings("", class_string2);
@@ -177,7 +180,7 @@ pub const ClassList = struct {
             try class_string.appendSlice(self.allocator, entry.key_ptr.*);
         }
 
-        _ = z.setAttribute(
+        try z.setAttribute(
             self.element,
             "class",
             class_string.items,
@@ -327,7 +330,7 @@ pub fn classList(allocator: std.mem.Allocator, element: *z.HTMLElement) !ClassLi
 test "classList" {
     const allocator = testing.allocator;
 
-    const doc = try z.createDocFromString("<p class=\"bold main\"></p>");
+    const doc = try z.parseHTML(allocator, "<p class=\"bold main\"></p>");
     const body = z.bodyNode(doc).?;
     const p = z.nodeToElement(z.firstChild(body).?).?;
 
@@ -352,7 +355,7 @@ test "classList" {
 test "ClassList set operations" {
     const allocator = testing.allocator;
 
-    const doc = try z.createDocFromString("<p></p>");
+    const doc = try z.parseHTML(allocator, "<p></p>");
     const body = z.bodyNode(doc).?;
     const p = z.nodeToElement(z.firstChild(body).?).?;
     var token_list = try ClassList.init(
@@ -407,7 +410,7 @@ test "ClassList set operations" {
 test "ClassList performance with lxb check" {
     const allocator = testing.allocator;
 
-    const doc = try z.createDocFromString("<p></p>");
+    const doc = try z.parseHTML(allocator, "<p></p>");
     const body = z.bodyNode(doc).?;
     const p = z.nodeToElement(z.firstChild(body).?).?;
     var token_list = try ClassList.init(
@@ -457,7 +460,7 @@ test "class search functionality" {
         \\<div>No class div</div>
     ;
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body_node = z.bodyNode(doc).?;

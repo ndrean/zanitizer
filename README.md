@@ -99,12 +99,11 @@ This is useful for web scraping, email sanitization, test engine for integrated 
 
 The primitives exposed stay as close as possible to `JavaScript` semantics.
 
-## ⚠️ Challenges
+## Challenges
 
 Plenty!
 
-- Partial Browser APIs - fetch via `libcurl`
-- No planned WASM support - Would need separate runtime integration
+No AsyncIO, no WebSocket, no planned WASM support, no `window` support, no CSSOM.
   
 ## Examples
 
@@ -406,7 +405,7 @@ exe.root_module.addImport("zexplorer", zexplorer.module("zexplorer"));
 
 You have two methods available.
 
-1. The `parseString()` creates a `<head>` and a `<body>` element and replaces BODY innerContent with the nodes created by the parsing of the given string.
+1. The `parseFromString()` creates a `<head>` and a `<body>` element and replaces BODY innerContent with the nodes created by the parsing of the given string.
 
 ```zig
 const z = @import("zexplorer");
@@ -414,7 +413,7 @@ const z = @import("zexplorer");
 const doc: *HTMLDocument = try z.createDocument();
 defer z.destroyDocument(doc);
 
-try z.parseString(doc, "<div></div>");
+try z.parseFromString(doc, "<div></div>");
 const body: *DomNode = z.bodyNode(doc).?;
 
 // you can create programmatically and append elements to a node
@@ -984,7 +983,7 @@ const expected = "<div><!-- comment --><p>Content</p><pre>  preserve  this  </pr
 Dom-base normalization:
 
 ```zig
-try z.parseString(doc, messy_html);
+try z.parseFromString(doc, messy_html);
 
 const body_elt1 = z.bodyElement(doc).?;
 try z.normalizeDOM(gpa, body_elt1);
@@ -1007,7 +1006,7 @@ defer gpa.free(cleaned);
 
 std.debug.assert(std.mem.eql(u8, cleaned, result1));
 
-try z.parseString(doc, cleaned);
+try z.parseFromString(doc, cleaned);
 const body_elt2 = z.bodyElement(doc).?;
 const result2 = try z.innerHTML(gpa, body_elt2);
 defer gpa.free(result2);
@@ -1023,9 +1022,9 @@ The overhead of normalization:
 
 ```txt
 --- Speed Results ---
-createDoc -> parseString:                        0.05 ms/op, 830 kB/s
+createDoc -> parseFromString:                        0.05 ms/op, 830 kB/s
 new parser -> new doc = parser.parse -> DOMnorm:     0.06 ms/op, 660 kB/s
-createDoc -> normString -> parseString:   0.08 ms/op, 470 kB/s
+createDoc -> normString -> parseFromString:   0.08 ms/op, 470 kB/s
 ```
 
 <hr>
@@ -1042,7 +1041,7 @@ The file _main.zig_ shows more use cases with parsing and serialization as well 
 - `lexbor` is built with static linking
 
 ```sh
-LEXOBR_VERSION=2.6 LEXBOR_DIR=vendor/lexbor_master  make -f Makefile.lexbor
+LEXBOR_VERSION=2.7 LEXBOR_DIR=vendor/lexbor_master  make -f Makefile.lexbor
 ```
 
 - tests: The _build.zig_ file runs all the tests from _root.zig_. It imports all the submodules and runs the tests.
@@ -1070,13 +1069,15 @@ Once you build `lexbor`, you have the static object located at _/lexbor_src_mast
 To check which primitives are exported, you can use:
 
 ```sh
-nm lexbor_src_master/build/liblexbor_static.a | grep -i "serialize"
+nm vendor/lexbor_src_master/build/liblexbor_static.a | grep " T " | grep -i "serialize"
 ```
 
 Directly in the source code:
 
 ```sh
-find lexbor_src_master/source -name "*.h" | xargs grep -l "lxb_selectors_opt_set_noi"
+find vendor/lexbor_src_master/source -name "*.h" | xargs grep -l "lxb_html_seralize_tree_cb"
+
+grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ```
 
 ## License

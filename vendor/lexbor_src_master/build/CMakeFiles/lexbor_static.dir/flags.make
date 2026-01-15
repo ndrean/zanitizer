@@ -4,7 +4,7 @@
 # compile C with /usr/bin/cc
 C_DEFINES = -DLEXBOR_STATIC -DLEXBOR_WITHOUT_THREADS
 
-C_INCLUDES = -I/Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_master/source
+C_INCLUDES = -I/Users/nevendrean/code/zig/zexplorer/vendor/lexbor_src_2.7.0/source
 
 C_FLAGSarm64 =  -O2 -Wall -pedantic -pipe -std=c99 -fPIC -arch arm64
 

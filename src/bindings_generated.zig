@@ -8,6 +8,7 @@ const qjs = z.qjs;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
+
 /// Generated wrapper for z.addEventListener
 pub fn js_addEventListener(
     ctx_ptr: ?*qjs.JSContext,
@@ -92,8 +93,7 @@ pub fn js_documentRoot(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     _ = this_val;
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
@@ -107,11 +107,7 @@ pub fn js_documentRoot(
     // Call native Zig function
     const result = z.documentRoot(arg0);
 
-    if (result) |node| {
-        return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION;
-    } else {
-        return w.NULL;
-    }
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.bodyElement
@@ -123,8 +119,7 @@ pub fn js_bodyElement(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     _ = this_val;
     const global0 = ctx.getGlobalObject();
     defer ctx.freeValue(global0);
@@ -138,11 +133,7 @@ pub fn js_bodyElement(
     // Call native Zig function
     const result = z.bodyElement(arg0);
 
-    if (result) |elem| {
-        return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION;
-    } else {
-        return w.NULL;
-    }
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.ownerDocument
@@ -154,8 +145,7 @@ pub fn js_ownerDocument(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
@@ -214,20 +204,13 @@ pub fn js_getElementById(
     defer ctx.freeValue(native_doc0);
     const doc_ptr0 = qjs.JS_GetOpaque(native_doc0, rc.classes.dom_node);
     if (doc_ptr0 == null) return w.EXCEPTION;
-    const doc0: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr0));
-    const root0 = z.documentRoot(doc0);
-    if (root0 == null) return w.EXCEPTION;
-    const arg0 = root0.?;
+    const arg0: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
     // Call native Zig function
     const result = z.getElementById(arg0, arg1);
 
-    if (result) |elem| {
-        return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION;
-    } else {
-        return w.NULL;
-    }
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.appendChild
@@ -261,19 +244,14 @@ pub fn js_firstChild(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
     // Call native Zig function
     const result = z.firstChild(arg0);
 
-    if (result) |node| {
-        return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION;
-    } else {
-        return w.NULL;
-    }
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.parentNode
@@ -285,19 +263,14 @@ pub fn js_parentNode(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
     // Call native Zig function
     const result = z.parentNode(arg0);
 
-    if (result) |node| {
-        return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION;
-    } else {
-        return w.NULL;
-    }
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.removeNode
@@ -309,8 +282,7 @@ pub fn js_remove(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
@@ -338,7 +310,7 @@ pub fn js_setAttribute(
     const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg2);
     // Call native Zig function
-    _ = z.setAttribute(arg0, arg1, arg2);
+    z.setAttribute(arg0, arg1, arg2) catch return w.EXCEPTION;
 
     return w.UNDEFINED;
 }
@@ -361,11 +333,7 @@ pub fn js_getAttribute(
     // Call native Zig function
     const result = z.getAttribute_zc(arg0, arg1);
 
-    if (result) |str| {
-        return ctx.newString(str);
-    } else {
-        return w.NULL;
-    }
+    if (result) |str| { return ctx.newString(str); } else { return w.NULL; }
 }
 
 /// Generated wrapper for z.removeAttribute
@@ -398,8 +366,7 @@ pub fn js_textContent(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     const node_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
     if (node_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.DomNode = @ptrCast(@alignCast(node_ptr0));
@@ -430,10 +397,74 @@ pub fn js_setContentAsText(
     return w.UNDEFINED;
 }
 
+/// Generated wrapper for z.parseHTML
+pub fn js_parseHTML(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.EXCEPTION;
+    _ = this_val;
+    const arg0 = rc.allocator;
+    const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg1);
+    // Call native Zig function
+    const result = z.parseHTML(arg0, arg1) catch return w.EXCEPTION;
+
+    const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(rc.classes.dom_node));
+    _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
+    return doc_obj;
+}
+
+/// Generated wrapper for z.setHTML
+pub fn js_setHTML(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.EXCEPTION;
+    const arg0 = rc.allocator;
+    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (elem_ptr1 == null) return w.EXCEPTION;
+    const arg1: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr1));
+    const arg2 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg2);
+    // Call native Zig function
+    z.setHTML(arg0, arg1, arg2) catch return w.EXCEPTION;
+
+    return w.UNDEFINED;
+}
+
+/// Generated wrapper for z.getHTML
+pub fn js_getHTML(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = argc; _ = argv;
+    const arg0 = rc.allocator;
+    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (elem_ptr1 == null) return w.EXCEPTION;
+    const arg1: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr1));
+    // Call native Zig function
+    const result = z.getHTML(arg0, arg1) catch return w.EXCEPTION;
+
+    defer arg0.free(result);
+    return ctx.newString(result);
+}
+
 // Property Getter for innerHTML
 pub fn js_get_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc;
-    _ = argv;
+    _ = argc; _ = argv;
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
@@ -455,9 +486,337 @@ pub fn js_set_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     const val = argv[0];
     const val_str = ctx.toZString(val) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    _ = z.setInnerHTML(this_arg, val_str) catch return w.EXCEPTION;
+    z.setInnerHTML(this_arg, val_str) catch return w.EXCEPTION;
     return w.UNDEFINED;
 }
+
+// Boolean Getter for disabled
+pub fn js_get_disabled(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const is_present = z.hasAttribute(this_arg, "disabled");
+    return ctx.newBool(is_present);
+}
+
+// Boolean Setter for disabled
+pub fn js_set_disabled(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Convert JS value to boolean
+    const val = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;
+
+    if (val) {
+        z.setAttribute(this_arg, "disabled", "") catch return w.EXCEPTION;
+    } else {
+        z.removeAttribute(this_arg, "disabled") catch return w.EXCEPTION;
+    }
+    return w.UNDEFINED;
+}
+
+// Boolean Getter for hidden
+pub fn js_get_hidden(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const is_present = z.hasAttribute(this_arg, "hidden");
+    return ctx.newBool(is_present);
+}
+
+// Boolean Setter for hidden
+pub fn js_set_hidden(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Convert JS value to boolean
+    const val = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;
+
+    if (val) {
+        z.setAttribute(this_arg, "hidden", "") catch return w.EXCEPTION;
+    } else {
+        z.removeAttribute(this_arg, "hidden") catch return w.EXCEPTION;
+    }
+    return w.UNDEFINED;
+}
+
+// Boolean Getter for checked
+pub fn js_get_checked(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const is_present = z.hasAttribute(this_arg, "checked");
+    return ctx.newBool(is_present);
+}
+
+// Boolean Setter for checked
+pub fn js_set_checked(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Convert JS value to boolean
+    const val = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;
+
+    if (val) {
+        z.setAttribute(this_arg, "checked", "") catch return w.EXCEPTION;
+    } else {
+        z.removeAttribute(this_arg, "checked") catch return w.EXCEPTION;
+    }
+    return w.UNDEFINED;
+}
+
+// Reflected String Getter for id -> id
+pub fn js_get_id(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Call getAttribute (returns allocated !?[]u8)
+    const val_opt = z.getAttribute(rc.allocator, this_arg, "id") catch return w.EXCEPTION;
+    if (val_opt) |val| {
+        defer rc.allocator.free(val);
+        return ctx.newString(val);
+    }
+    // Reflected attributes usually return empty string if missing (not null)
+    return ctx.newString("");
+}
+
+// Reflected String Setter for id -> id
+pub fn js_set_id(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    z.setAttribute(this_arg, "id", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Reflected String Getter for title -> title
+pub fn js_get_title(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Call getAttribute (returns allocated !?[]u8)
+    const val_opt = z.getAttribute(rc.allocator, this_arg, "title") catch return w.EXCEPTION;
+    if (val_opt) |val| {
+        defer rc.allocator.free(val);
+        return ctx.newString(val);
+    }
+    // Reflected attributes usually return empty string if missing (not null)
+    return ctx.newString("");
+}
+
+// Reflected String Setter for title -> title
+pub fn js_set_title(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    z.setAttribute(this_arg, "title", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Reflected String Getter for lang -> lang
+pub fn js_get_lang(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Call getAttribute (returns allocated !?[]u8)
+    const val_opt = z.getAttribute(rc.allocator, this_arg, "lang") catch return w.EXCEPTION;
+    if (val_opt) |val| {
+        defer rc.allocator.free(val);
+        return ctx.newString(val);
+    }
+    // Reflected attributes usually return empty string if missing (not null)
+    return ctx.newString("");
+}
+
+// Reflected String Setter for lang -> lang
+pub fn js_set_lang(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    z.setAttribute(this_arg, "lang", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Reflected String Getter for dir -> dir
+pub fn js_get_dir(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Call getAttribute (returns allocated !?[]u8)
+    const val_opt = z.getAttribute(rc.allocator, this_arg, "dir") catch return w.EXCEPTION;
+    if (val_opt) |val| {
+        defer rc.allocator.free(val);
+        return ctx.newString(val);
+    }
+    // Reflected attributes usually return empty string if missing (not null)
+    return ctx.newString("");
+}
+
+// Reflected String Setter for dir -> dir
+pub fn js_set_dir(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    z.setAttribute(this_arg, "dir", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Reflected String Getter for role -> role
+pub fn js_get_role(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Call getAttribute (returns allocated !?[]u8)
+    const val_opt = z.getAttribute(rc.allocator, this_arg, "role") catch return w.EXCEPTION;
+    if (val_opt) |val| {
+        defer rc.allocator.free(val);
+        return ctx.newString(val);
+    }
+    // Reflected attributes usually return empty string if missing (not null)
+    return ctx.newString("");
+}
+
+// Reflected String Setter for role -> role
+pub fn js_set_role(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    z.setAttribute(this_arg, "role", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Reflected String Getter for nonce -> nonce
+pub fn js_get_nonce(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    // Call getAttribute (returns allocated !?[]u8)
+    const val_opt = z.getAttribute(rc.allocator, this_arg, "nonce") catch return w.EXCEPTION;
+    if (val_opt) |val| {
+        defer rc.allocator.free(val);
+        return ctx.newString(val);
+    }
+    // Reflected attributes usually return empty string if missing (not null)
+    return ctx.newString("");
+}
+
+// Reflected String Setter for nonce -> nonce
+pub fn js_set_nonce(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    if (ptr == null) return w.EXCEPTION;
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    z.setAttribute(this_arg, "nonce", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
 
 // Install static bindings (document-level factories)
 pub fn installStaticBindings(ctx: ?*qjs.JSContext, doc_obj: qjs.JSValue) void {
@@ -467,6 +826,7 @@ pub fn installStaticBindings(ctx: ?*qjs.JSContext, doc_obj: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "ownerDocument", qjs.JS_NewCFunction(ctx, js_ownerDocument, "ownerDocument", 0));
     _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "createTextNode", qjs.JS_NewCFunction(ctx, js_createTextNode, "createTextNode", 1));
     _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "getElementById", qjs.JS_NewCFunction(ctx, js_getElementById, "getElementById", 1));
+    _ = qjs.JS_SetPropertyStr(ctx, doc_obj, "parseHTML", qjs.JS_NewCFunction(ctx, js_parseHTML, "parseHTML", 1));
 }
 
 // Install method bindings (shared via prototype)
@@ -482,10 +842,33 @@ pub fn installMethodBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "removeAttribute", qjs.JS_NewCFunction(ctx, js_removeAttribute, "removeAttribute", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "textContent", qjs.JS_NewCFunction(ctx, js_textContent, "textContent", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "setContentAsText", qjs.JS_NewCFunction(ctx, js_setContentAsText, "setContentAsText", 1));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "setHTML", qjs.JS_NewCFunction(ctx, js_setHTML, "setHTML", 1));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "getHTML", qjs.JS_NewCFunction(ctx, js_getHTML, "getHTML", 0));
     {
         const atom = qjs.JS_NewAtom(ctx, "innerHTML");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_innerHTML, "get_innerHTML", 0, qjs.JS_CFUNC_getter, 0);
         const set_fn = qjs.JS_NewCFunction2(ctx, js_set_innerHTML, "set_innerHTML", 1, qjs.JS_CFUNC_setter, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "disabled");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_disabled, "get_disabled", 0, qjs.JS_CFUNC_getter, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_disabled, "set_disabled", 1, qjs.JS_CFUNC_setter, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "hidden");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_hidden, "get_hidden", 0, qjs.JS_CFUNC_getter, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_hidden, "set_hidden", 1, qjs.JS_CFUNC_setter, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "checked");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_checked, "get_checked", 0, qjs.JS_CFUNC_getter, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_checked, "set_checked", 1, qjs.JS_CFUNC_setter, 0);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }

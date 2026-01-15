@@ -4,6 +4,7 @@ const zqjs = z.wrapper;
 const w = @import("wrapper.zig");
 const bindings = @import("bindings_generated.zig");
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const DocFragment = @import("js_DocFragment.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -22,7 +23,7 @@ pub const DOMBridge = struct {
     pub fn init(allocator: std.mem.Allocator, ctx: w.Context) !DOMBridge {
         // [FIX] Retrieve the Thread-Local RuntimeContext
         const rc = RuntimeContext.get(ctx);
-        const rt = ctx.getRuntime();
+        var rt = ctx.getRuntime();
 
         // Register class ONLY if not already registered for this runtime ????
         if (rc.classes.dom_node == 0) {
@@ -35,7 +36,10 @@ pub const DOMBridge = struct {
         }
 
         // Create the internal Lexbor document
-        const doc = try z.createDocFromString("");
+        const doc = try z.parseHTML(allocator, "");
+        rc.global_document = doc;
+        // var current_ctx = ctx;
+        try initDocumentFragmentClass(rt, ctx);
 
         return .{
             .allocator = allocator,
@@ -47,6 +51,7 @@ pub const DOMBridge = struct {
 
     pub fn deinit(self: *DOMBridge) void {
         z.destroyDocument(self.doc);
+
         var it = self.registry.iterator();
         while (it.next()) |node_entry| {
             var event_it = node_entry.value_ptr.iterator();
@@ -183,7 +188,7 @@ pub const DOMBridge = struct {
 };
 
 const Listener = struct {
-    callback: zqjs.Value,
+    callback: z.qjs.JSValue,
 };
 
 // Registry: NodeID -> EventName -> List[Listener]
@@ -221,7 +226,12 @@ pub fn addEventListener(
     try event_entry.value_ptr.append(self.allocator, .{ .callback = dup_cb });
 }
 
-pub fn dispatchEvent(ctx: zqjs.Context, self: *DOMBridge, node: *z.DomNode, event: []const u8) !void {
+pub fn dispatchEvent(
+    ctx: zqjs.Context,
+    self: *DOMBridge,
+    node: *z.DomNode,
+    event: []const u8,
+) !void {
     const node_id = @intFromPtr(node);
 
     if (self.registry.getPtr(node_id)) |node_map| {
@@ -252,7 +262,12 @@ pub fn dispatchEvent(ctx: zqjs.Context, self: *DOMBridge, node: *z.DomNode, even
     }
 }
 
-fn js_reportResult(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+fn js_reportResult(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: z.qjs.JSValue,
+    argc: c_int,
+    argv: [*c]zqjs.Value,
+) callconv(.c) zqjs.Value {
     const ctx = z.wrapper.Context{ .ptr = ctx_ptr };
     if (argc < 1) return z.wrapper.UNDEFINED;
 
@@ -276,7 +291,12 @@ fn js_reportResult(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, ar
 
 // --- NATIVE CALLBACKS (Using Wrapper API) ---
 
-fn js_querySelector(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+fn js_querySelector(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
 
@@ -314,7 +334,12 @@ fn js_querySelector(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, a
     return w.NULL;
 }
 
-fn js_querySelectorAll(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+fn js_querySelectorAll(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: z.qjs.JSValue,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     if (argc < 1) return w.EXCEPTION;
 
@@ -351,7 +376,12 @@ fn js_querySelectorAll(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int
     return array;
 }
 
-fn js_consoleLog(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+fn js_consoleLog(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: z.qjs.JSValue,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
     const ctx = w.Context{ .ptr = ctx_ptr };
     var i: c_int = 0;
     while (i < argc) : (i += 1) {
@@ -365,8 +395,56 @@ fn js_consoleLog(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv
 }
 
 // A dummy implementation of preventDefault to stop JS from crashing
-fn js_preventDefault(_: ?*z.qjs.JSContext, _: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+fn js_preventDefault(
+    _: ?*z.qjs.JSContext,
+    _: z.qjs.JSValue,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
     // In a real browser, this sets a 'defaultPrevented' flag.
     // For a headless scraper, a no-op is often sufficient to satisfy the script.
-    return z.wrapper.UNDEFINED;
+    return w.UNDEFINED;
+}
+
+pub fn initDocumentFragmentClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
+    // 1. Create Class ID
+    if (DocFragment.class_id == 0) {
+        _ = rt.newClassID();
+    }
+
+    const rc = RuntimeContext.get(ctx);
+
+    // 2. Define Class with Finalizer
+    const class_def = zqjs.Runtime.ClassDef{
+        .class_name = "DocumentFragment",
+        .finalizer = DocFragment.finalizer,
+    };
+    rt.newClass(DocFragment.class_id, class_def) catch |err| {
+        // Handle error (log or panic, don't just swallow if possible)
+        std.debug.print("Failed to register DocumentFragment class: {}\n", .{err});
+        return;
+    };
+
+    // 3. Setup Prototype Inheritance: DocumentFragment -> Node -> EventTarget
+    const proto = ctx.newObject();
+    // defer ctx.freeValue(proto);
+    const node_proto = ctx.getClassProto(rc.classes.dom_node);
+    defer ctx.freeValue(node_proto);
+
+    // MAGIC: This makes fragment inherit appendChild, removeChild, etc.
+    ctx.setPrototype(proto, node_proto) catch return;
+    // 4. Install the constructor
+    const ctor = ctx.newCFunction2(
+        DocFragment.constructor,
+        "DocumentFragment",
+        0,
+        z.qjs.JS_CFUNC_constructor,
+        0,
+    );
+    ctx.setConstructor(ctor, proto);
+    ctx.setClassProto(DocFragment.class_id, proto);
+    // Attach to global object
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    try ctx.setPropertyStr(global, "DocumentFragment", ctor);
 }

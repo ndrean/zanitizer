@@ -13,7 +13,7 @@ const parseCSV = @import("csv_parser.zig");
 const AsyncTask = event_loop_mod.AsyncTask;
 const AsyncBridge = @import("async_bridge.zig");
 // const NativeBridge = @import("js_native_bridge.zig");
-const Pt = @import("Point.zig");
+const Pt = @import("js_Point.zig");
 const Pt2 = @import("Point2.zig");
 const JSWorker = @import("js_worker.zig");
 const js_consoleLog = @import("utils.zig").js_consoleLog;
@@ -60,9 +60,13 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    setupSignalHandler();
+    // setupSignalHandler();
 
-    try eventListener(allocator);
+    try docFrag(allocator);
+    // try customPointClass(allocator);
+    // try demoPoint2Class(allocator);
+    // try eventListener(allocator);
+    // try performance2(allocator);
     // try demoCustomPointClass(allocator);
     // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
     // try first_QuickJS_test();
@@ -78,11 +82,93 @@ pub fn main() !void {
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async();
     // try firstJSONPass();
     // try simplifiedJSONPass(allocator);
-    try async_CSV_Tuple_Parser(allocator);
+    // try async_CSV_Tuple_Parser(allocator);
     // try JS_Proxy_And_Generators(allocator);
     // try async_Fetch_API_Demo(allocator);
-    try async_CSV_JSON_Parser(allocator);
-    try demoWorker(allocator);
+    // try async_CSV_JSON_Parser(allocator);
+    // try demoWorker(allocator);
+}
+
+fn docFrag(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const script =
+        \\const frag = new DocumentFragment();
+        \\const div = document.createElement("div");
+        // \\frag.appendChild(div);
+        \\console.log("appended");
+    ;
+
+    const c_script = try allocator.dupeZ(u8, script);
+    defer allocator.free(c_script);
+
+    const val = try engine.eval(c_script, "script");
+    defer engine.ctx.freeValue(val);
+}
+
+fn performance2(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const html =
+        \\<!DOCTYPE html>
+        \\<html>
+        \\  <body>
+        \\      <script>
+        \\          const elt = document.getElementById('content').textContent();
+        \\          document.documentElement.innerHTML;
+        \\      </script>
+        \\      <div id="content">Original</div>
+        \\  </body>
+        \\</html>
+    ;
+
+    const iterations = 100;
+
+    const start = std.time.nanoTimestamp();
+
+    for (0..iterations) |_| {
+        const doc = try z.createDocFromString(html);
+        try z.prettyPrint(allocator, z.documentRoot(doc).?);
+        defer z.destroyDocument(doc);
+        const script = try z.querySelector(allocator, doc, "script");
+        // defer allocator.free(script);
+        const script_content = z.textContent_zc(z.elementToNode(script.?));
+        const c_script = try allocator.dupeZ(u8, script_content);
+        defer allocator.free(c_script);
+        const val = try engine.eval(c_script, "script");
+        defer engine.ctx.freeValue(val);
+    }
+
+    const end = std.time.nanoTimestamp();
+    const total_ns = end - start;
+    const total_ms = @as(f64, @floatFromInt(total_ns)) / 1_000_000.0;
+
+    z.print("Time: {d}ms\n", .{total_ms});
+    z.print("Per file: {d:.2}ms\n", .{total_ms / @as(f64, @floatFromInt(iterations))});
+}
+fn performance1(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Performance Test: Large Loop 30_000 -------------------------\n\n", .{});
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/performance_test.js", 1024 * 1024);
+    defer allocator.free(source);
+
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
+
+    const val = try engine.evalModule(c_source, "performance_test.js");
+
+    engine.ctx.freeValue(val);
+
+    // Run Main Loop (Handles Events)
+    try engine.run();
+
+    // const body_node = z.documentRoot(engine.dom.doc);
+    // try z.prettyPrint(allocator, body_node.?);
 }
 
 fn eventListener(allocator: std.mem.Allocator) !void {
@@ -318,11 +404,7 @@ fn importModule(allocator: std.mem.Allocator) !void {
 }
 
 // Execute Scripts in HTML ----------------------------------------------------
-fn execute_Simple_Script_In_HTML() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-
+fn execute_Simple_Script_In_HTML(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer {
         rt.runGC();
@@ -1309,7 +1391,7 @@ fn async_Fetch_API_Demo(allocator: std.mem.Allocator) !void {
 }
 
 // Install Custom Class -------------------------------------------------
-pub fn demoCustomPointClass(allocator: std.mem.Allocator) !void {
+pub fn customPointClass(allocator: std.mem.Allocator) !void {
     z.print("\n=== Custom Class Demo (Point) -------------------\n", .{});
 
     const engine = try ScriptEngine.init(allocator);
@@ -2230,14 +2312,14 @@ fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 // }
 // const css_content = try zexplore_example_com(gpa, "https://www.example.com");
 
-/// use `parseString` or `createDocFromString` to create a document with a BODY element populated by the input string
+/// use `parseFromString` or `createDocFromString` to create a document with a BODY element populated by the input string
 fn demoSimpleParsing(_: std.mem.Allocator) !void {
     const html = "<div></div>";
     {
         const doc = try z.createDocument();
         defer z.destroyDocument(doc);
 
-        try z.parseString(doc, html);
+        try z.parseFromString(doc, html);
 
         const body = z.bodyNode(doc).?;
         const div = z.firstChild(body).?;
@@ -2274,7 +2356,7 @@ fn demoNormalizer(gpa: std.mem.Allocator) !void {
     defer z.destroyDocument(doc);
 
     // -- DOM-based normalization
-    try z.parseString(doc, messy_html);
+    try z.parseFromString(doc, messy_html);
 
     const body_elt1 = z.bodyElement(doc).?;
     try z.normalizeDOMwithOptions(
@@ -2298,7 +2380,7 @@ fn demoNormalizer(gpa: std.mem.Allocator) !void {
     z.print("\n\n Normalized sring: {s}\n\n", .{cleaned});
     std.debug.assert(std.mem.eql(u8, cleaned, result1));
 
-    try z.parseString(doc, cleaned);
+    try z.parseFromString(doc, cleaned);
     const body_elt2 = z.bodyElement(doc).?;
     const result2 = try z.innerHTML(gpa, body_elt2);
     defer gpa.free(result2);
@@ -2600,7 +2682,7 @@ fn demoSetInnerHTML(allocator: std.mem.Allocator) !void {
     // z.print("\n=== Demonstrate setInnerHTML & innerHTML ===\n\n", .{});
     const doc = try z.createDocument();
     defer z.destroyDocument(doc);
-    try z.parseString(doc, "<div id=\"target\"></div>");
+    try z.parseFromString(doc, "<div id=\"target\"></div>");
 
     const body = z.bodyNode(doc).?;
     const div = z.getElementById(body, "target").?;
@@ -2956,7 +3038,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     // ===================================================================
     z.print("=== A. STRING NORMALIZATION → REUSED DOC ===\n", .{});
 
-    // A1: String normalization → parseString (reused doc)
+    // A1: String normalization → parseFromString (reused doc)
     timer.reset();
     const docA1 = try z.createDocument();
     defer z.destroyDocument(docA1);
@@ -2966,8 +3048,8 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
             .remove_whitespace_text_nodes = true,
         });
         defer allocator.free(normalized);
-        try z.parseString(docA1, normalized);
-        try z.parseString(docA1, ""); // reset
+        try z.parseFromString(docA1, normalized);
+        try z.parseFromString(docA1, ""); // reset
     }
     const timeA1 = timer.read();
     const msA1 = @as(f64, @floatFromInt(timeA1)) / ns_to_ms;
@@ -3010,7 +3092,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     const timeA3 = timer.read();
     const msA3 = @as(f64, @floatFromInt(timeA3)) / ns_to_ms;
 
-    z.print("A1. reuse doc, no parser, string norm → parseString:                      {d:.2} ms/op, {d:.1} kB/s\n", .{ msA1 / iter, kb_size * iter / msA1 });
+    z.print("A1. reuse doc, no parser, string norm → parseFromString:                      {d:.2} ms/op, {d:.1} kB/s\n", .{ msA1 / iter, kb_size * iter / msA1 });
     z.print("A2. reuse doc,    parser, string norm → parseAndAppend (cloning):         {d:.2} ms/op, {d:.1} kB/s\n", .{ msA2 / iter, kb_size * iter / msA2 });
     z.print("A3. reuse doc,    parser, string norm → parseAndAppend (NO clone):        {d:.2} ms/op, {d:.1} kB/s\n", .{ msA3 / iter, kb_size * iter / msA3 });
 
@@ -3071,13 +3153,13 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     // ===================================================================
     z.print("\n=== D. RAW HTML (NO NORMALIZATION) ===\n", .{});
 
-    // D1: Raw HTML → parseString (reused doc, clear between)
+    // D1: Raw HTML → parseFromString (reused doc, clear between)
     timer.reset();
     const docD1 = try z.createDocument();
     defer z.destroyDocument(docD1);
     for (0..iterations) |_| {
-        try z.parseString(docD1, medium_html);
-        try z.parseString(docD1, ""); // Clear
+        try z.parseFromString(docD1, medium_html);
+        try z.parseFromString(docD1, ""); // Clear
     }
     const timeD1 = timer.read();
     const msD1 = @as(f64, @floatFromInt(timeD1)) / ns_to_ms;
@@ -3116,7 +3198,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     const timeD4 = timer.read();
     const msD4 = @as(f64, @floatFromInt(timeD4)) / ns_to_ms;
 
-    z.print("D1. reuse doc, no parser → parseString:           {d:.2} ms/op, {d:.1} kB/s  🚀\n", .{ msD1 / iter, kb_size * iter / msD1 });
+    z.print("D1. reuse doc, no parser → parseFromString:           {d:.2} ms/op, {d:.1} kB/s  🚀\n", .{ msD1 / iter, kb_size * iter / msD1 });
     z.print("D2. new doc,      parser → parser.parse:          {d:.2} ms/op, {d:.1} kB/s\n", .{ msD2 / iter, kb_size * iter / msD2 });
     z.print("D3. new doc,   no parser → createDocFromString:   {d:.2} ms/op, {d:.1} kB/s\n", .{ msD3 / iter, kb_size * iter / msD3 });
     z.print("D4. reuse doc,    parser, parseAndAppend:         {d:.2} ms/op, {d:.1} kB/s  \n", .{ msD4 / iter, kb_size * iter / msD4 });
@@ -3125,11 +3207,11 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     // SUMMARY & KEY INSIGHTS
     // ===================================================================
     z.print("\n=== KEY INSIGHTS ===\n", .{});
-    z.print("🚀 FASTEST: D1 (raw parseString, reused doc)    = {d:.1} kB/s\n", .{kb_size * iter / msD1});
+    z.print("🚀 FASTEST: D1 (raw parseFromString, reused doc)    = {d:.1} kB/s\n", .{kb_size * iter / msD1});
     z.print("⭐ DOM NORM: B1 (parser, new doc = parser.parse + DOM norm) = {d:.1} kB/s\n", .{kb_size * iter / msB1});
     z.print("\n\n", .{});
     z.print("- createDocFromString parses directly into fresh document\n", .{});
-    z.print("- Reused documents have reset overhead (parseString(\"\"))\n", .{});
+    z.print("- Reused documents have reset overhead (parseFromString(\"\"))\n", .{});
     z.print("- parseAndAppend has fragment creation/template wrapping overhead\n", .{});
     z.print("- DOM normalization is significantly faster than string pre-normalization\n", .{});
 }

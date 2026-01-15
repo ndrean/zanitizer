@@ -82,6 +82,10 @@ pub fn outerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
     return result;
 }
 
+pub fn getHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
+    return outerHTML(allocator, element);
+}
+
 /// [serializer] Get element's inner HTML
 ///
 /// Caller needs to free the returned slice
@@ -112,7 +116,7 @@ pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
 
 test "inner/outerHTML" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<p>hi</p>");
+    const doc = try z.parseHTML(allocator, "<p>hi</p>");
     defer z.destroyDocument(doc);
     const body = z.bodyElement(doc).?;
 
@@ -123,6 +127,34 @@ test "inner/outerHTML" {
     const inner = try z.innerHTML(allocator, body);
     defer allocator.free(inner);
     try testing.expectEqualStrings("<p>hi</p>", inner);
+}
+
+pub fn setOuterHTML(allocator: std.mem.Allocator, element: *z.HTMLElement, html: []const u8) !void {
+    const node = z.elementToNode(element);
+    const parent = z.parentNode(node) orelse return error.NoParentNode;
+
+    // 1. Parse the HTML string into a Document Fragment
+    // We use the existing Parser wrapper you have in parsing.zig
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+
+    // Context is important! Parsing <td> needs a <tr> context, etc.
+    // We use the element itself or body as context.
+    const fragment = try parser.parseFromStringInContext(html, z.ownerDocument(node), .body, // Fallback context
+        .permissive);
+    // fragment is now a populated DocumentFragment node
+
+    // 2. BULK INSERT (No Iteration!)
+    // Lexbor's insertBefore detects that 'fragment' is a DocumentFragment
+    // and automatically moves all its children into 'parent' before 'node'.
+    z.insertBefore(parent, fragment);
+
+    // 3. Remove & Destroy the old element
+    z.removeNode(node);
+    z.destroyNode(node);
+
+    // 4. Clean up the (now empty) fragment shell
+    z.destroyNode(fragment);
 }
 
 // ===================================================================================
@@ -154,7 +186,7 @@ const ProcessCtx = struct {
     }
 };
 
-/// [serializer] Prints the current node in a pretty format
+/// [serializer] Prints the current node in a pretty format. No deallocation needed.
 ///
 /// The styling is defined in the "colours.zig" module.
 ///
@@ -345,7 +377,7 @@ test "what does std.mem.endsWith, std.mem.eql find?" {
 
 test "outerNodeHTML" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<p>test</p>");
+    const doc = try z.parseHTML(allocator, "<p>test</p>");
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
@@ -458,4 +490,9 @@ fn walkTree(node: *z.DomNode, depth: u8) void {
 pub fn printDocStruct(doc: *z.HTMLDocument) !void {
     const root = z.documentRoot(doc).?;
     walkTree(root, 0);
+}
+
+pub fn ppDoc(allocator: std.mem.Allocator, doc: *z.HTMLDocument) !void {
+    const root = z.documentRoot(doc).?;
+    try prettyPrint(allocator, root);
 }

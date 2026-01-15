@@ -48,7 +48,7 @@ test "comments" {
         \\</div>
     ;
 
-    const doc = try z.createDocFromString(html_with_comments);
+    const doc = try z.parseHTML(allocator, html_with_comments);
     defer z.destroyDocument(doc);
     const body_node = z.bodyNode(doc).?;
     const div_node = z.firstChild(body_node).?;
@@ -84,7 +84,7 @@ test "comments" {
 /// Caller owns the slice
 /// ## Example
 /// ```
-/// const doc = try z.createDocFromString("<div><p>I am <strong>bold</strong></p><p>and I am <em>italic</em></p></div>");
+/// const doc = try z.parseHTML("<div><p>I am <strong>bold</strong></p><p>and I am <em>italic</em></p></div>");
 /// const div = z.firstChild(try z.bodyNode(doc));
 /// const text = try textContent(allocator, div.?);
 /// defer allocator.free(text);
@@ -107,7 +107,8 @@ pub fn textContent(allocator: std.mem.Allocator, node: *z.DomNode) ![]u8 {
 
 test "textContent" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<div><p>I am <strong>bold</strong></p><p>and I am <em>italic</em></p></div>");
+    const doc = try z.parseHTML(allocator, "<div><p>I am <strong>bold</strong></p><p>and I am <em>italic</em></p></div>");
+    defer z.destroyDocument(doc);
     const div = z.firstChild(z.bodyNode(doc).?);
     const p = z.firstChild(div.?);
     const text = try textContent(allocator, p.?);
@@ -128,13 +129,12 @@ pub fn textContent_zc(node: *z.DomNode) []const u8 {
     return text_ptr[0..len];
 }
 
-
 /// [core] Sets any inner content of a node with new content as text.
 ///
 /// This **replaces** _any_ existing content, even empty. check `replaceText()` to modify existing text nodes.
 /// ## Example
 /// ```
-/// const doc = try z.createDocFromString("<p>Hello <strong>world</strong></p>");
+/// const doc = try z.parseHTML("<p>Hello <strong>world</strong></p>");
 /// defer z.destroyDocument(doc);
 /// const p = firstChild(try bodyNode(doc));
 /// try setContentAsText(p.?, "Hi");
@@ -155,7 +155,7 @@ pub fn setContentAsText(node: *z.DomNode, content: []const u8) !void {
 
 test "setContentAsText" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<p>Hello <strong>world</strong></p><p></p>");
+    const doc = try z.parseHTML(allocator, "<p>Hello <strong>world</strong></p><p></p>");
     defer z.destroyDocument(doc);
 
     // replace the inner content of an element with a new text node
@@ -191,7 +191,7 @@ test "setContentAsText" {
 /// Only works on text nodes. Use `setContentAsText()` to replace any node's content.
 /// ## Example
 /// ```
-/// const doc = try z.createDocFromString("<p>Hello <strong>world</strong></p>");
+/// const doc = try z.parseHTML("<p>Hello <strong>world</strong></p>");
 /// defer z.destroyDocument(doc);
 /// const p = firstChild(try bodyNode(doc));
 /// const inner_text = firstChild(p.?);
@@ -221,7 +221,7 @@ pub fn replaceText(node: ?*z.DomNode, text: []const u8) !void {
 
 test "replaceTextContent" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<p>Hello <strong>world</strong></p>");
+    const doc = try z.parseHTML(allocator, "<p>Hello <strong>world</strong></p>");
     defer z.destroyDocument(doc);
 
     const p = z.firstChild(z.bodyNode(doc).?);
@@ -267,7 +267,7 @@ test "text content" {
     const allocator = testing.allocator;
 
     const html = "<p>Hello <strong>World</strong>!</p>";
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
@@ -291,9 +291,10 @@ test "text content" {
 }
 
 test "getNodeTextContent" {
+    const allocator = testing.allocator;
+
     const frag = "<p>First<span>Second</span></p><p>Third</p>";
-    const allocator = std.testing.allocator;
-    const doc = try z.createDocFromString(frag);
+    const doc = try z.parseHTML(allocator, frag);
     defer z.destroyDocument(doc);
 
     const body_element = z.bodyElement(doc).?;
@@ -328,7 +329,7 @@ test "gets all text elements from Fragment" {
     const fragment = "<div><p>First<span>Second</span></p><p>Third</p></div><div><ul><li>Fourth</li><li>Fifth</li></ul></div>";
 
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString(fragment);
+    const doc = try z.parseHTML(allocator, fragment);
     defer z.destroyDocument(doc);
     const body_element = z.bodyElement(doc).?;
     const body_node = z.elementToNode(body_element);
@@ -395,7 +396,7 @@ test "HTML escaping" {
 
 test "first text content & comment" {
     const allocator = testing.allocator;
-    const doc = try z.createDocFromString("<p>hello <em>italic</em></p><br/><!-- \tcomment -->");
+    const doc = try z.parseHTML(allocator, "<p>hello <em>italic</em></p><br/><!-- \tcomment -->");
 
     // text content of the P element
     const p = z.firstChild(z.bodyNode(doc).?);
@@ -430,7 +431,8 @@ test "first text content & comment" {
 }
 
 test "first set text content" {
-    const doc = try z.createDocFromString("<p></p><span>first</span>");
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p></p><span>first</span>");
     defer z.destroyDocument(doc);
 
     const body = z.bodyNode(doc).?;
