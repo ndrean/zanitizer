@@ -492,42 +492,31 @@ fn js_reportResult(
 }
 
 // --- NATIVE CALLBACKS (Using Wrapper API) ---
-
 fn js_querySelector(
     ctx_ptr: ?*z.qjs.JSContext,
-    _: zqjs.Value,
+    this_val: z.qjs.JSValue, // <--- [FIX] Use 'this_val' directly
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
-    // [FIX] Get RuntimeContext
-    const rc = RuntimeContext.get(ctx);
+    // [FIX] Polymorphic Lookup: Check both Document types
+    const doc: *z.HTMLDocument = blk: {
+        if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        if (ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        return ctx.throwTypeError("querySelector called on object that is not a Document");
+    };
 
-    const selector_str = ctx.toCString(argv[0]) catch return w.EXCEPTION;
-    defer ctx.freeCString(selector_str);
-    const selector = std.mem.span(selector_str);
+    // Get Selector
+    const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(selector_str);
+    // const selector = std.mem.span(selector_str);
 
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    const doc_obj = ctx.getPropertyStr(global, "document");
-    defer ctx.freeValue(doc_obj);
-    const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
-    defer ctx.freeValue(native_doc);
-
-    // [FIX] Use rc.classes.dom_node
-    const doc_ptr = ctx.getOpaque2(native_doc, rc.classes.dom_node);
-    if (doc_ptr == null) return w.EXCEPTION;
-    const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
-
-    // [FIX] Use rc.allocator (Thread-safe)
+    // Execute
     const allocator = rc.allocator;
-
-    // We need a root to search from
-    _ = z.documentRoot(doc) orelse return w.NULL;
-
-    const elements = z.querySelectorAll(allocator, doc, selector) catch return w.EXCEPTION;
+    const elements = z.querySelectorAll(allocator, doc, selector_str) catch return w.EXCEPTION;
     defer allocator.free(elements);
 
     if (elements.len > 0) {
@@ -538,45 +527,122 @@ fn js_querySelector(
 
 fn js_querySelectorAll(
     ctx_ptr: ?*z.qjs.JSContext,
-    _: z.qjs.JSValue,
+    this_val: z.qjs.JSValue, // <--- [FIX] Use 'this_val' directly
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
-    // [FIX] Get RuntimeContext
-    const rc = RuntimeContext.get(ctx);
+    // [FIX] Polymorphic Lookup
+    const doc: *z.HTMLDocument = blk: {
+        if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        if (ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        return ctx.throwTypeError("querySelectorAll called on object that is not a Document");
+    };
 
-    const selector_str = ctx.toCString(argv[0]) catch return w.EXCEPTION;
-    defer ctx.freeCString(selector_str);
-    const selector = std.mem.span(selector_str);
+    const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(selector_str);
+    // const selector = std.mem.span(selector_str);
 
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    const doc_obj = ctx.getPropertyStr(global, "document");
-    defer ctx.freeValue(doc_obj);
-    const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
-    defer ctx.freeValue(native_doc);
-
-    // [FIX] Use rc.classes.dom_node
-    const doc_ptr = ctx.getOpaque2(native_doc, rc.classes.dom_node);
-    if (doc_ptr == null) return w.EXCEPTION;
-    const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
-
-    // [FIX] Use rc.allocator
     const allocator = rc.allocator;
-
-    const elements = z.querySelectorAll(allocator, doc, selector) catch return w.EXCEPTION;
+    const elements = z.querySelectorAll(allocator, doc, selector_str) catch return w.EXCEPTION;
     defer allocator.free(elements);
 
+    // Return Array
     const array = ctx.newArray();
     for (elements, 0..) |elem, i| {
         const elem_obj = DOMBridge.wrapElement(ctx, elem) catch continue;
-        ctx.setPropertyUint32(array, @intCast(i), elem_obj) catch {};
+        _ = ctx.setPropertyUint32(array, @intCast(i), elem_obj) catch {};
     }
     return array;
 }
+
+// fn js_querySelector(
+//     ctx_ptr: ?*z.qjs.JSContext,
+//     _: zqjs.Value,
+//     argc: c_int,
+//     argv: [*c]z.qjs.JSValue,
+// ) callconv(.c) z.qjs.JSValue {
+//     const ctx = w.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return w.EXCEPTION;
+
+//     // [FIX] Get RuntimeContext
+//     const rc = RuntimeContext.get(ctx);
+
+//     const selector_str = ctx.toCString(argv[0]) catch return w.EXCEPTION;
+//     defer ctx.freeCString(selector_str);
+//     const selector = std.mem.span(selector_str);
+
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+//     const doc_obj = ctx.getPropertyStr(global, "document");
+//     defer ctx.freeValue(doc_obj);
+//     const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
+//     defer ctx.freeValue(native_doc);
+
+//     // [FIX] Use rc.classes.dom_node
+//     const doc_ptr = ctx.getOpaque2(native_doc, rc.classes.dom_node);
+//     if (doc_ptr == null) return w.EXCEPTION;
+//     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
+
+//     // [FIX] Use rc.allocator (Thread-safe)
+//     const allocator = rc.allocator;
+
+//     // We need a root to search from
+//     _ = z.documentRoot(doc) orelse return w.NULL;
+
+//     const elements = z.querySelectorAll(allocator, doc, selector) catch return w.EXCEPTION;
+//     defer allocator.free(elements);
+
+//     if (elements.len > 0) {
+//         return DOMBridge.wrapElement(ctx, elements[0]) catch w.EXCEPTION;
+//     }
+//     return w.NULL;
+// }
+
+// fn js_querySelectorAll(
+//     ctx_ptr: ?*z.qjs.JSContext,
+//     _: z.qjs.JSValue,
+//     argc: c_int,
+//     argv: [*c]z.qjs.JSValue,
+// ) callconv(.c) z.qjs.JSValue {
+//     const ctx = w.Context{ .ptr = ctx_ptr };
+//     if (argc < 1) return w.EXCEPTION;
+
+//     // [FIX] Get RuntimeContext
+//     const rc = RuntimeContext.get(ctx);
+
+//     const selector_str = ctx.toCString(argv[0]) catch return w.EXCEPTION;
+//     defer ctx.freeCString(selector_str);
+//     const selector = std.mem.span(selector_str);
+
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+//     const doc_obj = ctx.getPropertyStr(global, "document");
+//     defer ctx.freeValue(doc_obj);
+//     const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
+//     defer ctx.freeValue(native_doc);
+
+//     // [FIX] Use rc.classes.dom_node
+//     const doc_ptr = ctx.getOpaque2(native_doc, rc.classes.dom_node);
+//     if (doc_ptr == null) return w.EXCEPTION;
+//     const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
+
+//     // [FIX] Use rc.allocator
+//     const allocator = rc.allocator;
+
+//     const elements = z.querySelectorAll(allocator, doc, selector) catch return w.EXCEPTION;
+//     defer allocator.free(elements);
+
+//     const array = ctx.newArray();
+//     for (elements, 0..) |elem, i| {
+//         const elem_obj = DOMBridge.wrapElement(ctx, elem) catch continue;
+//         ctx.setPropertyUint32(array, @intCast(i), elem_obj) catch {};
+//     }
+//     return array;
+// }
 
 fn js_consoleLog(
     ctx_ptr: ?*z.qjs.JSContext,

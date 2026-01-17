@@ -61,13 +61,15 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // setupSignalHandler();
-    try eventListeners(allocator);
-    try transplante(allocator);
-    // try fullCycle(allocator);
-    // try customPointClass(allocator);
-    // try demoPoint2Class(allocator);
-    try domParser(allocator);
-    try buildDOM(allocator);
+    try bench(allocator);
+    // try extractScript(allocator);
+    // try eventListeners(allocator);
+    // try transplante(allocator);
+    // // try fullCycle(allocator);
+    // // try customPointClass(allocator);
+    // // try demoPoint2Class(allocator);
+    // try domParser(allocator);
+    // try buildDOM(allocator);
     // try eventListener(allocator);
     // try performance2(allocator);
     // // try demoCustomPointClass(allocator);
@@ -90,6 +92,73 @@ pub fn main() !void {
     // try async_Fetch_API_Demo(allocator);
     // try async_CSV_JSON_Parser(allocator);
     // try demoWorker(allocator);
+}
+
+fn bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+    const file = try std.fs.cwd().openFile("src/bench.html", .{});
+    defer file.close();
+    const html = try file.readToEndAlloc(allocator, 1024 * 1024);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+
+    const scripts = try engine.getScripts();
+    defer allocator.free(scripts);
+
+    for (scripts) |code| {
+        const c_code = try allocator.dupeZ(u8, code);
+        defer allocator.free(c_code);
+        const val = engine.eval(c_code, "bench_script") catch |err| {
+            std.debug.print("Script Error: {}\n", .{err});
+            continue;
+        };
+        engine.ctx.freeValue(val);
+    }
+
+    const end = std.time.nanoTimestamp();
+    const ms = @divFloor(end - start, 1_000_000);
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ms});
+}
+
+fn extractScript(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    z.print("\n=== Extract Script from HTML --------------------------------\n\n", .{});
+    const html =
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<body>
+        \\  <h1>Test</h1>
+        \\  <script>
+        \\    function greet(name) {
+        \\      return `Hello, ${name}!`;
+        \\    }
+        \\  </script>
+        \\  <script>var a = 10;</script>
+        \\  <div id="ignore"></div>
+        \\  <script src="jquery.js"></script>
+        \\  <script>var b = a + 20; console.log("[JS]: ", b);b;</script>
+        \\</body>
+        \\</html>
+    ;
+    try engine.loadHTML(html);
+    const scripts = try engine.getScripts();
+    defer allocator.free(scripts);
+
+    // try engine.run();
+    z.print("{}\n", .{scripts.len});
+    for (scripts) |code| {
+        const c_code = try allocator.dupeZ(u8, code);
+        defer allocator.free(c_code);
+        const val = try engine.eval(c_code, "inline_script");
+        defer engine.ctx.freeValue(val);
+        const res = try engine.ctx.toInt32(val);
+        z.print("[Zig] Script result: {d}\n", .{res});
+    }
 }
 
 fn eventListeners(allocator: std.mem.Allocator) !void {

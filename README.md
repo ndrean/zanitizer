@@ -15,6 +15,95 @@ This library can be used for:
 - ➡ One-shot usage (examples in `main.zig`)
 - ➡ long-running with event-loop/async
 
+## zeplorer vs JSDON first benchmark
+
+Process this HTML file with scripts:
+
+```html
+<!doctype html>
+<html>
+  <body>
+    <div id="root"></div>
+    <script>
+      const root = document.getElementById("root");
+      // 1. Write: Create 10,000 spans
+      for (let i = 0; i < 10000; i++) {
+        const span = document.createElement("span");
+        span.textContent = "Item " + i;
+        root.appendChild(span);
+      }
+      // 2. Read: Query all and concat text
+      const all = document.querySelectorAll("span");
+      let total = 0;
+      for (let i = 0; i < all.length; i++) {
+        total += all[i].textContent.length;
+      }
+      console.log("Total chars: " + total);
+    </script>
+  </body>
+</html>
+```
+
+```js
+console.time("Total");
+const jsdom = require("jsdom");
+const { JSDOM } = jsdom;
+const fs = require("fs");
+
+const html = fs.readFileSync("bench.html", "utf8");
+const dom = new JSDOM(html, { runScripts: "dangerously" });
+console.timeEnd("Total");
+```
+
+```zig
+fn bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+    const file = try std.fs.cwd().openFile("src/bench.html", .{});
+    defer file.close();
+    const html = try file.readToEndAlloc(allocator, 1024 * 1024);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+
+    const scripts = try engine.getScripts();
+    defer allocator.free(scripts);
+
+    for (scripts) |code| {
+        const c_code = try allocator.dupeZ(u8, code);
+        defer allocator.free(c_code);
+        const val = engine.eval(c_code, "bench_script") catch |err| {
+            std.debug.print("Script Error: {}\n", .{err});
+            continue;
+        };
+        engine.ctx.freeValue(val);
+    }
+
+    const end = std.time.nanoTimestamp();
+    const ms = @divFloor(end - start, 1_000_000);
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ms});
+}
+```
+
+**Results**: Zig (QuickJS+Lexbor) is x2 times faster than JSDOM (based on V8 engine).
+
+
+```txt
+> node bench.js
+Total chars: 88890
+Total: 334ms
+```
+
+```txt
+> zig build run -Doptimize=ReleaseFast
+Total chars: 88890
+
+⚡️ Zig Engine Time: 137ms
+```
+
+
 **API integrated**:
   
 - Native Zig Event Loop. Thread-safe loop handling Timers (microtasks) and  Promises (MicroTasks).

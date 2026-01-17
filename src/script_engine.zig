@@ -249,6 +249,39 @@ pub const ScriptEngine = struct {
         return val;
     }
 
+    /// Extracts content from all inline <script> tags.
+    /// Caller owns the returned slice and the strings inside it.
+    pub fn getScripts(self: *ScriptEngine) ![][]const u8 {
+        // 1. Find all script tags
+        const scripts = try z.querySelectorAll(self.allocator, self.dom.doc, "script");
+        defer self.allocator.free(scripts);
+
+        var code_list: std.ArrayList([]const u8) = .empty;
+        errdefer {
+            for (code_list.items) |s| self.allocator.free(s);
+            code_list.deinit(self.allocator);
+        }
+
+        for (scripts) |script_el| {
+            // 2. Filter out external scripts (<script src="...">)
+            if (z.hasAttribute(script_el, "src")) continue;
+
+            // 3. Extract content
+            // Note: z.elementToNode is needed if textContent expects a Node
+            const node = z.elementToNode(script_el);
+            const content = z.textContent_zc(node);
+
+            // Only add if not empty
+            if (content.len > 0) {
+                try code_list.append(self.allocator, content);
+            } else {
+                self.allocator.free(content);
+            }
+        }
+
+        return code_list.toOwnedSlice(self.allocator);
+    }
+
     // Helper to expose C Functions easily
     pub fn registerFunction(self: *ScriptEngine, name: [:0]const u8, func: qjs.JSCFunction, args: c_int) !void {
         const global = self.ctx.getGlobalObject();
