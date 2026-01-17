@@ -18,3 +18,4 @@
 .claude/
 /docs/
 /js/vendor/
+/node_modules/
