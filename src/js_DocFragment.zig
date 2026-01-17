@@ -14,7 +14,7 @@ pub fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
     const ptr = qjs.JS_GetOpaque(val, class_id);
     if (ptr) |p| {
         const frag: *Fragment = @ptrCast(@alignCast(p));
-        // Call your existing helper from fragment_template.zig
+        // Call helper from fragment_template.zig
         z.destroyDocumentFragment(frag);
     }
 }
@@ -33,15 +33,14 @@ pub fn constructor(
     // Usually we use the global document associated with the context.
     const doc = rc.global_document orelse return ctx.throwTypeError("No document context");
 
-    // Call your existing helper
     const fragment = z.createDocumentFragment(doc) catch return w.EXCEPTION;
 
     // Create the JS Object
-    const proto = qjs.JS_GetPropertyStr(ctx_ptr, new_target, "prototype");
-    const obj = qjs.JS_NewObjectProtoClass(ctx_ptr, proto, class_id);
-    qjs.JS_FreeValue(ctx_ptr, proto);
+    const proto = ctx.getPropertyStr(new_target, "prototype");
+    const obj = ctx.newObjectProtoClass(proto, class_id);
+    defer ctx.freeValue(proto);
 
     // Link C pointer to JS Object
-    _ = qjs.JS_SetOpaque(obj, fragment);
+    ctx.setOpaque(obj, fragment) catch return w.EXCEPTION;
     return obj;
 }

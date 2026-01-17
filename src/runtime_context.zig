@@ -15,11 +15,16 @@ pub const RuntimeContext = struct {
     worker_core: ?*anyopaque = null,
 
     // Central Registry of Class IDs for this Runtime
+    // Zig struct -> Opaque pointer -> QuickJS Class ID
     classes: struct {
         dom_node: zqjs.ClassID = 0,
         worker: zqjs.ClassID = 0,
         event_loop: zqjs.ClassID = 0,
-        // document_fragment: zqjs.ClassID = 0,
+        document_fragment: zqjs.ClassID = 0,
+        html_element: zqjs.ClassID = 0,
+        dom_parser: zqjs.ClassID = 0,
+        document: zqjs.ClassID = 0,
+        owned_document: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

@@ -279,9 +279,11 @@ test "fragment creation and destruction" {
     try testing.expect(z.nodeType(fragment_node) == .fragment);
     try testing.expect(z.isNodeEmpty(fragment_node));
 
-    // Test destroyDocumentFragment
+    const div = try z.createElement(doc, "div");
+    z.appendChild(fragment_node, z.elementToNode(div));
+    try testing.expect(!z.isNodeEmpty(fragment_node));
+
     destroyDocumentFragment(fragment);
-    // Note: After destruction, we can't safely test the fragment anymore
 }
 
 test "DocumentFragment  - append programmatically only" {

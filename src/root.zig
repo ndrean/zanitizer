@@ -158,6 +158,7 @@ pub const documentRoot = lxb.documentRoot;
 pub const ownerDocument = lxb.ownerDocument;
 pub const bodyElement = lxb.bodyElement;
 pub const bodyNode = lxb.bodyNode;
+pub const documentBody = lxb.documentBody;
 
 pub const cloneNode = lxb.cloneNode;
 pub const importNode = lxb.importNode;
@@ -223,6 +224,7 @@ pub const textContent = text.textContent;
 pub const textContent_zc = text.textContent_zc;
 pub const replaceText = text.replaceText;
 pub const setContentAsText = text.setContentAsText;
+pub const setTextContent = text.setTextContent;
 pub const escapeHtml = text.escapeHtml;
 
 // DOM based normalization

@@ -153,6 +153,11 @@ pub fn setContentAsText(node: *z.DomNode, content: []const u8) !void {
     if (status != z._OK) return Err.SetTextContentFailed;
 }
 
+/// [core] Sets any inner content of a node with new content as text. Wrapper for JS bindings.
+pub fn setTextContent(_: std.mem.Allocator, node: *z.DomNode, content: []const u8) !void {
+    return setContentAsText(node, content);
+}
+
 test "setContentAsText" {
     const allocator = testing.allocator;
     const doc = try z.parseHTML(allocator, "<p>Hello <strong>world</strong></p><p></p>");

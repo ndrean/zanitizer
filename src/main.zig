@@ -62,25 +62,26 @@ pub fn main() !void {
 
     // setupSignalHandler();
 
-    try docFrag(allocator);
     // try customPointClass(allocator);
     // try demoPoint2Class(allocator);
+    try domParser(allocator);
+    // try buildDOM(allocator);
     // try eventListener(allocator);
     // try performance2(allocator);
-    // try demoCustomPointClass(allocator);
-    // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
-    // try first_QuickJS_test();
-    // try getValueFromQJSinZig();
-    // try simpleESM();
+    // // try demoCustomPointClass(allocator);
+    // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
+    // try first_QuickJS_test(allocator);
+    // try getValueFromQJSinZig(allocator);
+    // try simpleESM(allocator);
     // try importModule(allocator);
     // try test_event_loop(allocator);
     // try promise_scope(allocator);
     // try async_task_sequence_AB(allocator);
     // try async_task_sequence_ABCDEFGH(allocator);
-    // try execute_Simple_Script_In_HTML();
-    // try execute_Async_Script_In_HTML_And_Pass_To_Zig();
-    // try execute_Passing_Binary_Data_from_Zig_to_JS_Async();
-    // try firstJSONPass();
+    try execute_Simple_Script_In_HTML(allocator);
+    try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
+    // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
+    // try firstJSONPass(allocator);
     // try simplifiedJSONPass(allocator);
     // try async_CSV_Tuple_Parser(allocator);
     // try JS_Proxy_And_Generators(allocator);
@@ -89,22 +90,71 @@ pub fn main() !void {
     // try demoWorker(allocator);
 }
 
-fn docFrag(allocator: std.mem.Allocator) !void {
+fn domParser(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== DOM Parser -------------------------\n\n", .{});
+
+    const script =
+        \\ const parser = new DOMParser();
+        \\ const pDoc = parser.parseFromString("<!DOCTYPE html><html><body><div id='content'>DOMParser worked</div></body></html>");
+        \\ const parserDivContent = pDoc.getElementById("content").textContent;
+        \\ console.log("Parsed div content:", parserDivContent);
+        \\ console.log("Document body innerHTML:", pDoc.body.innerHTML);
+        \\ pDoc.body.innerHTML;
+    ;
+
+    const val = try engine.eval(script, "script");
+    defer engine.ctx.freeValue(val);
+    const html = try engine.ctx.toZString(val);
+    defer engine.ctx.freeZString(html);
+    z.print("{s}\n", .{html});
+}
+
+fn buildDOM(allocator: std.mem.Allocator) !void {
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
 
     const script =
-        \\const frag = new DocumentFragment();
-        \\const div = document.createElement("div");
-        // \\frag.appendChild(div);
-        \\console.log("appended");
+        \\ const doc = document.parseHTML("<p id='a'>Hello</p>");
+        \\ const pElement = doc.getElementById("a");
+        \\ console.log("Paragraph #1 textContent:", pElement.textContent);
+        \\ const bodyElement = doc.body;
+        \\ const div = doc.createElement("div");
+        \\ const p = doc.createElement("p");
+        \\ p.textContent = "This is a paragraph in a DIV";
+        \\ console.log(p.textContent);
+        \\ div.appendChild(p);
+        \\ bodyElement.appendChild(div);
+        \\ const html = bodyElement.innerHTML;
+        \\ console.log(html);
     ;
 
-    const c_script = try allocator.dupeZ(u8, script);
-    defer allocator.free(c_script);
-
-    const val = try engine.eval(c_script, "script");
+    const val = try engine.eval(script, "script");
     defer engine.ctx.freeValue(val);
+}
+
+fn eventListener(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== DOM Event Listener Demo -------------------------\n\n", .{});
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/dom_event_listener.js", 1024 * 1024);
+    defer allocator.free(source);
+
+    const c_source = try allocator.dupeZ(u8, source);
+    defer allocator.free(c_source);
+
+    const val = try engine.evalModule(c_source, "dom_event_listener.js");
+
+    engine.ctx.freeValue(val);
+
+    // Run Main Loop (Handles Events)
+    try engine.run();
+    const body_node = z.documentRoot(engine.dom.doc);
+    try z.prettyPrint(allocator, body_node.?);
 }
 
 fn performance2(allocator: std.mem.Allocator) !void {
@@ -116,8 +166,8 @@ fn performance2(allocator: std.mem.Allocator) !void {
         \\<html>
         \\  <body>
         \\      <script>
-        \\          const elt = document.getElementById('content').textContent();
-        \\          document.documentElement.innerHTML;
+        \\          const elt = document.getElementById('content').textContent;
+        \\          //document.documentElement.innerHTML;
         \\      </script>
         \\      <div id="content">Original</div>
         \\  </body>
@@ -129,7 +179,7 @@ fn performance2(allocator: std.mem.Allocator) !void {
     const start = std.time.nanoTimestamp();
 
     for (0..iterations) |_| {
-        const doc = try z.createDocFromString(html);
+        const doc = try z.parseHTML(allocator, html);
         try z.prettyPrint(allocator, z.documentRoot(doc).?);
         defer z.destroyDocument(doc);
         const script = try z.querySelector(allocator, doc, "script");
@@ -171,28 +221,6 @@ fn performance1(allocator: std.mem.Allocator) !void {
     // try z.prettyPrint(allocator, body_node.?);
 }
 
-fn eventListener(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
-    defer engine.deinit();
-
-    z.print("\n=== DOM Event Listener Demo -------------------------\n\n", .{});
-
-    const source = try std.fs.cwd().readFileAlloc(allocator, "js/dom_event_listener.js", 1024 * 1024);
-    defer allocator.free(source);
-
-    const c_source = try allocator.dupeZ(u8, source);
-    defer allocator.free(c_source);
-
-    const val = try engine.evalModule(c_source, "dom_event_listener.js");
-
-    engine.ctx.freeValue(val);
-
-    // Run Main Loop (Handles Events)
-    try engine.run();
-    const body_node = z.documentRoot(engine.dom.doc);
-    try z.prettyPrint(allocator, body_node.?);
-}
-
 fn demoWorker(allocator: std.mem.Allocator) !void {
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
@@ -216,11 +244,7 @@ fn demoWorker(allocator: std.mem.Allocator) !void {
     try engine.run();
 }
 
-fn first_QuickJS_test() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-
+fn first_QuickJS_test(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer {
         rt.runGC();
@@ -270,11 +294,7 @@ fn first_QuickJS_test() !void {
     }
 }
 
-fn getValueFromQJSinZig() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-
+fn getValueFromQJSinZig(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer {
         rt.runGC();
@@ -309,11 +329,7 @@ fn getValueFromQJSinZig() !void {
 
 // ESM Modules ----------------------------------------------------------------
 // [TODO] Rework using ScriptEngine
-fn simpleESM() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-
+fn simpleESM(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer {
         rt.runGC();
@@ -442,7 +458,7 @@ fn execute_Simple_Script_In_HTML(allocator: std.mem.Allocator) !void {
     ;
 
     // parse and extract <script> contents
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
     const node = z.documentRoot(doc).?;
     try z.prettyPrint(allocator, node);
@@ -789,11 +805,7 @@ fn test_event_loop(allocator: std.mem.Allocator) !void {
 // ---------------------------------------------------------------------------
 
 // Passing data JS -> Zig via Async Script Execution
-fn execute_Async_Script_In_HTML_And_Pass_To_Zig() !void {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    const allocator = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-
+fn execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer {
         rt.runGC();
@@ -856,7 +868,7 @@ fn execute_Async_Script_In_HTML_And_Pass_To_Zig() !void {
     ;
 
     // parse and extract <script> content
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
     const node = z.documentRoot(doc).?;
     try z.prettyPrint(allocator, node);
@@ -942,11 +954,7 @@ fn execute_Async_Script_In_HTML_And_Pass_To_Zig() !void {
 
 // ----------------------------------------------------------------
 
-fn execute_Passing_Binary_Data_from_Zig_to_JS_Async() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
+fn execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer rt.deinit();
     const ctx = zqjs.Context.init(rt);
@@ -1021,7 +1029,7 @@ fn execute_Passing_Binary_Data_from_Zig_to_JS_Async() !void {
         \\</body>
     ;
 
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
     const script_elt = try z.querySelector(allocator, doc, "script");
     const content = z.textContent_zc(z.elementToNode(script_elt.?));
@@ -1071,12 +1079,7 @@ fn jsonZStringify(allocator: std.mem.Allocator, user: User) ![:0]u8 {
     return try out.toOwnedSliceSentinel(0);
 }
 
-fn firstJSONPass() !void {
-    // --- Standard Setup ---
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
+fn firstJSONPass(allocator: std.mem.Allocator) !void {
     const rt = try zqjs.Runtime.init(allocator);
     defer rt.deinit();
     const ctx = zqjs.Context.init(rt);

@@ -242,6 +242,73 @@ pub fn ownerDocument(node: *z.DomNode) *z.HTMLDocument {
     return lexbor_node_owner_document_wrapper(node);
 }
 
+/// [core] Get the document's body element (usually BODY)
+///
+/// ## Example
+/// ```
+/// const bodyElement: *z.HTMLElement = z.bodyElement(doc).?;
+/// ```
+/// ## Signature
+pub fn bodyElement(doc: *z.HTMLDocument) ?*z.HTMLElement {
+    if (lxb_html_document_body_element_noi(doc)) |element| {
+        return element;
+    } else {
+        return null;
+    }
+}
+
+/// [core] Get the document's body node (usually BODY)
+pub fn bodyNode(doc: *z.HTMLDocument) ?*z.DomNode {
+    const body_element = bodyElement(doc) orelse return null;
+    return @ptrCast(body_element);
+    // return node;
+}
+
+// [Helper] Polymorphic getter for .body
+/// Accepts a generic Node, checks if it is a Document, and returns the body.
+pub fn documentBody(node: *z.DomNode) ?*z.HTMLElement {
+    const doc = z.ownerDocument(node);
+    return z.bodyElement(doc);
+}
+
+test "documentBody" {
+    const allocator = std.testing.allocator;
+    var doc = try z.createDocument();
+    defer z.destroyDocument(doc);
+    var body = bodyNode(doc);
+    try std.testing.expect(body == null);
+
+    doc = try z.parseHTML(allocator, "<p>Hi</p>");
+    const p = z.firstChild(z.bodyNode(doc).?).?;
+    body = bodyNode(doc);
+    if (body) |b| {
+        const r_elt = documentBody(b);
+        const r_node = z.elementToNode(r_elt.?);
+        const db = documentBody(r_node);
+
+        try std.testing.expectEqualSlices(u8, "BODY", z.nodeName_zc(r_node));
+        try std.testing.expectEqualSlices(u8, "BODY", z.tagName_zc(r_elt.?));
+        try std.testing.expectEqualSlices(u8, "body", qualifiedName_zc(db.?));
+        try std.testing.expectEqualSlices(u8, "body", qualifiedName_zc(z.documentBody(p).?));
+    }
+}
+
+test "appendchild" {
+    const allocator = std.testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p>Hello</p>");
+    const div = try z.createElement(doc, "div");
+    const p = try z.createElement(doc, "p");
+    try z.setTextContent(
+        allocator,
+        z.elementToNode(p),
+        "this is a para in a DIV",
+    );
+    const body_node = z.bodyNode(doc).?;
+    z.appendChild(z.elementToNode(div), z.elementToNode(p));
+    z.appendChild(body_node, z.elementToNode(div));
+    try z.prettyPrint(allocator, body_node);
+}
+
 test "documentRoot is HTML, ownerDocument is document" {
     {
         // new document has no root element
@@ -268,28 +335,6 @@ test "documentRoot is HTML, ownerDocument is document" {
             std.debug.assert(false);
         }
     }
-}
-
-/// [core] Get the document's body element (usually BODY)
-///
-/// ## Example
-/// ```
-/// const bodyElement: *z.HTMLElement = z.bodyElement(doc).?;
-/// ```
-/// ## Signature
-pub fn bodyElement(doc: *z.HTMLDocument) ?*z.HTMLElement {
-    if (lxb_html_document_body_element_noi(doc)) |element| {
-        return element;
-    } else {
-        return null;
-    }
-}
-
-/// [core] Get the document's body node (usually BODY)
-pub fn bodyNode(doc: *z.HTMLDocument) ?*z.DomNode {
-    const body_element = bodyElement(doc) orelse return null;
-    return @ptrCast(body_element);
-    // return node;
 }
 
 test "BODY or null returned" {

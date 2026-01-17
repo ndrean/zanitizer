@@ -5,6 +5,7 @@ const w = @import("wrapper.zig");
 const bindings = @import("bindings_generated.zig");
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const DocFragment = @import("js_DocFragment.zig");
+const DOMParserClass = @import("js_DOMParser.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -13,33 +14,97 @@ pub const DOMBridge = struct {
     registry: std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))), // events registry
 
     // 1. FINALIZER (Lexbor owns the nodes, we just detach)
-    fn domFinalizer(rt_ptr: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
+    fn domFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
+
+    fn documentFinalizer(rt_ptr: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
         _ = rt_ptr;
-        _ = val;
-        // No-op: Lexbor manages the memory lifecycle of the nodes.
+        const ptr = z.qjs.JS_GetOpaque(val, 0); // Get ptr regardless of class ID
+        if (ptr) |p| {
+            const doc: *z.HTMLDocument = @ptrCast(@alignCast(p));
+            z.destroyDocument(doc); // Calls lxb_html_document_destroy
+        }
     }
 
     // 2. INIT (Register Class & Create internal Doc)
     pub fn init(allocator: std.mem.Allocator, ctx: w.Context) !DOMBridge {
-        // [FIX] Retrieve the Thread-Local RuntimeContext
+        // the Thread-Local RuntimeContext
         const rc = RuntimeContext.get(ctx);
         var rt = ctx.getRuntime();
 
         // Register class ONLY if not already registered for this runtime ????
         if (rc.classes.dom_node == 0) {
+            // --- DOM_NODE: class & Node.prototype
             rc.classes.dom_node = rt.newClassID();
-
             try rt.newClass(rc.classes.dom_node, .{
-                .class_name = "DOMNode",
+                .class_name = "Node",
                 .finalizer = domFinalizer,
             });
+            const node_proto = ctx.newObject();
+            bindings.installNodeBindings(ctx.ptr, node_proto);
+            ctx.setClassProto(rc.classes.dom_node, node_proto); // Consumes node_proto
+
+            // --- HTML_ELEMENT: class & HTMLElement.prototype. Inherits from Node
+            rc.classes.html_element = rt.newClassID();
+            try rt.newClass(rc.classes.html_element, .{
+                .class_name = "HTMLElement",
+                .finalizer = null,
+            });
+            const el_proto = ctx.newObject();
+            bindings.installElementBindings(ctx.ptr, el_proto);
+            // INHERITANCE: HTMLElement.prototype -> Node.prototype
+            {
+                // Get a reference to Node.prototype (+1 ref count)
+                const parent_proto = ctx.getClassProto(rc.classes.dom_node);
+                defer ctx.freeValue(parent_proto); // Free the reference after use
+
+                // Chain them: el_proto.__proto__ = parent_proto
+                try ctx.setPrototype(el_proto, parent_proto);
+            }
+
+            // Register: HTMLElement class uses el_proto
+            ctx.setClassProto(rc.classes.html_element, el_proto);
+
+            // --- DOCUMENT (Inherits from Node)
+            rc.classes.document = rt.newClassID();
+            try rt.newClass(rc.classes.document, .{
+                .class_name = "Document",
+                .finalizer = null,
+            });
+
+            const doc_proto = ctx.newObject();
+            // Install Document methods (createElement, body, etc.)
+            bindings.installDocumentBindings(ctx.ptr, doc_proto);
+
+            // INHERITANCE: Document.prototype -> Node.prototype
+            {
+                const parent_proto = ctx.getClassProto(rc.classes.dom_node);
+                defer ctx.freeValue(parent_proto);
+                try ctx.setPrototype(doc_proto, parent_proto);
+            }
+
+            // Register: Document class uses doc_proto
+            ctx.setClassProto(rc.classes.document, doc_proto);
+
+            // --- OWNED_DOCUMENT (Inherits from Document)
+            rc.classes.owned_document = rt.newClassID();
+            try rt.newClass(rc.classes.owned_document, .{
+                .class_name = "OwnedDocument",
+                .finalizer = documentFinalizer,
+            });
+
+            const owned_doc_proto = ctx.getClassProto(rc.classes.document);
+            ctx.setClassProto(rc.classes.owned_document, owned_doc_proto);
+
+            // ============================================================
+            // Other Classes
+            try initDocumentFragmentClass(rt, ctx);
+            try initDomParserClass(rt, ctx);
         }
 
         // Create the internal Lexbor document
         const doc = try z.parseHTML(allocator, "");
         rc.global_document = doc;
         // var current_ctx = ctx;
-        try initDocumentFragmentClass(rt, ctx);
 
         return .{
             .allocator = allocator,
@@ -51,6 +116,8 @@ pub const DOMBridge = struct {
 
     pub fn deinit(self: *DOMBridge) void {
         z.destroyDocument(self.doc);
+        const rc = RuntimeContext.get(self.ctx);
+        rc.global_document = null;
 
         var it = self.registry.iterator();
         while (it.next()) |node_entry| {
@@ -76,14 +143,7 @@ pub const DOMBridge = struct {
         const global = ctx.getGlobalObject();
         defer ctx.freeValue(global);
 
-        // A. Setup Prototype (Methods shared by all nodes)
-        const proto = ctx.newObject();
-
-        // Install generated methods (appendChild, etc.)
-        bindings.installMethodBindings(ctx.ptr, proto);
-
-        // [FIX] Use local ID
-        ctx.setClassProto(rc.classes.dom_node, proto);
+        // install*Bindings called inside init() on the prottypes
 
         // B. Install Global APIs
         try self.createDocumentAPI(global, rc.classes.dom_node);
@@ -95,12 +155,12 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "sendToHost", fn_val);
     }
 
-    fn createDocumentAPI(self: *DOMBridge, global: w.Value, class_id: w.ClassID) !void {
+    fn createDocumentAPI(self: *DOMBridge, global: w.Value, _: w.ClassID) !void {
         const ctx = self.ctx;
-        const doc_obj = ctx.newObject();
+        const rc = RuntimeContext.get(ctx);
 
-        // 1. Install Static Bindings (createElement, etc.)
-        bindings.installStaticBindings(ctx.ptr, doc_obj);
+        // 'document' instance inherits from Document.prototype
+        const doc_obj = ctx.newObjectClass(rc.classes.document);
 
         // 2. Install Manual Bindings (querySelector)
         const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
@@ -109,17 +169,9 @@ pub const DOMBridge = struct {
         const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
         try ctx.setPropertyStr(doc_obj, "querySelectorAll", qsa_fn);
 
-        // 3. Attach 'body' property
-        if (z.bodyNode(self.doc)) |body_node| {
-            if (z.nodeToElement(body_node)) |body_elem| {
-                const body_val = try wrapElement(ctx, body_elem);
-                try ctx.setPropertyStr(doc_obj, "body", body_val);
-            }
-        }
-
-        // 4. Store Native Pointer (Hidden _native_doc)
-        // [FIX] Use local ID
-        const opaque_obj = ctx.newObjectClass(class_id);
+        // Store Native Pointer (Hidden _native_doc)
+        // create a separate opaque object to hold the pointer
+        const opaque_obj = ctx.newObjectClass(rc.classes.document);
         try ctx.setOpaque(opaque_obj, self.doc);
         try ctx.setPropertyStr(doc_obj, "_native_doc", opaque_obj);
 
@@ -165,9 +217,9 @@ pub const DOMBridge = struct {
     // --- WRAPPERS (Helpers for bindings) ---
 
     pub fn wrapElement(ctx: w.Context, element: *z.HTMLElement) !w.Value {
-        // [FIX] Get ID from context
+        // Get ID from context
         const rc = RuntimeContext.get(ctx);
-        const obj = ctx.newObjectClass(rc.classes.dom_node);
+        const obj = ctx.newObjectClass(rc.classes.html_element);
         try ctx.setOpaque(obj, element);
 
         // Add convenience properties like tagName
@@ -179,13 +231,132 @@ pub const DOMBridge = struct {
     }
 
     pub fn wrapNode(ctx: w.Context, node: *z.DomNode) !w.Value {
-        // [FIX] Get ID from context
+        // Get ID from context
         const rc = RuntimeContext.get(ctx);
         const obj = ctx.newObjectClass(rc.classes.dom_node);
         try ctx.setOpaque(obj, node);
+        const nodeName = z.nodeName_zc(node);
+        const name_str = ctx.newString(nodeName);
+        try ctx.setPropertyStr(obj, "nodeName", name_str);
         return obj;
     }
+
+    /// Helper to unwrap ANY class that inherits from Node
+    pub fn unwrapNode(ctx: w.Context, val: zqjs.Value) ?*z.DomNode {
+        const rc = RuntimeContext.get(ctx);
+
+        // 1. Is it a generic Node? (Text, Comment)
+        if (ctx.getOpaque(val, rc.classes.dom_node)) |ptr| {
+            return @ptrCast(@alignCast(ptr));
+        }
+
+        // 2. Is it an Element? (div, span)
+        if (ctx.getOpaque(val, rc.classes.html_element)) |ptr| {
+            const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+            return z.elementToNode(el); // Cast *HTMLElement -> *DomNode
+        }
+
+        // 3. Is it a DocumentFragment?
+        if (ctx.getOpaque(val, rc.classes.document_fragment)) |ptr| {
+            const frag: *z.DocumentFragment = @ptrCast(@alignCast(ptr));
+            return z.fragmentToNode(frag); // Cast *DocumentFragment -> *DomNode
+        }
+
+        // 4. Is it a Document?
+        if (ctx.getOpaque(val, rc.classes.document)) |ptr| {
+            const doc: *z.HTMLDocument = @ptrCast(@alignCast(ptr));
+            return z.documentRoot(doc); // Cast *HTMLDocument -> *DomNode
+        } else {
+            // Check OwnedDocument as well
+            if (ctx.getOpaque(val, rc.classes.owned_document)) |ptr| {
+                const doc: *z.HTMLDocument = @ptrCast(@alignCast(ptr));
+                return z.documentRoot(doc); // Cast *HTMLDocument -> *DomNode
+            }
+        }
+
+        return null;
+    }
 };
+
+pub fn initDomParserClass(rt: zqjs.Runtime, ctx: w.Context) !void {
+    DOMParserClass.class_id = rt.newClassID();
+
+    const rc = RuntimeContext.get(ctx);
+    rc.classes.dom_parser = DOMParserClass.class_id;
+
+    const class_def = zqjs.Runtime.ClassDef{
+        .class_name = "DOMParser",
+        .finalizer = DOMParserClass.finalizer,
+    };
+    rt.newClass(DOMParserClass.class_id, class_def) catch |err| {
+        std.debug.print("Failed to register DOMParser class: {}\n", .{err});
+        return err;
+    };
+    // Setup Prototype Inheritance: DOMParser -> Object
+    const proto = ctx.newObject();
+
+    bindings.installDOMParserBindings(ctx.ptr, proto);
+
+    // Install the constructor
+    const ctor = ctx.newCFunction2(
+        DOMParserClass.constructor,
+        "DOMParser",
+        0,
+        z.qjs.JS_CFUNC_constructor,
+        0,
+    );
+    ctx.setConstructor(ctor, proto);
+    // takes ownership & consume proto
+    ctx.setClassProto(DOMParserClass.class_id, proto);
+
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    try ctx.setPropertyStr(global, "DOMParser", ctor);
+}
+
+pub fn initDocumentFragmentClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
+    // 1. Create Class ID
+    // if (DocFragment.class_id == 0) {
+    DocFragment.class_id = rt.newClassID();
+    // }
+
+    const rc = RuntimeContext.get(ctx);
+    rc.classes.document_fragment = DocFragment.class_id;
+
+    // 2. Define Class with Finalizer
+    const class_def = zqjs.Runtime.ClassDef{
+        .class_name = "DocumentFragment",
+        .finalizer = null, //DocFragment.finalizer,
+    };
+    rt.newClass(DocFragment.class_id, class_def) catch |err| {
+        // Handle error (log or panic, don't just swallow if possible)
+        std.debug.print("Failed to register DocumentFragment class: {}\n", .{err});
+        return;
+    };
+
+    // 3. Setup Prototype Inheritance: DocumentFragment -> Node -> EventTarget
+    const proto = ctx.newObject();
+    // defer ctx.freeValue(proto);
+    const node_proto = ctx.getClassProto(rc.classes.dom_node);
+    defer ctx.freeValue(node_proto);
+
+    // MAGIC: This makes fragment inherit appendChild, removeChild, etc.
+    ctx.setPrototype(proto, node_proto) catch return;
+    // 4. Install the constructor
+    const ctor = ctx.newCFunction2(
+        DocFragment.constructor,
+        "DocumentFragment",
+        0,
+        z.qjs.JS_CFUNC_constructor,
+        0,
+    );
+    ctx.setConstructor(ctor, proto);
+    ctx.setClassProto(DocFragment.class_id, proto);
+    // Attach to global object
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    try ctx.setPropertyStr(global, "DocumentFragment", ctor);
+}
 
 const Listener = struct {
     callback: z.qjs.JSValue,
@@ -404,47 +575,4 @@ fn js_preventDefault(
     // In a real browser, this sets a 'defaultPrevented' flag.
     // For a headless scraper, a no-op is often sufficient to satisfy the script.
     return w.UNDEFINED;
-}
-
-pub fn initDocumentFragmentClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
-    // 1. Create Class ID
-    if (DocFragment.class_id == 0) {
-        _ = rt.newClassID();
-    }
-
-    const rc = RuntimeContext.get(ctx);
-
-    // 2. Define Class with Finalizer
-    const class_def = zqjs.Runtime.ClassDef{
-        .class_name = "DocumentFragment",
-        .finalizer = DocFragment.finalizer,
-    };
-    rt.newClass(DocFragment.class_id, class_def) catch |err| {
-        // Handle error (log or panic, don't just swallow if possible)
-        std.debug.print("Failed to register DocumentFragment class: {}\n", .{err});
-        return;
-    };
-
-    // 3. Setup Prototype Inheritance: DocumentFragment -> Node -> EventTarget
-    const proto = ctx.newObject();
-    // defer ctx.freeValue(proto);
-    const node_proto = ctx.getClassProto(rc.classes.dom_node);
-    defer ctx.freeValue(node_proto);
-
-    // MAGIC: This makes fragment inherit appendChild, removeChild, etc.
-    ctx.setPrototype(proto, node_proto) catch return;
-    // 4. Install the constructor
-    const ctor = ctx.newCFunction2(
-        DocFragment.constructor,
-        "DocumentFragment",
-        0,
-        z.qjs.JS_CFUNC_constructor,
-        0,
-    );
-    ctx.setConstructor(ctor, proto);
-    ctx.setClassProto(DocFragment.class_id, proto);
-    // Attach to global object
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    try ctx.setPropertyStr(global, "DocumentFragment", ctor);
 }

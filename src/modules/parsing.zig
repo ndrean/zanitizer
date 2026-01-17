@@ -87,6 +87,29 @@ pub fn setInnerHTML(element: *z.HTMLElement, content: []const u8) !void {
     _ = lxb_html_element_inner_html_set(element, content.ptr, content.len) orelse return Err.FragmentParseFailed;
 }
 
+/// [parse] Polymorphic Setter for document.body = "<html>"
+/// Behaves like setInnerHTML on the body element.
+pub fn setDocumentBody(node: *z.DomNode, html: []const u8) !void {
+    const body = z.documentBody(node) orelse return error.NoBodyElement;
+    // Direct call, no allocator needed
+    return z.setInnerHTML(body, html);
+}
+
+test "setBody" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "");
+    defer z.destroyDocument(doc);
+
+    const body_node = z.bodyNode(doc).?;
+    try setDocumentBody(body_node, "<div>Hello, world!</div>");
+    // try z.setInnerHTML(body, "<div><p>Hello, world!</p></div>");
+
+    const result = try z.innerHTML(allocator, z.nodeToElement(body_node).?);
+    defer allocator.free(result);
+
+    try testing.expectEqualStrings("<div>Hello, world!</div>", result);
+}
+
 /// [parse] Replaces the contents of an element with a strictly sanitized HTML string.
 ///
 /// This is a safe-by-default version of `setHTMLUnsafe`. It applies strict
@@ -321,9 +344,11 @@ pub const DOMParser = struct {
             return Err.ParserCreateFailed;
 
         if (lxb_html_parser_init(parser) != z._OK) {
+            std.debug.print("Failed to initialize HTML parser\n", .{});
             _ = lxb_html_parser_destroy(parser);
             return Err.ParserInitFailed;
         }
+        std.debug.print("HTML Parser initialized successfully\n", .{});
 
         return .{
             .allocator = allocator,
@@ -780,7 +805,7 @@ test "parseFromStringInContext + appendFragment with options" {
     defer allocator.free(result);
 
     const expected = "<div id=\"1\"><p> some text</p><div> more <i>text</i><span></span></div><ul><li></li></ul><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a></div>";
-    try z.prettyPrint(allocator, z.documentRoot(doc).?);
+    // try z.prettyPrint(allocator, z.documentRoot(doc).?);
 
     try testing.expectEqualStrings(expected, result);
 }

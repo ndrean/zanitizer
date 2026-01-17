@@ -24,30 +24,37 @@ pub const ScriptEngine = struct {
     pub fn init(allocator: std.mem.Allocator) !*ScriptEngine {
         const self = try allocator.create(ScriptEngine);
         self.allocator = allocator;
+        errdefer allocator.destroy(self);
 
         // 1. Runtime & Context
         self.rt = try zqjs.Runtime.init(allocator);
+        errdefer self.rt.deinit();
 
         self.rt.enableModuleLoader();
 
         self.ctx = zqjs.Context.init(self.rt);
         // (Optional: set allocator on ctx if wrapper needs it, but RCtx handles mostly)
         self.ctx.setAllocator(&self.allocator);
+        errdefer self.ctx.deinit();
 
         // 2. Event Loop
         self.loop = try EventLoop.create(allocator, self.rt);
+        errdefer self.loop.destroy();
 
         // 3. Runtime Context (The Glue)
         // Allocates, zeroes classes, and sets the opaque pointer
         self.rc = try RuntimeContext.create(allocator, self.ctx, self.loop);
+        errdefer self.rc.destroy();
 
         self.dom = try DOMBridge.init(allocator, self.ctx);
+        errdefer self.dom.deinit();
 
         self.rc.dom_bridge = @ptrCast(@alignCast(&self.dom));
 
         // Install Bridges (timers)
         try self.loop.install(self.ctx);
         // install DOM APIs
+        // try self.dom.init();
         try self.dom.installAPIs(); // console, etc.
         // Worker class
         try JSWorker.registerWorkerClass(self.ctx);
