@@ -410,12 +410,8 @@ pub fn dispatchEvent(
                 defer ctx.freeValue(event_obj);
                 _ = try ctx.setPropertyStr(event_obj, "type", ctx.newString(event));
 
-                // [FIX] Wrap as Element if possible, otherwise generic Node
-                // You will need to check your 'z' wrapper for the specific casting function.
-                // Assuming something like z.isElement(node) or checking node type exists:
                 var target_obj: zqjs.Value = zqjs.NULL;
 
-                // Hypothetical check: Adjust 'z.isElement' to match your bindings
                 if (z.nodeType(node) == .element) {
                     const el: *z.HTMLElement = @ptrCast(@alignCast(node));
                     target_obj = DOMBridge.wrapElement(ctx, el) catch zqjs.NULL;

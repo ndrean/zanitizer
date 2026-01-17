@@ -112,7 +112,6 @@ fn eventListeners(allocator: std.mem.Allocator) !void {
         \\     // 1. Verify Event Object
         \\     const e_target = e.target;
         \\     console.log("[JS]: Click received " + e.type + " on " + e.target.tagName + " " + e.target.id);
-        \\     const id = e_target.id;
         \\     
         \\     // 2. Synchronous DOM Update
         \\     result.textContent = "Clicked (Sync)";
