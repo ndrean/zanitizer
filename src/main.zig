@@ -61,11 +61,13 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // setupSignalHandler();
-
+    try eventListeners(allocator);
+    try transplante(allocator);
+    // try fullCycle(allocator);
     // try customPointClass(allocator);
     // try demoPoint2Class(allocator);
     try domParser(allocator);
-    // try buildDOM(allocator);
+    try buildDOM(allocator);
     // try eventListener(allocator);
     // try performance2(allocator);
     // // try demoCustomPointClass(allocator);
@@ -78,8 +80,8 @@ pub fn main() !void {
     // try promise_scope(allocator);
     // try async_task_sequence_AB(allocator);
     // try async_task_sequence_ABCDEFGH(allocator);
-    try execute_Simple_Script_In_HTML(allocator);
-    try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
+    // try execute_Simple_Script_In_HTML(allocator);
+    // try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
     // try firstJSONPass(allocator);
     // try simplifiedJSONPass(allocator);
@@ -89,6 +91,168 @@ pub fn main() !void {
     // try async_CSV_JSON_Parser(allocator);
     // try demoWorker(allocator);
 }
+
+fn eventListeners(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    // 2. Load Page with a Button
+    try engine.loadHTML(
+        \\<body>
+        \\  <button id="my-btn">Click Me</button>
+        \\  <div id="result">Waiting...</div>
+        \\</body>
+    );
+
+    const script =
+        \\ const btn = document.getElementById('my-btn');
+        \\ const result = document.getElementById('result');
+        \\
+        \\ btn.addEventListener('click', (e) => {
+        \\     // 1. Verify Event Object
+        \\     const e_target = e.target;
+        \\     console.log("[JS]: Click received " + e.type + " on " + e.target.tagName + " " + e.target.id);
+        \\     const id = e_target.id;
+        \\     
+        \\     // 2. Synchronous DOM Update
+        \\     result.textContent = "Clicked (Sync)";
+        \\
+        \\     // 3. Asynchronous Operation (Tests EventLoop)
+        \\     setTimeout(() => {
+        \\         console.log("[JS]: Timeout fired!");
+        \\         result.textContent = "Clicked (Async)";
+        \\     }, 10);
+        \\ });
+        \\
+        \\ // 4. Trigger the event from JS
+        \\ // Note: Your current binding takes a string, not an Event object
+        \\ console.log("[JS]: Dispatching click...");
+        \\ btn.dispatchEvent('click');
+    ;
+
+    // 4. Run the Script (This executes the sync parts: dispatch -> handler -> sync update)
+    _ = try engine.eval(script, "event_test");
+
+    // 5. Verify Synchronous Update
+    {
+        const result_div = try z.querySelector(allocator, engine.dom.doc, "#result");
+        const text = z.textContent_zc(z.elementToNode(result_div.?));
+
+        std.debug.print("[Zig] Check (Sync): {s}\n", .{text});
+        try std.testing.expectEqualStrings("Clicked (Sync)", text);
+    }
+
+    // 6. Run Event Loop to process the setTimeout
+    // The run() method processes timers and macrotasks
+    try engine.loop.run(.Script);
+
+    // 7. Verify Asynchronous Update
+    {
+        const result_div = try z.querySelector(allocator, engine.dom.doc, "#result");
+        const text = z.textContent_zc(z.elementToNode(result_div.?));
+
+        std.debug.print("[Zig] Check (Async): {s}\n", .{text});
+        try std.testing.expectEqualStrings("Clicked (Async)", text);
+    }
+}
+
+fn transplante(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    z.print("\n=== Transplante Demo -------------------------\n\n", .{});
+
+    try engine.loadHTML(
+        \\<!DOCTYPE html>
+        \\<body>
+        \\  <div id="target">Old Text</div>
+        \\</body>
+    );
+    const script =
+        \\ const el = document.getElementById("target");
+        \\ console.log("Found element:", el.tagName);
+        \\ el.textContent = "Updated by JS!";
+        \\ el.textContent; // Return this string to Zig
+    ;
+
+    const val = try engine.eval(script, "test_script");
+    defer engine.ctx.freeValue(val);
+
+    // 3. Verify Result
+    const result_str = try engine.ctx.toZString(val);
+    defer engine.ctx.freeZString(result_str);
+
+    std.debug.print("Result: {s}\n", .{result_str});
+    try std.testing.expectEqualStrings("Updated by JS!", result_str);
+}
+
+// // test "Full Cycle: HTML -> JS Execution -> DOM Modification" {
+// fn fullCycle(allocator: std.mem.Allocator) !void {
+//     const engine = try ScriptEngine.init(allocator);
+//     defer engine.deinit();
+
+//     // 1. The Raw HTML (simulating a downloaded web page)
+//     // Notice: The HTML is incomplete. The JS is required to finish it.
+//     try engine.loadHTML(
+//         \\<!DOCTYPE html>
+//         \\<html>
+//         \\  <body>
+//         \\    <div id="app">Loading...</div>
+//         \\    <script id="main-script">
+//         \\       // This JS runs inside QuickJS
+//         \\       const app = document.getElementById("app");
+//         \\       app.textContent = "Hydration Complete!";
+//         \\
+//         \\       const newBtn = document.createElement("button");
+//         \\       newBtn.textContent = "Click Me";
+//         \\       document.body.appendChild(newBtn);
+//         \\       console.log("JS finished running.");
+//         \\    </script>
+//         \\  </body>
+//         \\</html>
+//     );
+
+//     const page = try z.parseHTML(allocator, html_src);
+//     defer z.destroyDocument(page);
+
+//     // 3. The "Browser Loop": Find and Run Scripts
+//     // (This is what your 'zexplorer' logic needs to do)
+//     const script_el = try z.querySelector(allocator, page, "script");
+//     const js_code = z.textContent_zc(z.elementToNode(script_el.?));
+//     const c_code = try allocator.dupeZ(u8, js_code);
+//     defer allocator.free(c_code);
+
+//     // A. Extract JS code from DOM
+//     // defer allocator.free(js_code);
+
+//     // B. Run it in the Engine!
+//     // We need to make sure 'document' in JS points to 'page' in Zig.
+//     // Since your current binding hardcodes 'document' to the GLOBAL one,
+//     // we must temporarily set the engine's global document to 'page'
+//     // OR (better) use your 'owned_document' logic and pass 'page' as 'document' to the script.
+
+//     // Let's assume for this test we update the Engine's global doc pointer:
+//     engine.rc.global_document = page;
+//     // (You might need to update the opaque pointer in JS global 'document' too if it caches it)
+
+//     // std.debug.print("Executing Script: {s}\n", .{js_code});
+//     const val = engine.eval(c_code, "embedded_script") catch |err| {
+//         std.debug.print("Script failed: {}\n", .{err});
+//         return err;
+//     };
+//     engine.ctx.freeValue(val);
+
+//     // Check #app text
+//     const app_div = try z.querySelector(allocator, page, "#app");
+//     const app_text = z.textContent_zc(z.elementToNode(app_div.?));
+//     std.debug.print("Final App Text: {s}\n", .{app_text});
+//     // try std.testing.expectEqualStrings("Hydration Complete!", app_text);
+
+//     // Check if Button exists
+//     const buttons = try z.querySelectorAll(allocator, page, "button");
+//     defer allocator.free(buttons);
+//     // try std.testing.expect(buttons.len == 1);
+// }
 
 fn domParser(allocator: std.mem.Allocator) !void {
     const engine = try ScriptEngine.init(allocator);
@@ -110,6 +274,10 @@ fn domParser(allocator: std.mem.Allocator) !void {
     const html = try engine.ctx.toZString(val);
     defer engine.ctx.freeZString(html);
     z.print("{s}\n", .{html});
+    const expected =
+        \\<div id="content">DOMParser worked</div>
+    ;
+    try std.testing.expectEqualStrings(expected, html);
 }
 
 fn buildDOM(allocator: std.mem.Allocator) !void {
@@ -128,11 +296,21 @@ fn buildDOM(allocator: std.mem.Allocator) !void {
         \\ div.appendChild(p);
         \\ bodyElement.appendChild(div);
         \\ const html = bodyElement.innerHTML;
-        \\ console.log(html);
+        \\ console.log("[JS] :", html);
+        \\html;
     ;
+
+    z.print("\n=== perseHTML -------------------------\n\n", .{});
 
     const val = try engine.eval(script, "script");
     defer engine.ctx.freeValue(val);
+    const result_str = try engine.ctx.toZString(val);
+    defer engine.ctx.freeZString(result_str);
+    z.print("[Zig]: {s}\n", .{result_str});
+    const expect =
+        \\<p id="a">Hello</p><div><p>This is a paragraph in a DIV</p></div>
+    ;
+    try std.testing.expectEqualStrings(expect, result_str);
 }
 
 fn eventListener(allocator: std.mem.Allocator) !void {

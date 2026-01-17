@@ -223,7 +223,8 @@ fn genGetter(writer: anytype, func: BindingSpec) !void {
                 \\    const this_arg: *z.HTMLDocument = blk: {
                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-                \\        return w.EXCEPTION;
+                \\        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
+                // \\        return w.EXCEPTION;
                 \\    };
                 \\
             );
@@ -309,7 +310,8 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
                 \\    const this_arg: *z.HTMLDocument = blk: {
                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-                \\        return w.EXCEPTION;
+                // \\        return w.EXCEPTION;
+                \\        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
                 \\    };
                 \\
             );
@@ -742,7 +744,8 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
                     \\    const arg{d}: *z.HTMLDocument = blk: {{
                     \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
                     \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-                    \\        return w.EXCEPTION;
+                    \\        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
+                    // \\        return w.EXCEPTION;
                     \\    }};
                     \\
                 , .{i});

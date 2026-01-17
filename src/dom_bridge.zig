@@ -162,6 +162,9 @@ pub const DOMBridge = struct {
         // 'document' instance inherits from Document.prototype
         const doc_obj = ctx.newObjectClass(rc.classes.document);
 
+        try ctx.setOpaque(doc_obj, self.doc);
+        try ctx.setPropertyStr(doc_obj, "_native_doc", ctx.dupValue(doc_obj));
+
         // 2. Install Manual Bindings (querySelector)
         const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
         try ctx.setPropertyStr(doc_obj, "querySelector", qs_fn);
@@ -171,9 +174,9 @@ pub const DOMBridge = struct {
 
         // Store Native Pointer (Hidden _native_doc)
         // create a separate opaque object to hold the pointer
-        const opaque_obj = ctx.newObjectClass(rc.classes.document);
-        try ctx.setOpaque(opaque_obj, self.doc);
-        try ctx.setPropertyStr(doc_obj, "_native_doc", opaque_obj);
+        // const opaque_obj = ctx.newObjectClass(rc.classes.document);
+        // try ctx.setOpaque(opaque_obj, self.doc);
+        // try ctx.setPropertyStr(doc_obj, "_native_doc", opaque_obj);
 
         // 5. Expose 'document' on global
         try ctx.setPropertyStr(global, "document", doc_obj);
@@ -362,13 +365,6 @@ const Listener = struct {
     callback: z.qjs.JSValue,
 };
 
-// Registry: NodeID -> EventName -> List[Listener]
-// var event_registry: std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))) = undefined;
-
-// pub fn initRegistry(allocator: std.mem.Allocator) void {
-//     event_registry = std.AutoHashMap(usize, std.StringHashMap(std.ArrayList(Listener))).init(allocator);
-// }
-
 pub fn addEventListener(
     ctx: zqjs.Context,
     self: *DOMBridge, // via rc.dom_bridge
@@ -404,34 +400,73 @@ pub fn dispatchEvent(
     event: []const u8,
 ) !void {
     const node_id = @intFromPtr(node);
-
     if (self.registry.getPtr(node_id)) |node_map| {
         if (node_map.getPtr(event)) |listeners| {
             const prev_def_fn = ctx.newCFunction(js_preventDefault, "preventDefault", 0);
             defer ctx.freeValue(prev_def_fn);
 
             for (listeners.items) |l| {
-                // set { type: "click" } )
                 const event_obj = ctx.newObject();
                 defer ctx.freeValue(event_obj);
                 _ = try ctx.setPropertyStr(event_obj, "type", ctx.newString(event));
 
-                // 2. Set 'target' (The node itself!)
-                // We wrap the node again so JS sees 'e.target === btn'
-                // (Optimization: In a real engine, we'd cache this wrapper)
-                const target_obj = DOMBridge.wrapNode(ctx, node) catch zqjs.NULL;
-                _ = try ctx.setPropertyStr(event_obj, "target", target_obj);
+                // [FIX] Wrap as Element if possible, otherwise generic Node
+                // You will need to check your 'z' wrapper for the specific casting function.
+                // Assuming something like z.isElement(node) or checking node type exists:
+                var target_obj: zqjs.Value = zqjs.NULL;
 
-                // 3. Set 'preventDefault'
+                // Hypothetical check: Adjust 'z.isElement' to match your bindings
+                if (z.nodeType(node) == .element) {
+                    const el: *z.HTMLElement = @ptrCast(@alignCast(node));
+                    target_obj = DOMBridge.wrapElement(ctx, el) catch zqjs.NULL;
+                } else {
+                    target_obj = DOMBridge.wrapNode(ctx, node) catch zqjs.NULL;
+                }
+
+                _ = try ctx.setPropertyStr(event_obj, "target", target_obj);
                 _ = try ctx.setPropertyStr(event_obj, "preventDefault", ctx.dupValue(prev_def_fn));
 
-                // Call the JS function
                 const ret = ctx.call(l.callback, zqjs.UNDEFINED, &.{event_obj});
-                ctx.freeValue(ret); // Ignore result, but free it
+                ctx.freeValue(ret);
             }
         }
     }
 }
+// pub fn dispatchEvent(
+//     ctx: zqjs.Context,
+//     self: *DOMBridge,
+//     node: *z.DomNode,
+//     event: []const u8,
+// ) !void {
+//     const node_id = @intFromPtr(node);
+
+//     if (self.registry.getPtr(node_id)) |node_map| {
+//         if (node_map.getPtr(event)) |listeners| {
+//             const prev_def_fn = ctx.newCFunction(js_preventDefault, "preventDefault", 0);
+//             defer ctx.freeValue(prev_def_fn);
+
+//             for (listeners.items) |l| {
+//                 // set { type: "click" } )
+//                 const event_obj = ctx.newObject();
+//                 defer ctx.freeValue(event_obj);
+//                 _ = try ctx.setPropertyStr(event_obj, "type", ctx.newString(event));
+
+//                 // 2. Set 'target' (The node itself!)
+//                 // We wrap the node again so JS sees 'e.target === btn'
+//                 // (Optimization: In a real engine, we'd cache this wrapper)
+//                 const target_obj = DOMBridge.wrapNode(ctx, node) catch zqjs.NULL;
+//                 _ = try ctx.setPropertyStr(event_obj, "target", target_obj);
+
+//                 // 3. Set 'preventDefault'
+//                 _ = try ctx.setPropertyStr(event_obj, "preventDefault", ctx.dupValue(prev_def_fn));
+
+//                 // Call the JS function
+//                 const ret = ctx.call(l.callback, zqjs.UNDEFINED, &.{event_obj});
+//                 ctx.freeValue(ret); // Ignore result, but free it
+//             }
+//         }
+//     }
+// }
 
 fn js_reportResult(
     ctx_ptr: ?*z.qjs.JSContext,

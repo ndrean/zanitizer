@@ -257,6 +257,41 @@ pub const ScriptEngine = struct {
         const js_fn = self.ctx.newCFunction(func, name, args);
         _ = try self.ctx.setPropertyStr(global, name, js_fn);
     }
+
+    /// Loads HTML content into the Engine, replacing the current global document.
+    pub fn loadHTML(self: *ScriptEngine, html: []const u8) !void {
+        const new_doc = try z.parseHTML(self.allocator, html);
+
+        // 2. Destroy the old document to prevent leaks
+        // (DOMBridge owns the global doc, so we must clean up the old one)
+        if (self.dom.doc != new_doc) {
+            z.destroyDocument(self.dom.doc);
+        }
+
+        // 3. Update Zig References
+        self.dom.doc = new_doc;
+        self.rc.global_document = new_doc;
+
+        // 4. Update the JavaScript 'window.document' reference
+        // We must update the hidden '_native_doc' property to point to the new C struct.
+        const global = self.ctx.getGlobalObject();
+        defer self.ctx.freeValue(global);
+
+        const doc_obj = self.ctx.getPropertyStr(global, "document");
+        defer self.ctx.freeValue(doc_obj);
+
+        // Create a new opaque handle for the new document.
+        // CRITICAL: We use 'rc.classes.document' (NO Finalizer).
+        // Why? Because 'self.dom' owns this document and will free it in deinit().
+        // If we used 'owned_document' (With Finalizer), we would double-free it!
+        // const new_handle = self.ctx.newObjectClass(self.rc.classes.document);
+        // try self.ctx.setOpaque(new_handle, new_doc);
+
+        // Perform the transplant
+        // try self.ctx.setPropertyStr(doc_obj, "_native_doc", new_handle);
+
+        try self.ctx.setOpaque(doc_obj, new_doc);
+    }
 };
 
 // ============================================================================

@@ -97,7 +97,7 @@ pub fn js_createElement(
     const arg0: *z.HTMLDocument = blk: {
         if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
         if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        return w.EXCEPTION;
+        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
     };
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
@@ -126,7 +126,7 @@ pub fn js_createTextNode(
     const arg0: *z.HTMLDocument = blk: {
         if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
         if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        return w.EXCEPTION;
+        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
     };
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
@@ -155,7 +155,7 @@ pub fn js_getElementById(
     const arg0: *z.HTMLDocument = blk: {
         if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
         if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        return w.EXCEPTION;
+        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
     };
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(arg1);
@@ -473,7 +473,7 @@ pub fn js_get_body(
     const this_arg: *z.HTMLDocument = blk: {
         if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
         if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        return w.EXCEPTION;
+        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
     };
     const result = z.bodyElement(this_arg);
     if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
