@@ -20,7 +20,7 @@ This library can be used for:
 Process this HTML file with scripts:
 
 ```html
-<!doctype html>
+<!DOCTYPE html>
 <html>
   <body>
     <div id="root"></div>
