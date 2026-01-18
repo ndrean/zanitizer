@@ -101,7 +101,7 @@ fn bench(allocator: std.mem.Allocator) !void {
     const start = std.time.nanoTimestamp();
     const file = try std.fs.cwd().openFile("src/bench.html", .{});
     defer file.close();
-    const html = try file.readToEndAlloc(allocator, 1024 * 1024);
+    const html = try file.readToEndAlloc(allocator, 1024);
     defer allocator.free(html);
 
     try engine.loadHTML(html);
@@ -120,7 +120,7 @@ fn bench(allocator: std.mem.Allocator) !void {
     }
 
     const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000_000);
+    const ms = @divFloor(end - start, 1_000);
     std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ms});
 }
 

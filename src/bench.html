@@ -3,14 +3,15 @@
   <body>
     <div id="root"></div>
     <script>
+      const nb = 100;
       const root = document.getElementById("root");
-      // 1. Write: Create 10,000 spans
-      for (let i = 0; i < 10000; i++) {
+
+      for (let i = 0; i < nb; i++) {
         const span = document.createElement("span");
         span.textContent = "Item " + i;
         root.appendChild(span);
       }
-      // 2. Read: Query all and concat text
+
       const all = document.querySelectorAll("span");
       let total = 0;
       for (let i = 0; i < all.length; i++) {

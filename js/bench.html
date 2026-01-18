@@ -4,8 +4,8 @@
     <div id="root"></div>
     <script>
       const root = document.getElementById("root");
-      // 1. Write: Create 10,000 spans
-      for (let i = 0; i < 10000; i++) {
+      const nb = 100;
+      for (let i = 0; i < nb; i++) {
         const span = document.createElement("span");
         span.textContent = "Item " + i;
         root.appendChild(span);

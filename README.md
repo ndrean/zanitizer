@@ -1,4 +1,4 @@
-# zexplorer: Scriptable headless browser
+# zexplorer: Scriptable Headless Browser
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
@@ -6,7 +6,7 @@ HTML parser & JavaScript execution at native speed on a server
 
 ## WIP
 
-A project to use `Zig` capabilities to run a JavaScript runtime extended with some document APIs.
+A project to run a JavaScript runtime extended with (some)  DOM APIs.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
@@ -25,14 +25,13 @@ Process this HTML file with scripts:
   <body>
     <div id="root"></div>
     <script>
+      const nb = 10_000;
       const root = document.getElementById("root");
-      // 1. Write: Create 10,000 spans
-      for (let i = 0; i < 10000; i++) {
+      for (let i = 0; i < nb; i++) {
         const span = document.createElement("span");
         span.textContent = "Item " + i;
         root.appendChild(span);
       }
-      // 2. Read: Query all and concat text
       const all = document.querySelectorAll("span");
       let total = 0;
       for (let i = 0; i < all.length; i++) {
@@ -43,6 +42,8 @@ Process this HTML file with scripts:
   </body>
 </html>
 ```
+
+The `jsdom` script:
 
 ```js
 console.time("Total");
@@ -55,6 +56,9 @@ const dom = new JSDOM(html, { runScripts: "dangerously" });
 console.timeEnd("Total");
 ```
 
+The `Zexplorer` script:
+
+
 ```zig
 fn bench(allocator: std.mem.Allocator) !void {
     var engine = try ScriptEngine.init(allocator);
@@ -63,7 +67,7 @@ fn bench(allocator: std.mem.Allocator) !void {
     const start = std.time.nanoTimestamp();
     const file = try std.fs.cwd().openFile("src/bench.html", .{});
     defer file.close();
-    const html = try file.readToEndAlloc(allocator, 1024 * 1024);
+    const html = try file.readToEndAlloc(allocator, 1024);
     defer allocator.free(html);
 
     try engine.loadHTML(html);
@@ -72,6 +76,7 @@ fn bench(allocator: std.mem.Allocator) !void {
     defer allocator.free(scripts);
 
     for (scripts) |code| {
+        // TODO: integrate the sentinel conversion in `getScripts()`
         const c_code = try allocator.dupeZ(u8, code);
         defer allocator.free(c_code);
         const val = engine.eval(c_code, "bench_script") catch |err| {
@@ -83,94 +88,37 @@ fn bench(allocator: std.mem.Allocator) !void {
 
     const end = std.time.nanoTimestamp();
     const ms = @divFloor(end - start, 1_000_000);
-    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ms});
+    std.debug.print("⚡️ Zig Engine Time: {d}ms\n", .{ms});
 }
 ```
 
-**Results**: Zig (QuickJS+Lexbor) is x2 times faster than JSDOM (based on V8 engine).
+**Results**
 
+`Zexplorer` is much lighter thus much faster for smaller workloads whilst `jsdom` starts to shine for large workloads.
 
-```txt
-> node bench.js
-Total chars: 88890
-Total: 334ms
-```
-
-```txt
-> zig build run -Doptimize=ReleaseFast
-Total chars: 88890
-
-⚡️ Zig Engine Time: 137ms
-```
-
+| #rows   | Zexp   | jsdom  |
+| ------- | ------ | ------ |
+| 100     | 0.58ms | 241ms  |
+| 1_000   | 14ms   | 251ms  |
+| 10_000  | 139ms  | 331ms  |
+| 20_000  | 298ms  | 421ms  |
+| 50_000  | 794ms  | 662ms  |
+| 100_000 | 1633ms | 1062ms |
+| 500_000 | 7971ms | 4213ms |
 
 **API integrated**:
   
 - Native Zig Event Loop. Thread-safe loop handling Timers (microtasks) and  Promises (MicroTasks).
 - **Worker pool**: multi-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
-- ES6 Module System: You are now loading external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
-
-> [TODO] `fetch`: use `libcurl` ?
-
-**The Event Loop**
-
-```mermaid
-graph TD
-    %% Nodes
-    Start((Loop Start)) --> SignalCheck{Ctrl+C?}
-    SignalCheck -- Yes --> Exit
-    SignalCheck -- No --> Microtasks1
-
-    subgraph "Phase 1: Microtasks (High Priority)"
-    Microtasks1[Flush Pending Jobs]
-    note1[Executes all .then callbacks]
-    end
-
-    Microtasks1 --> ExitCheck{Can Exit?}
-    ExitCheck -- Empty Queue & No Timers --> Exit
-    ExitCheck -- Active --> Timers
-
-    subgraph "Phase 2: Timers (Macrotask)"
-    Timers[Check Timers]
-    note2[Did a timer fire?]
-    end
-
-    Timers -- Yes! Fired one --> Start
-    Timers -- No, all waiting --> Workers
-
-    subgraph "Phase 3: Native Workers (Macrotask)"
-    Workers[Check Worker Queue]
-    note3[Did a thread finish?]
-    end
-
-    Workers -- Yes! Task Resolved --> Start
-    Workers -- No, queue empty --> Sleep
-
-    subgraph "Phase 4: Idle"
-    Sleep[Sleep for Min Timer, 10ms]
-    end
-
-    Sleep --> Start
-
-    %% Styling
-    style Microtasks1 fill:#f96,stroke:#333,stroke-width:2px
-    style Start fill:#bbf,stroke:#333
-    style Exit fill:#f66,stroke:#333
-```
+- ES6 Module System: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
+- `fetch` API (WIP).
 
 **Expectations**:
 
-- Native Speed: Lexbor parses/manipulates HTML at C speeds
-- No Serialization: JS directly manipulates real DOM via FFI
-- Memory Efficient: Single DOM tree, no virtual DOM overhead
-- Zero Network: All SSR happens in-process
-- Tiny footprint: 0.6MB, very fast start-up
-
+- instant start, low footprint
 - NO JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts. Not suited for long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig` for this! (data processing, CSV parsing, batch and send to Zig...)
 
-[![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
-[![Scc Code Badge](https://sloc.xyz/github/ndrean/z-html/)](https://github.com/ndrean/z-html)
 
 ## Use cases
 
@@ -441,6 +389,8 @@ sequenceDiagram
     Note right of WorkerZig: Looks up property "onmessage"
 ```
 
+### DOM API integration
+
 This project exposes a significant / essential subset of all available `lexbor` functions:
 
 - Direct parsing or parsing with a parser engine (document or fragment context-aware)
@@ -468,6 +418,51 @@ Some functions borrow memory from `lexbor` for zero-copy operations: their resul
 
 We opted for the following convention: add `_zc` (for _zero_copy_) to the **non allocated** version of a function. For example, you can get the qualifiedName of an HTMLElement with the allocated version `qualifiedName(allocator, node)` or by mapping to `lexbor` memory with `qualifiedName_zc(node)`. The non-allocated must be consumed immediately whilst the allocated result can outlive the calling function.
 
+### **The Event Loop**
+
+```mermaid
+graph TD
+    %% Nodes
+    Start((Loop Start)) --> SignalCheck{Ctrl+C?}
+    SignalCheck -- Yes --> Exit
+    SignalCheck -- No --> Microtasks1
+
+    subgraph "Phase 1: Microtasks (High Priority)"
+    Microtasks1[Flush Pending Jobs]
+    note1[Executes all .then callbacks]
+    end
+
+    Microtasks1 --> ExitCheck{Can Exit?}
+    ExitCheck -- Empty Queue & No Timers --> Exit
+    ExitCheck -- Active --> Timers
+
+    subgraph "Phase 2: Timers (Macrotask)"
+    Timers[Check Timers]
+    note2[Did a timer fire?]
+    end
+
+    Timers -- Yes! Fired one --> Start
+    Timers -- No, all waiting --> Workers
+
+    subgraph "Phase 3: Native Workers (Macrotask)"
+    Workers[Check Worker Queue]
+    note3[Did a thread finish?]
+    end
+
+    Workers -- Yes! Task Resolved --> Start
+    Workers -- No, queue empty --> Sleep
+
+    subgraph "Phase 4: Idle"
+    Sleep[Sleep for Min Timer, 10ms]
+    end
+
+    Sleep --> Start
+
+    %% Styling
+    style Microtasks1 fill:#f96,stroke:#333,stroke-width:2px
+    style Start fill:#bbf,stroke:#333
+    style Exit fill:#f66,stroke:#333
+```
 ---
 
 ## Install
