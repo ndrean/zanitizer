@@ -66,13 +66,14 @@ const ReturnType = union(enum) {
     owned_document,
 
     string, // []const u8 (allocated, will be freed with allocator from args)
+    string_zc, // []const u8 (zero-copy, do not free)
     optional_string, // ?[]const u8
     int32,
     uint32,
     boolean,
 
     // Special cases
-    error_string, // ![]const u8
+    error_string, // allocated, returns ![]u8
     error_document, // !*HTMLDocument
     error_owned_document,
 };
@@ -211,6 +212,7 @@ fn genGetter(writer: anytype, func: BindingSpec) !void {
     switch (func.prop_this) {
         .this_node => {
             try writer.writeAll(
+                \\    _ = rc;
                 \\    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
                 \\    if (arg0_opt == null) return w.EXCEPTION; 
                 \\    const this_arg = arg0_opt.?;
@@ -250,7 +252,16 @@ fn genGetter(writer: anytype, func: BindingSpec) !void {
     // 2. Call Zig Getter
     //  !! If returning string/error_string, we assume the Zig func needs (allocator, node).
     if (func.prop_type == .error_string or func.prop_type == .string) {
-        try writer.print("    const result = {s}(rc.allocator, this_arg)", .{func.getter});
+        if (func.prop_this == .this_node) {
+            // Fallback for nodes that might allocate (rare)
+            try writer.print("    const result = {s}(rc.allocator, this_arg)", .{func.getter});
+        } else {
+            // Element: Allocator assumption (e.g. z.innerHTML(allocator, element))
+            try writer.print("    const result = {s}(rc.allocator, this_arg)", .{func.getter});
+        }
+    } else if (func.prop_type == .string_zc) {
+        // Zero-Copy: Never pass allocator
+        try writer.print("    const result = {s}(this_arg)", .{func.getter});
     } else {
         try writer.print("    const result = {s}(this_arg)", .{func.getter});
     }
@@ -264,10 +275,17 @@ fn genGetter(writer: anytype, func: BindingSpec) !void {
         try writer.writeAll(";\n");
         try writer.writeAll("    defer rc.allocator.free(result);\n");
         try writer.writeAll("    return ctx.newString(result);\n");
+    } else if (func.prop_type == .string_zc) {
+        // [FIX] Added missing handler for Zero-Copy strings
+        try writer.writeAll(";\n    return ctx.newString(result);\n");
     } else if (func.prop_type == .boolean) {
         try writer.writeAll(";\n    return ctx.newBool(result);\n");
     } else if (func.prop_type == .optional_element) {
         try writer.writeAll(";\n    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }\n");
+    } else if (func.prop_type == .optional_node) {
+        try writer.writeAll(";\n    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }\n");
+    } else if (func.prop_type == .node) {
+        try writer.writeAll(";\n    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;\n");
     } else {
         try writer.writeAll(";\n    return w.UNDEFINED;\n");
     }
@@ -335,7 +353,10 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
         },
     }
     // 2. Extract Value (from argv[0]) and Call Zig
-    if (func.prop_type == .error_string or func.prop_type == .string) {
+    if (func.prop_type == .error_string or
+        func.prop_type == .string or
+        func.prop_type == .string_zc)
+    {
         try writer.writeAll(
             \\    const val = argv[0];
             \\    const val_str = ctx.toZString(val) catch return w.EXCEPTION;
@@ -654,10 +675,17 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     }
 
     // Suppress ctx usage check if nothing uses it
-    const return_needs_ctx = (func.return_type == .element or func.return_type == .node or
-        func.return_type == .optional_element or func.return_type == .optional_node or
-        func.return_type == .string or func.return_type == .error_string or func.return_type == .optional_string or
-        func.return_type == .int32 or func.return_type == .uint32 or func.return_type == .boolean);
+    const return_needs_ctx = (func.return_type == .element or
+        func.return_type == .node or
+        func.return_type == .optional_element or
+        func.return_type == .optional_node or
+        func.return_type == .string or
+        func.return_type == .error_string or
+        func.return_type == .optional_string or
+        func.return_type == .string_zc or
+        func.return_type == .int32 or
+        func.return_type == .uint32 or
+        func.return_type == .boolean);
 
     // Note: 'rc' uses ctx, so ctx is almost always used now.
     // suppression logic commented, just in case, but updated.
@@ -881,6 +909,9 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
             } else {
                 try writer.writeAll("    return ctx.newString(result);\n");
             }
+        },
+        .string_zc => {
+            try writer.writeAll("    return ctx.newString(result);\n");
         },
         .optional_string => try writer.writeAll("    if (result) |str| { return ctx.newString(str); } else { return w.NULL; }\n"),
         .int32 => try writer.writeAll("    return ctx.newInt32(result);\n"),

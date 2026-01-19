@@ -306,7 +306,7 @@ test "appendchild" {
     const body_node = z.bodyNode(doc).?;
     z.appendChild(z.elementToNode(div), z.elementToNode(p));
     z.appendChild(body_node, z.elementToNode(div));
-    try z.prettyPrint(allocator, body_node);
+    // try z.prettyPrint(allocator, body_node);
 }
 
 test "documentRoot is HTML, ownerDocument is document" {
@@ -747,18 +747,20 @@ test "destruction" {
     }
 }
 
-/// [core] Deep node clone in the same document
+/// [core] Deep node clone in the same document.
 ///
-///  JavaScript `cloneNode()`
-pub fn cloneNode(node: *z.DomNode) ?*z.DomNode {
-    return lxb_dom_node_clone(node, true);
+/// Arg `deep = true`.
+///
+///  JavaScript `node.cloneNode(true)`
+pub fn cloneNode(node: *z.DomNode, deep: bool) ?*z.DomNode {
+    return lxb_dom_node_clone(node, deep);
 }
 
 /// [core] Deep cross document clone
 ///
-///  JavaScript `importNode()`
-pub fn importNode(node: *z.DomNode, target_doc: *z.HTMLDocument) ?*z.DomNode {
-    return lxb_dom_document_import_node(target_doc, node, true);
+///  JavaScript `node.importNode(target_doc, true)`
+pub fn importNode(node: *z.DomNode, target_doc: *z.HTMLDocument, deep: bool) ?*z.DomNode {
+    return lxb_dom_document_import_node(target_doc, node, deep);
 }
 
 test "clone in a document" {
@@ -768,7 +770,7 @@ test "clone in a document" {
     const body = z.bodyNode(doc).?;
 
     const span = z.firstChild(body);
-    const cloned = z.cloneNode(span.?);
+    const cloned = z.cloneNode(span.?, true);
     try testing.expect(cloned != null);
 
     const p = z.nextSibling(span.?);
@@ -790,7 +792,7 @@ test "import between documents" {
     const body2 = z.bodyNode(doc2).?;
 
     const span = z.firstChild(body1);
-    const import = z.importNode(span.?, doc2);
+    const import = z.importNode(span.?, doc2, true);
     try testing.expect(import != null);
 
     const p = z.firstChild(body2);
@@ -843,7 +845,7 @@ pub fn lastChild(node: *z.DomNode) ?*z.DomNode {
     return lxb_dom_node_last_child_noi(node);
 }
 
-test "firstChild / lastChild / next / previous" {
+test "firstChild / lastChild / next / previous / parent of parent chain" {
     const allocator = testing.allocator;
     {
         const doc = try z.parseHTML(allocator, "");
@@ -898,18 +900,43 @@ test "firstChild / lastChild / next / previous" {
 
         const prev_next_span = z.previousSibling(next_span.?);
         try testing.expectEqualStrings("SPAN", z.nodeName_zc(prev_next_span.?));
+
+        // parent chain: SPAN > P > BODY > HTML > #document > null
+        const span_parent = z.parentNode(span.?);
+        try testing.expectEqualStrings("P", z.nodeName_zc(span_parent.?));
+        const span_parent_parent = z.parentNode(span_parent.?);
+        try testing.expectEqualStrings("BODY", z.nodeName_zc(span_parent_parent.?));
+        const span_parent_parent_parent = z.parentNode(span_parent_parent.?);
+        try testing.expectEqualStrings("HTML", z.nodeName_zc(span_parent_parent_parent.?));
+        const span_parent_parent_parent_parent = z.parentNode(span_parent_parent_parent.?);
+        try testing.expectEqualStrings("#document", z.nodeName_zc(span_parent_parent_parent_parent.?));
+        const span_parent_parent_parent_parent_parent = z.parentNode(span_parent_parent_parent_parent.?);
+        if (span_parent_parent_parent_parent_parent) |_| {
+            // we expect NULL here so this is an error
+            try testing.expect(false);
+        } else {
+            // we expect NULL to return true
+            // std.debug.print("is NULL\n", .{});
+            try testing.expect(true);
+        }
     }
 }
 
-/// [core] First element child
+/// [core] First element child (polymorphic)
 ///
-/// Takes an element and returns the first child element, or null if none exists.
+/// Takes an element, document fragment, or node and returns the first child element, or null if none exists.
 ///
-/// [JS] `Element.firstElementChild` property
+/// [JS] `ParentNode.firstElementChild` property (Element, Document, DocumentFragment)
 ///
 /// Skips non-element nodes such as text nodes, comments
-pub fn firstElementChild(element: *z.HTMLElement) ?*z.HTMLElement {
-    const node = elementToNode(element);
+pub fn firstElementChild(parent: anytype) ?*z.HTMLElement {
+    const node: *z.DomNode = switch (@TypeOf(parent)) {
+        *z.HTMLElement => elementToNode(parent),
+        *z.DocumentFragment => z.fragmentToNode(parent),
+        *z.HTMLDocument => documentRoot(parent) orelse return null,
+        *z.DomNode => parent,
+        else => @compileError("firstElementChild expects *HTMLElement, *DocumentFragment, *HTMLDocument, or *DomNode"),
+    };
     var child = firstChild(node);
     while (child != null) {
         if (nodeToElement(child.?)) |child_element| {
@@ -920,11 +947,19 @@ pub fn firstElementChild(element: *z.HTMLElement) ?*z.HTMLElement {
     return null;
 }
 
-/// [core] Last element child
+/// [core] Last element child (polymorphic)
 ///
-/// [JS] `Element.lastElementChild` property
-pub fn lastElementChild(element: *z.HTMLElement) ?*z.HTMLElement {
-    const node = elementToNode(element);
+/// [JS] `ParentNode.lastElementChild` property (Element, Document, DocumentFragment)
+///
+/// Skips non-element nodes such as text nodes, comments
+pub fn lastElementChild(parent: anytype) ?*z.HTMLElement {
+    const node: *z.DomNode = switch (@TypeOf(parent)) {
+        *z.HTMLElement => elementToNode(parent),
+        *z.DocumentFragment => z.fragmentToNode(parent),
+        *z.HTMLDocument => documentRoot(parent) orelse return null,
+        *z.DomNode => parent,
+        else => @compileError("lastElementChild expects *HTMLElement, *DocumentFragment, *HTMLDocument, or *DomNode"),
+    };
     var child = lastChild(node);
     while (child != null) {
         if (nodeToElement(child.?)) |child_element| {
@@ -1076,9 +1111,9 @@ test "childNodes" {
     }
 }
 
-/// [core] Collect only element children from an element
+/// [core] Collect only element children (polymorphic)
 ///
-/// [JS] `Element.children` property
+/// [JS] `ParentNode.children` property (Element, Document, DocumentFragment)
 ///
 /// Allocated: Caller needs to free the slice
 /// ## Example
@@ -1098,10 +1133,10 @@ test "childNodes" {
 /// }
 /// ```
 /// ## Signature
-pub fn children(allocator: std.mem.Allocator, parent_element: *z.HTMLElement) ![]*z.HTMLElement {
+pub fn children(allocator: std.mem.Allocator, parent: anytype) ![]*z.HTMLElement {
     var elements: std.ArrayList(*z.HTMLElement) = .empty;
 
-    var child = firstElementChild(parent_element);
+    var child = firstElementChild(parent);
     while (child != null) {
         try elements.append(allocator, child.?);
         child = nextElementSibling(child.?);
@@ -1492,6 +1527,7 @@ test "insertAdjacentElement - cloning into an empty target" {
         const cloned_node = z.importNode(
             z.elementToNode(child_element),
             doc,
+            true,
         );
         const clone_element = z.nodeToElement(cloned_node.?).?;
         try insertAdjacentElement(

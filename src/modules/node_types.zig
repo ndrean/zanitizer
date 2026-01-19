@@ -4,37 +4,77 @@ const z = @import("../root.zig");
 const testing = std.testing;
 const print = std.debug.print;
 
-/// Node types enum for easy comparison
-pub const NodeType = enum(u8) {
-    element = z.LXB_DOM_NODE_TYPE_ELEMENT,
-    text = z.LXB_DOM_NODE_TYPE_TEXT,
-    comment = z.LXB_DOM_NODE_TYPE_COMMENT,
-    document = z.LXB_DOM_NODE_TYPE_DOCUMENT,
-    fragment = z.LXB_DOM_NODE_TYPE_FRAGMENT,
-    unknown = z.LXB_DOM_NODE_TYPE_UNKNOWN,
+// /// Node types enum for easy comparison
+// pub const NodeType = enum(u8) {
+//     element = z.LXB_DOM_NODE_TYPE_ELEMENT,
+//     text = z.LXB_DOM_NODE_TYPE_TEXT,
+//     comment = z.LXB_DOM_NODE_TYPE_COMMENT,
+//     document = z.LXB_DOM_NODE_TYPE_DOCUMENT,
+//     fragment = z.LXB_DOM_NODE_TYPE_FRAGMENT,
+//     unknown = z.LXB_DOM_NODE_TYPE_UNKNOWN,
+// };
+
+pub const NodeType = enum(c_uint) {
+    element = 1,
+    attribute = 2,
+    text = 3,
+    cdata_section = 4,
+    processing_instruction = 7,
+    comment = 8,
+    document = 9,
+    document_type = 10,
+    document_fragment = 11,
+    unknown = 0,
+};
+
+const lxb_dom_event_target_t = extern struct {
+    events: ?*anyopaque,
+};
+
+pub const lxb_dom_node_t = extern struct {
+    event_target: lxb_dom_event_target_t,
+
+    local_name: usize, // uintptr_t
+    prefix: usize,
+    ns: usize,
+
+    owner_document: ?*anyopaque,
+
+    next: ?*lxb_dom_node_t,
+    prev: ?*lxb_dom_node_t,
+    parent: ?*lxb_dom_node_t,
+    first_child: ?*lxb_dom_node_t,
+    last_child: ?*lxb_dom_node_t,
+
+    user: ?*anyopaque,
+
+    type: c_uint, // lxb_dom_node_type_t (The treasure!)
 };
 
 /// [node_types] Get node type for enum comparison (Inlined)
 ///
 /// Values are: `.text`, `.comment`, `.document`, `.fragment`, `.element`, `.unknown`.
 pub inline fn nodeType(node: *z.DomNode) NodeType {
-    const node_name = z.nodeName_zc(node);
+    const raw: *lxb_dom_node_t = @ptrCast(@alignCast(node));
+    return @enumFromInt(raw.type);
 
-    // Fast string comparison - most common cases first
-    if (std.mem.eql(u8, node_name, "#text")) {
-        return .text;
-    } else if (std.mem.eql(u8, node_name, "#comment")) {
-        return .comment;
-    } else if (std.mem.eql(u8, node_name, "#document")) {
-        return .document;
-    } else if (std.mem.eql(u8, node_name, "#document-fragment")) {
-        return .fragment;
-    } else if (node_name.len > 0 and node_name[0] != '#') {
-        // Regular node names (DIV, P, SPAN, STRONG, EM...)
-        return .element;
-    } else {
-        return .unknown;
-    }
+    // const node_name = z.nodeName_zc(node);
+
+    // // Fast string comparison - most common cases first
+    // if (std.mem.eql(u8, node_name, "#text")) {
+    //     return .text;
+    // } else if (std.mem.eql(u8, node_name, "#comment")) {
+    //     return .comment;
+    // } else if (std.mem.eql(u8, node_name, "#document")) {
+    //     return .document;
+    // } else if (std.mem.eql(u8, node_name, "#document-fragment")) {
+    //     return .fragment;
+    // } else if (node_name.len > 0 and node_name[0] != '#') {
+    //     // Regular node names (DIV, P, SPAN, STRONG, EM...)
+    //     return .element;
+    // } else {
+    //     return .unknown;
+    // }
 }
 
 /// [node_types] human-readable type name (Inlined )
@@ -48,7 +88,7 @@ pub inline fn nodeTypeName(node: *z.DomNode) []const u8 {
         return "#comment";
     } else if (z.nodeType(node) == .document) {
         return "#document";
-    } else if (z.nodeType(node) == .fragment) {
+    } else if (z.nodeType(node) == .document_fragment) {
         return "#document-fragment";
     } else if (z.nodeType(node) == .element) {
         // Regular HTML tag names (DIV, P, SPAN, STRONG, EM...)
@@ -80,7 +120,7 @@ pub inline fn isTypeDocument(node: *z.DomNode) bool {
 
 /// [node_types] Check if node is a FRAGMENT node
 pub inline fn isTypeFragment(node: *z.DomNode) bool {
-    return nodeType(node) == .fragment;
+    return nodeType(node) == .document_fragment;
 }
 
 test "type / name checking" {
@@ -164,7 +204,7 @@ test "type / name checking" {
         if (std.mem.eql(u8, node_name, "#document-fragment")) {
             fragment_count += 1;
             try testing.expect(@intFromEnum(node_type) == 11);
-            try testing.expect(node_type == .fragment);
+            try testing.expect(node_type == .document_fragment);
             try testing.expectEqualStrings(
                 "#document-fragment",
                 node_type_name,

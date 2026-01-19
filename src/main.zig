@@ -60,8 +60,12 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // setupSignalHandler();
-    try bench(allocator);
+    setupSignalHandler();
+
+    try js_framework_1_bench(allocator);
+    try js_framework_2_bench(allocator);
+
+    // try bench(allocator);
     // try extractScript(allocator);
     // try eventListeners(allocator);
     // try transplante(allocator);
@@ -94,15 +98,95 @@ pub fn main() !void {
     // try demoWorker(allocator);
 }
 
+fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+
+    const html_file = try std.fs.cwd().openFile("js/js-fram-1/index.html", .{});
+    defer html_file.close();
+    const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+    const code_file = try std.fs.cwd().openFile("js/js-fram-1/js-benchmark.js", .{});
+    defer code_file.close();
+    const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(code);
+
+    const c_code = try allocator.dupeZ(u8, code);
+    defer allocator.free(c_code);
+    const val = try engine.eval(c_code, "bench_script");
+    engine.ctx.freeValue(val);
+
+    const driver_file = try std.fs.cwd().openFile("js/js-fram-1/driver.js", .{});
+    defer driver_file.close();
+    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(driver_js);
+
+    // const driver_js = @embedFile("../js/js-fram/driver.js");
+    // The click script <-- needs to be in "/src" to work
+    const driver_c_code = try allocator.dupeZ(u8, driver_js);
+    defer allocator.free(driver_c_code);
+    const driver = try engine.eval(driver_c_code, "driver.js");
+    engine.ctx.freeValue(driver);
+
+    const end = std.time.nanoTimestamp();
+    const ms = @divFloor(end - start, 1_000);
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n\n", .{ms});
+}
+
+fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+
+    const html_file = try std.fs.cwd().openFile("js/js-fram-2/index.html", .{});
+    defer html_file.close();
+    const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+    const code_file = try std.fs.cwd().openFile("js/js-fram-2/js-vanilla-bench.js", .{});
+    defer code_file.close();
+    const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(code);
+
+    const c_code = try allocator.dupeZ(u8, code);
+    defer allocator.free(c_code);
+    const val = try engine.eval(c_code, "bench_script");
+    engine.ctx.freeValue(val);
+
+    const driver_file = try std.fs.cwd().openFile("js/js-fram-2/driver.js", .{});
+    defer driver_file.close();
+    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(driver_js);
+
+    // const driver_js = @embedFile("../js/js-fram/driver.js");
+    // The click script <-- needs to be in "/src" to work
+
+    const driver_c_code = try allocator.dupeZ(u8, driver_js);
+    defer allocator.free(driver_c_code);
+    const driver = try engine.eval(driver_c_code, "driver.js");
+    engine.ctx.freeValue(driver);
+
+    const end = std.time.nanoTimestamp();
+    const ns = @divFloor(end - start, 1_000_000);
+
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ns});
+}
 fn bench(allocator: std.mem.Allocator) !void {
     var engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
 
     const start = std.time.nanoTimestamp();
-    const file = try std.fs.cwd().openFile("src/bench.html", .{});
-    defer file.close();
-    const html = try file.readToEndAlloc(allocator, 1024);
-    defer allocator.free(html);
+    // const file = try std.fs.cwd().openFile("src/bench.html", .{});
+    // defer file.close();
+    // const html = try file.readToEndAlloc(allocator, 1024);
+    const html = @embedFile("bench.html");
+    // defer allocator.free(html);
 
     try engine.loadHTML(html);
 
@@ -120,8 +204,8 @@ fn bench(allocator: std.mem.Allocator) !void {
     }
 
     const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000);
-    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ms});
+    const ms = @divFloor(end - start, 1_000_000);
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n\n", .{ms});
 }
 
 fn extractScript(allocator: std.mem.Allocator) !void {

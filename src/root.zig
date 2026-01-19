@@ -222,10 +222,14 @@ pub const commentContent_zc = text.commentContent_zc;
 
 pub const textContent = text.textContent;
 pub const textContent_zc = text.textContent_zc;
+/// Note: not style aware.
+pub const innerText = text.textContent_zc; // alias
 pub const replaceText = text.replaceText;
 pub const setContentAsText = text.setContentAsText;
 pub const setTextContent = text.setTextContent;
 pub const escapeHtml = text.escapeHtml;
+pub const nodeValue_zc = text.nodeValue_zc;
+pub const setNodeValue = text.setNodeValue;
 
 // DOM based normalization
 pub const isWhitespaceOnly = norm.isWhitespaceOnly;
@@ -296,8 +300,11 @@ pub const nodeToTemplate = frag_temp.nodeToTemplate;
 pub const elementToTemplate = frag_temp.elementToTemplate;
 // ---
 pub const templateContent = frag_temp.templateContent;
+pub const getTemplateContent = frag_temp.getTemplateContent;
+pub const getTemplateContentAsNode = frag_temp.getTemplateContentAsNode;
 pub const useTemplateElement = frag_temp.useTemplateElement;
 pub const innerTemplateHTML = frag_temp.innerTemplateHTML;
+pub const templateContentFirstElementChild = frag_temp.templateContentFirstElementChild;
 
 // Debug printing utilities
 pub const printDocStruct = serialize.printDocStruct;
@@ -344,12 +351,14 @@ pub const createCssEngine = css.createCssEngine;
 pub const querySelectorAll = css.querySelectorAll;
 pub const querySelector = css.querySelector;
 pub const filter = css.filter;
+pub const matches = css.matches;
 
 //============================================================================================
 // Class & ClassList
 
 pub const hasClass = classes.hasClass;
 pub const classList_zc = classes.classList_zc;
+pub const className = classes.classList_zc;
 pub const classListAsString = classes.classListAsString;
 // pub const classListAsString_zc = classes.classListAsString_zc;
 

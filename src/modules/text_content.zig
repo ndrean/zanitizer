@@ -129,6 +129,46 @@ pub fn textContent_zc(node: *z.DomNode) []const u8 {
     return text_ptr[0..len];
 }
 
+pub fn nodeValue_zc(node: *z.DomNode) []const u8 {
+    switch (z.nodeType(node)) {
+        .text => return z.textContent_zc(node),
+        .comment => return z.commentContent_zc(z.nodeToComment(node).?),
+        else => return "", // Elements and others have no nodeValue
+    }
+}
+
+pub fn setNodeValue(node: *z.DomNode, value: []const u8) !void {
+    switch (z.nodeType(node)) {
+        .text, .comment => try z.setContentAsText(node, value),
+        else => {}, // Elements and others have no nodeValue
+    }
+}
+
+test "nodeValue" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div><!--comment--><p>Text</p></div>");
+    defer z.destroyDocument(doc);
+    const bodyElt = z.bodyElement(doc).?;
+
+    const div = z.firstElementChild(bodyElt).?;
+    const comment_node = z.firstChild(z.elementToNode(div));
+    const p_node = z.nextSibling(comment_node.?);
+    const text_node = z.firstChild(p_node.?);
+
+    try testing.expect(z.nodeType(text_node.?) == .text);
+    try std.testing.expect(z.nodeType(comment_node.?) == .comment);
+    try std.testing.expect(z.nodeType(p_node.?) == .element);
+
+    try testing.expectEqualStrings("comment", z.nodeValue_zc(comment_node.?));
+    try testing.expectEqualStrings("Text", z.nodeValue_zc(text_node.?));
+
+    try z.setNodeValue(comment_node.?, "new comment");
+    try z.setNodeValue(text_node.?, "new text");
+
+    try testing.expectEqualStrings("new comment", z.nodeValue_zc(comment_node.?));
+    try testing.expectEqualStrings("new text", z.nodeValue_zc(text_node.?));
+}
+
 /// [core] Sets any inner content of a node with new content as text.
 ///
 /// This **replaces** _any_ existing content, even empty. check `replaceText()` to modify existing text nodes.

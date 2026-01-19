@@ -175,20 +175,29 @@ pub const CssSelectorEngine = struct {
         return self.selector_cache.getPtr(parsed.original_selector).?;
     }
 
-    /// [selectors] Find first matching node using cached selector
+    /// [selectors] Find first matching element using cached selector
     pub fn querySelectorCached(
         self: *Self,
-        root_node: *z.DomNode,
+        // root: *z.HTMLElement,
+        root: anytype,
         selector: *StoredSelector,
-    ) !?*z.DomNode {
+    ) !?*z.HTMLElement {
         if (!self.initialized) return Err.CssEngineNotInitialized;
+        const node = switch (@TypeOf(root)) {
+            *z.HTMLElement => z.elementToNode(root),
+            *z.HTMLDocument => z.documentRoot(root).?, // Search from <html>
+            *z.DocumentFragment => z.fragmentToNode(root),
+            *z.DomNode => root,
+            else => @compileError("querySelector root must be Element, Document, or Fragment"),
+        };
 
-        var context = FirstNodeContext.init();
+        var context = FirstElementContext.init();
         const status = lxb_selectors_find(
             self.selectors,
-            root_node,
+            // z.elementToNode(root),
+            node,
             selector.selector_list,
-            findFirstNodeCallback,
+            findFirstElementCallback,
             &context,
         );
 
@@ -197,23 +206,32 @@ pub const CssSelectorEngine = struct {
             return Err.CssSelectorFindFailed;
         }
 
-        return context.first_node;
+        return context.first_element;
     }
 
-    /// [selectors] Find all matching nodes using cached selector
+    /// [selectors] Find all matching elements using cached selector
     pub fn querySelectorAllCached(
         self: *Self,
-        root_node: *z.DomNode,
+        // root: *z.HTMLElement,
+        root: anytype,
         selector: *StoredSelector,
-    ) ![]*z.DomNode {
+    ) ![]*z.HTMLElement {
         if (!self.initialized) return Err.CssEngineNotInitialized;
+        const node = switch (@TypeOf(root)) {
+            *z.HTMLElement => z.elementToNode(root),
+            *z.HTMLDocument => z.documentRoot(root).?, // Search from <html>
+            *z.DocumentFragment => z.fragmentToNode(root),
+            *z.DomNode => root,
+            else => @compileError("querySelector root must be Element, Document, or Fragment"),
+        };
 
         var context = FindContext.init(self.allocator);
         defer context.deinit();
 
         const status = lxb_selectors_find(
             self.selectors,
-            root_node,
+            // z.elementToNode(root),
+            node,
             selector.selector_list,
             findCallback,
             &context,
@@ -230,39 +248,45 @@ pub const CssSelectorEngine = struct {
         return context.results.toOwnedSlice(self.allocator);
     }
 
-    /// [selectors] Find first matching node (optimized with caching and early stopping)
-    pub fn querySelector(
+    /// [selectors] Find first matching element (optimized with caching and early stopping)
+    pub fn querySelector(self: *Self, root: anytype, selector: []const u8) !?*z.HTMLElement {
+        const node = switch (@TypeOf(root)) {
+            *z.HTMLElement => z.elementToNode(root),
+            *z.HTMLDocument => z.documentRoot(root).?, // Search from <html>
+            *z.DocumentFragment => z.fragmentToNode(root),
+            *z.DomNode => root,
+            else => @compileError("querySelector root must be Element, Document, or Fragment"),
+        };
+        return self.querySelectorInternal(node, selector);
+    }
+    pub fn querySelectorInternal(
         self: *Self,
-        root_node: *z.DomNode,
+        // root: *z.HTMLElement,
+        root: *z.DomNode,
         selector: []const u8,
-    ) !?*z.DomNode {
+    ) !?*z.HTMLElement {
         if (!self.initialized) return Err.CssEngineNotInitialized;
 
         // Use cached selector for better performance
         const parsed = try self.getOrParseSelector(selector);
-        return self.querySelectorCached(root_node, parsed);
+        return self.querySelectorCached(root, parsed);
     }
 
-    /// [selectors] Check if any nodes match the selector
+    /// [selectors] Check if any elements match the selector
     pub fn matches(
         self: *Self,
-        root_node: *z.DomNode,
+        root: *z.HTMLElement,
         selector: []const u8,
     ) !bool {
         // Use cached querySelector for efficiency
-        const result = try self.querySelector(root_node, selector);
+        const result = try self.querySelector(root, selector);
         return result != null;
     }
 
-    /// [selectors] Match a single node against a CSS selector
-    /// Check if a specific node matches a selector (with type safety and caching)
-    pub fn matchNode(self: *Self, node: *z.DomNode, selector: []const u8) !bool {
+    /// [selectors] Match a single element against a CSS selector
+    /// Check if a specific element matches a selector (with caching)
+    pub fn matchElement(self: *Self, element: *z.HTMLElement, selector: []const u8) !bool {
         if (!self.initialized) return Err.CssEngineNotInitialized;
-
-        // CSS selectors only on element nodes
-        if (!z.isTypeElement(node)) {
-            return false;
-        }
 
         // Use cached selector for better performance
         const _selector = try self.getOrParseSelector(selector);
@@ -278,7 +302,7 @@ pub const CssSelectorEngine = struct {
 
         const status = lxb_selectors_match_node(
             self.selectors,
-            node,
+            z.elementToNode(element),
             _selector.selector_list,
             cb,
             &matched,
@@ -291,21 +315,32 @@ pub const CssSelectorEngine = struct {
         return matched;
     }
 
-    /// Find matching nodes (with caching and optional type filtering)
+    /// [selectors] Find all matching elements (with caching)
     ///
     /// Caller needs to free the slice
-    pub fn querySelectorAll(self: *Self, root_node: *z.DomNode, selector: []const u8) ![]*z.DomNode {
+    pub fn querySelectorAll(self: *Self, root: anytype, selector: []const u8) ![]*z.HTMLElement {
+        const node = switch (@TypeOf(root)) {
+            *z.HTMLElement => z.elementToNode(root),
+            *z.HTMLDocument => z.documentRoot(root).?, // Search from <html>
+            *z.DocumentFragment => z.fragmentToNode(root),
+            *z.DomNode => root,
+            else => @compileError("querySelectorAll root must be Element, Document, or Fragment"),
+        };
+        return self.querySelectorAllInternal(node, selector);
+    }
+
+    pub fn querySelectorAllInternal(self: *Self, root: *z.DomNode, selector: []const u8) ![]*z.HTMLElement {
         if (!self.initialized) return Err.CssEngineNotInitialized;
 
         // Use cached selector for better performance
         const _selector = try self.getOrParseSelector(selector);
-        return self.querySelectorAllCached(root_node, _selector);
+        return self.querySelectorAllCached(root, _selector);
     }
 
-    /// Query: Find all descendant nodes that match the selector
+    /// Query: Find all descendant elements that match the selector
     ///
-    /// /// Caller needs to free the slice
-    pub fn queryAll(self: *Self, nodes: []*z.DomNode, selector: []const u8) ![]*z.DomNode {
+    /// Caller needs to free the slice
+    pub fn queryAll(self: *Self, elements: []*z.HTMLElement, selector: []const u8) ![]*z.HTMLElement {
         if (!self.initialized) return Err.CssEngineNotInitialized;
 
         const selector_list = lxb_css_selectors_parse(
@@ -319,11 +354,11 @@ pub const CssSelectorEngine = struct {
         var context = FindContext.init(self.allocator);
         defer context.deinit();
 
-        // Search descendants of each input node
-        for (nodes) |node| {
+        // Search descendants of each input element
+        for (elements) |element| {
             const status = lxb_selectors_find(
                 self.selectors,
-                node,
+                z.elementToNode(element),
                 selector_list,
                 findCallback,
                 &context,
@@ -336,8 +371,8 @@ pub const CssSelectorEngine = struct {
         return context.results.toOwnedSlice(self.allocator);
     }
 
-    /// Filter: Keep only nodes that match the selector themselves
-    pub fn filter(self: *Self, nodes: []*z.DomNode, selector: []const u8) ![]*z.DomNode {
+    /// Filter: Keep only elements that match the selector themselves
+    pub fn filter(self: *Self, elements: []*z.HTMLElement, selector: []const u8) ![]*z.HTMLElement {
         if (!self.initialized) return Err.CssEngineNotInitialized;
 
         const selector_list = lxb_css_selectors_parse(
@@ -350,19 +385,17 @@ pub const CssSelectorEngine = struct {
         var context = FindContext.init(self.allocator);
         defer context.deinit();
 
-        // Test each input node directly
-        for (nodes) |node| {
-            if (z.isTypeElement(node)) {
-                const status = lxb_selectors_match_node(
-                    self.selectors,
-                    node,
-                    selector_list,
-                    findCallback,
-                    &context,
-                );
-                if (status != z._OK) {
-                    return Err.CssSelectorMatchFailed;
-                }
+        // Test each input element directly
+        for (elements) |element| {
+            const status = lxb_selectors_match_node(
+                self.selectors,
+                z.elementToNode(element),
+                selector_list,
+                findCallback,
+                &context,
+            );
+            if (status != z._OK) {
+                return Err.CssSelectorMatchFailed;
             }
         }
 
@@ -374,7 +407,7 @@ pub const CssSelectorEngine = struct {
 
 const FindContext = struct {
     allocator: std.mem.Allocator,
-    results: std.ArrayList(*z.DomNode) = .empty,
+    results: std.ArrayList(*z.HTMLElement) = .empty,
     oom_error: bool = false,
 
     fn init(allocator: std.mem.Allocator) FindContext {
@@ -386,32 +419,34 @@ const FindContext = struct {
     }
 };
 
-/// Callback function for lxb_selectors_find
+/// Callback function for lxb_selectors_find - converts DomNode to HTMLElement
 fn findCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
     const context: *FindContext = @ptrCast(@alignCast(ctx.?));
-    context.results.append(context.allocator, node) catch {
+    // CSS selectors only match elements, so this conversion should always succeed
+    const element = z.nodeToElement(node) orelse return z._OK; // Skip non-elements (shouldn't happen)
+    context.results.append(context.allocator, element) catch {
         context.oom_error = true;
         return z._STOP;
     };
     return z._OK;
 }
 
-// Special context for early stopping (nodes)
-const FirstNodeContext = struct {
-    first_node: ?*z.DomNode,
+// Special context for early stopping (elements)
+const FirstElementContext = struct {
+    first_element: ?*z.HTMLElement,
 
-    fn init() FirstNodeContext {
-        return .{ .first_node = null };
+    fn init() FirstElementContext {
+        return .{ .first_element = null };
     }
 };
 
-/// Callback that stops after finding first node
-fn findFirstNodeCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
-    const context: *FirstNodeContext = @ptrCast(@alignCast(ctx.?));
-    context.first_node = node;
+/// Callback that stops after finding first element
+fn findFirstElementCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
+    const context: *FirstElementContext = @ptrCast(@alignCast(ctx.?));
+    // CSS selectors only match elements, so this conversion should always succeed
+    context.first_element = z.nodeToElement(node);
 
     // Return a special status to indicate early stopping
-    // Some lexbor implementations might use this pattern
     return 0x7FFFFFFF; // Large positive number to indicate early stop
 }
 
@@ -419,56 +454,61 @@ fn findFirstNodeCallback(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*
 // CONVENIENCE FUNCTIONS
 //=============================================================================
 
-/// [selectors] High-level function: Find all elements by CSS selector in a document
+/// [selectors] High-level function: Find all elements by CSS selector in a document. Polymorphic root: document, element, or fragment
 ///
 /// Caller needs to free the returned slice.
-pub fn querySelectorAll(allocator: std.mem.Allocator, doc: *z.HTMLDocument, selector: []const u8) ![]*z.HTMLElement {
+pub fn querySelectorAll(allocator: std.mem.Allocator, root: anytype, selector: []const u8) ![]*z.HTMLElement {
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
-    const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
+    const node = switch (@TypeOf(root)) {
+        *z.HTMLElement => z.elementToNode(root),
+        *z.HTMLDocument => z.documentRoot(root).?, // Search from <html>
+        *z.DocumentFragment => z.fragmentToNode(root),
+        *z.DomNode => root,
+        else => @compileError("querySelectorAll root must be Element, Document, or Fragment"),
+    };
 
-    const nodes = try css_engine.querySelectorAll(body_node, selector);
-    defer allocator.free(nodes);
-
-    // Convert nodes to elements
-    var elements: std.ArrayList(*z.HTMLElement) = .empty;
-    defer elements.deinit(allocator);
-
-    for (nodes) |node| {
-        if (z.nodeToElement(node)) |element| {
-            try elements.append(allocator, element);
-        }
-    }
-
-    return elements.toOwnedSlice(allocator);
+    return css_engine.querySelectorAll(node, selector);
 }
 
-/// [selectors] High-level function: Find first element by CSS selector in a document
+/// [selectors] High-level function: Find first element by CSS selector in a document. Polymorphic root: document, element, or fragment
 ///
 /// Returns null if no element found.
-pub fn querySelector(allocator: std.mem.Allocator, doc: *z.HTMLDocument, selector: []const u8) !?*z.HTMLElement {
+pub fn querySelector(allocator: std.mem.Allocator, root: anytype, selector: []const u8) !?*z.HTMLElement {
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
-    const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
+    const node = switch (@TypeOf(root)) {
+        *z.HTMLElement => z.elementToNode(root),
+        *z.HTMLDocument => z.documentRoot(root).?, // Search from <html>
+        *z.DocumentFragment => z.fragmentToNode(root),
+        *z.DomNode => root,
+        else => @compileError("querySelector root must be Element, Document, or Fragment"),
+    };
 
-    const node = try css_engine.querySelector(body_node, selector);
-
-    if (node) |n| {
-        return z.nodeToElement(n);
-    }
-
-    return null;
+    return css_engine.querySelector(node, selector);
 }
 
-pub fn filter(allocator: std.mem.Allocator, nodes: []*z.DomNode, selector: []const u8) ![]*z.DomNode {
+/// [selectors] High-level function: Filter elements by CSS selector
+///
+/// Caller needs to free the returned slice.
+pub fn filter(allocator: std.mem.Allocator, elements: []*z.HTMLElement, selector: []const u8) ![]*z.HTMLElement {
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
-    return css_engine.filter(nodes, selector);
+    return css_engine.filter(elements, selector);
+}
+
+/// [selectors] High-level function: Check if an element matches a CSS selector
+///
+/// [JS] Element.matches(selector)
+pub fn matches(allocator: std.mem.Allocator, element: *z.HTMLElement, selector: []const u8) bool {
+    // Init engine on the fly (parsing is fast, creating engine is acceptable for user clicks)
+    var engine = CssSelectorEngine.init(allocator) catch return false;
+    defer engine.deinit();
+
+    return engine.matchElement(element, selector) catch false;
 }
 
 /// [selectors] Create a reusable CSS selector engine for high-performance repeated queries
@@ -583,36 +623,35 @@ test "CssSelectorEngine querySelector (low-level) functionality" {
     defer css_engine.deinit();
 
     const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
 
-    // Test 1: Engine querySelector should return first matching node
-    const first_p_node = try css_engine.querySelector(body_node, "p");
-    try testing.expect(first_p_node != null);
+    const p_selector = try css_engine.parseSelector("p");
+    defer p_selector.deinit();
 
-    if (first_p_node) |node| {
-        // Should be able to convert to element
-        const element = z.nodeToElement(node);
-        try testing.expect(element != null);
+    const poly_p = try css_engine.querySelector(doc, "p");
+    try testing.expect(poly_p != null);
 
-        if (element) |el| {
-            const tag_name = z.tagName_zc(el);
-            try testing.expectEqualStrings("P", tag_name);
-        }
+    // Test 1: Engine querySelector should return first matching element
+    const first_p = try css_engine.querySelector(body, "p");
+    try testing.expect(first_p != null);
+
+    if (first_p) |element| {
+        const tag_name = z.tagName_zc(element);
+        try testing.expectEqualStrings("P", tag_name);
     }
 
-    // Test 2: Engine querySelectorAll should return all matching nodes
-    const all_p_nodes = try css_engine.querySelectorAll(body_node, "p");
-    defer allocator.free(all_p_nodes);
-    try testing.expectEqual(@as(usize, 2), all_p_nodes.len);
+    // Test 2: Engine querySelectorAll should return all matching elements
+    const all_p = try css_engine.querySelectorAll(body, "p");
+    defer allocator.free(all_p);
+    try testing.expectEqual(@as(usize, 2), all_p.len);
 
     // Test 3: Verify early stopping efficiency
     // querySelector should stop after finding first match
-    const div_node = try css_engine.querySelector(body_node, "div");
-    try testing.expect(div_node != null);
+    const div_element = try css_engine.querySelector(body, "div");
+    try testing.expect(div_element != null);
 
     // Test 4: Non-existent selector
-    const missing_node = try css_engine.querySelector(body_node, ".nonexistent");
-    try testing.expect(missing_node == null);
+    const missing = try css_engine.querySelector(body, ".nonexistent");
+    try testing.expect(missing == null);
 }
 
 test "querySelector performance vs querySelectorAll[0]" {
@@ -666,27 +705,26 @@ test "CSS selector engine reuse" {
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
 
     // Create engine once, use multiple times
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
     // Find paragraphs
-    const paragraphs = try css_engine.querySelectorAll(body_node, "p");
+    const paragraphs = try css_engine.querySelectorAll(body, "p");
     defer allocator.free(paragraphs);
     try testing.expect(paragraphs.len == 2);
 
     // Find header
-    const headers = try css_engine.querySelectorAll(body_node, "h1");
+    const headers = try css_engine.querySelectorAll(body, "h1");
     defer allocator.free(headers);
     try testing.expect(headers.len == 1);
 
     // Test matches
-    const has_footer = try css_engine.matches(body_node, "footer");
+    const has_footer = try css_engine.matches(body, "footer");
     try testing.expect(has_footer);
 
-    const has_nav = try css_engine.matches(body_node, "nav");
+    const has_nav = try css_engine.matches(body, "nav");
     try testing.expect(!has_nav);
 }
 
@@ -706,21 +744,21 @@ test "CSS selector nth-child functionality" {
     const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
-    const body_node = z.bodyNode(doc).?;
+    const body = z.bodyElement(doc).?;
 
     // Test CSS selector for second li
     var engine = try z.CssSelectorEngine.init(allocator);
     defer engine.deinit();
 
     // Find the second li element using nth-child
-    const second_li_results = try engine.querySelectorAll(body_node, "ul > li:nth-child(2)");
+    const second_li_results = try engine.querySelectorAll(body, "ul > li:nth-child(2)");
     defer allocator.free(second_li_results);
 
     try testing.expect(second_li_results.len == 1);
 
     if (second_li_results.len > 0) {
-        const second_li_node = second_li_results[0];
-        const text_content = try z.textContent(allocator, second_li_node);
+        const second_li = second_li_results[0];
+        const text_content = try z.textContent(allocator, z.elementToNode(second_li));
         defer allocator.free(text_content);
 
         // Should be "Second item"
@@ -728,15 +766,15 @@ test "CSS selector nth-child functionality" {
     }
 
     // Test finding all li elements
-    const all_li_results = try engine.querySelectorAll(body_node, "ul > li");
+    const all_li_results = try engine.querySelectorAll(body, "ul > li");
     defer allocator.free(all_li_results);
 
     try testing.expect(all_li_results.len == 4);
 
     // Test first li using querySelector (single result)
-    const first_li_node = try engine.querySelector(body_node, "ul > li:first-child");
-    if (first_li_node) |node| {
-        const text_content = try z.textContent(allocator, node);
+    const first_li = try engine.querySelector(body, "ul > li:first-child");
+    if (first_li) |element| {
+        const text_content = try z.textContent(allocator, z.elementToNode(element));
         defer allocator.free(text_content);
         try testing.expect(std.mem.eql(u8, std.mem.trim(u8, text_content, " \t\n\r"), "First item"));
     } else {
@@ -753,14 +791,13 @@ test "challenging CSS selectors - lexbor example" {
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
 
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
     // Test 1: Multiple selectors with :has() pseudo-class
     const first_selector = ".x, div:has(p[id=Y i])";
-    const first_results = try css_engine.querySelectorAll(body_node, first_selector);
+    const first_results = try css_engine.querySelectorAll(body, first_selector);
     defer allocator.free(first_results);
 
     // z.print("First selector '{s}' found {d} elements\n", .{ first_selector, first_results.len });
@@ -772,7 +809,7 @@ test "challenging CSS selectors - lexbor example" {
 
     // Test 2: :blank pseudo-class
     const second_selector = "p:blank";
-    const second_results = try css_engine.querySelectorAll(body_node, second_selector);
+    const second_results = try css_engine.querySelectorAll(body, second_selector);
     defer allocator.free(second_results);
 
     // z.print("Second selector '{s}' found {d} elements\n", .{ second_selector, second_results.len });
@@ -839,9 +876,8 @@ test "CSS selector edge cases" {
         defer z.destroyDocument(doc);
 
         const body = z.bodyElement(doc).?;
-        const body_node = z.elementToNode(body);
 
-        const results = try css_engine.querySelectorAll(body_node, test_case.selector);
+        const results = try css_engine.querySelectorAll(body, test_case.selector);
         defer allocator.free(results);
 
         // z.print("  Selector: '{s}' -> {d} results (expected {d})\n", .{ test_case.selector, results.len, test_case.expected_count });
@@ -922,7 +958,7 @@ test "CSS selector edge cases" {
 //     try testing.expect(blue_blue_class);
 // }
 
-test "CSS selector matchNode vs find vs matches" {
+test "CSS selector matchElement vs find vs matches" {
     const allocator = testing.allocator;
     // !! the html string must be without whitespace, indentation, or newlines (#text nodes are not elements)
     const html =
@@ -931,19 +967,16 @@ test "CSS selector matchNode vs find vs matches" {
     const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
-    const body_node = z.bodyNode(doc).?;
-    const container_div = z.firstChild(body_node).?;
-    const red_box = z.firstChild(container_div).?;
-    const blue_box = z.nextSibling(red_box).?;
-    const paragraph = z.nextSibling(blue_box).?;
+    const body = z.bodyElement(doc).?;
+    const container_div = z.firstElementChild(body).?;
+    const red_box = z.firstElementChild(container_div).?;
+    const blue_box = z.nextElementSibling(red_box).?;
+    const paragraph = z.nextElementSibling(blue_box).?;
 
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
-    const found_div = try css_engine.querySelectorAll(
-        container_div,
-        "div",
-    );
+    const found_div = try css_engine.querySelectorAll(container_div, "div");
     defer allocator.free(found_div);
     try testing.expect(found_div.len == 3);
 
@@ -951,42 +984,42 @@ test "CSS selector matchNode vs find vs matches" {
     defer allocator.free(found_box);
     try testing.expect(found_box.len == 2);
 
-    const matches_div = try css_engine.matchNode(container_div, "div");
+    const matches_div = try css_engine.matchElement(container_div, "div");
     try testing.expect(matches_div);
 
-    const matches_box = try css_engine.matchNode(container_div, ".box");
+    const matches_box = try css_engine.matchElement(container_div, ".box");
     try testing.expect(!matches_box);
 
     const find_results = try css_engine.querySelectorAll(container_div, ".box");
     defer allocator.free(find_results);
     try testing.expect(find_results.len == 2);
 
-    for (find_results) |result_node| {
-        try testing.expect(!(result_node == container_div));
+    for (find_results) |result_element| {
+        try testing.expect(!(result_element == container_div));
     }
 
-    // Test with matchNode (not working)
-    const match_result = try css_engine.matchNode(container_div, ".box");
+    // Test with matchElement
+    const match_result = try css_engine.matchElement(container_div, ".box");
     try testing.expect(!match_result);
 
     // Red box tests
-    try testing.expect(try css_engine.matchNode(red_box, "div"));
-    try testing.expect(try css_engine.matchNode(red_box, ".box"));
-    try testing.expect(try css_engine.matchNode(red_box, ".red"));
-    try testing.expect(!try css_engine.matchNode(red_box, ".blue"));
+    try testing.expect(try css_engine.matchElement(red_box, "div"));
+    try testing.expect(try css_engine.matchElement(red_box, ".box"));
+    try testing.expect(try css_engine.matchElement(red_box, ".red"));
+    try testing.expect(!try css_engine.matchElement(red_box, ".blue"));
 
     // Blue box tests
-    try testing.expect(try css_engine.matchNode(blue_box, ".box"));
-    try testing.expect(try css_engine.matchNode(blue_box, ".blue"));
-    try testing.expect(!try css_engine.matchNode(blue_box, ".red"));
+    try testing.expect(try css_engine.matchElement(blue_box, ".box"));
+    try testing.expect(try css_engine.matchElement(blue_box, ".blue"));
+    try testing.expect(!try css_engine.matchElement(blue_box, ".red"));
 
     // Paragraph tests
-    try testing.expect(try css_engine.matchNode(paragraph, "p"));
-    try testing.expect(try css_engine.matchNode(paragraph, ".text"));
-    try testing.expect(!try css_engine.matchNode(paragraph, ".box"));
+    try testing.expect(try css_engine.matchElement(paragraph, "p"));
+    try testing.expect(try css_engine.matchElement(paragraph, ".text"));
+    try testing.expect(!try css_engine.matchElement(paragraph, ".box"));
 
-    // matchNode: Does the container itself have class "box"?
-    const container_matches_box = try css_engine.matchNode(container_div, ".box");
+    // matchElement: Does the container itself have class "box"?
+    const container_matches_box = try css_engine.matchElement(container_div, ".box");
     try testing.expect(!container_matches_box);
 
     // find: Are there any descendants with class "box"?
@@ -996,7 +1029,6 @@ test "CSS selector matchNode vs find vs matches" {
 
     try testing.expect(!container_matches_box); // Container itself is not .box
     try testing.expect(container_find_box.len == 2); // But it has 2 descendants with .box
-
 }
 
 test "query vs filter behavior" {
@@ -1007,37 +1039,37 @@ test "query vs filter behavior" {
     const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
-    const body_node = z.bodyNode(doc).?;
-    const container_div = z.firstChild(body_node).?;
-    const box_div = z.firstChild(container_div).?;
-    const paragraph = z.nextSibling(box_div).?;
-    const second_paragraph = z.nextSibling(paragraph).?;
+    const body = z.bodyElement(doc).?;
+    const container_div = z.firstElementChild(body).?;
+    const box_div = z.firstElementChild(container_div).?;
+    const paragraph = z.nextElementSibling(box_div).?;
+    const second_paragraph = z.nextElementSibling(paragraph).?;
 
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
-    // Setup: Array of nodes to work with (use `var` to allow mutation)
-    var input_nodes = [_]*z.DomNode{ container_div, box_div, paragraph, second_paragraph };
+    // Setup: Array of elements to work with (use `var` to allow mutation)
+    var input_elements = [_]*z.HTMLElement{ container_div, box_div, paragraph, second_paragraph };
 
-    // Query: Find descendants with class "box" from each input node
-    // `MATCH_ROOT` option allows searching from the root node itself => 2!
-    const query_results = try css_engine.queryAll(&input_nodes, ".box");
+    // Query: Find descendants with class "box" from each input element
+    // `MATCH_ROOT` option allows searching from the root element itself => 2!
+    const query_results = try css_engine.queryAll(&input_elements, ".box");
     defer allocator.free(query_results);
     try testing.expect(query_results.len == 2);
     // Should find the box_div when searching from container_div
 
-    const filter_results = try css_engine.filter(&input_nodes, ".box");
+    const filter_results = try css_engine.filter(&input_elements, ".box");
     defer allocator.free(filter_results);
     try testing.expect(filter_results.len == 1);
-    // Should keep only box_div from the input nodes
+    // Should keep only box_div from the input elements
 
     // Test with different selector
-    // `MATCH_ROOT` option allows searching from the root node itself
-    const query_divs = try css_engine.queryAll(&input_nodes, "div");
+    // `MATCH_ROOT` option allows searching from the root element itself
+    const query_divs = try css_engine.queryAll(&input_elements, "div");
     defer allocator.free(query_divs);
     try testing.expect(query_divs.len == 3);
 
-    const filter_divs = try css_engine.filter(&input_nodes, "div");
+    const filter_divs = try css_engine.filter(&input_elements, "div");
     defer allocator.free(filter_divs);
     try testing.expect(filter_divs.len == 2);
 }
@@ -1067,7 +1099,6 @@ test "CSS selector caching performance" {
     defer z.destroyDocument(doc);
 
     const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
 
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
@@ -1077,9 +1108,9 @@ test "CSS selector caching performance" {
     defer compiled_selector.deinit();
 
     // Use the compiled selector multiple times (this would be much faster in real scenarios)
-    const result1 = try css_engine.querySelectorCached(body_node, &compiled_selector);
-    const result2 = try css_engine.querySelectorCached(body_node, &compiled_selector);
-    const result3 = try css_engine.querySelectorCached(body_node, &compiled_selector);
+    const result1 = try css_engine.querySelectorCached(body, &compiled_selector);
+    const result2 = try css_engine.querySelectorCached(body, &compiled_selector);
+    const result3 = try css_engine.querySelectorCached(body, &compiled_selector);
 
     try testing.expect(result1 != null);
     try testing.expect(result2 != null);
@@ -1088,9 +1119,9 @@ test "CSS selector caching performance" {
     try testing.expect(result2.? == result3.?);
 
     // Test 2: Demonstrate automatic caching with repeated calls
-    const auto_result1 = try css_engine.querySelector(body_node, ".item-7");
-    const auto_result2 = try css_engine.querySelector(body_node, ".item-7"); // Should use cached selector
-    const auto_result3 = try css_engine.querySelector(body_node, ".item-7"); // Should use cached selector
+    const auto_result1 = try css_engine.querySelector(body, ".item-7");
+    const auto_result2 = try css_engine.querySelector(body, ".item-7"); // Should use cached selector
+    const auto_result3 = try css_engine.querySelector(body, ".item-7"); // Should use cached selector
 
     try testing.expect(auto_result1 != null);
     try testing.expect(auto_result2 != null);
@@ -1262,54 +1293,40 @@ test "multiple reuse css_engine" {
     defer allocator.free(normHTML);
     const doc = try z.parseHTML(allocator, normHTML);
     defer z.destroyDocument(doc);
-    const body_node = z.bodyNode(doc).?;
-
-    // try z.prettyPrint(allocator, body_node);
-
-    // const item_template = z.getElementById(body_node, "grocery-item-template");
-
-    // if (item_template != null) {
-    //     const grocery_item_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(item_template.?));
-    //     print("Grocery Item Template HTML:\n{s}\n", .{grocery_item_template_html});
-    //     allocator.free(grocery_item_template_html);
-    // } else {
-    //     print("not found", .{}); // Should find the grocery-item-template
-    // }
+    const body = z.bodyElement(doc).?;
 
     var css_engine = try CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
     for (0..100) |_| {
-        const item_template = try css_engine.querySelector(
-            body_node,
-            "#grocery-item-template",
-        );
+        const item_template = try css_engine.querySelector(body, "#grocery-item-template");
 
+        // Now querySelector returns HTMLElement directly, no need for nodeToElement
         const grocery_item_template_html = try z.innerTemplateHTML(allocator, item_template.?);
         defer allocator.free(grocery_item_template_html);
         std.debug.assert(grocery_item_template_html.len > 0);
 
-        const groceries_template = try css_engine.querySelector(body_node, "#groceries-page-template");
+        const groceries_template = try css_engine.querySelector(body, "#groceries-page-template");
         const groceries_html = try z.innerTemplateHTML(allocator, groceries_template.?);
         defer allocator.free(groceries_html);
         std.debug.assert(groceries_html.len > 0);
 
-        const shopping_template = try css_engine.querySelector(body_node, "#shopping-list-template");
+        const shopping_template = try css_engine.querySelector(body, "#shopping-list-template");
         const shopping_html = try z.innerTemplateHTML(allocator, shopping_template.?);
         defer allocator.free(shopping_html);
         std.debug.assert(shopping_html.len > 0);
 
-        const default_template = try css_engine.querySelector(body_node, "#item-details-default-template");
+        const default_template = try css_engine.querySelector(body, "#item-details-default-template");
         const default_html = try z.innerTemplateHTML(allocator, default_template.?);
         defer allocator.free(default_html);
         std.debug.assert(default_html.len > 0);
 
-        const details_template = try css_engine.querySelector(body_node, "#item-details-template");
+        const details_template = try css_engine.querySelector(body, "#item-details-template");
         const details_template_html = try z.innerTemplateHTML(allocator, details_template.?);
         defer allocator.free(details_template_html);
         std.debug.assert(details_template_html.len > 0);
 
-        const cart_item_template = try css_engine.querySelector(body_node, "#cart-item-template");
+        const cart_item_template = try css_engine.querySelector(body, "#cart-item-template");
         const cart_item_template_html = try z.innerTemplateHTML(allocator, cart_item_template.?);
         defer allocator.free(cart_item_template_html);
         std.debug.assert(cart_item_template_html.len > 0);

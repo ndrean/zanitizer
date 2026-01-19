@@ -15,9 +15,11 @@ This library can be used for:
 - ➡ One-shot usage (examples in `main.zig`)
 - ➡ long-running with event-loop/async
 
-## zeplorer vs JSDON first benchmark
+## Tests
 
-Process this HTML file with scripts:
+### zeplorer vs JSDON first benchmark
+
+<details><summary>Process this HTML file</summary>
 
 ```html
 <!DOCTYPE html>
@@ -42,8 +44,10 @@ Process this HTML file with scripts:
   </body>
 </html>
 ```
+</details>
 
-The `jsdom` script:
+
+<details><summary>The `jsdom` runner script:</summary>
 
 ```js
 console.time("Total");
@@ -56,8 +60,9 @@ const dom = new JSDOM(html, { runScripts: "dangerously" });
 console.timeEnd("Total");
 ```
 
-The `Zexplorer` script:
+</details>
 
+<details><summary>Zexplorer script:</summary>
 
 ```zig
 fn bench(allocator: std.mem.Allocator) !void {
@@ -65,11 +70,8 @@ fn bench(allocator: std.mem.Allocator) !void {
     defer engine.deinit();
 
     const start = std.time.nanoTimestamp();
-    const file = try std.fs.cwd().openFile("src/bench.html", .{});
-    defer file.close();
-    const html = try file.readToEndAlloc(allocator, 1024);
-    defer allocator.free(html);
 
+    const html = @embedFile("bench.html")
     try engine.loadHTML(html);
 
     const scripts = try engine.getScripts();
@@ -92,19 +94,981 @@ fn bench(allocator: std.mem.Allocator) !void {
 }
 ```
 
+</details>
+
 **Results**
 
-`Zexplorer` is much lighter thus much faster for smaller workloads whilst `jsdom` starts to shine for large workloads.
 
-| #rows   | Zexp   | jsdom  |
-| ------- | ------ | ------ |
-| 100     | 0.58ms | 241ms  |
-| 1_000   | 14ms   | 251ms  |
-| 10_000  | 139ms  | 331ms  |
-| 20_000  | 298ms  | 421ms  |
-| 50_000  | 794ms  | 662ms  |
-| 100_000 | 1633ms | 1062ms |
-| 500_000 | 7971ms | 4213ms |
+| #rows     | Zexp    | jsdom  |
+| --------- | ------- | ------ |
+| 100       | 0.13ms  | 241ms  |
+| 1_000     | 0.7ms   | 251ms  |
+| 10_000    | 52ms    | 331ms  |
+| 20_000    | 115ms   | 421ms  |
+| 50_000    | 279ms   | 662ms  |
+| 100_000   | 633ms   | 1062ms |
+| 500_000   | 4323ms  | 4213ms |
+| 1_000_000 | 15165ms | 9216ms |
+
+---
+
+### zexplorer running (vanilla)-js-framework-1 benchmark
+
+Source: <https://github.com/krausest/js-framework-benchmark/tree/master>
+
+<details><summary>index1.html</summary>
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VanillaJS</title>
+    <link href="/css/currentStyle.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="main">
+      <div class="container">
+        <div class="jumbotron">
+          <div class="row">
+            <div class="col-md-6">
+              <h1>VanillaJS</h1>
+            </div>
+            <div class="col-md-6">
+              <div class="row">
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="run"
+                  >
+                    Create 1,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="runlots"
+                  >
+                    Create 10,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="add"
+                  >
+                    Append 1,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="update"
+                  >
+                    Update every 10th row
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="clear"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="swaprows"
+                  >
+                    Swap Rows
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <table class="table table-hover table-striped test-data">
+          <tbody id="tbody"></tbody>
+        </table>
+        <span
+          class="preloadicon glyphicon glyphicon-remove"
+          aria-hidden="true"
+        ></span>
+      </div>
+    </div>
+    <script src="src/Main.js"></script>
+  </body>
+</html>
+```
+
+</details>
+
+<details><summary>JS benchmark-1.js Class version</summary>
+
+ ```js
+ function _random(max) {
+  return Math.round(Math.random() * 1000) % max;
+}
+
+const rowTemplate = document.createElement("tr");
+rowTemplate.innerHTML =
+  "<td class='col-md-1'></td><td class='col-md-4'><a class='lbl'></a></td><td class='col-md-1'><a class='remove'><span class='remove glyphicon glyphicon-remove' aria-hidden='true'></span></a></td><td class='col-md-6'></td>";
+
+class Store {
+  constructor() {
+    this.data = [];
+    this.backup = null;
+    this.selected = null;
+    this.id = 1;
+  }
+  buildData(count = 1000) {
+    var adjectives = [
+      "pretty",
+      "large",
+      "big",
+      "small",
+      "tall",
+      "short",
+      "long",
+      "handsome",
+      "plain",
+      "quaint",
+      "clean",
+      "elegant",
+      "easy",
+      "angry",
+      "crazy",
+      "helpful",
+      "mushy",
+      "odd",
+      "unsightly",
+      "adorable",
+      "important",
+      "inexpensive",
+      "cheap",
+      "expensive",
+      "fancy",
+    ];
+    var colours = [
+      "red",
+      "yellow",
+      "blue",
+      "green",
+      "pink",
+      "brown",
+      "purple",
+      "brown",
+      "white",
+      "black",
+      "orange",
+    ];
+    var nouns = [
+      "table",
+      "chair",
+      "house",
+      "bbq",
+      "desk",
+      "car",
+      "pony",
+      "cookie",
+      "sandwich",
+      "burger",
+      "pizza",
+      "mouse",
+      "keyboard",
+    ];
+    var data = [];
+    for (var i = 0; i < count; i++)
+      data.push({
+        id: this.id++,
+        label:
+          adjectives[_random(adjectives.length)] +
+          " " +
+          colours[_random(colours.length)] +
+          " " +
+          nouns[_random(nouns.length)],
+      });
+    return data;
+  }
+  updateData(mod = 10) {
+    for (let i = 0; i < this.data.length; i += 10) {
+      this.data[i].label += " !!!";
+      // this.data[i] = Object.assign({}, this.data[i], {label: this.data[i].label +' !!!'});
+    }
+  }
+  delete(id) {
+    const idx = this.data.findIndex((d) => d.id == id);
+    this.data = this.data.filter((e, i) => i != idx);
+    return this;
+  }
+  run() {
+    console.log("running");
+    this.data = this.buildData();
+    this.selected = null;
+  }
+  add() {
+    this.data = this.data.concat(this.buildData(1000));
+    this.selected = null;
+  }
+  update() {
+    this.updateData();
+    this.selected = null;
+  }
+  select(id) {
+    this.selected = id;
+  }
+  hideAll() {
+    this.backup = this.data;
+    this.data = [];
+    this.selected = null;
+  }
+  showAll() {
+    this.data = this.backup;
+    this.backup = null;
+    this.selected = null;
+  }
+  runLots() {
+    this.data = this.buildData(10000);
+    this.selected = null;
+  }
+  clear() {
+    this.data = [];
+    this.selected = null;
+  }
+  swapRows() {
+    if (this.data.length > 998) {
+      var a = this.data[1];
+      this.data[1] = this.data[998];
+      this.data[998] = a;
+    }
+  }
+}
+
+var getParentId = function (elem) {
+  while (elem) {
+    if (elem.tagName === "TR") {
+      return elem.data_id;
+    }
+    elem = elem.parentNode;
+  }
+  return undefined;
+};
+class Main {
+  constructor(props) {
+    this.store = new Store();
+    this.select = this.select.bind(this);
+    this.delete = this.delete.bind(this);
+    this.add = this.add.bind(this);
+    this.run = this.run.bind(this);
+    this.update = this.update.bind(this);
+    this.start = 0;
+    this.rows = [];
+    this.data = [];
+    this.selectedRow = undefined;
+
+    console.log("Main started");
+    document.getElementById("main").addEventListener("click", (e) => {
+      console.log("listener", e.type, e.target.tagName);
+      if (e.target.matches("#add")) {
+        e.preventDefault();
+        console.log("add");
+        this.add();
+      } else if (e.target.matches("#run")) {
+        e.preventDefault();
+        console.log("run");
+        this.run();
+      } else if (e.target.matches("#update")) {
+        e.preventDefault();
+        console.log("update");
+        this.update();
+      } else if (e.target.matches("#hideall")) {
+        e.preventDefault();
+        console.log("hideAll");
+        this.hideAll();
+      } else if (e.target.matches("#showall")) {
+        e.preventDefault();
+        console.log("showAll");
+        this.showAll();
+      } else if (e.target.matches("#runlots")) {
+        e.preventDefault();
+        console.log("runLots");
+        this.runLots();
+      } else if (e.target.matches("#clear")) {
+        e.preventDefault();
+        console.log("clear");
+        this.clear();
+      } else if (e.target.matches("#swaprows")) {
+        e.preventDefault();
+        console.log("swapRows");
+        this.swapRows();
+      } else if (e.target.matches(".remove")) {
+        e.preventDefault();
+        let id = getParentId(e.target);
+        let idx = this.findIdx(id);
+        console.log("delete", idx);
+        this.delete(idx);
+      } else if (e.target.matches(".lbl")) {
+        e.preventDefault();
+        let id = getParentId(e.target);
+        let idx = this.findIdx(id);
+        console.log("select", idx);
+        this.select(idx);
+      }
+    });
+    this.tbody = document.getElementById("tbody");
+  }
+  findIdx(id) {
+    for (let i = 0; i < this.data.length; i++) {
+      if (this.data[i].id === id) return i;
+    }
+    return undefined;
+  }
+  run() {
+    this.store.run();
+    this.updateRows();
+    this.appendRows();
+    this.unselect();
+  }
+  add() {
+    this.store.add();
+    this.appendRows();
+  }
+  update() {
+    this.store.update();
+    // this.updateRows();
+    for (let i = 0; i < this.data.length; i += 10) {
+      this.rows[i].childNodes[1].childNodes[0].innerText =
+        this.store.data[i].label;
+    }
+  }
+  unselect() {
+    if (this.selectedRow !== undefined) {
+      this.selectedRow.className = "";
+      this.selectedRow = undefined;
+    }
+  }
+  select(idx) {
+    this.unselect();
+    this.store.select(this.data[idx].id);
+    this.selectedRow = this.rows[idx];
+    this.selectedRow.className = "danger";
+  }
+  delete(idx) {
+    // Remove that row from the DOM
+    // this.store.delete(this.data[idx].id);
+    // this.rows[idx].remove();
+    // this.rows.splice(idx, 1);
+    // this.data.splice(idx, 1);
+
+    // Faster, shift all rows below the row that should be deleted rows one up and drop the last row
+    for (let i = this.rows.length - 2; i >= idx; i--) {
+      let tr = this.rows[i];
+      let data = this.store.data[i + 1];
+      tr.data_id = data.id;
+      tr.childNodes[0].innerText = data.id;
+      tr.childNodes[1].childNodes[0].innerText = data.label;
+      this.data[i] = this.store.data[i];
+    }
+    this.store.delete(this.data[idx].id);
+    this.data.splice(idx, 1);
+    this.rows.pop().remove();
+  }
+  updateRows() {
+    for (let i = 0; i < this.rows.length; i++) {
+      if (this.data[i] !== this.store.data[i]) {
+        let tr = this.rows[i];
+        let data = this.store.data[i];
+        tr.data_id = data.id;
+        tr.childNodes[0].innerText = data.id;
+        tr.childNodes[1].childNodes[0].innerText = data.label;
+        this.data[i] = this.store.data[i];
+      }
+    }
+  }
+  removeAllRows() {
+    // ~258 msecs
+    // for(let i=this.rows.length-1;i>=0;i--) {
+    //     tbody.removeChild(this.rows[i]);
+    // }
+    // ~251 msecs
+    // for(let i=0;i<this.rows.length;i++) {
+    //     tbody.removeChild(this.rows[i]);
+    // }
+    // ~216 msecs
+    // var cNode = tbody.cloneNode(false);
+    // tbody.parentNode.replaceChild(cNode ,tbody);
+    // ~212 msecs
+    this.tbody.textContent = "";
+
+    // ~236 msecs
+    // var rangeObj = new Range();
+    // rangeObj.selectNodeContents(tbody);
+    // rangeObj.deleteContents();
+    // ~260 msecs
+    // var last;
+    // while (last = tbody.lastChild) tbody.removeChild(last);
+  }
+  runLots() {
+    this.store.runLots();
+    this.updateRows();
+    this.appendRows();
+    this.unselect();
+  }
+  clear() {
+    this.store.clear();
+    this.rows = [];
+    this.data = [];
+    // 165 to 175 msecs, but feels like cheating
+    // requestAnimationFrame(() => {
+    this.removeAllRows();
+    this.unselect();
+    // });
+  }
+  swapRows() {
+    let old_selection = this.store.selected;
+    this.store.swapRows();
+    this.updateRows();
+    this.unselect();
+    if (old_selection >= 0) {
+      let idx = this.store.data.findIndex((d) => d.id === old_selection);
+      if (idx > 0) {
+        this.store.select(this.data[idx].id);
+        this.selectedRow = this.rows[idx];
+        this.selectedRow.className = "danger";
+      }
+    }
+  }
+  appendRows() {
+    // Using a document fragment is slower...
+    // var docfrag = document.createDocumentFragment();
+    // for(let i=this.rows.length;i<this.store.data.length; i++) {
+    //     let tr = this.createRow(this.store.data[i]);
+    //     this.rows[i] = tr;
+    //     this.data[i] = this.store.data[i];
+    //     docfrag.appendChild(tr);
+    // }
+    // this.tbody.appendChild(docfrag);
+
+    // ... than adding directly
+    var rows = this.rows,
+      s_data = this.store.data,
+      data = this.data,
+      tbody = this.tbody;
+    for (let i = rows.length; i < s_data.length; i++) {
+      let tr = this.createRow(s_data[i]);
+      rows[i] = tr;
+      data[i] = s_data[i];
+      tbody.appendChild(tr);
+    }
+  }
+  createRow(data) {
+    const tr = rowTemplate.cloneNode(true),
+      td1 = tr.firstChild,
+      a2 = td1.nextSibling.firstChild;
+    tr.data_id = data.id;
+    td1.textContent = data.id;
+    a2.textContent = data.label;
+    return tr;
+  }
+}
+
+new Main();
+
+```
+
+</details>
+
+<details><summary>JS code runner interpretated by Zexplorer:</summary>
+
+```js
+// driver.js - The "Click Generator"
+
+function click(id) {
+  const el = document.getElementById(id);
+  console.log("Cicked :", el.id);
+  if (!el) {
+    console.error("❌ Element not found: #" + id);
+    return;
+  }
+  // We use our custom dispatchEvent.
+  // In standard JS this would be el.click() or el.dispatchEvent(new Event('click'))
+  el.dispatchEvent("click");
+}
+
+function measure(name, actionId) {
+  const start = Date.now();
+  click(actionId);
+  // In a real browser, we'd wait for layout repaint here.
+  // In Zexplorer, execution is synchronous, so we are done immediately!
+  const end = Date.now();
+  console.log(`[${name}] took ${end - start} ms`);
+}
+
+console.log("🚀 Starting Benchmark...");
+
+// 1. Create 1,000 Rows
+measure("Create 1k", "run");
+
+// 2. Clear
+measure("Clear", "clear");
+
+// 3. Create 10,000 Rows (The stress test)
+measure("Create 10k", "runlots");
+
+// 4. Append 1,000 Rows
+measure("Append 1k", "add");
+
+// 5. Update every 10th row
+measure("Update", "update");
+
+// 6. Swap Rows
+measure("Swap", "swaprows");
+
+// 7. Verify Data (Sanity Check)
+const rows = document.querySelectorAll("tr");
+console.log(`✅ Final Row Count: ${rows.length}`);
+```
+
+</details>
+
+<details><summary>Zexplorer code to run this:</summary>
+
+```zig
+fn js_framework_bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+    const html_file = try std.fs.cwd().openFile("js/js-fram/index.html", .{});
+    defer html_file.close();
+    const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+    const code_file = try std.fs.cwd().openFile("js/js-fram/js-benchmark.js", .{});
+    defer code_file.close();
+    const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(code);
+
+    const c_code = try allocator.dupeZ(u8, code);
+    defer allocator.free(c_code);
+    const val = try engine.eval(c_code, "bench_script");
+    engine.ctx.freeValue(val);
+
+    const driver_file = try std.fs.cwd().openFile("js/js-fram/driver.js", .{});
+    defer driver_file.close();
+    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(driver_js);
+
+    // const driver_js = @embedFile("../js/js-fram/driver.js"); // The click script <-- needs to be in "/src" to work
+    const driver_c_code = try allocator.dupeZ(u8, driver_js);
+    defer allocator.free(driver_c_code);
+    const driver = try engine.eval(driver_c_code, "driver.js");
+    engine.ctx.freeValue(driver);
+
+    const end = std.time.nanoTimestamp();
+    const ms = @divFloor(end - start, 1_000);
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n", .{ms});
+}
+```
+
+</details>
+
+**Results**
+
+| Operation  | zexplorer | jsdom  |
+| ---------- | --------- | ------ |
+| Create 1k  | 3 ms      | 70 ms  |
+| Clear      | 1 ms      | 11 ms  |
+| Create 10k | 35 ms     | 557 ms |
+| Append 1k  | 3 ms      | 44     |
+| Update     | 6 ms      | 10 ms  |
+| Swap rows  | 0 ms      | 1 ms   |
+
+---
+
+### zexplorer running (vanilla)-js-framework-2 benchmark
+
+<details><summary>index2.html with templates</summary>
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <title>Benchmarks for Vanillajs-3</title>
+    <link href="/css/currentStyle.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="main">
+      <div class="container">
+        <div class="jumbotron">
+          <div class="row">
+            <div class="col-md-6">
+              <h1>Vanillajs-3-"keyed"</h1>
+            </div>
+            <div class="col-md-6">
+              <div class="row" id="app-actions">
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="run"
+                  >
+                    Create 1,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="runlots"
+                  >
+                    Create 10,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="add"
+                  >
+                    Append 1,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="update"
+                  >
+                    Update every 10th row
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="clear"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="swaprows"
+                  >
+                    Swap Rows
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <table class="table table-hover table-striped test-data">
+          <tbody id="tbody"></tbody>
+        </table>
+        <span
+          class="preloadicon glyphicon glyphicon-remove"
+          aria-hidden="true"
+        ></span>
+      </div>
+    </div>
+    <template
+      ><tr>
+        <td class="col-md-1">{id}</td>
+        <td class="col-md-4"><a class="lbl">{lbl}</a></td>
+        <td class="col-md-1">
+          <a class="remove"
+            ><span
+              class="remove glyphicon glyphicon-remove"
+              aria-hidden="true"
+            ></span
+          ></a>
+        </td>
+        <td class="col-md-6"></td></tr
+    ></template>
+    <script src="src/Main.js"></script>
+  </body>
+</html>
+```
+
+</details>
+
+<details><summary>JS-bench executor</summary>
+
+```js
+"use strict";
+const adjectives = [
+  "pretty",
+  "large",
+  "big",
+  "small",
+  "tall",
+  "short",
+  "long",
+  "handsome",
+  "plain",
+  "quaint",
+  "clean",
+  "elegant",
+  "easy",
+  "angry",
+  "crazy",
+  "helpful",
+  "mushy",
+  "odd",
+  "unsightly",
+  "adorable",
+  "important",
+  "inexpensive",
+  "cheap",
+  "expensive",
+  "fancy",
+];
+const colours = [
+  "red",
+  "yellow",
+  "blue",
+  "green",
+  "pink",
+  "brown",
+  "purple",
+  "brown",
+  "white",
+  "black",
+  "orange",
+];
+const nouns = [
+  "table",
+  "chair",
+  "house",
+  "bbq",
+  "desk",
+  "car",
+  "pony",
+  "cookie",
+  "sandwich",
+  "burger",
+  "pizza",
+  "mouse",
+  "keyboard",
+];
+
+const tbody = document.querySelector("tbody"),
+  l1 = adjectives.length,
+  l2 = colours.length,
+  l3 = nouns.length;
+let index = 1,
+  op = null,
+  c1 = null,
+  c2 = null,
+  c998 = null,
+  data = [],
+  selected = null;
+
+const app = {
+  run(n = 1000) {
+    if (data.length > 0) app.clear();
+    app.add(n);
+  },
+  runlots() {
+    app.run(10000);
+  },
+  add(n = 1000) {
+    const templ = document.querySelector("template");
+    const item = templ.content.firstElementChild;
+    const id = item.firstElementChild.firstChild;
+    const lbl = item.querySelector("a").firstChild;
+    for (let i = 0; i < n; i++) {
+      id.nodeValue = index++;
+      data.push(
+        (lbl.nodeValue = `${adjectives[Math.round(Math.random() * 1000) % l1]} ${colours[Math.round(Math.random() * 1000) % l2]} ${nouns[Math.round(Math.random() * 1000) % l3]}`),
+      );
+      tbody.appendChild(item.cloneNode(true));
+    }
+  },
+  update() {
+    for (let i = 0, item; i < data.length; i += 10) {
+      if (op === "update" && item?.hasOwnProperty("next")) item = item.next;
+      else if (item) {
+        item.next = tbody.childNodes[i];
+        item = item.next;
+      } else item = tbody.childNodes[i];
+      if (!item.hasOwnProperty("el"))
+        item.el = item.querySelector("a").firstChild;
+      item.el.nodeValue = data[i] += " !!!";
+    }
+  },
+  clear() {
+    tbody.textContent = "";
+    data = [];
+  },
+  swaprows() {
+    if (data.length < 999) return;
+    const d1 = data[1];
+    data[1] = data[998];
+    data[998] = d1;
+    if (op === "swaprows") {
+      const temp = c1;
+      c1 = c998;
+      c998 = temp;
+    } else {
+      c1 = tbody.children[1];
+      c2 = c1.nextElementSibling;
+      c998 = tbody.children[998];
+    }
+    tbody.insertBefore(c1, c998);
+    tbody.insertBefore(c998, c2);
+  },
+};
+
+tbody.addEventListener(new Event("click"), (e) => {
+  e.stopPropagation();
+  e.preventDefault();
+  op = "null";
+  if (e.target.tagName === "A") {
+    const element = e.target.parentNode.parentNode;
+    if (selected) selected.className = "";
+    selected = element === selected ? null : element;
+    if (selected) selected.className = "danger";
+  } else if (e.target.tagName === "SPAN") {
+    const element = e.target.parentNode.parentNode.parentNode;
+    const index = Array.prototype.indexOf.call(tbody.children, element);
+    element.remove();
+    data.splice(index, 1);
+  }
+});
+document.querySelector("#app-actions").addEventListener("click", (e) => {
+  e.stopPropagation();
+  e.preventDefault();
+  app[e.target.id]();
+  op = e.target.id;
+});
+
+```
+
+</details>
+
+<details><summary>node runner.js</summary>
+
+```js
+const fs = require("fs");
+const jsdom = require("jsdom");
+const { JSDOM } = jsdom;
+
+// 1. Load the files
+const html = fs.readFileSync("index.html", "utf8");
+const appCode = fs.readFileSync("js-vanilla-bench.js", "utf8");
+const driverCode = fs.readFileSync("driver.js", "utf8");
+
+// 2. Configure Virtual Console (to see console.log output)
+const virtualConsole = new jsdom.VirtualConsole();
+virtualConsole.forwardTo(console);
+
+// 3. Initialize JSDOM
+// We use 'runScripts: "dangerously"' to allow executing JS.
+const dom = new JSDOM(html, {
+  runScripts: "dangerously",
+  resources: "usable",
+  virtualConsole,
+});
+
+const { window } = dom;
+
+// 4. Polyfill global environment (optional but good for some libs)
+// JSDOM isolates variables, but the benchmark might rely on global behavior
+global.window = window;
+global.document = window.document;
+
+console.log("--- Starting JSDOM Benchmark ---");
+
+try {
+  // 5. Run the Application Code (Setup event listeners)
+  window.eval(appCode);
+
+  // 6. Run the Driver (Perform clicks and measurements)
+  window.eval(driverCode);
+} catch (e) {
+  console.error("Benchmark failed:", e);
+}
+
+```
+
+</details>
+
+<details><sumamry>Zig runner</sumamry>
+
+```zig
+fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+
+    const html_file = try std.fs.cwd().openFile("js/js-fram-2/index.html", .{});
+    defer html_file.close();
+    const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+    const code_file = try std.fs.cwd().openFile("js/js-fram-2/js-vanilla-bench.js", .{});
+    defer code_file.close();
+    const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(code);
+
+    const c_code = try allocator.dupeZ(u8, code);
+    defer allocator.free(c_code);
+    const val = try engine.eval(c_code, "bench_script");
+    engine.ctx.freeValue(val);
+
+    const driver_file = try std.fs.cwd().openFile("js/js-fram-2/driver.js", .{});
+    defer driver_file.close();
+    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(driver_js);
+
+    // const driver_js = @embedFile("../js/js-fram/driver.js");
+    // The click script <-- needs to be in "/src" to work
+
+    const driver_c_code = try allocator.dupeZ(u8, driver_js);
+    defer allocator.free(driver_c_code);
+    const driver = try engine.eval(driver_c_code, "driver.js");
+    engine.ctx.freeValue(driver);
+
+    const end = std.time.nanoTimestamp();
+    const ns = @divFloor(end - start, 1_000_000);
+
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ns});
+}
+```
+
+</details>
+
+**Results**
+
+
+| Operation        | zexplorer | jsdom   | Chrome (Approx) |
+| ---------------- | --------- | ------- | --------------- |
+| Create 1,000     | 1 ms      | 81 ms   | ~22 ms          |
+| Replace 1,000    | 3 ms      | 86 ms   | ~24 ms          |
+| Partial Update   | 2 ms      | 19 ms   | ~9 ms           |
+| Select Row       | 0 ms      | 4458 ms | ~2 ms           |
+| Swap Rows        | 0 ms      | 1 ms    | ~12 ms          |
+| Remove Row       | 0 ms      | 45 ms   | ~9 ms           |
+| Create 10,000    | 19 ms     | 3157 ms | ~229 ms         |
+| Append 1k to 10k | 7 ms      | 705 ms  | ~26 ms          |
+| Clear            | 7 ms      | 2975 ms | ~9 ms           |
+| Final count      | 0         | 0       | 0               |
+
+---
 
 **API integrated**:
   

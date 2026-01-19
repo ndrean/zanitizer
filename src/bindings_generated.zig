@@ -253,6 +253,25 @@ pub fn js_dispatchEvent(
     return w.UNDEFINED;
 }
 
+/// Generated wrapper for z.cloneNode
+pub fn js_cloneNode(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    if (argc < 1) return w.EXCEPTION;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (or unwrap failed)");
+    const arg0 = arg0_opt.?;
+    const arg1 = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;
+    // Call native Zig function
+    const result = z.cloneNode(arg0, arg1);
+
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
 /// Generated wrapper for z.appendChild
 pub fn js_appendChild(
     ctx_ptr: ?*qjs.JSContext,
@@ -274,22 +293,25 @@ pub fn js_appendChild(
     return w.UNDEFINED;
 }
 
-/// Generated wrapper for z.firstChild
-pub fn js_firstChild(
+/// Generated wrapper for z.insertBefore
+pub fn js_insertBefore(
     ctx_ptr: ?*qjs.JSContext,
     this_val: qjs.JSValue,
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
-    _ = argc; _ = argv;
+    if (argc < 1) return w.EXCEPTION;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
     if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (or unwrap failed)");
     const arg0 = arg0_opt.?;
+    const arg1_opt = DOMBridge.unwrapNode(ctx, argv[0]);
+    if (arg1_opt  == null) return ctx.throwTypeError("Argument 0 must be a Node");
+    const arg1 = arg1_opt.?;
     // Call native Zig function
-    const result = z.firstChild(arg0);
+    z.insertBefore(arg0, arg1);
 
-    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+    return w.UNDEFINED;
 }
 
 /// Generated wrapper for z.parentNode
@@ -489,16 +511,94 @@ pub fn js_get_textContent(
     _ = argc; _ = argv;
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
+    _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
     if (arg0_opt == null) return w.EXCEPTION; 
     const this_arg = arg0_opt.?;
-    const result = z.textContent(rc.allocator, this_arg) catch return w.EXCEPTION;
-    defer rc.allocator.free(result);
+    const result = z.textContent_zc(this_arg);
     return ctx.newString(result);
 }
 
 // Property Setter for textContent
 pub fn js_set_textContent(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const val = argv[0];
+    const val_str = ctx.toZString(val) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+    z.setContentAsText(this_arg, val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Property Getter for nodeValue
+pub fn js_get_nodeValue(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.nodeValue_zc(this_arg);
+    return ctx.newString(result);
+}
+
+// Property Setter for nodeValue
+pub fn js_set_nodeValue(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const val = argv[0];
+    const val_str = ctx.toZString(val) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+    z.setNodeValue(this_arg, val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+
+// Property Getter for innerText
+pub fn js_get_innerText(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.textContent_zc(this_arg);
+    return ctx.newString(result);
+}
+
+// Property Setter for innerText
+pub fn js_set_innerText(
     ctx_ptr: ?*qjs.JSContext,
     this_val: qjs.JSValue,
     argc: c_int,
@@ -554,6 +654,164 @@ pub fn js_set_innerHTML(
     defer ctx.freeZString(val_str);
     z.setInnerHTML(this_arg, val_str) catch return w.EXCEPTION;
     return w.UNDEFINED;
+}
+
+// Property Getter for content
+pub fn js_get_content(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.getTemplateContentAsNode(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for nextSibling
+pub fn js_get_nextSibling(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.nextSibling(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for previousSibling
+pub fn js_get_previousSibling(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.previousSibling(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for firstChild
+pub fn js_get_firstChild(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.firstChild(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for lastChild
+pub fn js_get_lastChild(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.lastChild(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for firstElementChild
+pub fn js_get_firstElementChild(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = rc;
+    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg0_opt == null) return w.EXCEPTION; 
+    const this_arg = arg0_opt.?;
+    const result = z.firstElementChild(this_arg);
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for nextElementSibling
+pub fn js_get_nextElementSibling(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.nextElementSibling(this_arg);
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for lastElementChild
+pub fn js_get_lastElementChild(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.lastElementChild(this_arg);
+    if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for className
+pub fn js_get_className(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.className(this_arg);
+    return ctx.newString(result);
 }
 
 // Boolean Getter for disabled
@@ -900,14 +1158,64 @@ pub fn installDocumentBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
 }
 
 pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "cloneNode", qjs.JS_NewCFunction(ctx, js_cloneNode, "cloneNode", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "appendChild", qjs.JS_NewCFunction(ctx, js_appendChild, "appendChild", 1));
-    _ = qjs.JS_SetPropertyStr(ctx, proto, "firstChild", qjs.JS_NewCFunction(ctx, js_firstChild, "firstChild", 0));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "insertBefore", qjs.JS_NewCFunction(ctx, js_insertBefore, "insertBefore", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "parentNode", qjs.JS_NewCFunction(ctx, js_parentNode, "parentNode", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "remove", qjs.JS_NewCFunction(ctx, js_remove, "remove", 0));
     {
         const atom = qjs.JS_NewAtom(ctx, "textContent");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_textContent, "get_textContent", 0, qjs.JS_CFUNC_generic, 0);
         const set_fn = qjs.JS_NewCFunction2(ctx, js_set_textContent, "set_textContent", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "nodeValue");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nodeValue, "get_nodeValue", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_nodeValue, "set_nodeValue", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "innerText");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_innerText, "get_innerText", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_innerText, "set_innerText", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "nextSibling");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nextSibling, "get_nextSibling", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "previousSibling");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_previousSibling, "get_previousSibling", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "firstChild");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_firstChild, "get_firstChild", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "lastChild");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_lastChild, "get_lastChild", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "firstElementChild");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_firstElementChild, "get_firstElementChild", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
@@ -925,6 +1233,34 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
         const atom = qjs.JS_NewAtom(ctx, "innerHTML");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_innerHTML, "get_innerHTML", 0, qjs.JS_CFUNC_generic, 0);
         const set_fn = qjs.JS_NewCFunction2(ctx, js_set_innerHTML, "set_innerHTML", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "content");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_content, "get_content", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "nextElementSibling");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nextElementSibling, "get_nextElementSibling", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "lastElementChild");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_lastElementChild, "get_lastElementChild", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "className");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_className, "get_className", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }

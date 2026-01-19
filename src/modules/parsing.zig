@@ -1288,7 +1288,7 @@ test "parseFragmentNodes - moving SVG elements" {
                 svg_count += 1;
 
                 // Route to graphics container
-                const cloned_svg = z.cloneNode(node).?;
+                const cloned_svg = z.cloneNode(node, true).?;
                 z.appendChild(
                     z.elementToNode(graphics_div),
                     cloned_svg,
@@ -1296,12 +1296,12 @@ test "parseFragmentNodes - moving SVG elements" {
             } else if (z.tagFromElement(element) == .div and z.hasClass(element, "icon-wrapper")) {
                 regular_html_count += 1;
                 // Route to icons container
-                const cloned = z.cloneNode(node).?;
+                const cloned = z.cloneNode(node, true).?;
                 z.appendChild(z.elementToNode(icons_div), cloned);
             } else {
                 regular_html_count += 1;
                 // Route to icons container (default)
-                const cloned = z.cloneNode(node).?;
+                const cloned = z.cloneNode(node, true).?;
                 z.appendChild(z.elementToNode(icons_div), cloned);
             }
         }
@@ -1718,6 +1718,36 @@ test "fragment contexts: picture responsive" {
     try testing.expect(std.mem.indexOf(u8, result, "loading=\"lazy\"") != null);
 }
 
+test "fragment contexts: audio sources" {
+    const allocator = testing.allocator;
+
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+
+    const doc = try parser.parseFromString("<audio id='podcast' controls></audio>");
+    defer z.destroyDocument(doc);
+
+    const body = z.bodyNode(doc).?;
+    const audio = z.getElementById(doc, "podcast").?;
+
+    const audio_html =
+        \\<source src="/podcast.ogg" type="audio/ogg">
+        \\<source src="/podcast.mp3" type="audio/mp3">
+        \\<track kind="descriptions" src="/descriptions.vtt" srclang="en">
+        \\<p>Your browser doesn't support HTML5 audio.</p>
+    ;
+
+    try parser.parseAndAppendFragment(audio, audio_html, .audio, .permissive);
+
+    const result = try z.outerHTML(allocator, z.nodeToElement(body).?);
+    defer allocator.free(result);
+
+    try testing.expect(std.mem.indexOf(u8, result, "podcast.ogg") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "podcast.mp3") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "descriptions.vtt") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "HTML5 audio") != null);
+}
+
 test "parseAndAppend - unified API for templates and fragments" {
     const allocator = testing.allocator;
 
@@ -1846,34 +1876,4 @@ test "parseTemplates - multiple template parsing" {
         search_pos = pos + 17;
     }
     try testing.expectEqual(@as(usize, 2), item_count);
-}
-
-test "fragment contexts: audio sources" {
-    const allocator = testing.allocator;
-
-    var parser = try z.DOMParser.init(allocator);
-    defer parser.deinit();
-
-    const doc = try parser.parseFromString("<audio id='podcast' controls></audio>");
-    defer z.destroyDocument(doc);
-
-    const body = z.bodyNode(doc).?;
-    const audio = z.getElementById(doc, "podcast").?;
-
-    const audio_html =
-        \\<source src="/podcast.ogg" type="audio/ogg">
-        \\<source src="/podcast.mp3" type="audio/mp3">
-        \\<track kind="descriptions" src="/descriptions.vtt" srclang="en">
-        \\<p>Your browser doesn't support HTML5 audio.</p>
-    ;
-
-    try parser.parseAndAppendFragment(audio, audio_html, .audio, .permissive);
-
-    const result = try z.outerHTML(allocator, z.nodeToElement(body).?);
-    defer allocator.free(result);
-
-    try testing.expect(std.mem.indexOf(u8, result, "podcast.ogg") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "podcast.mp3") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "descriptions.vtt") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "HTML5 audio") != null);
 }

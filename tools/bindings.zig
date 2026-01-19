@@ -78,6 +78,15 @@ pub const bindings = [_]BindingSpec{
         .return_type = .void_with_error,
     },
     .{
+        .name = "cloneNode",
+        .zig_func_name = "z.cloneNode",
+        .kind = .method,
+        .prop_this = .this_node,
+        .args = &.{ .this_node, .boolean }, // deep: bool
+        .return_type = .optional_node,
+    },
+
+    .{
         .name = "appendChild",
         .zig_func_name = "z.appendChild",
         .kind = .method,
@@ -85,12 +94,13 @@ pub const bindings = [_]BindingSpec{
         .return_type = .void_type,
     },
     .{
-        .name = "firstChild",
-        .zig_func_name = "z.firstChild",
+        .name = "insertBefore",
+        .zig_func_name = "z.insertBefore",
         .kind = .method,
-        .args = &.{.this_node},
-        .return_type = .optional_node,
+        .args = &.{ .this_node, .node },
+        .return_type = .void_type,
     },
+
     .{
         .name = "parentNode",
         .zig_func_name = "z.parentNode",
@@ -156,11 +166,26 @@ pub const bindings = [_]BindingSpec{
     .{
         .name = "textContent",
         .kind = .property,
-        .getter = "z.textContent", // New Helper
+        .getter = "z.textContent_zc", // New Helper
         .setter = "z.setContentAsText", // New Helper
-        // .setter = "z.setTextContent",
-        .prop_type = .error_string, // Returns ![]u8, Setter takes string
+        .prop_type = .string_zc, // Returns ![]u8, Setter takes string
         .prop_this = .this_node, // Works on any Node (Text, Element, etc.)
+    },
+    .{
+        .name = "nodeValue",
+        .kind = .property,
+        .getter = "z.nodeValue_zc",
+        .setter = "z.setNodeValue",
+        .prop_type = .string_zc,
+        .prop_this = .this_node,
+    },
+    .{
+        .name = "innerText",
+        .kind = .property,
+        .getter = "z.textContent_zc", // Alias to textContent
+        .setter = "z.setContentAsText",
+        .prop_type = .string_zc,
+        .prop_this = .this_node,
     },
 
     .{
@@ -171,6 +196,89 @@ pub const bindings = [_]BindingSpec{
         .prop_type = .error_string, // returns ![]u8
         .prop_this = .this_element,
     },
+
+    .{
+        .name = "content",
+        .kind = .property,
+        .getter = "z.getTemplateContentAsNode",
+        .setter = "", // Read-Only
+        .prop_type = .optional_node,
+        .prop_this = .this_element,
+    },
+    .{
+        .name = "nextSibling",
+        .kind = .property,
+        .getter = "z.nextSibling",
+        .setter = "", // Read-Only
+        .prop_type = .optional_node,
+        .prop_this = .this_node,
+    },
+    .{
+        .name = "previousSibling",
+        .kind = .property,
+        .getter = "z.previousSibling",
+        .setter = "", // Read-Only
+        .prop_type = .optional_node,
+        .prop_this = .this_node,
+    },
+    .{
+        .name = "firstChild",
+        .kind = .property,
+        .getter = "z.firstChild",
+        .setter = "", // Read-Only
+        .prop_type = .optional_node,
+        .prop_this = .this_node,
+    },
+
+    .{
+        .name = "lastChild",
+        .zig_func_name = "z.lastChild",
+        .kind = .property,
+        .getter = "z.lastChild",
+        .setter = "", // Read-Only
+        .prop_type = .optional_node,
+        .prop_this = .this_node,
+    },
+    .{
+        .name = "firstElementChild",
+        .kind = .property,
+        .getter = "z.firstElementChild",
+        .setter = "",
+        .prop_type = .optional_element, // Returns ?*HTMLElement
+        .prop_this = .this_node, // [FIX] Available on Document, Fragment, and Element
+    },
+    .{
+        .name = "nextElementSibling",
+        .kind = .property,
+        .getter = "z.nextElementSibling",
+        .setter = "", // Read-Only
+        .prop_type = .optional_element,
+        .prop_this = .this_element,
+    },
+    .{
+        .name = "lastElementChild",
+        .kind = .property,
+        .getter = "z.lastElementChild",
+        .setter = "", // Read-Only
+        .prop_type = .optional_element,
+        .prop_this = .this_element,
+    },
+    .{
+        .name = "className",
+        .kind = .property,
+        .getter = "z.className",
+        .setter = "",
+        .prop_type = .string_zc,
+        .prop_this = .this_element,
+    },
+    // .{
+    //     .name = "children",
+    //     .kind = .property,
+    //     .getter = "z.children",
+    //     .setter = "", // Read-Only
+    //     .prop_type = .element_list, <--- Not yet implemented
+    //     .prop_this = .this_element,
+    // },
     .{
         .name = "disabled",
         .kind = .boolean_attribute,
