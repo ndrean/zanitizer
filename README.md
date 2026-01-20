@@ -99,20 +99,20 @@ fn bench(allocator: std.mem.Allocator) !void {
 **Results**
 
 
-| #rows     | Zexp    | jsdom  |
-| --------- | ------- | ------ |
-| 100       | 0.13ms  | 241ms  |
-| 1_000     | 0.7ms   | 251ms  |
-| 10_000    | 52ms    | 331ms  |
-| 20_000    | 115ms   | 421ms  |
-| 50_000    | 279ms   | 662ms  |
-| 100_000   | 633ms   | 1062ms |
-| 500_000   | 4323ms  | 4213ms |
-| 1_000_000 | 15165ms | 9216ms |
+| #rows     | Zexplorer | jsdom  |
+| --------- | --------- | ------ |
+| 100       | 0.13ms    | 241ms  |
+| 1_000     | 0.7ms     | 251ms  |
+| 10_000    | 52ms      | 331ms  |
+| 20_000    | 115ms     | 421ms  |
+| 50_000    | 279ms     | 662ms  |
+| 100_000   | 633ms     | 1062ms |
+| 500_000   | 4323ms    | 4213ms |
+| 1_000_000 | 15165ms   | 9216ms |
 
 ---
 
-### zexplorer running (vanilla)-js-framework-1 benchmark
+### zexplorer running (vanilla)-js-framework-1 benchmark Class
 
 Source: <https://github.com/krausest/js-framework-benchmark/tree/master>
 
@@ -694,7 +694,7 @@ fn js_framework_bench(allocator: std.mem.Allocator) !void {
 
 ---
 
-### zexplorer running (vanilla)-js-framework-2 benchmark
+### zexplorer running (vanilla)-js-framework-2 benchmark Templates
 
 <details><summary>index2.html with templates</summary>
 
@@ -1069,6 +1069,430 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
 | Final count      | 0         | 0       | 0               |
 
 ---
+
+### zexplorer running (vanilla)-js-framework-3 benchmark EventListener
+
+<details><summary>index3.html with EventListener</summary>
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <title>Benchmarks for Vanillajs-3</title>
+    <link href="/css/currentStyle.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="main">
+      <div class="container">
+        <div class="jumbotron">
+          <div class="row">
+            <div class="col-md-6">
+              <h1>Vanillajs-3-"keyed"</h1>
+            </div>
+            <div class="col-md-6">
+              <div class="row" id="app-actions">
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="run"
+                  >
+                    Create 1,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="runlots"
+                  >
+                    Create 10,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="add"
+                  >
+                    Append 1,000 rows
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="update"
+                  >
+                    Update every 10th row
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="clear"
+                  >
+                    Clear
+                  </button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button
+                    type="button"
+                    class="btn btn-primary btn-block"
+                    id="swaprows"
+                  >
+                    Swap Rows
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <table class="table table-hover table-striped test-data">
+          <tbody id="tbody"></tbody>
+        </table>
+        <span
+          class="preloadicon glyphicon glyphicon-remove"
+          aria-hidden="true"
+        ></span>
+      </div>
+    </div>
+    <template
+      ><tr>
+        <td class="col-md-1">{id}</td>
+        <td class="col-md-4"><a class="lbl">{lbl}</a></td>
+        <td class="col-md-1">
+          <a class="remove"
+            ><span
+              class="remove glyphicon glyphicon-remove"
+              aria-hidden="true"
+            ></span
+          ></a>
+        </td>
+        <td class="col-md-6"></td></tr
+    ></template>
+    <script src="src/Main.js"></script>
+  </body>
+</html>
+
+```
+
+</details>
+
+<details><summary>JS-bench executor</summary>
+
+```js
+"use strict";
+const adjectives = [
+  "pretty",
+  "large",
+  "big",
+  "small",
+  "tall",
+  "short",
+  "long",
+  "handsome",
+  "plain",
+  "quaint",
+  "clean",
+  "elegant",
+  "easy",
+  "angry",
+  "crazy",
+  "helpful",
+  "mushy",
+  "odd",
+  "unsightly",
+  "adorable",
+  "important",
+  "inexpensive",
+  "cheap",
+  "expensive",
+  "fancy",
+];
+const colours = [
+  "red",
+  "yellow",
+  "blue",
+  "green",
+  "pink",
+  "brown",
+  "purple",
+  "brown",
+  "white",
+  "black",
+  "orange",
+];
+const nouns = [
+  "table",
+  "chair",
+  "house",
+  "bbq",
+  "desk",
+  "car",
+  "pony",
+  "cookie",
+  "sandwich",
+  "burger",
+  "pizza",
+  "mouse",
+  "keyboard",
+];
+
+const tbody = document.querySelector("tbody"),
+  l1 = adjectives.length,
+  l2 = colours.length,
+  l3 = nouns.length;
+let index = 1,
+  op = null,
+  c1 = null,
+  c2 = null,
+  c998 = null,
+  data = [],
+  selected = null;
+
+const app = {
+  run(n = 1000) {
+    if (data.length) app.clear();
+    app.add(n);
+  },
+  runlots() {
+    app.run(10000);
+  },
+  add(n = 1000) {
+    const item = document.querySelector("template").content.firstElementChild;
+    const id = item.firstElementChild.firstChild,
+      lbl = item.querySelector("a").firstChild;
+    for (let i = 0; i < n; i++) {
+      id.nodeValue = index++;
+      data.push(
+        (lbl.nodeValue = `${adjectives[Math.round(Math.random() * 1000) % l1]} ${colours[Math.round(Math.random() * 1000) % l2]} ${nouns[Math.round(Math.random() * 1000) % l3]}`),
+      );
+      tbody.appendChild(item.cloneNode(true));
+    }
+  },
+  update() {
+    for (let i = 0, item; i < data.length; i += 10) {
+      if (op === "update" && item?.hasOwnProperty("next")) item = item.next;
+      else if (item) {
+        item.next = tbody.childNodes[i];
+        item = item.next;
+      } else item = tbody.childNodes[i];
+      if (!item.hasOwnProperty("el"))
+        item.el = item.querySelector("a").firstChild;
+      item.el.nodeValue = data[i] += " !!!";
+    }
+  },
+  clear() {
+    tbody.textContent = "";
+    data = [];
+  },
+  swaprows() {
+    if (data.length < 999) return;
+    const d1 = data[1];
+    data[1] = data[998];
+    data[998] = d1;
+    if (op === "swaprows") {
+      const temp = c1;
+      c1 = c998;
+      c998 = temp;
+    } else {
+      c1 = tbody.children[1];
+      c2 = c1.nextElementSibling;
+      c998 = tbody.children[998];
+    }
+    tbody.insertBefore(c1, c998);
+    tbody.insertBefore(c998, c2);
+  },
+};
+
+// tbody.onclick = (e) => {
+tbody.addEventListener("click", (e) => {
+  // e.stopPropagation();
+  e.preventDefault();
+  op = "null";
+  if (e.target.tagName === "A") {
+    const element = e.target.parentNode.parentNode;
+    if (selected) selected.className = "";
+    selected = element === selected ? null : element;
+    if (selected) selected.className = "danger";
+  } else if (e.target.tagName === "SPAN") {
+    const element = e.target.parentNode.parentNode.parentNode;
+    const index = Array.prototype.indexOf.call(tbody.children, element);
+    element.remove();
+    data.splice(index, 1);
+  }
+});
+// document.querySelector("#app-actions").onclick = (e) => {
+document.querySelector("#app-actions").addEventListener("click", (e) => {
+  // e.stopPropagation();
+  e.preventDefault();
+  app[e.target.id]();
+  op = e.target.id;
+});
+
+```
+
+</details>
+
+<details><summary>node runner.js</summary>
+
+```js
+const fs = require("fs");
+const { JSDOM, VirtualConsole } = require("jsdom");
+const { performance } = require("perf_hooks");
+
+// 1. Load your artifacts
+const html = fs.readFileSync("index.html", "utf8");
+const appCode = fs.readFileSync("js-vanilla-bench.js", "utf8");
+
+// 2. Setup Virtual Console (to see logs)
+const virtualConsole = new VirtualConsole();
+virtualConsole.forwardTo(console);
+
+// 3. Initialize JSDOM
+const dom = new JSDOM(html, {
+  runScripts: "dangerously",
+  resources: "usable",
+  virtualConsole,
+});
+
+const { window } = dom;
+const { document } = window;
+
+// 4. Global Polyfills (Crucial for some frameworks/benchmarks)
+global.window = window;
+global.document = document;
+global.Node = window.Node;
+global.HTMLElement = window.HTMLElement;
+global.Event = window.Event;
+global.MouseEvent = window.MouseEvent;
+
+console.log("\n--- 🐢 Starting JSDOM Benchmark (Standard API) ---\n");
+
+try {
+  // 5. Load the Application Code
+  // This registers the addEventListener('click') on body/app-actions
+  window.eval(appCode);
+
+  // 6. Define the Driver Helper (JSDOM Version)
+  // We can't use your 'driver.js' directly because JSDOM needs 'new MouseEvent'
+  const click = (selector) => {
+    const el = document.querySelector(selector);
+    if (!el) {
+      console.log(`❌ Not found: ${selector}`);
+      return;
+    }
+
+    // JSDOM requires the formal event ceremony
+    const event = new window.MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    });
+    el.dispatchEvent(event);
+  };
+
+  const measure = (name, fn) => {
+    const start = performance.now();
+    fn();
+    const end = performance.now();
+    console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
+  };
+
+  // 7. Run the Suite
+  measure("Create 1k", () => click("#run"));
+  measure("Replace 1k", () => click("#run")); // clear + add
+
+  click("#runlots"); // Setup 10k
+  measure("Partial Update (10k)", () => click("#update"));
+
+  measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
+
+  click("#run"); // Reset to 1k
+  measure("Swap Rows", () => click("#swaprows"));
+
+  measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+
+  measure("Create 10k", () => click("#runlots"));
+
+  measure("Append 1k", () => click("#add"));
+
+  measure("Clear", () => click("#clear"));
+
+  const count = document.querySelectorAll("tr").length;
+  console.log(`\n✅ Final Row Count: ${count}`);
+} catch (e) {
+  console.error("Benchmark Crashed:", e);
+}
+
+```
+
+</details>
+
+<details><summary>Zig runner</summary>
+
+```zig
+fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+
+    const html_file = try std.fs.cwd().openFile("js/js-fram-3/index.html", .{});
+    defer html_file.close();
+    const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(html);
+
+    try engine.loadHTML(html);
+    const code_file = try std.fs.cwd().openFile("js/js-fram-3/js-vanilla-bench.js", .{});
+    defer code_file.close();
+    const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(code);
+
+    const c_code = try allocator.dupeZ(u8, code);
+    defer allocator.free(c_code);
+    const val = try engine.eval(c_code, "bench_script");
+    engine.ctx.freeValue(val);
+
+    const driver_file = try std.fs.cwd().openFile("js/js-fram-3/driver.js", .{});
+    defer driver_file.close();
+    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(driver_js);
+
+    // const driver_js = @embedFile("../js/js-fram/driver.js");
+    // The click script <-- needs to be in "/src" to work
+
+    const driver_c_code = try allocator.dupeZ(u8, driver_js);
+    defer allocator.free(driver_c_code);
+    const driver = try engine.eval(driver_c_code, "driver.js");
+    engine.ctx.freeValue(driver);
+
+    const end = std.time.nanoTimestamp();
+    const ns = @divFloor(end - start, 1_000_000);
+
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n", .{ns});
+}
+```
+
+</details>
+
+
+**Results**
+
+| Operation            | zexplorer | jsdom   |
+| -------------------- | --------- | ------- |
+| Create 1k            | 1 ms      | 78 ms   |
+| Replace 1k           | 3 ms      | 81 ms   |
+| Partial Update (10k) | 2 ms      | 19 ms   |
+| Select row           | 0 ms      | 4438 ms |
+| Swap rows            | 0 ms      | 1 ms    |
+| Remove row           | 0 ms      | 52 ms   |
+| Create 10k           | 20 ms     | 3212 ms |
+| Append 1k            | 8 ms      | 715     |
+| Clear                | 7 ms      | 3134 ms |
+
 
 **API integrated**:
   
