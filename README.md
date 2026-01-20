@@ -1493,8 +1493,9 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 | Append 1k            | 8 ms      | 715     |
 | Clear                | 7 ms      | 3134 ms |
 
+---
 
-**API integrated**:
+## DOM API integration
   
 - Native Zig Event Loop. Thread-safe loop handling Timers (microtasks) and  Promises (MicroTasks).
 - **Worker pool**: multi-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
@@ -1506,7 +1507,6 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 
 - instant start, low footprint
 - NO JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts. Not suited for long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig` for this! (data processing, CSV parsing, batch and send to Zig...)
-
 
 ## Use cases
 
