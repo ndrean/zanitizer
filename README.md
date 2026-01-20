@@ -6,7 +6,7 @@
 
 ## WIP
 
-A project to run a JavaScript runtime parser extended with DOM APIs.
+A project to run a fast JavaScript runtime parser extended with DOM APIs.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
@@ -21,6 +21,12 @@ We compare zexplorer vs jsdom running js-vanilla-benchframework tests.
 We parse the HTML and run the JavaScript scripts (the framework and the test suite).
 
 Source: <https://github.com/krausest/js-framework-benchmark>
+
+[TODO]: finish the CLI to run:
+
+```sh
+zxp loc/index.html loc/bench.js loc/test-runner.js
+```
 
 ### First Append rows & swap rows
 
