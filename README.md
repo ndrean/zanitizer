@@ -2,24 +2,29 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-HTML parser & JavaScript execution at native speed on a server
+`Zig` based HTML parser & JavaScript executor at native speed on a server
 
 ## WIP
 
-A project to run a JavaScript runtime extended with (some)  DOM APIs.
+A project to run a JavaScript runtime parser extended with DOM APIs.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
 This library can be used for:
 
-- ➡ One-shot usage (examples in `main.zig`)
-- ➡ long-running with event-loop/async
+- ➡ One-shot usage (examples in _/examples_  TODO)
+- ➡ long-running with event-loop/async (example TODO)
 
-## Tests
+## Tests zexplorer vs jsdom
 
-### zeplorer vs JSDON first benchmark
+We compare zexplorer vs jsdom running js-vanilla-benchframework tests.
+We parse the HTML and run the JavaScript scripts (the framework and the test suite).
 
-<details><summary>Process this HTML file</summary>
+Source: <https://github.com/krausest/js-framework-benchmark>
+
+### First Append rows & swap rows
+
+<details><summary>HTML with embedded benchmark Script</summary>
 
 ```html
 <!DOCTYPE html>
@@ -47,7 +52,7 @@ This library can be used for:
 </details>
 
 
-<details><summary>The `jsdom` runner script:</summary>
+<details><summary>jsdom runner script:</summary>
 
 ```js
 console.time("Total");
@@ -74,16 +79,16 @@ fn bench(allocator: std.mem.Allocator) !void {
     const html = @embedFile("bench.html")
     try engine.loadHTML(html);
 
-    const scripts = try engine.getScripts();
-    defer allocator.free(scripts);
+    const c_scripts = try engine.getScripts();
+    defer {
+      for (c_scripts) |code| allocator.free(code);
+      allocator.free(c_scripts);
+    }
 
-    for (scripts) |code| {
-        // TODO: integrate the sentinel conversion in `getScripts()`
-        const c_code = try allocator.dupeZ(u8, code);
-        defer allocator.free(c_code);
-        const val = engine.eval(c_code, "bench_script") catch |err| {
+    for (c_scripts) |code| {
+        const val = engine.eval(code, "bench_script") catch |err| {
             std.debug.print("Script Error: {}\n", .{err});
-            continue;
+            return err;
         };
         engine.ctx.freeValue(val);
     }
@@ -112,9 +117,7 @@ fn bench(allocator: std.mem.Allocator) !void {
 
 ---
 
-### zexplorer running (vanilla)-js-framework-1 benchmark Class
-
-Source: <https://github.com/krausest/js-framework-benchmark/tree/master>
+### Running Class based script
 
 <details><summary>index1.html</summary>
 
@@ -588,8 +591,7 @@ new Main();
 <details><summary>JS code runner interpretated by Zexplorer:</summary>
 
 ```js
-// driver.js - The "Click Generator"
-
+// clicker.js - The "Click Generator"
 function click(id) {
   const el = document.getElementById(id);
   console.log("Cicked :", el.id);
@@ -597,41 +599,27 @@ function click(id) {
     console.error("❌ Element not found: #" + id);
     return;
   }
-  // We use our custom dispatchEvent.
-  // In standard JS this would be el.click() or el.dispatchEvent(new Event('click'))
   el.dispatchEvent("click");
 }
 
 function measure(name, actionId) {
   const start = Date.now();
   click(actionId);
-  // In a real browser, we'd wait for layout repaint here.
-  // In Zexplorer, execution is synchronous, so we are done immediately!
+  // execution is synchronous
   const end = Date.now();
   console.log(`[${name}] took ${end - start} ms`);
 }
 
 console.log("🚀 Starting Benchmark...");
 
-// 1. Create 1,000 Rows
 measure("Create 1k", "run");
-
-// 2. Clear
 measure("Clear", "clear");
-
-// 3. Create 10,000 Rows (The stress test)
 measure("Create 10k", "runlots");
-
-// 4. Append 1,000 Rows
 measure("Append 1k", "add");
-
-// 5. Update every 10th row
+// Update every 10th row
 measure("Update", "update");
-
-// 6. Swap Rows
 measure("Swap", "swaprows");
-
-// 7. Verify Data (Sanity Check)
+// Sanity Check
 const rows = document.querySelectorAll("tr");
 console.log(`✅ Final Row Count: ${rows.length}`);
 ```
@@ -662,16 +650,15 @@ fn js_framework_bench(allocator: std.mem.Allocator) !void {
     const val = try engine.eval(c_code, "bench_script");
     engine.ctx.freeValue(val);
 
-    const driver_file = try std.fs.cwd().openFile("js/js-fram/driver.js", .{});
-    defer driver_file.close();
-    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
-    defer allocator.free(driver_js);
-
-    // const driver_js = @embedFile("../js/js-fram/driver.js"); // The click script <-- needs to be in "/src" to work
-    const driver_c_code = try allocator.dupeZ(u8, driver_js);
-    defer allocator.free(driver_c_code);
-    const driver = try engine.eval(driver_c_code, "driver.js");
-    engine.ctx.freeValue(driver);
+    const clicker_file = try std.fs.cwd().openFile("js/js-fram/clicker.js", .{});
+    defer clicker_file.close();
+    const clicker_js = try clicker_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(clicker_js);
+    // sentinel for C-quicjks
+    const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
+    defer allocator.free(clicker_c_code);
+    const clicker = try engine.eval(clicker_c_code, "clicker.js");
+    engine.ctx.freeValue(clicker);
 
     const end = std.time.nanoTimestamp();
     const ms = @divFloor(end - start, 1_000);
@@ -694,7 +681,7 @@ fn js_framework_bench(allocator: std.mem.Allocator) !void {
 
 ---
 
-### zexplorer running (vanilla)-js-framework-2 benchmark Templates
+### Using Templates
 
 <details><summary>index2.html with templates</summary>
 
@@ -958,23 +945,20 @@ document.querySelector("#app-actions").addEventListener("click", (e) => {
 
 </details>
 
-<details><summary>node runner.js</summary>
+<details><summary>node jsdom-runner.js</summary>
 
 ```js
 const fs = require("fs");
 const jsdom = require("jsdom");
 const { JSDOM } = jsdom;
 
-// 1. Load the files
 const html = fs.readFileSync("index.html", "utf8");
 const appCode = fs.readFileSync("js-vanilla-bench.js", "utf8");
-const driverCode = fs.readFileSync("driver.js", "utf8");
+const clickerCode = fs.readFileSync("clicker.js", "utf8");
 
-// 2. Configure Virtual Console (to see console.log output)
 const virtualConsole = new jsdom.VirtualConsole();
 virtualConsole.forwardTo(console);
 
-// 3. Initialize JSDOM
 // We use 'runScripts: "dangerously"' to allow executing JS.
 const dom = new JSDOM(html, {
   runScripts: "dangerously",
@@ -984,7 +968,7 @@ const dom = new JSDOM(html, {
 
 const { window } = dom;
 
-// 4. Polyfill global environment (optional but good for some libs)
+// Polyfill global environment (optional but good for some libs)
 // JSDOM isolates variables, but the benchmark might rely on global behavior
 global.window = window;
 global.document = window.document;
@@ -992,11 +976,11 @@ global.document = window.document;
 console.log("--- Starting JSDOM Benchmark ---");
 
 try {
-  // 5. Run the Application Code (Setup event listeners)
+  // Run the Application Code (Setup event listeners)
   window.eval(appCode);
 
-  // 6. Run the Driver (Perform clicks and measurements)
-  window.eval(driverCode);
+  // Run the clicker (Perform clicks and measurements)
+  window.eval(clickerCode);
 } catch (e) {
   console.error("Benchmark failed:", e);
 }
@@ -1018,30 +1002,25 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
     defer html_file.close();
     const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
     defer allocator.free(html);
-
     try engine.loadHTML(html);
+
     const code_file = try std.fs.cwd().openFile("js/js-fram-2/js-vanilla-bench.js", .{});
     defer code_file.close();
     const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
     defer allocator.free(code);
-
     const c_code = try allocator.dupeZ(u8, code);
     defer allocator.free(c_code);
     const val = try engine.eval(c_code, "bench_script");
     engine.ctx.freeValue(val);
 
-    const driver_file = try std.fs.cwd().openFile("js/js-fram-2/driver.js", .{});
-    defer driver_file.close();
-    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
-    defer allocator.free(driver_js);
-
-    // const driver_js = @embedFile("../js/js-fram/driver.js");
-    // The click script <-- needs to be in "/src" to work
-
-    const driver_c_code = try allocator.dupeZ(u8, driver_js);
-    defer allocator.free(driver_c_code);
-    const driver = try engine.eval(driver_c_code, "driver.js");
-    engine.ctx.freeValue(driver);
+    const clicker_file = try std.fs.cwd().openFile("js/js-fram-2/clicker.js", .{});
+    defer clicker_file.close();
+    const clicker_js = try clicker_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(clicker_js);
+    const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
+    defer allocator.free(clicker_c_code);
+    const clicker = try engine.eval(clicker_c_code, "clicker.js");
+    engine.ctx.freeValue(clicker);
 
     const end = std.time.nanoTimestamp();
     const ns = @divFloor(end - start, 1_000_000);
@@ -1070,9 +1049,9 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
 
 ---
 
-### zexplorer running (vanilla)-js-framework-3 benchmark EventListener
+### EventListener with bubbling
 
-<details><summary>index3.html with EventListener</summary>
+<details><summary>index3.html with EventListener bubbling</summary>
 
 ```html
 <!doctype html>
@@ -1336,22 +1315,19 @@ document.querySelector("#app-actions").addEventListener("click", (e) => {
 
 </details>
 
-<details><summary>node runner.js</summary>
+<details><summary>node jsdom-runner.js</summary>
 
 ```js
 const fs = require("fs");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { performance } = require("perf_hooks");
 
-// 1. Load your artifacts
 const html = fs.readFileSync("index.html", "utf8");
 const appCode = fs.readFileSync("js-vanilla-bench.js", "utf8");
 
-// 2. Setup Virtual Console (to see logs)
 const virtualConsole = new VirtualConsole();
 virtualConsole.forwardTo(console);
 
-// 3. Initialize JSDOM
 const dom = new JSDOM(html, {
   runScripts: "dangerously",
   resources: "usable",
@@ -1361,7 +1337,7 @@ const dom = new JSDOM(html, {
 const { window } = dom;
 const { document } = window;
 
-// 4. Global Polyfills (Crucial for some frameworks/benchmarks)
+// Global Polyfills (Crucial for some frameworks/benchmarks)
 global.window = window;
 global.document = document;
 global.Node = window.Node;
@@ -1372,12 +1348,12 @@ global.MouseEvent = window.MouseEvent;
 console.log("\n--- 🐢 Starting JSDOM Benchmark (Standard API) ---\n");
 
 try {
-  // 5. Load the Application Code
+  // Load the Application Code
   // This registers the addEventListener('click') on body/app-actions
   window.eval(appCode);
 
-  // 6. Define the Driver Helper (JSDOM Version)
-  // We can't use your 'driver.js' directly because JSDOM needs 'new MouseEvent'
+  // Define the clicker Helper (JSDOM Version)
+  // We can't use your 'clicker.js' directly because JSDOM needs 'new MouseEvent'
   const click = (selector) => {
     const el = document.querySelector(selector);
     if (!el) {
@@ -1385,7 +1361,7 @@ try {
       return;
     }
 
-    // JSDOM requires the formal event ceremony
+    // JSDOM requires the formal event
     const event = new window.MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -1401,26 +1377,20 @@ try {
     console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
   };
 
-  // 7. Run the Suite
+  // Test Suite
   measure("Create 1k", () => click("#run"));
   measure("Replace 1k", () => click("#run")); // clear + add
-
   click("#runlots"); // Setup 10k
   measure("Partial Update (10k)", () => click("#update"));
-
   measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
-
   click("#run"); // Reset to 1k
   measure("Swap Rows", () => click("#swaprows"));
-
   measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
-
   measure("Create 10k", () => click("#runlots"));
-
   measure("Append 1k", () => click("#add"));
-
   measure("Clear", () => click("#clear"));
 
+  // sanity
   const count = document.querySelectorAll("tr").length;
   console.log(`\n✅ Final Row Count: ${count}`);
 } catch (e) {
@@ -1456,18 +1426,18 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
     const val = try engine.eval(c_code, "bench_script");
     engine.ctx.freeValue(val);
 
-    const driver_file = try std.fs.cwd().openFile("js/js-fram-3/driver.js", .{});
-    defer driver_file.close();
-    const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
-    defer allocator.free(driver_js);
+    const clicker_file = try std.fs.cwd().openFile("js/js-fram-3/clicker.js", .{});
+    defer clicker_file.close();
+    const clicker_js = try clicker_file.readToEndAlloc(allocator, 1024 * 10);
+    defer allocator.free(clicker_js);
 
-    // const driver_js = @embedFile("../js/js-fram/driver.js");
+    // const clicker_js = @embedFile("../js/js-fram/clicker.js");
     // The click script <-- needs to be in "/src" to work
 
-    const driver_c_code = try allocator.dupeZ(u8, driver_js);
-    defer allocator.free(driver_c_code);
-    const driver = try engine.eval(driver_c_code, "driver.js");
-    engine.ctx.freeValue(driver);
+    const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
+    defer allocator.free(clicker_c_code);
+    const clicker = try engine.eval(clicker_c_code, "clicker.js");
+    engine.ctx.freeValue(clicker);
 
     const end = std.time.nanoTimestamp();
     const ns = @divFloor(end - start, 1_000_000);

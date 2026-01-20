@@ -20,37 +20,25 @@ function measure(name, fn) {
 
 console.log("\n🚀 Starting VanillaJS-2 Benchmark...\n");
 
-// 1. Create 1,000 rows
 measure("Create 1k", () => click("#run"));
-
-// 2. Replace all rows (Warmup + Run)
 // We click run again, which triggers clear() + add() internally
 measure("Replace 1k", () => click("#run"));
 
-// 3. Partial Update (Warmup: Create 10k first)
+// Partial Update (Warmup: Create 10k first)
 click("#runlots"); // Setup 10k
 measure("Partial Update (10k)", () => click("#update"));
 
-// 4. Select Row
-// We select the second row's label
+// Select Row: the second row's label
 measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
-
-// 5. Swap Rows (Reset to 1k first)
+// Swap Rows (Reset to 1k first)
 click("#run"); // Reset to 1k
 measure("Swap Rows", () => click("#swaprows"));
-
-// 6. Remove Row
 // Remove the 2nd row
 measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
-
-// 7. Create 10,000 Rows
 measure("Create 10k", () => click("#runlots"));
-
-// 8. Append 1,000 Rows (to the existing 10k)
+// Append 1,000 Rows (to the existing 10k)
 measure("Append 1k", () => click("#add"));
-
-// 9. Clear Rows
 measure("Clear", () => click("#clear"));
-
+// sanity check
 const count = document.querySelectorAll("tr").length;
 console.log(`✅ Final Row Count: ${count} (Should be 0)`);
