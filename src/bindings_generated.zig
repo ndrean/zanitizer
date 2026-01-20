@@ -194,6 +194,112 @@ pub fn js_parseFromString(
     return doc_obj;
 }
 
+// Property Getter for type
+pub fn js_get_type(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
+    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
+    const this_arg: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+    const result = z.events.getType(this_arg);
+    return ctx.newString(result);
+}
+
+// Property Getter for bubbles
+pub fn js_get_bubbles(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
+    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
+    const this_arg: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+    const result = z.events.getBubbles(this_arg);
+    return ctx.newBool(result);
+}
+
+// Property Getter for target
+pub fn js_get_target(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
+    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
+    const this_arg: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+    const result = z.events.getTarget(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+// Property Getter for currentTarget
+pub fn js_get_currentTarget(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
+    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
+    const this_arg: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+    const result = z.events.getCurrentTarget(this_arg);
+    if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
+}
+
+/// Generated wrapper for z.events.stopPropagation
+pub fn js_stopPropagation(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = argc; _ = argv;
+    const ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.event);
+    if (ptr0 == null) return ctx.throwTypeError("Object is not an Event");
+    const arg0: *z.events.DomEvent = @ptrCast(@alignCast(ptr0));
+    // Call native Zig function
+    z.events.stopPropagation(arg0);
+
+    return w.UNDEFINED;
+}
+
+/// Generated wrapper for z.events.preventDefault
+pub fn js_preventDefault(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    _ = argc; _ = argv;
+    const ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.event);
+    if (ptr0 == null) return ctx.throwTypeError("Object is not an Event");
+    const arg0: *z.events.DomEvent = @ptrCast(@alignCast(ptr0));
+    // Call native Zig function
+    z.events.preventDefault(arg0);
+
+    return w.UNDEFINED;
+}
+
 /// Generated wrapper for z.addEventListener
 pub fn js_addEventListener(
     ctx_ptr: ?*qjs.JSContext,
@@ -203,7 +309,7 @@ pub fn js_addEventListener(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    if (argc < 1) return w.EXCEPTION;
+    if (argc < 2) return w.EXCEPTION;
     const arg0 = ctx;
     const arg1: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
     const arg2_opt = DOMBridge.unwrapNode(ctx, this_val);
@@ -214,6 +320,36 @@ pub fn js_addEventListener(
     const arg4 = argv[1];
     // Call native Zig function
     z.addEventListener(arg0, arg1, arg2, arg3, arg4) catch |err| {
+     if (@errorReturnTrace()) |trace| {
+         std.debug.dumpStackTrace(trace.*);
+     }
+     std.debug.print("JS Binding Error: {}\n", .{err});
+     return ctx.throwTypeError("Native Zig Error");
+ };
+
+    return w.UNDEFINED;
+}
+
+/// Generated wrapper for z.removeEventListener
+pub fn js_removeEventListener(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 2) return w.EXCEPTION;
+    const arg0 = ctx;
+    const arg1: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+    const arg2_opt = DOMBridge.unwrapNode(ctx, this_val);
+    if (arg2_opt == null) return ctx.throwTypeError("'this' is not a Node (or unwrap failed)");
+    const arg2 = arg2_opt.?;
+    const arg3 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg3);
+    const arg4 = argv[1];
+    // Call native Zig function
+    z.removeEventListener(arg0, arg1, arg2, arg3, arg4) catch |err| {
      if (@errorReturnTrace()) |trace| {
          std.debug.dumpStackTrace(trace.*);
      }
@@ -239,10 +375,9 @@ pub fn js_dispatchEvent(
     const arg2_opt = DOMBridge.unwrapNode(ctx, this_val);
     if (arg2_opt == null) return ctx.throwTypeError("'this' is not a Node (or unwrap failed)");
     const arg2 = arg2_opt.?;
-    const arg3 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
-    defer ctx.freeZString(arg3);
+    const arg3 = argv[0];
     // Call native Zig function
-    z.dispatchEvent(arg0, arg1, arg2, arg3) catch |err| {
+    const result = z.dispatchEvent(arg0, arg1, arg2, arg3) catch |err| {
      if (@errorReturnTrace()) |trace| {
          std.debug.dumpStackTrace(trace.*);
      }
@@ -250,7 +385,7 @@ pub fn js_dispatchEvent(
      return ctx.throwTypeError("Native Zig Error");
  };
 
-    return w.UNDEFINED;
+    return ctx.newBool(result);
 }
 
 /// Generated wrapper for z.cloneNode
@@ -360,7 +495,7 @@ pub fn js_setAttribute(
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
     if (argc < 2) return w.EXCEPTION;
-    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
@@ -389,7 +524,7 @@ pub fn js_getAttribute(
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
-    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
@@ -410,7 +545,7 @@ pub fn js_removeAttribute(
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
-    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    const elem_ptr0 = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
     if (elem_ptr0 == null) return w.EXCEPTION;
     const arg0: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr0));
     const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
@@ -438,7 +573,7 @@ pub fn js_setHTML(
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
     const arg0 = rc.allocator;
-    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
     if (elem_ptr1 == null) return w.EXCEPTION;
     const arg1: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr1));
     const arg2 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
@@ -466,7 +601,7 @@ pub fn js_getHTML(
     const rc = RuntimeContext.get(ctx);
     _ = argc; _ = argv;
     const arg0 = rc.allocator;
-    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+    const elem_ptr1 = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
     if (elem_ptr1 == null) return w.EXCEPTION;
     const arg1: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr1));
     // Call native Zig function
@@ -513,7 +648,7 @@ pub fn js_get_textContent(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.textContent_zc(this_arg);
     return ctx.newString(result);
@@ -531,12 +666,15 @@ pub fn js_set_textContent(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (unwrap failed)");
     const this_arg = arg0_opt.?;
     const val = argv[0];
     const val_str = ctx.toZString(val) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    z.setContentAsText(this_arg, val_str) catch return w.EXCEPTION;
+    z.setContentAsText(this_arg, val_str) catch |err| {
+        std.debug.print("JS Setter Error (textContent): {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error in Setter");
+    };
     return w.UNDEFINED;
 }
 
@@ -552,7 +690,7 @@ pub fn js_get_nodeValue(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.nodeValue_zc(this_arg);
     return ctx.newString(result);
@@ -570,12 +708,15 @@ pub fn js_set_nodeValue(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (unwrap failed)");
     const this_arg = arg0_opt.?;
     const val = argv[0];
     const val_str = ctx.toZString(val) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    z.setNodeValue(this_arg, val_str) catch return w.EXCEPTION;
+    z.setNodeValue(this_arg, val_str) catch |err| {
+        std.debug.print("JS Setter Error (nodeValue): {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error in Setter");
+    };
     return w.UNDEFINED;
 }
 
@@ -591,7 +732,7 @@ pub fn js_get_innerText(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.textContent_zc(this_arg);
     return ctx.newString(result);
@@ -609,12 +750,15 @@ pub fn js_set_innerText(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (unwrap failed)");
     const this_arg = arg0_opt.?;
     const val = argv[0];
     const val_str = ctx.toZString(val) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    z.setContentAsText(this_arg, val_str) catch return w.EXCEPTION;
+    z.setContentAsText(this_arg, val_str) catch |err| {
+        std.debug.print("JS Setter Error (innerText): {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error in Setter");
+    };
     return w.UNDEFINED;
 }
 
@@ -647,12 +791,15 @@ pub fn js_set_innerHTML(
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return w.EXCEPTION; 
+    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
     const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
     const val = argv[0];
     const val_str = ctx.toZString(val) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    z.setInnerHTML(this_arg, val_str) catch return w.EXCEPTION;
+    z.setInnerHTML(this_arg, val_str) catch |err| {
+        std.debug.print("JS Setter Error (innerHTML): {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error in Setter");
+    };
     return w.UNDEFINED;
 }
 
@@ -685,7 +832,7 @@ pub fn js_get_nextSibling(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.nextSibling(this_arg);
     if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
@@ -703,7 +850,7 @@ pub fn js_get_previousSibling(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.previousSibling(this_arg);
     if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
@@ -721,7 +868,7 @@ pub fn js_get_firstChild(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.firstChild(this_arg);
     if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
@@ -739,7 +886,7 @@ pub fn js_get_lastChild(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.lastChild(this_arg);
     if (result) |node| { return DOMBridge.wrapNode(ctx, node) catch w.EXCEPTION; } else { return w.NULL; }
@@ -757,7 +904,7 @@ pub fn js_get_firstElementChild(
     const rc = RuntimeContext.get(ctx);
     _ = rc;
     const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-    if (arg0_opt == null) return w.EXCEPTION; 
+    if (arg0_opt == null) return w.EXCEPTION;
     const this_arg = arg0_opt.?;
     const result = z.firstElementChild(this_arg);
     if (result) |elem| { return DOMBridge.wrapElement(ctx, elem) catch w.EXCEPTION; } else { return w.NULL; }
@@ -1158,6 +1305,9 @@ pub fn installDocumentBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
 }
 
 pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "addEventListener", qjs.JS_NewCFunction(ctx, js_addEventListener, "addEventListener", 2));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "removeEventListener", qjs.JS_NewCFunction(ctx, js_removeEventListener, "removeEventListener", 2));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "dispatchEvent", qjs.JS_NewCFunction(ctx, js_dispatchEvent, "dispatchEvent", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "cloneNode", qjs.JS_NewCFunction(ctx, js_cloneNode, "cloneNode", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "appendChild", qjs.JS_NewCFunction(ctx, js_appendChild, "appendChild", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "insertBefore", qjs.JS_NewCFunction(ctx, js_insertBefore, "insertBefore", 1));
@@ -1222,8 +1372,6 @@ pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
 }
 
 pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
-    _ = qjs.JS_SetPropertyStr(ctx, proto, "addEventListener", qjs.JS_NewCFunction(ctx, js_addEventListener, "addEventListener", 1));
-    _ = qjs.JS_SetPropertyStr(ctx, proto, "dispatchEvent", qjs.JS_NewCFunction(ctx, js_dispatchEvent, "dispatchEvent", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "setAttribute", qjs.JS_NewCFunction(ctx, js_setAttribute, "setAttribute", 2));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "getAttribute", qjs.JS_NewCFunction(ctx, js_getAttribute, "getAttribute", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "removeAttribute", qjs.JS_NewCFunction(ctx, js_removeAttribute, "removeAttribute", 1));
@@ -1331,4 +1479,37 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
 
 pub fn installDOMParserBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "parseFromString", qjs.JS_NewCFunction(ctx, js_parseFromString, "parseFromString", 1));
+}
+
+pub fn installEventBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
+    {
+        const atom = qjs.JS_NewAtom(ctx, "type");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_type, "get_type", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "bubbles");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_bubbles, "get_bubbles", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "target");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_target, "get_target", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "currentTarget");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_currentTarget, "get_currentTarget", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "stopPropagation", qjs.JS_NewCFunction(ctx, js_stopPropagation, "stopPropagation", 0));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "preventDefault", qjs.JS_NewCFunction(ctx, js_preventDefault, "preventDefault", 0));
 }

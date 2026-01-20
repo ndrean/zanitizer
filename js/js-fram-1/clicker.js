@@ -8,10 +8,10 @@ function click(id) {
     return;
   }
   /// jsdom needs Event object for dispatchEvent
-  // el.dispatchEvent(new Event("click", { bubbles: true }));
+  el.dispatchEvent(new Event("click", { bubbles: true }));
 
   // Dispatch the click. Bubbling is handled by engine
-  el.dispatchEvent("click");
+  // el.dispatchEvent("click");
 }
 
 function measure(name, actionId) {

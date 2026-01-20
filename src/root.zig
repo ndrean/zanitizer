@@ -22,10 +22,12 @@ pub const dom_bridge = @import("dom_bridge.zig");
 // Mailbox for inter-thread communication (Worker pattern)
 pub const Mailbox = @import("mailbox.zig").Mailbox;
 pub const utils = @import("utils.zig");
+pub const events = @import("events.zig");
 
-// Event handling functions
+// Event handling functions: implemented in dom_bridge.zig
 pub const addEventListener = dom_bridge.addEventListener;
 pub const dispatchEvent = dom_bridge.dispatchEvent;
+pub const removeEventListener = dom_bridge.removeEventListener;
 
 // Re-export wrapper constants - use these instead of creating values manually
 // This avoids std.mem.zeroes() code smell and provides compile-time constants

@@ -60,6 +60,54 @@ pub const bindings = [_]BindingSpec{
         .prop_this = .this_parser,
     },
 
+    .{
+        .name = "type",
+        .kind = .property,
+        .getter = "z.events.getType",
+        .setter = "", // Read-Only
+        .prop_this = .this_event, // You need to add this enum or generic handling
+        .prop_type = .string_zc,
+    },
+    .{
+        .name = "bubbles",
+        .kind = .property,
+        .getter = "z.events.getBubbles",
+        .setter = "", // Read-Only
+        .prop_this = .this_event,
+        .prop_type = .boolean,
+    },
+    .{
+        .name = "target",
+        .kind = .property,
+        .getter = "z.events.getTarget",
+        .setter = "", // Read-Only
+        .prop_this = .this_event,
+        .prop_type = .optional_node,
+    },
+    .{
+        .name = "currentTarget",
+        .kind = .property,
+        .getter = "z.events.getCurrentTarget",
+        .setter = "", // Read-Only
+        .prop_this = .this_event,
+        .prop_type = .optional_node,
+    },
+    .{
+        .name = "stopPropagation",
+        .kind = .method,
+        .zig_func_name = "z.events.stopPropagation",
+        .args = &.{.this_event},
+        .return_type = .void_type,
+        .prop_this = .this_event,
+    },
+    .{
+        .name = "preventDefault",
+        .kind = .method,
+        .zig_func_name = "z.events.preventDefault",
+        .args = &.{.this_event},
+        .return_type = .void_type,
+        .prop_this = .this_event,
+    },
     // Node/Element methods (Prototype methods)
     .{
         .name = "addEventListener",
@@ -68,22 +116,32 @@ pub const bindings = [_]BindingSpec{
         // Pass Context first, then 'this' (Node), then Event Name, then Function
         .args = &.{ .context, .dom_bridge, .this_node, .string, .callback },
         .return_type = .void_with_error,
+        .prop_this = .this_node,
+    },
+    .{
+        .name = "removeEventListener",
+        .zig_func_name = "z.removeEventListener",
+        .kind = .method,
+        .args = &.{ .context, .dom_bridge, .this_node, .string, .callback },
+        .return_type = .void_with_error,
+        .prop_this = .this_node,
     },
     // Optional: Dispatch for manual testing
     .{
         .name = "dispatchEvent",
         .zig_func_name = "z.dispatchEvent",
         .kind = .method,
-        .args = &.{ .context, .dom_bridge, .this_node, .string },
-        .return_type = .void_with_error,
+        .args = &.{ .context, .dom_bridge, .this_node, .js_value },
+        .return_type = .error_boolean,
+        .prop_this = .this_node,
     },
     .{
         .name = "cloneNode",
         .zig_func_name = "z.cloneNode",
         .kind = .method,
-        .prop_this = .this_node,
         .args = &.{ .this_node, .boolean }, // deep: bool
         .return_type = .optional_node,
+        .prop_this = .this_node,
     },
 
     .{
@@ -121,6 +179,7 @@ pub const bindings = [_]BindingSpec{
         .kind = .method,
         .args = &.{ .this_element, .string, .string },
         .return_type = .void_with_error,
+        .prop_this = .this_element,
     },
     .{
         .name = "getAttribute",

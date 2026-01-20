@@ -37,9 +37,11 @@ pub const ArgType = union(enum) {
     context, // <--- Passes 'ctx' to Zig function
     callback, // <-- passes raw JS_Value
     dom_bridge,
+    js_value,
 
     // SOURCES
     this_parser,
+    this_event,
     this_element, // *HTMLElement from 'this'
     this_node, // *DomNode from 'this'
     this_document, // *HTMLDocument from 'this'
@@ -71,6 +73,7 @@ const ReturnType = union(enum) {
     int32,
     uint32,
     boolean,
+    error_boolean,
 
     // Special cases
     error_string, // allocated, returns ![]u8
@@ -127,7 +130,7 @@ pub fn main() !void {
     // GENERATE INSTALLERS
     // ============================================================
 
-    // 2. DOCUMENT Bindings (Static methods like createElement: doc_obj -> proto
+    // DOCUMENT Bindings (Static methods like createElement: doc_obj -> proto
     try writer.writeAll("\npub fn installDocumentBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
     for (bindings) |binding| {
         if (binding.kind == .static or binding.prop_this == .this_document) {
@@ -143,7 +146,7 @@ pub fn main() !void {
     }
     try writer.writeAll("}\n");
 
-    // 3. NODE Prototype Bindings (appendChild, parentNode, etc.)
+    // NODE Prototype Bindings (appendChild, parentNode, etc.)
     try writer.writeAll("\npub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
     for (bindings) |binding| {
         //  Belongs to Node if 'this' is defined as .this_node
@@ -158,7 +161,7 @@ pub fn main() !void {
     }
     try writer.writeAll("}\n");
 
-    // 4. ELEMENT Prototype Bindings (innerHTML, setAttribute, etc.)
+    // ELEMENT Prototype Bindings (innerHTML, setAttribute, etc.)
     try writer.writeAll("\npub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
     for (bindings) |binding| {
         // If it's not 'static' and not a Node method, it's an Element method
@@ -167,16 +170,30 @@ pub fn main() !void {
             else => if (binding.args.len > 0 and binding.args[0] == .this_node) true else false,
         };
 
-        if (binding.kind != .static and !is_node_method and binding.prop_this != .this_document and binding.prop_this != .this_parser) {
+        if (binding.kind != .static and
+            !is_node_method and
+            binding.prop_this != .this_document and
+            binding.prop_this != .this_parser and
+            binding.prop_this != .this_event)
+        {
             try genInstallerLine(writer, binding);
         }
     }
     try writer.writeAll("}\n");
 
-    // 5. DOMPARSER Prototype Bindings
+    // DOMPARSER Prototype Bindings
     try writer.writeAll("\npub fn installDOMParserBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
     for (bindings) |binding| {
         if (binding.prop_this == .this_parser) {
+            try genInstallerLine(writer, binding);
+        }
+    }
+    try writer.writeAll("}\n");
+
+    // EVENT Prototype Bindings
+    try writer.writeAll("\npub fn installEventBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
+    for (bindings) |binding| {
+        if (binding.prop_this == .this_event) {
             try genInstallerLine(writer, binding);
         }
     }
@@ -210,11 +227,19 @@ fn genGetter(writer: anytype, func: BindingSpec) !void {
 
     // Check if we need polymorphic unwrapping (Node) or strict checking (Element)
     switch (func.prop_this) {
+        .this_event => {
+            try writer.writeAll(
+                \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
+                \\    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
+                \\    const this_arg: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+                \\
+            );
+        },
         .this_node => {
             try writer.writeAll(
                 \\    _ = rc;
                 \\    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-                \\    if (arg0_opt == null) return w.EXCEPTION; 
+                \\    if (arg0_opt == null) return w.EXCEPTION;
                 \\    const this_arg = arg0_opt.?;
                 \\
             );
@@ -309,7 +334,7 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
         \\
     , .{ func.name, func.name });
 
-    // 1. Unwrap 'this'
+    // 1. Unwrap 'this' with LOUD Error Checking
     const cast_type = if (func.prop_this == .this_element) "*z.HTMLElement" else "*z.DomNode";
 
     switch (func.prop_this) {
@@ -317,7 +342,7 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
             try writer.writeAll(
                 \\    _ = rc;
                 \\    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
-                \\    if (arg0_opt == null) return w.EXCEPTION; 
+                \\    if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (unwrap failed)");
                 \\    const this_arg = arg0_opt.?;
                 \\
             );
@@ -328,7 +353,6 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
                 \\    const this_arg: *z.HTMLDocument = blk: {
                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-                // \\        return w.EXCEPTION;
                 \\        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
                 \\    };
                 \\
@@ -338,7 +362,7 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
             // Use rc.classes.html_element
             try writer.writeAll(
                 \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-                \\    if (ptr == null) return w.EXCEPTION; 
+                \\    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
                 \\    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
                 \\
             );
@@ -346,12 +370,13 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
         else => {
             try writer.print(
                 \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
-                \\    if (ptr == null) return w.EXCEPTION;
+                \\    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not a DOM Node");
                 \\    const this_arg: {s} = @ptrCast(@alignCast(ptr));
                 \\
             , .{cast_type});
         },
     }
+
     // 2. Extract Value (from argv[0]) and Call Zig
     if (func.prop_type == .error_string or
         func.prop_type == .string or
@@ -363,8 +388,16 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
             \\    defer ctx.freeZString(val_str);
             \\
         );
-        // Setters usually don't take allocators (Lexbor handles internal memory)
-        try writer.print("    {s}(this_arg, val_str) catch return w.EXCEPTION;\n", .{func.setter});
+
+        // [FIX] LOUD ERROR REPORTING
+        // Instead of just 'catch return w.EXCEPTION', we catch the error, print it, and throw a TypeError.
+        try writer.print(
+            \\    {s}(this_arg, val_str) catch |err| {{
+            \\        std.debug.print("JS Setter Error ({s}): {{}}\n", .{{err}});
+            \\        return ctx.throwTypeError("Native Zig Error in Setter");
+            \\    }};
+            \\
+        , .{ func.setter, func.name });
     } else if (func.prop_type == .boolean) {
         try writer.writeAll("    const val_bool = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;\n");
         try writer.print("    {s}(this_arg, val_bool);\n", .{func.setter});
@@ -372,6 +405,88 @@ fn genSetter(writer: anytype, func: BindingSpec) !void {
 
     try writer.writeAll("    return w.UNDEFINED;\n}\n");
 }
+
+// fn genSetter(writer: anytype, func: BindingSpec) !void {
+//     try writer.print(
+//         \\
+//         \\// Property Setter for {s}
+//         \\pub fn js_set_{s}(
+//         \\    ctx_ptr: ?*qjs.JSContext,
+//         \\    this_val: qjs.JSValue,
+//         \\    argc: c_int,
+//         \\    argv: [*c]qjs.JSValue,
+//         \\) callconv(.c) qjs.JSValue {{
+//         \\    _ = argc;
+//         \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+//         \\    const rc = RuntimeContext.get(ctx);
+//         \\
+//     , .{ func.name, func.name });
+
+//     // 1. Unwrap 'this'
+//     const cast_type = if (func.prop_this == .this_element) "*z.HTMLElement" else "*z.DomNode";
+
+//     switch (func.prop_this) {
+//         .this_node => {
+//             try writer.writeAll(
+//                 \\    _ = rc;
+//                 \\    const arg0_opt = DOMBridge.unwrapNode(ctx, this_val);
+//                 \\    if (arg0_opt == null) return ctx.throwTypeError("'this' is not a Node (unwrap failed)");
+//                 // \\return w.EXCEPTION;
+//                 \\    const this_arg = arg0_opt.?;
+//                 \\
+//             );
+//         },
+//         .this_document => {
+//             // Check BOTH Document AND OwnedDocument
+//             try writer.writeAll(
+//                 \\    const this_arg: *z.HTMLDocument = blk: {
+//                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+//                 \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+//                 // \\        return w.EXCEPTION;
+//                 \\        return ctx.throwTypeError("Method called on object that is not a Document (Class ID mismatch)");
+//                 \\    };
+//                 \\
+//             );
+//         },
+//         .this_element => {
+//             // Use rc.classes.html_element
+//             try writer.writeAll(
+//                 \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+//                 \\    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
+//                 // \\return w.EXCEPTION;
+//                 \\    const this_arg: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+//                 \\
+//             );
+//         },
+//         else => {
+//             try writer.print(
+//                 \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+//                 \\    if (ptr == null) return w.EXCEPTION;
+//                 \\    const this_arg: {s} = @ptrCast(@alignCast(ptr));
+//                 \\
+//             , .{cast_type});
+//         },
+//     }
+//     // 2. Extract Value (from argv[0]) and Call Zig
+//     if (func.prop_type == .error_string or
+//         func.prop_type == .string or
+//         func.prop_type == .string_zc)
+//     {
+//         try writer.writeAll(
+//             \\    const val = argv[0];
+//             \\    const val_str = ctx.toZString(val) catch return w.EXCEPTION;
+//             \\    defer ctx.freeZString(val_str);
+//             \\
+//         );
+//         // Setters usually don't take allocators (Lexbor handles internal memory)
+//         try writer.print("    {s}(this_arg, val_str) catch return w.EXCEPTION;\n", .{func.setter});
+//     } else if (func.prop_type == .boolean) {
+//         try writer.writeAll("    const val_bool = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;\n");
+//         try writer.print("    {s}(this_arg, val_bool);\n", .{func.setter});
+//     }
+
+//     try writer.writeAll("    return w.UNDEFINED;\n}\n");
+// }
 
 fn genInstallerLine(writer: anytype, binding: BindingSpec) !void {
     if (binding.kind == .method) {
@@ -421,6 +536,7 @@ fn needsRc(func: BindingSpec) bool {
             .element, // Uses rc.classes.dom_node
             .this_parser, // Uses rc.classes.dom_parser
             .this_document,
+            .this_event,
             => return true,
             else => {},
         }
@@ -432,7 +548,7 @@ fn countJsArgs(args: []const ArgType) usize {
     var count: usize = 0;
     for (args) |arg| {
         switch (arg) {
-            .string, .int32, .uint32, .boolean, .element, .node => count += 1,
+            .string, .int32, .uint32, .boolean, .element, .node, .js_value, .callback => count += 1,
             else => {},
         }
     }
@@ -663,7 +779,7 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
     var uses_ctx = false;
     for (func.args) |arg| {
         switch (arg) {
-            .this_element, .this_node, .this_parser, .this_document => uses_this = true,
+            .this_element, .this_node, .this_parser, .this_document, .this_event => uses_this = true,
             .string, .document, .document_root, .element, .node => uses_ctx = true,
             // Allocator removed from uses_ctx because we use rc.allocator now
 
@@ -716,10 +832,22 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
                 try writer.print("    const arg{d} = rc.allocator;\n", .{i});
                 allocator_idx = i;
             },
+            .this_event => {
+                try writer.print(
+                    \\    const ptr{d} = qjs.JS_GetOpaque(this_val, rc.classes.event);
+                    \\    if (ptr{d} == null) return ctx.throwTypeError("Object is not an Event");
+                    \\    const arg{d}: *z.events.DomEvent = @ptrCast(@alignCast(ptr{d}));
+                    \\
+                , .{ i, i, i, i });
+            },
+            .js_value => {
+                try writer.print("    const arg{d} = argv[{d}];\n", .{ i, js_arg_idx });
+                js_arg_idx += 1;
+            },
             .this_element => {
                 // Use rc.classes.dom_node
                 try writer.print(
-                    \\    const elem_ptr{d} = qjs.JS_GetOpaque(this_val, rc.classes.dom_node);
+                    \\    const elem_ptr{d} = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
                     \\    if (elem_ptr{d} == null) return w.EXCEPTION;
                     \\    const arg{d}: *z.HTMLElement = @ptrCast(@alignCast(elem_ptr{d}));
                     \\
@@ -781,7 +909,7 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
             .element => {
                 // Use rc.classes.dom_node (generic check) or strict?
                 try writer.print(
-                    \\    const elem_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], rc.classes.dom_node);
+                    \\    const elem_arg_ptr{d} = qjs.JS_GetOpaque(argv[{d}], rc.classes.html_element);
                     \\    if (elem_arg_ptr{d} == null) return ctx.throwTypeError("Argument {d} must be a DOM Element");
                     \\    const arg{d}: *z.HTMLElement = @ptrCast(@alignCast(elem_arg_ptr{d}));
                     \\
@@ -864,7 +992,8 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
         func.return_type == .error_string or
         func.return_type == .error_document or
         func.return_type == .void_with_error or
-        func.return_type == .error_owned_document)
+        func.return_type == .error_owned_document or
+        func.return_type == .error_boolean)
     {
         try writer.writeAll(
             \\ catch |err| {
@@ -917,6 +1046,7 @@ fn genFunction(writer: *std.Io.Writer, func: BindingSpec) !void {
         .int32 => try writer.writeAll("    return ctx.newInt32(result);\n"),
         .uint32 => try writer.writeAll("    return ctx.newUint32(result);\n"),
         .boolean => try writer.writeAll("    return ctx.newBool(result);\n"),
+        .error_boolean => try writer.writeAll("    return ctx.newBool(result);\n"),
 
         .document, .error_document => {
             // Use rc.classes.document instead of z.dom_class_id.*

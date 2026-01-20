@@ -1,14 +1,13 @@
 const btn = document.createElement("button");
-
 const form = document.createElement("form");
 form.appendChild(btn);
 document.body.appendChild(form);
 
 const mylist = document.createElement("ul");
-
 for (let i = 1; i < 3; i++) {
   const item = document.createElement("li");
-  item.setContentAsText("Item " + i * 10);
+  console.log(item.tagName, item.textContent);
+  item.textContent = "Item " + i * 10;
   item.setAttribute("id", i);
   mylist.appendChild(item);
 }
@@ -16,24 +15,24 @@ document.body.appendChild(mylist);
 
 console.log("[JS] Initial document", document.body.innerHTML);
 
-// --------------------------------------------------------------------
 // DOM Event Listener with Delayed action with Timer
-// --------------------------------------------------------------------
 
-form.addEventListener("submit", (e) => {
-  e.preventDefault(); // Prevent actual form submission
+const cb1 = (e) => {
+  e.preventDefault();
   console.log("[JS] ⌛️ 📝 Form Submitted! Event Type:", e.type);
-});
+};
+
+form.addEventListener("submit", cb1);
 
 setTimeout(() => {
   console.log("[JS] Submit the form! ⏳");
   form.dispatchEvent("submit");
+  form.removeEventListener("submit", cb1);
+  form.dispatchEvent("submit"); // No log this time
   console.log("[JS] Final HTML: ", document.body.innerHTML);
 }, 1000);
 
-// --------------------------------------------------------------------
-// Simple reactive object
-// --------------------------------------------------------------------
+// Reactive object
 
 function createReactiveObject(target, callback) {
   return new Proxy(target, {
@@ -43,8 +42,8 @@ function createReactiveObject(target, callback) {
 
       // Trigger callback on change
       if (oldValue !== value) {
-        const prop_id = prop === "name" ? "#1" : prop === "age" ? "#2" : null;
-        document.querySelector(prop_id).setContentAsText(value); // Normal DOM update
+        const prop_id = prop === "name" ? "1" : prop === "age" ? "2" : null;
+        document.getElementById(prop_id).textContent = value; // Normal DOM update
         callback(prop, oldValue, value);
       }
 
@@ -57,10 +56,10 @@ function createReactiveObject(target, callback) {
   });
 }
 
-// Instantiate the data and the DOM
+// // Instantiate the data and the DOM
 const data = { name: "John", age: 30 };
-document.querySelector("#1").setContentAsText(data.name);
-document.querySelector("#2").setContentAsText(data.age);
+document.getElementById("1").textContent = data.name;
+document.getElementById("2").textContent = data.age;
 console.log("[JS] Direct DOM injection: ", document.body.innerHTML);
 
 // Reactive function
@@ -185,7 +184,7 @@ const state = deepReactive(
   },
   (path, oldVal, newVal) => {
     console.log(`${path} changed: ${oldVal} -> ${newVal}`);
-  }
+  },
 );
 
 state.user.name = "Jane"; // user.name changed: John -> Jane

@@ -25,6 +25,7 @@ pub const RuntimeContext = struct {
         dom_parser: zqjs.ClassID = 0,
         document: zqjs.ClassID = 0,
         owned_document: zqjs.ClassID = 0,
+        event: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

@@ -7,6 +7,7 @@ const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const DocFragment = @import("js_DocFragment.zig");
 const DOMParserClass = @import("js_DOMParser.zig");
 const CssSelectorEngine = z.CssSelectorEngine;
+const events = @import("events.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -28,15 +29,25 @@ pub const DOMBridge = struct {
         }
     }
 
+    fn eventFinalizer(_: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
+        const class_id = z.qjs.JS_GetClassID(val);
+        const ptr = z.qjs.JS_GetOpaque(val, class_id); // Get ptr regardless of class ID
+        if (ptr) |p| {
+            const ev_struct: *events.DomEvent = @ptrCast(@alignCast(p));
+            ev_struct.deinit();
+        }
+    }
+
     // 2. INIT (Register Class & Create internal Doc)
     pub fn init(allocator: std.mem.Allocator, ctx: w.Context) !DOMBridge {
         // the Thread-Local RuntimeContext
         const rc = RuntimeContext.get(ctx);
         var rt = ctx.getRuntime();
 
-        // Register class ONLY if not already registered for this runtime ????
+        // Register class ONLY if not already registered for this runtime
         if (rc.classes.dom_node == 0) {
-            // --- DOM_NODE: class & Node.prototype
+
+            // --- NODE: base class & Node.prototype --------------------------
             rc.classes.dom_node = rt.newClassID();
             try rt.newClass(rc.classes.dom_node, .{
                 .class_name = "Node",
@@ -44,39 +55,44 @@ pub const DOMBridge = struct {
             });
             const node_proto = ctx.newObject();
             bindings.installNodeBindings(ctx.ptr, node_proto);
+            // manually add childNodes getter
+            {
+                const atom = z.qjs.JS_NewAtom(ctx.ptr, "childNodes");
+                const get_fn = ctx.newCFunction(js_get_childNodes, "get_childNodes", 0);
+                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, node_proto, atom, get_fn, zqjs.UNDEFINED, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
+                z.qjs.JS_FreeAtom(ctx.ptr, atom);
+            }
             ctx.setClassProto(rc.classes.dom_node, node_proto); // Consumes node_proto
 
-            // --- HTML_ELEMENT: class & HTMLElement.prototype. Inherits from Node
+            // --- HTML_ELEMENT: class & HTMLElement.prototype. Inherits from Node ----
             rc.classes.html_element = rt.newClassID();
             try rt.newClass(rc.classes.html_element, .{
                 .class_name = "HTMLElement",
                 .finalizer = null,
             });
+
             const el_proto = ctx.newObject();
             bindings.installElementBindings(ctx.ptr, el_proto);
 
-            {
-                const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
-                try ctx.setPropertyStr(el_proto, "querySelector", qs_fn);
+            // Manual Methods
+            const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
+            try ctx.setPropertyStr(el_proto, "querySelector", qs_fn);
 
-                const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
-                try ctx.setPropertyStr(el_proto, "querySelectorAll", qsa_fn);
-            }
+            const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
+            try ctx.setPropertyStr(el_proto, "querySelectorAll", qsa_fn);
 
-            // INHERITANCE: HTMLElement.prototype -> Node.prototype
+            const matches_fn = ctx.newCFunction(js_matches, "matches", 1);
+            try ctx.setPropertyStr(el_proto, "matches", matches_fn);
+
+            // Inheritance: HTMLElement -> Node
             {
-                // Get a reference to Node.prototype (+1 ref count)
                 const parent_proto = ctx.getClassProto(rc.classes.dom_node);
-                defer ctx.freeValue(parent_proto); // Free the reference after use
-
-                // Chain them: el_proto.__proto__ = parent_proto
+                defer ctx.freeValue(parent_proto);
                 try ctx.setPrototype(el_proto, parent_proto);
             }
-
-            // Register: HTMLElement class uses el_proto
             ctx.setClassProto(rc.classes.html_element, el_proto);
 
-            // --- DOCUMENT (Inherits from Node)
+            // --- DOCUMENT ( <-- Inherits from Node) ----------------------
             rc.classes.document = rt.newClassID();
             try rt.newClass(rc.classes.document, .{
                 .class_name = "Document",
@@ -84,7 +100,7 @@ pub const DOMBridge = struct {
             });
 
             const doc_proto = ctx.newObject();
-            // Install Document methods (createElement, body, etc.)
+            // Document methods (createElement, body, etc.)
             bindings.installDocumentBindings(ctx.ptr, doc_proto);
 
             // INHERITANCE: Document.prototype -> Node.prototype
@@ -92,12 +108,12 @@ pub const DOMBridge = struct {
                 const parent_proto = ctx.getClassProto(rc.classes.dom_node);
                 defer ctx.freeValue(parent_proto);
                 try ctx.setPrototype(doc_proto, parent_proto);
-            }
 
-            // Register: Document class uses doc_proto
+                // Register: Document class uses doc_proto
+            }
             ctx.setClassProto(rc.classes.document, doc_proto);
 
-            // --- OWNED_DOCUMENT (Inherits from Document)
+            // --- OWNED_DOCUMENT ( <-- Inherits from Document) -----------
             rc.classes.owned_document = rt.newClassID();
             try rt.newClass(rc.classes.owned_document, .{
                 .class_name = "OwnedDocument",
@@ -109,30 +125,14 @@ pub const DOMBridge = struct {
 
             // ============================================================
             // Other Classes
+            try initEventClass(rt, ctx);
             try initDocumentFragmentClass(rt, ctx);
             try initDomParserClass(rt, ctx);
-
-            // Install Element.matches()
-
-            {
-                const matches_fn = ctx.newCFunction(js_matches, "matches", 1);
-                try ctx.setPropertyStr(el_proto, "matches", matches_fn);
-            }
-
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "childNodes");
-                const get_fn = ctx.newCFunction(js_get_childNodes, "get_childNodes", 0);
-
-                // Define as a GETTER (Read-Only)
-                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, node_proto, atom, get_fn, zqjs.UNDEFINED, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
-                z.qjs.JS_FreeAtom(ctx.ptr, atom);
-            }
         }
 
         // Create the internal Lexbor document
         const doc = try z.parseHTML(allocator, "");
         rc.global_document = doc;
-        // var current_ctx = ctx;
 
         return .{
             .allocator = allocator,
@@ -349,6 +349,25 @@ pub const DOMBridge = struct {
     }
 };
 
+pub fn initEventClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
+    const rc = RuntimeContext.get(ctx);
+    rc.classes.event = rt.newClassID();
+    try rt.newClass(rc.classes.event, .{
+        .class_name = "Event",
+        .finalizer = DOMBridge.eventFinalizer,
+    });
+    const event_proto = ctx.newObject();
+    bindings.installEventBindings(ctx.ptr, event_proto);
+    ctx.setClassProto(rc.classes.event, event_proto);
+
+    const evt_ctor = ctx.newCFunction2(events.constructor, "Event", 1, z.qjs.JS_CFUNC_constructor, 0);
+    ctx.setConstructor(evt_ctor, event_proto);
+    // Attach to global object
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    try ctx.setPropertyStr(global, "Event", evt_ctor);
+}
+
 pub fn initDomParserClass(rt: zqjs.Runtime, ctx: w.Context) !void {
     DOMParserClass.class_id = rt.newClassID();
 
@@ -386,28 +405,23 @@ pub fn initDomParserClass(rt: zqjs.Runtime, ctx: w.Context) !void {
 }
 
 pub fn initDocumentFragmentClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
-    // 1. Create Class ID
-    // if (DocFragment.class_id == 0) {
     DocFragment.class_id = rt.newClassID();
-    // }
 
     const rc = RuntimeContext.get(ctx);
     rc.classes.document_fragment = DocFragment.class_id;
 
-    // 2. Define Class with Finalizer
     const class_def = zqjs.Runtime.ClassDef{
         .class_name = "DocumentFragment",
         .finalizer = null, //DocFragment.finalizer,
     };
     rt.newClass(DocFragment.class_id, class_def) catch |err| {
-        // Handle error (log or panic, don't just swallow if possible)
         std.debug.print("Failed to register DocumentFragment class: {}\n", .{err});
         return;
     };
 
-    // 3. Setup Prototype Inheritance: DocumentFragment -> Node -> EventTarget
+    // Setup Prototype Inheritance: DocumentFragment -> Node -> EventTarget
     const proto = ctx.newObject();
-    // defer ctx.freeValue(proto);
+    // no defer proto free!!: consumed by setClassProto
     const node_proto = ctx.getClassProto(rc.classes.dom_node);
     defer ctx.freeValue(node_proto);
 
@@ -432,6 +446,31 @@ pub fn initDocumentFragmentClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
 const Listener = struct {
     callback: z.qjs.JSValue,
 };
+
+pub fn removeEventListener(
+    ctx: zqjs.Context,
+    self: *DOMBridge,
+    node: *z.DomNode,
+    event: []const u8,
+    callback: zqjs.Value,
+) !void {
+    const node_id = @intFromPtr(node);
+
+    if (self.registry.getPtr(node_id)) |node_map| {
+        if (node_map.getPtr(event)) |listeners| {
+            for (listeners.items, 0..) |l, i| {
+                const cb_a = std.mem.asBytes(&l.callback);
+                const cb_b = std.mem.asBytes(&callback);
+                if (std.mem.eql(u8, cb_a, cb_b)) {
+                    // Release the JS reference. duped it in addEventListener
+                    ctx.freeValue(l.callback);
+                    _ = listeners.orderedRemove(i);
+                    return;
+                }
+            }
+        }
+    }
+}
 
 // [hashmap]= https://devlog.hexops.com/2022/zig-hashmaps-explained/
 pub fn addEventListener(
@@ -458,58 +497,81 @@ pub fn addEventListener(
     }
 
     // Store Callback
-    // CRITICAL: Increment refcount so the function isn't garbage collected!
+    // !! CRITICAL !!: Increment refcount so the function isn't garbage collected!
     const dup_cb = ctx.dupValue(callback);
     try event_entry.value_ptr.append(self.allocator, .{ .callback = dup_cb });
 }
 
+/// Dispatch an event to a target node, handling bubbling and invoking listeners.Takes a raw JS Value for the event (either a string type or an Event object).
 pub fn dispatchEvent(
     ctx: zqjs.Context,
     self: *DOMBridge,
     target_node: *z.DomNode,
-    event_name: []const u8,
-) !void {
-    var js_target: zqjs.Value = zqjs.NULL;
-    // 'freeze' target after wrapping
-    if (z.nodeType(target_node) == .element) {
-        js_target = try DOMBridge.wrapElement(ctx, @ptrCast(@alignCast(target_node)));
-    } else {
-        js_target = try DOMBridge.wrapNode(ctx, target_node);
+    event_arg: zqjs.Value, // Raw JS Value
+) !bool {
+    const rc = RuntimeContext.get(ctx);
+    var js_event = event_arg;
+    var ev_struct: *events.DomEvent = undefined;
+    var created_locally = false;
+
+    // PATH A: dispatchEvent("click")
+    if (ctx.isString(event_arg)) {
+        const type_str = try ctx.toZString(event_arg);
+        defer ctx.freeZString(type_str);
+
+        ev_struct = try events.DomEvent.init(
+            rc.allocator,
+            type_str,
+            true,
+            true,
+        );
+
+        js_event = ctx.newObjectClass(rc.classes.event);
+        try ctx.setOpaque(js_event, ev_struct);
+        created_locally = true;
     }
-    defer ctx.freeValue(js_target);
+    // PATH B: Standard with class Event: dispatchEvent(new Event("click"))
+    else {
+        const ptr = ctx.getOpaque(event_arg, rc.classes.event);
+        if (ptr == null) return false;
 
-    // bubbling loop
+        ev_struct = @ptrCast(@alignCast(ptr));
+    }
+
+    // Clean up if we created a temporary wrapper
+    defer if (created_locally) ctx.freeValue(js_event);
+
+    // --- Standard Bubbling  ---
+    ev_struct.target = @ptrCast(target_node);
+    ev_struct.phase = .AT_TARGET;
+    ev_struct.current_target = null;
+
     var current_node: ?*z.DomNode = target_node;
+
     while (current_node) |node| : (current_node = z.parentNode(node)) {
-        // try self.dispatchEventAtNode(ctx, node, event);
+        if (ev_struct.stop_propagation) break;
+        if (!ev_struct.bubbles and node != target_node) break;
+
+        ev_struct.current_target = @ptrCast(node);
+        if (node != target_node) ev_struct.phase = .BUBBLING_PHASE;
+
         const node_id = @intFromPtr(node);
-        // Check if this node has listeners
         if (self.registry.getPtr(node_id)) |node_map| {
-            if (node_map.getPtr(event_name)) |listeners| {
-                const prev_def_fn = ctx.newCFunction(js_preventDefault, "preventDefault", 0);
-                defer ctx.freeValue(prev_def_fn);
+            if (node_map.getPtr(ev_struct.type)) |listeners| {
+                const js_this = try DOMBridge.wrapNode(ctx, node);
+                defer ctx.freeValue(js_this);
 
-                // Create the event object for this listener
-                // (In a full engine, we'd reuse the object and update currentTarget)
                 for (listeners.items) |l| {
-                    const event_obj = ctx.newObject();
-                    defer ctx.freeValue(event_obj);
-
-                    _ = try ctx.setPropertyStr(event_obj, "type", ctx.newString(event_name));
-
-                    // Critical: e.target is the button (original target), not the current node
-                    _ = try ctx.setPropertyStr(event_obj, "target", ctx.dupValue(js_target));
-
-                    _ = try ctx.setPropertyStr(event_obj, "preventDefault", ctx.dupValue(prev_def_fn));
-
-                    const ret = ctx.call(l.callback, zqjs.UNDEFINED, &.{event_obj});
+                    if (ev_struct.stop_immediate) break;
+                    // Pass the JS Event Object
+                    const ret = ctx.call(l.callback, js_this, &.{js_event});
                     ctx.freeValue(ret);
                 }
             }
         }
-
-        // Stop bubbling if we hit #document root (whohse parent is NULL)
     }
+
+    return !ev_struct.default_prevented;
 }
 
 fn js_reportResult(
@@ -525,15 +587,14 @@ fn js_reportResult(
     std.debug.print("[HOST MSG] {s}\n", .{str});
     ctx.freeCString(str);
 
-    // 1. Get the Context State
     const rc = RuntimeContext.get(ctx);
 
-    // 2. Free old result if exists
+    // Free old result if exists
     if (rc.last_result) |old_val| {
         ctx.freeValue(old_val);
     }
 
-    // 3. Store new result (Duplicate it so it survives!)
+    // Store new result (duplicate to survive)
     rc.last_result = ctx.dupValue(argv[0]);
 
     return z.wrapper.UNDEFINED;
@@ -550,14 +611,13 @@ fn js_querySelector(
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
-    // 1. Unwrap 'this' (Polymorphic)
-    // We try Element first (most common), then Document, then Fragment
+    // Unwrap 'this' (Polymorphic): try Element first (most common), then Document, then Fragment
     var root_node: ?*z.DomNode = null;
 
     if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
         root_node = z.elementToNode(@ptrCast(ptr));
     } else if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| {
-        // Document: start searching from the document root (usually <html>)
+        // Document: start searching from the document root (<html>)
         const doc: *z.HTMLDocument = @ptrCast(ptr);
         root_node = z.documentRoot(doc);
     } else if (ctx.getOpaque(this_val, rc.classes.document_fragment)) |ptr| {
@@ -568,11 +628,9 @@ fn js_querySelector(
 
     if (root_node == null) return w.NULL;
 
-    // 2. Get Selector
     const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(selector_str);
 
-    // 3. Execute
     const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
 
     // Pass generic *DomNode to your new engine API
@@ -583,40 +641,6 @@ fn js_querySelector(
 
     return w.NULL;
 }
-// fn js_querySelector(
-//     ctx_ptr: ?*z.qjs.JSContext,
-//     this_val: z.qjs.JSValue, // <---  Use 'this_val' directly
-//     argc: c_int,
-//     argv: [*c]z.qjs.JSValue,
-// ) callconv(.c) z.qjs.JSValue {
-//     const ctx = w.Context{ .ptr = ctx_ptr };
-//     const rc = RuntimeContext.get(ctx);
-//     if (argc < 1) return w.EXCEPTION;
-
-//     // Polymorphic Lookup: Check both Document types: global document & owned documents
-//     const doc: *z.HTMLDocument = blk: {
-//         if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-//         if (ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-//         return ctx.throwTypeError("querySelector called on object that is not a Document");
-//     };
-
-//     // Get Selector
-//     const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
-//     defer ctx.freeZString(selector_str);
-//     // const selector = std.mem.span(selector_str);
-
-//     const root_node = z.documentRoot(doc) orelse return w.NULL;
-//     const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
-
-//     if (bridge.css_engine.querySelector(root_node, selector_str) catch return w.EXCEPTION) |node| {
-//         // Most querySelector results are elements
-//         if (z.nodeToElement(node)) |el| {
-//             return DOMBridge.wrapElement(ctx, el) catch w.EXCEPTION;
-//         }
-//     }
-
-//     return w.NULL;
-// }
 
 fn js_querySelectorAll(
     ctx_ptr: ?*z.qjs.JSContext,
@@ -628,7 +652,7 @@ fn js_querySelectorAll(
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
-    // 1. Unwrap 'this' (Polymorphic: Element, Document, or Fragment)
+    // Unwrap 'this' (Polymorphic: Element, Document, or Fragment)
     var root_node: ?*z.DomNode = null;
 
     if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
@@ -644,76 +668,24 @@ fn js_querySelectorAll(
 
     if (root_node == null) return ctx.newArray(); // Return empty array if root is null
 
-    // 2. Get Selector
     const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(selector_str);
 
     const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
 
-    // 3. Execute Query
-    // engine.querySelectorAll now returns []*z.HTMLElement
+    // engine.querySelectorAll returns []*z.HTMLElement
     const elements = bridge.css_engine.querySelectorAll(root_node.?, selector_str) catch return w.EXCEPTION;
     defer bridge.allocator.free(elements); // Free the slice
 
-    // 4. Create JS Array
+    // JS Array
     const array = ctx.newArray();
     for (elements, 0..) |el, i| {
-        // Optimization: Use wrapElement directly (skips nodeType check)
         const val = DOMBridge.wrapElement(ctx, el) catch continue;
         _ = ctx.setPropertyUint32(array, @intCast(i), val) catch {};
     }
 
     return array;
 }
-// fn js_querySelectorAll(
-//     ctx_ptr: ?*z.qjs.JSContext,
-//     this_val: z.qjs.JSValue, // <---  Use 'this_val' directly
-//     argc: c_int,
-//     argv: [*c]z.qjs.JSValue,
-// ) callconv(.c) z.qjs.JSValue {
-//     const ctx = w.Context{ .ptr = ctx_ptr };
-//     const rc = RuntimeContext.get(ctx);
-//     if (argc < 1) return w.EXCEPTION;
-
-//     // Polymorphic Lookup: global document & owned documents
-//     const doc: *z.HTMLDocument = blk: {
-//         if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-//         if (ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-//         return ctx.throwTypeError("querySelectorAll called on object that is not a Document");
-//     };
-
-//     const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
-//     defer ctx.freeZString(selector_str);
-//     // const selector = std.mem.span(selector_str);
-//     const root_node = z.documentRoot(doc) orelse return w.NULL;
-
-//     const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
-
-//     const nodes = bridge.css_engine.querySelectorAll(root_node, selector_str) catch return w.EXCEPTION;
-//     defer bridge.allocator.free(nodes); // Free the slice (nodes themselves are owned by Doc)
-
-//     const array = ctx.newArray();
-//     var idx: u32 = 0;
-//     for (nodes) |node| {
-//         if (z.nodeToElement(node)) |el| {
-//             const elem_obj = DOMBridge.wrapElement(ctx, el) catch continue;
-//             _ = ctx.setPropertyUint32(array, idx, elem_obj) catch {};
-//             idx += 1;
-//         }
-//     }
-
-//     // const allocator = rc.allocator;
-//     // const elements = z.querySelectorAll(allocator, doc, selector_str) catch return w.EXCEPTION;
-//     // defer allocator.free(elements);
-
-//     // // Return Array
-//     // const array = ctx.newArray();
-//     // for (elements, 0..) |elem, i| {
-//     //     const elem_obj = DOMBridge.wrapElement(ctx, elem) catch continue;
-//     //     _ = ctx.setPropertyUint32(array, @intCast(i), elem_obj) catch {};
-//     // }
-//     return array;
-// }
 
 fn js_matches(
     ctx_ptr: ?*z.qjs.JSContext,
@@ -725,20 +697,17 @@ fn js_matches(
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
-    // 1. Get Element from 'this'
+    // Get Element from 'this'
     const ptr = ctx.getOpaque(this_val, rc.classes.html_element);
     if (ptr == null) return ctx.throwTypeError("matches() called on non-Element");
     const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
 
-    // 2. Get Selector
     const selector_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(selector_str);
 
-    // 3. Use Engine
     const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
 
     // Note: matchNode expects a generic *DomNode
-    // const node = z.elementToNode(el);
     const result = bridge.css_engine.matchElement(el, selector_str) catch return w.EXCEPTION;
 
     return ctx.newBool(result);
@@ -788,14 +757,12 @@ fn js_consoleLog(
     return w.UNDEFINED;
 }
 
-// A dummy implementation of preventDefault to stop JS from crashing
+// Dummy implementation to stop JS from crashing
 fn js_preventDefault(
     _: ?*z.qjs.JSContext,
     _: z.qjs.JSValue,
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
-    // In a real browser, this sets a 'defaultPrevented' flag.
-    // For a headless scraper, a no-op is often sufficient to satisfy the script.
     return w.UNDEFINED;
 }

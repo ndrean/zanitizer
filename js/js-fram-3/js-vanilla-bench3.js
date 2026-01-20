@@ -124,7 +124,7 @@ const app = {
 
 // tbody.onclick = (e) => {
 tbody.addEventListener("click", (e) => {
-  // e.stopPropagation();
+  e.stopPropagation();
   e.preventDefault();
   op = "null";
   if (e.target.tagName === "A") {
@@ -141,7 +141,7 @@ tbody.addEventListener("click", (e) => {
 });
 // document.querySelector("#app-actions").onclick = (e) => {
 document.querySelector("#app-actions").addEventListener("click", (e) => {
-  // e.stopPropagation();
+  e.stopPropagation();
   e.preventDefault();
   app[e.target.id]();
   op = e.target.id;

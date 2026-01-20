@@ -62,25 +62,29 @@ pub fn main() !void {
 
     setupSignalHandler();
 
-    try js_framework_1_bench(allocator);
-    try js_framework_2_bench(allocator);
-    try js_framework_3_bench(allocator);
-    try bench(allocator);
+    // try js_framework_1_bench(allocator);
+    // try js_framework_2_bench(allocator);
+    // try js_framework_3_bench(allocator);
+    // try bench(allocator);
     // try extractScript(allocator);
-    // try eventListeners(allocator);
+
+    try eventListeners(allocator);
+
     // try transplante(allocator);
-    // // try fullCycle(allocator);
+    // try fullCycle(allocator);
     // // try customPointClass(allocator);
     // // try demoPoint2Class(allocator);
     // try domParser(allocator);
     // try buildDOM(allocator);
-    // try eventListener(allocator);
+
+    try eventListener(allocator);
     // try performance2(allocator);
     // // try demoCustomPointClass(allocator);
     // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
     // try first_QuickJS_test(allocator);
     // try getValueFromQJSinZig(allocator);
     // try simpleESM(allocator);
+
     // try importModule(allocator);
     // try test_event_loop(allocator);
     // try promise_scope(allocator);
@@ -95,6 +99,7 @@ pub fn main() !void {
     // try JS_Proxy_And_Generators(allocator);
     // try async_Fetch_API_Demo(allocator);
     // try async_CSV_JSON_Parser(allocator);
+
     // try demoWorker(allocator);
 }
 
@@ -308,13 +313,58 @@ fn extractScript(allocator: std.mem.Allocator) !void {
     }
 }
 
+fn eventListener(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    z.print("\n=== DOM Event Listener Demo -------------------------\n\n", .{});
+
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/event_loop_event_listener_and_reactive.js", 1024 * 10);
+    defer allocator.free(source);
+    const c_source = try allocator.dupeZ(u8, source);
+
+    defer allocator.free(c_source);
+
+    const val = try engine.evalModule(c_source, "dom_event_listener.js");
+    if (z.isException(val)) {
+        const exception_val = z.qjs.JS_GetException(engine.ctx.ptr);
+        defer z.qjs.JS_FreeValue(engine.ctx.ptr, exception_val);
+
+        // Print the error stack trace to stderr
+        // (Assuming you have a helper or manual extraction)
+        // const str = z.wrapper.Context{ .ptr = engine.ctx.ptr };
+        const ctx_str = engine.ctx.toCString(exception_val) catch "Unknown Error";
+        std.debug.print("❌ JS Error: {s}\n", .{ctx_str});
+        // Note: Real QuickJS error printing usually involves getting the 'stack' property too.
+    } else {
+        const state = z.qjs.JS_PromiseState(engine.ctx.ptr, val);
+
+        if (state == z.qjs.JS_PROMISE_REJECTED) {
+            const reason = z.qjs.JS_PromiseResult(engine.ctx.ptr, val);
+
+            defer z.qjs.JS_FreeValue(engine.ctx.ptr, reason);
+
+            const str = engine.ctx.toCString(reason) catch "Unknown Error";
+            defer engine.ctx.freeCString(str);
+            std.debug.print("❌ Module Promise Rejected: {s}\n", .{str});
+        } else {
+            z.print("[Zig] Script executed successfully (Promise Pending/Resolved).\n", .{});
+        }
+    }
+    engine.ctx.freeValue(val);
+
+    // Run Main Loop (Handles Events)
+    try engine.run();
+
+    const body_node = z.documentRoot(engine.dom.doc);
+    try z.prettyPrint(allocator, body_node.?);
+}
+
 fn eventListeners(allocator: std.mem.Allocator) !void {
     var engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
 
     z.print("\n=== Async Event listeners --------------------------------\n\n", .{});
 
-    // 2. Load Page with a Button
     try engine.loadHTML(
         \\<body>
         \\  <button id="my-btn">Click Me</button>
@@ -325,32 +375,32 @@ fn eventListeners(allocator: std.mem.Allocator) !void {
     const script =
         \\ const btn = document.getElementById('my-btn');
         \\ const result = document.getElementById('result');
+        \\ function cb(e) {
+        \\    console.log("[JS]: Click received " + e.type + " on " + e.target.tagName + " " + e.target.id);
+        \\    result.textContent = "Clicked (Sync)";
         \\
-        \\ btn.addEventListener('click', (e) => {
-        \\     // 1. Verify Event Object
-        \\     const e_target = e.target;
-        \\     console.log("[JS]: Click received " + e.type + " on " + e.target.tagName + " " + e.target.id);
-        \\     
-        \\     // 2. Synchronous DOM Update
-        \\     result.textContent = "Clicked (Sync)";
-        \\
-        \\     // 3. Asynchronous Operation (Tests EventLoop)
-        \\     setTimeout(() => {
+        \\    setTimeout(() => {
         \\         console.log("[JS]: Timeout fired!");
+        \\          // should return to Zig after this line
         \\         result.textContent = "Clicked (Async)";
         \\     }, 10);
-        \\ });
+        \\}
+        \\ btn.addEventListener('click', cb);
         \\
-        \\ // 4. Trigger the event from JS
-        \\ // Note: Your current binding takes a string, not an Event object
+        \\ // Trigger the event from JS (new Event form and string form)
+        \\
         \\ console.log("[JS]: Dispatching click...");
-        \\ btn.dispatchEvent('click');
+        \\ btn.dispatchEvent(new Event('click'));
+        \\ btn.dispatchEvent('click'); // also works
+        \\ btn.removeEventListener('click', cb);
+        \\ btn.dispatchEvent('click'); // should not trigger anything now
     ;
 
-    // 4. Run the Script (This executes the sync parts: dispatch -> handler -> sync update)
-    _ = try engine.eval(script, "event_test");
+    // Run the Script: executed parts: dispatch -> handler -> sync update)
+    const val = try engine.eval(script, "event_test");
+    defer engine.ctx.freeValue(val);
 
-    // 5. Verify Synchronous Update
+    // Check Synchronous Update
     {
         const result_div = try z.querySelector(allocator, engine.dom.doc, "#result");
         const text = z.textContent_zc(z.elementToNode(result_div.?));
@@ -359,11 +409,10 @@ fn eventListeners(allocator: std.mem.Allocator) !void {
         try std.testing.expectEqualStrings("Clicked (Sync)", text);
     }
 
-    // 6. Run Event Loop to process the setTimeout
-    // The run() method processes timers and macrotasks
+    // Run Event Loop
     try engine.loop.run(.Script);
 
-    // 7. Verify Asynchronous Update
+    // Check Asynchronous Update
     {
         const result_div = try z.querySelector(allocator, engine.dom.doc, "#result");
         const text = z.textContent_zc(z.elementToNode(result_div.?));
@@ -528,28 +577,6 @@ fn buildDOM(allocator: std.mem.Allocator) !void {
         \\<p id="a">Hello</p><div><p>This is a paragraph in a DIV</p></div>
     ;
     try std.testing.expectEqualStrings(expect, result_str);
-}
-
-fn eventListener(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
-    defer engine.deinit();
-
-    z.print("\n=== DOM Event Listener Demo -------------------------\n\n", .{});
-
-    const source = try std.fs.cwd().readFileAlloc(allocator, "js/dom_event_listener.js", 1024 * 1024);
-    defer allocator.free(source);
-
-    const c_source = try allocator.dupeZ(u8, source);
-    defer allocator.free(c_source);
-
-    const val = try engine.evalModule(c_source, "dom_event_listener.js");
-
-    engine.ctx.freeValue(val);
-
-    // Run Main Loop (Handles Events)
-    try engine.run();
-    const body_node = z.documentRoot(engine.dom.doc);
-    try z.prettyPrint(allocator, body_node.?);
 }
 
 fn performance2(allocator: std.mem.Allocator) !void {

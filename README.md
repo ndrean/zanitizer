@@ -1475,6 +1475,7 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
   
 - Native Zig Event Loop. Thread-safe loop handling Timers (microtasks) and  Promises (MicroTasks).
 - **Worker pool**: multi-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
+- EventListeners (add, remove, dispatch) and bubbling supported.
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
 - ES6 Module System: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
 - `fetch` API (WIP).
