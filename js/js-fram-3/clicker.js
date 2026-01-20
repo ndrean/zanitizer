@@ -1,5 +1,3 @@
-// --- Helper Functions ---
-
 function click(selector) {
   const el = document.querySelector(selector);
   if (!el) {
@@ -7,8 +5,10 @@ function click(selector) {
     return;
   }
 
-  // Custom Engine: We pass the event name as a string.
-  // The engine MUST handle bubbling from 'el' up to the listener parents.
+  /// jsdom needs Event object for dispatchEvent
+  // el.dispatchEvent(new Event("click", { bubbles: true }));
+
+  // Dispatch the click. Bubbling is handled by engine
   el.dispatchEvent("click");
 }
 

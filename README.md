@@ -1057,13 +1057,13 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
 
 | Operation        | zexplorer | jsdom   | Chrome (Approx) |
 | ---------------- | --------- | ------- | --------------- |
-| Create 1,000     | 1 ms      | 81 ms   | ~22 ms          |
-| Replace 1,000    | 3 ms      | 86 ms   | ~24 ms          |
+| Create 1k        | 1 ms      | 81 ms   | ~22 ms          |
+| Replace 1k       | 3 ms      | 86 ms   | ~24 ms          |
 | Partial Update   | 2 ms      | 19 ms   | ~9 ms           |
 | Select Row       | 0 ms      | 4458 ms | ~2 ms           |
 | Swap Rows        | 0 ms      | 1 ms    | ~12 ms          |
 | Remove Row       | 0 ms      | 45 ms   | ~9 ms           |
-| Create 10,000    | 19 ms     | 3157 ms | ~229 ms         |
+| Create 10k       | 19 ms     | 3157 ms | ~229 ms         |
 | Append 1k to 10k | 7 ms      | 705 ms  | ~26 ms          |
 | Clear            | 7 ms      | 2975 ms | ~9 ms           |
 | Final count      | 0         | 0       | 0               |

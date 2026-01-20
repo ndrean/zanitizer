@@ -4,8 +4,11 @@ function click(selector) {
     console.log("❌ Not found: " + selector);
     return;
   }
-  // Dispatch the click. Bubbling is handled by your engine!
-  el.dispatchEvent(new Event("click", { bubbles: true }));
+  // jsdom needs Event object for dispatchEvent
+  // el.dispatchEvent(new Event("click", { bubbles: true }));
+
+  // Dispatch the click. Bubbling is handled by engine
+  el.dispatchEvent("click");
 }
 
 function measure(name, fn) {
@@ -15,7 +18,7 @@ function measure(name, fn) {
   console.log(`[${name}] ${end - start} ms`);
 }
 
-console.log("\n🚀 Starting VanillaJS-3 Benchmark...\n");
+console.log("\n🚀 Starting VanillaJS-2 Benchmark...\n");
 
 // 1. Create 1,000 rows
 measure("Create 1k", () => click("#run"));

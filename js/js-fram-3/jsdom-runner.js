@@ -2,15 +2,12 @@ const fs = require("fs");
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { performance } = require("perf_hooks");
 
-// 1. Load your artifacts
 const html = fs.readFileSync("index.html", "utf8");
-const appCode = fs.readFileSync("js-vanilla-bench.js", "utf8");
+const appCode = fs.readFileSync("js-vanilla-bench3.js", "utf8");
 
-// 2. Setup Virtual Console (to see logs)
 const virtualConsole = new VirtualConsole();
 virtualConsole.forwardTo(console);
 
-// 3. Initialize JSDOM
 const dom = new JSDOM(html, {
   runScripts: "dangerously",
   resources: "usable",
@@ -20,7 +17,7 @@ const dom = new JSDOM(html, {
 const { window } = dom;
 const { document } = window;
 
-// 4. Global Polyfills (Crucial for some frameworks/benchmarks)
+// Global Polyfills (Crucial for some frameworks/benchmarks)
 global.window = window;
 global.document = document;
 global.Node = window.Node;
@@ -31,11 +28,11 @@ global.MouseEvent = window.MouseEvent;
 console.log("\n--- 🐢 Starting JSDOM Benchmark (Standard API) ---\n");
 
 try {
-  // 5. Load the Application Code
+  // Load the Application Code
   // This registers the addEventListener('click') on body/app-actions
   window.eval(appCode);
 
-  // 6. Define the Driver Helper (JSDOM Version)
+  // Define the Driver Helper (JSDOM Version)
   // We can't use your 'driver.js' directly because JSDOM needs 'new MouseEvent'
   const click = (selector) => {
     const el = document.querySelector(selector);
@@ -44,7 +41,7 @@ try {
       return;
     }
 
-    // JSDOM requires the formal event ceremony
+    // JSDOM requires the formal event construction
     const event = new window.MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -60,7 +57,7 @@ try {
     console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
   };
 
-  // 7. Run the Suite
+  // Run the Benchmark
   measure("Create 1k", () => click("#run"));
   measure("Replace 1k", () => click("#run")); // clear + add
 

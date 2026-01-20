@@ -123,8 +123,9 @@ const app = {
   },
 };
 
-tbody.addEventListener(new Event("click"), (e) => {
-  e.stopPropagation();
+// tbody.addEventListener(new Event("click"), (e) => {
+tbody.addEventListener("click", (e) => {
+  // e.stopPropagation();
   e.preventDefault();
   op = "null";
   if (e.target.tagName === "A") {
@@ -140,7 +141,7 @@ tbody.addEventListener(new Event("click"), (e) => {
   }
 });
 document.querySelector("#app-actions").addEventListener("click", (e) => {
-  e.stopPropagation();
+  // e.stopPropagation();
   e.preventDefault();
   app[e.target.id]();
   op = e.target.id;

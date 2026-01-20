@@ -7,10 +7,11 @@ function click(id) {
     console.error("❌ Element not found: #" + id);
     return;
   }
-  // We use our custom dispatchEvent.
-  // In standard JS this would be el.click() or el.dispatchEvent(new Event('click'))
-  el.dispatchEvent(new Event("click", { bubbles: true }));
-  // el.dispatchEvent("click");
+  /// jsdom needs Event object for dispatchEvent
+  // el.dispatchEvent(new Event("click", { bubbles: true }));
+
+  // Dispatch the click. Bubbling is handled by engine
+  el.dispatchEvent("click");
 }
 
 function measure(name, actionId) {
