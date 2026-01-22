@@ -1478,12 +1478,14 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 - EventListeners (add, remove, dispatch) and bubbling supported.
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
 - ES6 Module System: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
+- CCSOM: inline CSS-inJS and <style></style> StyleSheet support.
 - `fetch` API (WIP).
 
 **Expectations**:
 
 - instant start, low footprint
-- NO JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts. Not suited for long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig` for this! (data processing, CSV parsing, batch and send to Zig...)
+- No JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts. 
+- For long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig`: embed native Zig functions for this! (data processing, CSV parsing, batch and send to Zig...)
 
 ## Use cases
 
