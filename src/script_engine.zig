@@ -45,7 +45,8 @@ pub const ScriptEngine = struct {
         self.rc = try RuntimeContext.create(allocator, self.ctx, self.loop);
         errdefer self.rc.destroy();
 
-        self.dom = try DOMBridge.init(allocator, self.ctx);
+        const dom_bridge = try DOMBridge.init(allocator, self.ctx);
+        self.dom = dom_bridge;
         errdefer self.dom.deinit();
 
         self.rc.dom_bridge = @ptrCast(@alignCast(&self.dom));
@@ -65,8 +66,12 @@ pub const ScriptEngine = struct {
     }
 
     pub fn deinit(self: *ScriptEngine) void {
-        // bridges first (release JS references)
         self.dom.deinit();
+        if (self.rc.last_result) |val| {
+            self.ctx.freeValue(val);
+            self.rc.last_result = null;
+        }
+        // bridges first (release JS references)
         // release internal slots
         self.rc.destroy();
         // Loop (stops threads, frees tasks)
@@ -268,24 +273,7 @@ pub const ScriptEngine = struct {
 
     /// Loads HTML content into the Engine, replacing the current global document.
     pub fn loadHTML(self: *ScriptEngine, html: []const u8) !void {
-        const new_doc = try z.parseHTML(self.allocator, html);
-
-        // Destroy the old document to prevent leaks. DOMBridge owns the global doc, so we must clean up the old one.
-        if (self.dom.doc != new_doc) {
-            z.destroyDocument(self.dom.doc);
-        }
-
-        //  Update Zig refs
-        self.dom.doc = new_doc;
-        self.rc.global_document = new_doc;
-
-        // Update the JS 'window.document' reference
-        const global = self.ctx.getGlobalObject();
-        defer self.ctx.freeValue(global);
-        const doc_obj = self.ctx.getPropertyStr(global, "document");
-        defer self.ctx.freeValue(doc_obj);
-
-        try self.ctx.setOpaque(doc_obj, new_doc);
+        try z.insertHTML(self.dom.doc, html);
     }
 };
 

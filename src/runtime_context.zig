@@ -26,6 +26,7 @@ pub const RuntimeContext = struct {
         document: zqjs.ClassID = 0,
         owned_document: zqjs.ClassID = 0,
         event: zqjs.ClassID = 0,
+        css_style_decl: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,
@@ -43,7 +44,6 @@ pub const RuntimeContext = struct {
         };
 
         // Install into QuickJS immediately
-        // qjs.JS_SetContextOpaque(ctx.ptr, self);
         ctx.setContextOpaque(self);
 
         return self;
@@ -56,10 +56,7 @@ pub const RuntimeContext = struct {
 
     /// Retrieve this struct from the JS Context
     pub fn get(ctx: zqjs.Context) *RuntimeContext {
-        // const ptr = qjs.JS_GetContextOpaque(ctx.ptr);
         const ptr = ctx.getContextOpaque(RuntimeContext);
-
-        // const ptr = ctx.getContextOpaque(ctx.ptr);
         if (ptr == null) @panic("RuntimeContext not installed on Context!");
         return @ptrCast(@alignCast(ptr));
     }

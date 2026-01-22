@@ -213,6 +213,7 @@ pub const bindings = [_]BindingSpec{
     },
 
     // Properties (getters/setters)
+
     .{
         .name = "body",
         .kind = .property,

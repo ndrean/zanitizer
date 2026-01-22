@@ -14,6 +14,8 @@ const print = std.debug.print;
 //     unknown = z.LXB_DOM_NODE_TYPE_UNKNOWN,
 // };
 
+extern "c" fn lxb_dom_node_type_noi(node: *z.DomNode) c_uint; // <-- type???
+
 pub const NodeType = enum(c_uint) {
     element = 1,
     attribute = 2,
@@ -27,75 +29,28 @@ pub const NodeType = enum(c_uint) {
     unknown = 0,
 };
 
-const lxb_dom_event_target_t = extern struct {
-    events: ?*anyopaque,
-};
-
-pub const lxb_dom_node_t = extern struct {
-    event_target: lxb_dom_event_target_t,
-
-    local_name: usize, // uintptr_t
-    prefix: usize,
-    ns: usize,
-
-    owner_document: ?*anyopaque,
-
-    next: ?*lxb_dom_node_t,
-    prev: ?*lxb_dom_node_t,
-    parent: ?*lxb_dom_node_t,
-    first_child: ?*lxb_dom_node_t,
-    last_child: ?*lxb_dom_node_t,
-
-    user: ?*anyopaque,
-
-    type: c_uint, // lxb_dom_node_type_t (The treasure!)
-};
-
 /// [node_types] Get node type for enum comparison (Inlined)
 ///
 /// Values are: `.text`, `.comment`, `.document`, `.fragment`, `.element`, `.unknown`.
 pub inline fn nodeType(node: *z.DomNode) NodeType {
-    const raw: *lxb_dom_node_t = @ptrCast(@alignCast(node));
-    return @enumFromInt(raw.type);
-
-    // const node_name = z.nodeName_zc(node);
-
-    // // Fast string comparison - most common cases first
-    // if (std.mem.eql(u8, node_name, "#text")) {
-    //     return .text;
-    // } else if (std.mem.eql(u8, node_name, "#comment")) {
-    //     return .comment;
-    // } else if (std.mem.eql(u8, node_name, "#document")) {
-    //     return .document;
-    // } else if (std.mem.eql(u8, node_name, "#document-fragment")) {
-    //     return .fragment;
-    // } else if (node_name.len > 0 and node_name[0] != '#') {
-    //     // Regular node names (DIV, P, SPAN, STRONG, EM...)
-    //     return .element;
-    // } else {
-    //     return .unknown;
-    // }
+    const type_id = lxb_dom_node_type_noi(node);
+    return @enumFromInt(type_id);
 }
+// const raw: *lxb_dom_node_t = @ptrCast(@alignCast(node));
+// return @enumFromInt(raw.type);
 
 /// [node_types] human-readable type name (Inlined )
 ///
-/// Returns the actual node name (`#text`, `#comment`, `#document-fragment`) for special nodes, `#element` for regular HTML tags.
+/// Values are: `.text`, `.comment`, `.document`, `.fragment`, `.element`, `.unknown`.
 pub inline fn nodeTypeName(node: *z.DomNode) []const u8 {
-    // Direct string comparison for maximum performance - return actual names for special nodes
-    if (z.nodeType(node) == .text) {
-        return "#text";
-    } else if (z.nodeType(node) == .comment) {
-        return "#comment";
-    } else if (z.nodeType(node) == .document) {
-        return "#document";
-    } else if (z.nodeType(node) == .document_fragment) {
-        return "#document-fragment";
-    } else if (z.nodeType(node) == .element) {
-        // Regular HTML tag names (DIV, P, SPAN, STRONG, EM...)
-        return "#element";
-    } else {
-        return "#unknown";
-    }
+    return switch (nodeType(node)) {
+        .text => "#text",
+        .comment => "#comment",
+        .document => "#document",
+        .document_fragment => "#document-fragment",
+        .element => "#element",
+        else => "#unknown",
+    };
 }
 
 /// [node_types] Check if node is an HTMLElement

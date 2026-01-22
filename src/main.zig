@@ -68,6 +68,7 @@ pub fn main() !void {
     // try bench(allocator);
     // try extractScript(allocator);
 
+    try inline_crud_css_js(allocator);
     try eventListeners(allocator);
 
     // try transplante(allocator);
@@ -77,10 +78,11 @@ pub fn main() !void {
     // try domParser(allocator);
     // try buildDOM(allocator);
 
-    try eventListener(allocator);
-    // try performance2(allocator);
-    // // try demoCustomPointClass(allocator);
-    // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
+    // try css_in_js(allocator);
+    // try eventListener(allocator);
+    // // try performance2(allocator);
+    // // // try demoCustomPointClass(allocator);
+    // // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
     // try first_QuickJS_test(allocator);
     // try getValueFromQJSinZig(allocator);
     // try simpleESM(allocator);
@@ -101,6 +103,83 @@ pub fn main() !void {
     // try async_CSV_JSON_Parser(allocator);
 
     // try demoWorker(allocator);
+}
+fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    // with inline styles
+    try engine.loadHTML(
+        \\<html><body><div id="box" style="color: red;"></div></body></html>
+        \\
+    );
+
+    const script =
+        \\ const div = document.getElementById('box');
+        \\ console.log("Div found:", div.tagName);
+        // inline style access
+        \\ const div_style = div.style;
+        \\ const color_str = div_style.getPropertyValue('color');
+        \\ div_style.setProperty('width', '100px');
+        \\ const width_str = div_style.getPropertyValue('width');
+        \\ console.log(width_str);
+        \\ div_style.setProperty('font-size', '16px');
+        \\ console.log("Font size set to:", div_style.getPropertyValue('font-size'));
+        \\ div_style.removeProperty('font-size');
+        \\ ({color: color_str, width: width_str});
+    ;
+    const result = try engine.eval(script, "test.js");
+    defer engine.ctx.freeValue(result);
+
+    const color_val = engine.ctx.getPropertyStr(result, "color");
+    defer engine.ctx.freeValue(color_val);
+    const color_str = try engine.ctx.toZString(color_val);
+    defer engine.ctx.freeZString(color_str);
+
+    const width_val = engine.ctx.getPropertyStr(result, "width");
+    defer engine.ctx.freeValue(width_val);
+    const width_str = try engine.ctx.toZString(width_val);
+    defer engine.ctx.freeZString(width_str);
+
+    try std.testing.expectEqualStrings("red", color_str);
+    try std.testing.expectEqualStrings("100px", width_str);
+}
+
+fn css_in_js(allocator: std.mem.Allocator) !void {
+    const html =
+        \\<p id="pid">Some text</p>
+        \\<form>
+        \\  <button type="button">Change text</button>
+        \\</form>
+    ;
+    const css =
+        \\#pid {
+        \\  color: green;
+        \\  font-size: 20px;
+        \\}
+    ;
+
+    const js =
+        \\function changeText() {
+        \\  const p = document.getElementById("pid")
+        \\  p.textContent = "New text"
+        \\  p.style.color = "red";
+        \\  p.style.fontSize = "30px";
+        \\}
+        \\ document.querySelector("button").addEventListener("click", () => {
+        \\ changeText();
+        \\});
+    ;
+    _ = html;
+    _ = js;
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    const bridge = engine.dom_bridge;
+    try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
+
+    const p_el = z.getElementById(bridge.doc, "pid").?;
+    try bridge.applyStylesToElement(p_el);
 }
 
 fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
@@ -321,7 +400,6 @@ fn eventListener(allocator: std.mem.Allocator) !void {
     const source = try std.fs.cwd().readFileAlloc(allocator, "js/event_loop_event_listener_and_reactive.js", 1024 * 10);
     defer allocator.free(source);
     const c_source = try allocator.dupeZ(u8, source);
-
     defer allocator.free(c_source);
 
     const val = try engine.evalModule(c_source, "dom_event_listener.js");

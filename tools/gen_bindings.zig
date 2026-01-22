@@ -111,7 +111,7 @@ pub fn main() !void {
         \\const qjs = z.qjs;
         \\const DOMBridge = @import("dom_bridge.zig").DOMBridge;
         \\const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-        \\
+        \\const js_CSSStyleDeclaration = @import("js_CSSStyleDeclaration.zig");
         \\
     );
 

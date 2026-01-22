@@ -49,6 +49,12 @@ pub fn parseHTML(allocator: std.mem.Allocator, html_str: []const u8) !*z.HTMLDoc
     return parseHTMLUnsafe(allocator, html_str, .none);
 }
 
+pub fn insertHTML(doc: *z.HTMLDocument, html_str: []const u8) !void {
+    if (lxb_html_document_parse(doc, html_str.ptr, html_str.len) != z._OK) {
+        return Err.ParseFailed;
+    }
+}
+
 /// [parse] Parses a full HTML string into a new document and applies sanitization.
 ///
 /// This function handles full HTML documents by parsing them completely

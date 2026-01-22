@@ -1579,10 +1579,6 @@ pub const Context = packed struct {
         return qjs.JS_SetConstructorBit(self.ptr, func_obj, val) != 0;
     }
 
-    // pub inline fn newCFunctionData(self: Context, func: qjs.JSCFunctionData, length: c_int, magic: c_int, data: []const Value) Value {
-    //     return qjs.JS_NewCFunctionData(self.ptr, func, length, magic, data.len, data.ptr);
-    // }
-
     // Module type
     pub const Module = struct {
         ptr: *qjs.JSModuleDef,

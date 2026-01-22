@@ -73,6 +73,7 @@ const sanitize = @import("modules/sanitizer.zig");
 const parse = @import("modules/parsing.zig");
 const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
+const styles = @import("modules/styles.zig");
 
 // ================================================================================
 
@@ -105,8 +106,7 @@ pub const LXB_DOM_NODE_TYPE_UNKNOWN = 0;
 pub const DomDocument = opaque {};
 // pub const HTMLDocument = opaque {};
 pub const HTMLDocument = opaque {
-    // Helper to treat this HTMLDocument as a DomDocument
-    // This is safe because lxb_dom_document_t is the first member of lxb_html_document_t
+    // treat HTMLDocument as a DomDocument (lxb_dom_document_t is the first member of lxb_html_document_t)
     pub inline fn asDom(self: *HTMLDocument) *DomDocument {
         return @ptrCast(self);
     }
@@ -126,6 +126,9 @@ pub const CssSelectors = opaque {};
 pub const CssSelectorList = opaque {};
 pub const CssSelectorSpecificity = opaque {};
 
+pub const CssStyleParser = opaque {};
+pub const CssStyleSheet = opaque {};
+
 //==============================================================================================
 
 pub const createDocument = lxb.createDocument;
@@ -134,6 +137,7 @@ pub const cleanDocument = lxb.cleanDocument;
 pub const asDom = lxb.asDom;
 
 // Direct access to parser functions
+pub const insertHTML = parse.insertHTML;
 pub const parseHTML = parse.parseHTML;
 pub const parseHTMLUnsafe = parse.parseHTMLUnsafe;
 
@@ -344,16 +348,37 @@ pub const isFrameworkAttribute = specs.isFrameworkAttribute;
 pub const getFrameworkSpec = specs.getFrameworkSpec;
 pub const isFrameworkAttributeSafe = specs.isFrameworkAttributeSafe;
 
+// ============================================================================================
+// CSS Styles integration functions
+
+pub const initDocumentCSS = styles.initDocumentCSS;
+pub const destroyDocumentCSS = styles.destroyDocumentCSS;
+pub const createStylesheet = styles.createStylesheet;
+pub const destroyStylesheet = styles.destroyStylesheet;
+pub const parseStylesheet = styles.parseStylesheet;
+pub const attachStylesheet = styles.attachStylesheet;
+pub const attachElementStyles = styles.attachElementStyles;
+pub const getComputedStyle = styles.getComputedStyle;
+pub const createCssStyleParser = styles.createCssStyleParser;
+pub const destroyCssStyleParser = styles.destroyCssStyleParser;
+pub const setStyleProperty = styles.setStyleProperty;
+pub const getInlineStyle = styles.getInlineStyle;
+pub const parseElementStyle = styles.parseElementStyle;
+pub const removeInlineStyleProperty = styles.removeInlineStyleProperty;
+
+// ============================================================================================
+
 //============================================================================================
 // CSS selectors
 
 pub const CssSelectorEngine = css.CssSelectorEngine;
-pub const createCssEngine = css.createCssEngine;
+// pub const createCssEngine = css.createCssEngine;
 
 pub const querySelectorAll = css.querySelectorAll;
 pub const querySelector = css.querySelector;
 pub const filter = css.filter;
 pub const matches = css.matches;
+pub const closest = css.closest;
 
 //============================================================================================
 // Class & ClassList
