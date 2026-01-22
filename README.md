@@ -1473,13 +1473,13 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 
 ## DOM API integration
   
-- Native Zig Event Loop. Thread-safe loop handling Timers (microtasks) and  Promises (MicroTasks).
+- **Event Loop**. Native Zig thread-safe loop handling Timers (microtasks) and  Promises (macrotasks).
 - **Worker pool**: multi-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
-- EventListeners (add, remove, dispatch) and bubbling supported.
-- Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
-- ES6 Module System: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
-- CCSOM: inline CSS-inJS and <style></style> StyleSheet support.
+- **EventListeners** (add, remove, dispatch) and _bubbling_ supported.
+- **ES6 Module System**: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
+- **CCSOM**: _inline_ CSS-inJS and <style></style> _StyleSheet_ support. The 1000+ CSS properties will not be coded but replaced with functional accessors: `Element.getPropertyValue()` and `Element.setPropertyValue()`.
 - `fetch` API (WIP).
+- Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
 
 **Expectations**:
 
@@ -1507,7 +1507,7 @@ The primitives exposed stay as close as possible to `JavaScript` semantics.
 
 Plenty!
 
-No AsyncIO, no WebSocket, no planned WASM support, no `window` support, no CSSOM.
+No AsyncIO, no WebSocket, no planned WASM support, no `window` support.
   
 ## Examples
 
