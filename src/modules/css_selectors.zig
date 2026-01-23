@@ -13,67 +13,54 @@ const Err = z.Err;
 
 // 1. CSS Memory (The Pool)
 extern "c" fn lxb_css_memory_create() ?*anyopaque;
-extern "c" fn lxb_css_memory_init(memory: *anyopaque, size: usize) usize;
+extern "c" fn lxb_css_memory_init(memory: *anyopaque, size: usize) c_int;
 extern "c" fn lxb_css_memory_destroy(memory: *anyopaque, destroy_self: bool) ?*anyopaque;
 
 // 2. CSS Parser
 extern "c" fn lxb_css_parser_create() ?*z.CssParser;
-extern "c" fn lxb_css_parser_init(parser: *z.CssParser, memory: ?*anyopaque) usize;
+extern "c" fn lxb_css_parser_init(parser: *z.CssParser, memory: ?*anyopaque) c_int;
 extern "c" fn lxb_css_parser_destroy(parser: *z.CssParser, destroy_self: bool) ?*z.CssParser;
 
-// NOTE: Setters for Parser are inline in C and have no _noi export in parser.h.
-// We map the struct manually below (LxCssParserHead).
+// [NEW] Setters are now exposed via _noi (Not Inline) functions
+extern "c" fn lxb_css_parser_memory_set_noi(parser: *z.CssParser, memory: ?*anyopaque) void;
+extern "c" fn lxb_css_parser_selectors_set_noi(parser: *z.CssParser, selectors: ?*z.CssSelectorsState) void;
 
 // 3. CSS Selectors (The Parser State Helper)
 // Note: This is NOT the finder. This holds state for parsing selector strings.
-const LxCssSelectorsState = opaque {};
-extern "c" fn lxb_css_selectors_create() ?*LxCssSelectorsState;
-extern "c" fn lxb_css_selectors_init(selectors: *LxCssSelectorsState) usize;
-extern "c" fn lxb_css_selectors_destroy(selectors: *LxCssSelectorsState, destroy_self: bool) ?*LxCssSelectorsState;
-
+// const LxCssSelectorsState = opaque {};
+extern "c" fn lxb_css_selectors_create() ?*z.CssSelectorsState;
+extern "c" fn lxb_css_selectors_init(selectors: *z.CssSelectorsState) c_int;
+extern "c" fn lxb_css_selectors_destroy(selectors: *z.CssSelectorsState, destroy_self: bool) ?*z.CssSelectorsState;
 extern "c" fn lxb_css_selectors_parse(parser: *z.CssParser, list: [*]const u8, size: usize) ?*z.CssSelectorList;
 
 // 4. Selectors (The Finder Engine)
 extern "c" fn lxb_selectors_create() ?*z.CssSelectors;
-extern "c" fn lxb_selectors_init(selectors: *z.CssSelectors) usize;
+extern "c" fn lxb_selectors_init(selectors: *z.CssSelectors) c_int;
 extern "c" fn lxb_selectors_destroy(selectors: *z.CssSelectors, destroy_self: bool) ?*z.CssSelectors;
 
 // [FIX] Use _noi (Not Inline) version exposed by selectors.h
 extern "c" fn lxb_selectors_opt_set_noi(selectors: *z.CssSelectors, opt: c_uint) void;
-
 extern "c" fn lxb_selectors_find(
     selectors: *z.CssSelectors,
     root: *z.DomNode,
     list: *z.CssSelectorList,
-    cb: *const fn (*z.DomNode, *z.CssSelectorSpecificity, ?*anyopaque) callconv(.c) usize,
+    cb: *const fn (*z.DomNode, *z.CssSelectorSpecificity, ?*anyopaque) callconv(.c) c_int,
     ctx: ?*anyopaque,
-) usize;
+) c_int;
 
 extern "c" fn lxb_selectors_match_node(
     selectors: *z.CssSelectors,
     node: *z.DomNode,
     list: *z.CssSelectorList,
-    cb: *const fn (*z.DomNode, *z.CssSelectorSpecificity, ?*anyopaque) callconv(.c) usize,
+    cb: *const fn (*z.DomNode, *z.CssSelectorSpecificity, ?*anyopaque) callconv(.c) c_int,
     ctx: ?*anyopaque,
-) usize;
+) c_int;
 
 // [FIX] Correct Constants from selectors.h
 // LXB_SELECTORS_OPT_MATCH_ROOT = 1 << 1 (2)
 // LXB_SELECTORS_OPT_MATCH_FIRST = 1 << 2 (4)
 const LXB_SELECTORS_OPT_MATCH_ROOT: c_uint = 2;
 const LXB_SELECTORS_OPT_MATCH_FIRST: c_uint = 4;
-
-//=============================================================================
-// INTERNAL STRUCT MAPPING
-//=============================================================================
-
-// We map the head of lxb_css_parser struct to access fields directly
-// because the setters are static inline functions in C and no _noi exists.
-const LxCssParserHead = extern struct {
-    tkz: ?*anyopaque, // 0: Tokenizer
-    selectors: ?*LxCssSelectorsState, // 1: Parser Helper
-    memory: ?*anyopaque, // 2: Memory Pool
-};
 
 //=============================================================================
 // ENGINE
@@ -85,7 +72,7 @@ pub const CssSelectorEngine = struct {
     // Core Objects
     css_memory: *anyopaque, // Shared memory pool
     css_parser: *z.CssParser, // Shared parser
-    css_helper: *LxCssSelectorsState, // Shared parser state
+    css_helper: *z.CssSelectorsState, // Shared parser state
     selectors: *z.CssSelectors, // Shared finder engine
 
     // Cache
@@ -107,16 +94,16 @@ pub const CssSelectorEngine = struct {
         const helper = lxb_css_selectors_create() orelse return error.CssHelperAllocFailed;
         if (lxb_css_selectors_init(helper) != z._OK) return error.CssHelperInitFailed;
 
-        // [FIX] Manually bind Memory and Helper to Parser (with @alignCast)
-        const parser_head: *LxCssParserHead = @ptrCast(@alignCast(parser));
-        parser_head.memory = mem;
-        parser_head.selectors = helper;
+        // [FIXED] Bind Memory and Helper to Parser using official API
+        // No more manual struct casting needed!
+        lxb_css_parser_memory_set_noi(parser, mem);
+        lxb_css_parser_selectors_set_noi(parser, helper);
 
         // 4. Create Finder
         const sel = lxb_selectors_create() orelse return error.CssFinderAllocFailed;
         if (lxb_selectors_init(sel) != z._OK) return error.CssFinderInitFailed;
 
-        // [FIX] Use _noi function and correct constants
+        // Use _noi function to set options
         lxb_selectors_opt_set_noi(sel, LXB_SELECTORS_OPT_MATCH_FIRST | LXB_SELECTORS_OPT_MATCH_ROOT);
 
         return .{
@@ -186,7 +173,6 @@ pub const CssSelectorEngine = struct {
         defer ctx.deinit();
 
         const status = lxb_selectors_find(self.selectors, root_node, list, findAllCb, &ctx);
-
         if (status != z._OK) return error.SelectorFindError;
         return ctx.results.toOwnedSlice(self.allocator);
     }
@@ -197,7 +183,6 @@ pub const CssSelectorEngine = struct {
         var matched = false;
 
         const status = lxb_selectors_match_node(self.selectors, z.elementToNode(element), list, matchCb, &matched);
-
         if (status != z._OK and status != z._STOP) return error.SelectorMatchError;
         return matched;
     }
@@ -205,7 +190,6 @@ pub const CssSelectorEngine = struct {
     /// Find closest ancestor (or self) matching selector: `el.closest(sel)`
     pub fn closest(self: *Self, element: *z.HTMLElement, selector: []const u8) !?*z.HTMLElement {
         const list = try self.getSelector(selector);
-
         var current: ?*z.DomNode = z.elementToNode(element);
 
         while (current) |node| {
@@ -226,7 +210,6 @@ pub const CssSelectorEngine = struct {
     /// Filter a list of elements: `list.filter(el => el.matches(sel))`
     pub fn filter(self: *Self, elements: []*z.HTMLElement, selector: []const u8) ![]*z.HTMLElement {
         const list = try self.getSelector(selector);
-
         // Use ArrayListUnmanaged for explicit allocator control
         var results = std.ArrayListUnmanaged(*z.HTMLElement){};
         errdefer results.deinit(self.allocator);
@@ -286,6 +269,7 @@ fn toNode(root: anytype) !*z.DomNode {
     if (T == *z.HTMLElement) return z.elementToNode(root);
     if (T == *z.HTMLDocument) return z.documentRoot(root) orelse return error.DocumentHasNoRoot;
     if (T == *z.DocumentFragment) return z.fragmentToNode(root);
+
     // Generic optional handling
     if (@typeInfo(T) == .Optional) {
         if (root) |val| return toNode(val);
@@ -300,7 +284,7 @@ const FirstContext = struct {
     result: ?*z.HTMLElement,
 };
 
-fn findFirstCb(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
+fn findFirstCb(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) c_int {
     const context: *FirstContext = @ptrCast(@alignCast(ctx.?));
     if (z.nodeToElement(node)) |el| {
         context.result = el;
@@ -321,7 +305,7 @@ const AllContext = struct {
     }
 };
 
-fn findAllCb(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
+fn findAllCb(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) c_int {
     const context: *AllContext = @ptrCast(@alignCast(ctx.?));
     if (z.nodeToElement(node)) |el| {
         context.results.append(context.allocator, el) catch return z._STOP;
@@ -329,7 +313,7 @@ fn findAllCb(node: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) c
     return z._OK;
 }
 
-fn matchCb(_: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) usize {
+fn matchCb(_: *z.DomNode, _: *z.CssSelectorSpecificity, ctx: ?*anyopaque) callconv(.c) c_int {
     const matched: *bool = @ptrCast(@alignCast(ctx.?));
     matched.* = true;
     return z._STOP;

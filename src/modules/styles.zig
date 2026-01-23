@@ -1,104 +1,83 @@
 //! CSS Styling Support
 //!
 //! Wraps Lexbor's Document and Stylesheet API.
-//! Allows manual stylesheet creation, parsing, and application.
+//! Uses Lexbor's native DOM functions to handle the CSS Cascade automatically.
 
 const std = @import("std");
 const z = @import("../root.zig");
 
 // ============================================================================
-// TYPES & DEFINITIONS
+// EXTERN DECLARATIONS
 // ============================================================================
-
-const lxb_status_t = c_int;
 
 const lxb_serialize_cb_f = *const fn (
     data: [*]const u8,
     len: usize,
     ctx: ?*anyopaque,
-) callconv(.c) lxb_status_t;
-
-// Opaque handles
-const lxb_css_rule_declaration_t = opaque {};
-// const lxb_css_parser_t = opaque {}; CssStyleParser
-// const lxb_css_stylesheet_t = opaque {};CssStyleSheet
-const lxb_css_memory_t = opaque {};
-
-// ============================================================================
-// EXTERN DEFINITIONS
-// ============================================================================
+) callconv(.c) c_int;
 
 // Document CSS Init/Destroy
-extern "c" fn lxb_dom_document_css_init(document: *z.DomDocument, init_events: bool) lxb_status_t;
+extern "c" fn lxb_dom_document_css_init(document: *z.DomDocument, init_events: bool) c_int;
 extern "c" fn lxb_dom_document_css_destroy(document: *z.DomDocument) void;
 
-// Element Style Attachment
-extern "c" fn lxb_dom_document_element_styles_attach(element: *z.HTMLElement) lxb_status_t;
+// Element Style Attachment (The "Magic" Function that runs the cascade)
+extern "c" fn lxb_dom_document_element_styles_attach(element: *z.HTMLElement) c_int;
+
+extern "c" fn lexbor_css_parser_memory_wrapper(parser: *z.CssStyleParser) ?*z.CssMemory;
+
+// Element Style Accessors
 extern "c" fn lxb_dom_element_style_by_name(
     element: *z.HTMLElement,
     name: [*]const u8,
     len: usize,
-) ?*const lxb_css_rule_declaration_t;
+) ?*const z.CssRuleDeclaration;
 
-// Serialize all styles of an element (for syncing back to attribute)
 extern "c" fn lxb_dom_element_style_serialize(
     element: *z.HTMLElement,
     opt: c_uint,
     cb: lxb_serialize_cb_f,
     ctx: ?*anyopaque,
-) lxb_status_t;
+) c_int;
 
 extern "c" fn lxb_dom_element_style_remove_by_name(
     element: *z.HTMLElement,
     name: [*]const u8,
     size: usize,
 ) void;
-// Parse 'style' attribute string into element styles
+
 extern "c" fn lxb_dom_element_style_parse(
     element: *z.HTMLElement,
     style: [*]const u8,
     size: usize,
 ) c_int;
 
+// CSS Core
 extern "c" fn lxb_css_parser_create() ?*z.CssStyleParser;
-extern "c" fn lxb_css_parser_init(parser: *z.CssStyleParser, tokenizer: ?*anyopaque) lxb_status_t;
+extern "c" fn lxb_css_parser_init(parser: *z.CssStyleParser, tokenizer: ?*anyopaque) c_int;
 extern "c" fn lxb_css_parser_destroy(parser: *z.CssStyleParser, self_destroy: bool) void;
-
-const lxb_html_style_element_t = opaque {};
-extern "c" fn lxb_html_style_element_parse(style_element: *lxb_html_style_element_t) lxb_status_t;
-extern "c" fn lxb_html_style_element_remove(style_element: *lxb_html_style_element_t) lxb_status_t;
-
-// CSS Rule Serialization
-extern "c" fn lxb_css_rule_declaration_serialize(decl: *const lxb_css_rule_declaration_t, cb: lxb_serialize_cb_f, ctx: ?*anyopaque) lxb_status_t;
+extern "c" fn lxb_css_rule_declaration_serialize(decl: *const z.CssRuleDeclaration, cb: lxb_serialize_cb_f, ctx: ?*anyopaque) c_int;
 
 // Stylesheet
-extern "c" fn lxb_css_stylesheet_create(memory: ?*lxb_css_memory_t) ?*z.CssStyleSheet;
-extern "c" fn lxb_css_stylesheet_parse(sst: *z.CssStyleSheet, parser: *z.CssStyleParser, data: [*]const u8, length: usize) lxb_status_t;
+extern "c" fn lxb_css_stylesheet_create(memory: ?*z.CssMemory) ?*z.CssStyleSheet;
+extern "c" fn lxb_css_stylesheet_parse(sst: *z.CssStyleSheet, parser: *z.CssStyleParser, data: [*]const u8, length: usize) c_int;
 extern "c" fn lxb_css_stylesheet_destroy(sst: *z.CssStyleSheet, self_destroy: bool) void;
-
-// Document <-> Stylesheet Attachment
-extern "c" fn lxb_dom_document_stylesheet_attach(document: *z.DomDocument, sst: *z.CssStyleSheet) lxb_status_t;
+extern "c" fn lxb_dom_document_stylesheet_attach(document: *z.DomDocument, sst: *z.CssStyleSheet) c_int;
 
 // ============================================================================
-// ZIG WRAPPERS
+// IMPLEMENTATION
 // ============================================================================
 
 pub fn initDocumentCSS(doc: *z.HTMLDocument, init_events: bool) !void {
-    if (lxb_dom_document_css_init(doc.asDom(), init_events) != z._OK) {
-        return error.CSSInitFailed;
-    }
+    if (lxb_dom_document_css_init(doc.asDom(), init_events) != z._OK) return error.CSSInitFailed;
 }
 
 pub fn destroyDocumentCSS(doc: *z.HTMLDocument) void {
     lxb_dom_document_css_destroy(doc.asDom());
 }
 
-/// [Styles] Create a new CSS Parser.
-/// You usually only need one of these to parse multiple stylesheets.
 pub fn createCssStyleParser() !*z.CssStyleParser {
     const parser = lxb_css_parser_create() orelse return error.CssParserAllocFailed;
     if (lxb_css_parser_init(parser, null) != z._OK) {
-        // Destroy if init fails (though create succeeded)
         lxb_css_parser_destroy(parser, true);
         return error.CssParserInitFailed;
     }
@@ -109,7 +88,6 @@ pub fn destroyCssStyleParser(parser: *z.CssStyleParser) void {
     lxb_css_parser_destroy(parser, true);
 }
 
-/// [Styles] Create a new empty Stylesheet.
 pub fn createStylesheet() !*z.CssStyleSheet {
     return lxb_css_stylesheet_create(null) orelse error.StylesheetAllocFailed;
 }
@@ -118,122 +96,96 @@ pub fn destroyStylesheet(sst: *z.CssStyleSheet) void {
     lxb_css_stylesheet_destroy(sst, true);
 }
 
-/// [Styles] Parse CSS text into a Stylesheet.
 pub fn parseStylesheet(sst: *z.CssStyleSheet, parser: *z.CssStyleParser, css_text: []const u8) !void {
     if (lxb_css_stylesheet_parse(sst, parser, css_text.ptr, css_text.len) != z._OK) {
         return error.StylesheetParseFailed;
     }
 }
 
-/// [Styles] Attach a stylesheet to the document.
-/// This makes the rules in the stylesheet active for the document.
 pub fn attachStylesheet(doc: *z.HTMLDocument, sst: *z.CssStyleSheet) !void {
     if (lxb_dom_document_stylesheet_attach(doc.asDom(), sst) != z._OK) {
         return error.StylesheetAttachFailed;
     }
 }
 
-/// [Styles] Calculate and attach matching styles to a specific Element.
 pub fn attachElementStyles(element: *z.HTMLElement) !void {
+    // Lexbor's native function. It iterates the document's stylesheets
+    // and applies matching rules to this element's internal style list.
     if (lxb_dom_document_element_styles_attach(element) != z._OK) {
         return error.StyleAttachFailed;
     }
 }
 
-/// [Styles] Manually parse the 'style' attribute of an element.
-/// Use this if the element was created/parsed BEFORE CSS was initialized.
-pub fn parseElementStyle(element: *z.HTMLElement) !void {
-    // 1. Get the raw style attribute string (e.g. "color: red;")
-    const style_attr = z.getAttribute_zc(element, "style");
-    if (style_attr == null) return; // No style to parse
+// ----------------------------------------------------------------------------
+// INLINE STYLE HELPERS
+// ----------------------------------------------------------------------------
 
-    // 2. Feed it to the CSS engine
-    if (lxb_dom_element_style_parse(element, style_attr.?.ptr, style_attr.?.len) != z._OK) {
-        return error.StyleParseFailed;
-    }
+const SerializeContext = struct {
+    list: *std.ArrayListUnmanaged(u8),
+    allocator: std.mem.Allocator,
+};
+
+fn serializeStructCb(data: [*]const u8, len: usize, ptr: ?*anyopaque) callconv(.c) c_int {
+    const ctx: *SerializeContext = @ptrCast(@alignCast(ptr));
+    ctx.list.appendSlice(ctx.allocator, data[0..len]) catch return z._STOP;
+    return z._OK;
 }
 
-/// [Styles] Serialize the element's current CSSOM to a string
-/// e.g. "color: red; width: 10px;"
-fn serializeElementStyles(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
+pub fn serializeElementStyles(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
     var writer = std.ArrayListUnmanaged(u8){};
     errdefer writer.deinit(allocator);
+    var ctx = SerializeContext{ .list = &writer, .allocator = allocator };
 
-    const Context = struct {
-        list: *std.ArrayListUnmanaged(u8),
-        allocator: std.mem.Allocator,
-    };
-    var ctx = Context{ .list = &writer, .allocator = allocator };
-
-    const cb = struct {
-        fn impl(data: [*]const u8, len: usize, ptr: ?*anyopaque) callconv(.c) lxb_status_t {
-            const self: *Context = @ptrCast(@alignCast(ptr));
-            self.list.appendSlice(self.allocator, data[0..len]) catch return z._STOP;
-            return z._OK;
-        }
-    }.impl;
-
-    if (lxb_dom_element_style_serialize(element, 0, cb, &ctx) != z._OK) {
+    if (lxb_dom_element_style_serialize(element, 0, serializeStructCb, &ctx) != z._OK) {
         writer.deinit(allocator);
         return try allocator.dupe(u8, "");
     }
     return writer.toOwnedSlice(allocator);
 }
 
-/// NOTE: This does NOT return values from stylesheets (<style> or <link>).
-/// For that, you need a Cascade Walker (future implementation).
-/// [Styles] Get a property from the element's INLINE style.
-/// This corresponds to JS: `element.style.getPropertyValue(prop)`
-pub fn getInlineStyle(
+/// [Styles] Get a property from the element's style.
+/// Returns the effective style (Stylesheet + Inline).
+pub fn getComputedStyle(
     allocator: std.mem.Allocator,
     element: *z.HTMLElement,
     property: []const u8,
 ) !?[]u8 {
-    // 1. Get declaration
     const decl = lxb_dom_element_style_by_name(element, property.ptr, property.len);
     if (decl == null) return null;
 
-    // 2. Serialize full declaration (e.g. "color: green")
     var writer = std.ArrayListUnmanaged(u8){};
     defer writer.deinit(allocator);
+    var ctx = SerializeContext{ .list = &writer, .allocator = allocator };
 
-    const Context = struct {
-        list: *std.ArrayListUnmanaged(u8),
-        allocator: std.mem.Allocator,
-    };
-    var ctx = Context{ .list = &writer, .allocator = allocator };
-
-    const cb = struct {
-        fn impl(data: [*]const u8, len: usize, ptr: ?*anyopaque) callconv(.c) c_int {
-            const self: *Context = @ptrCast(@alignCast(ptr));
-            self.list.appendSlice(self.allocator, data[0..len]) catch return z._STOP;
-            return z._OK;
-        }
-    }.impl;
-
-    if (lxb_css_rule_declaration_serialize(decl.?, cb, &ctx) != z._OK) {
+    if (lxb_css_rule_declaration_serialize(decl.?, serializeStructCb, &ctx) != z._OK) {
         return error.StyleSerializeFailed;
     }
 
     const full_decl = try writer.toOwnedSlice(allocator);
-    // defer allocator.free(full_decl); // We will return a slice or copy of this
-
-    // 3. Strip key ("color: green" -> "green")
+    // Parse "prop: value" -> "value"
     if (std.mem.indexOf(u8, full_decl, ":")) |colon_idx| {
-        // Find start of value (skip colon and spaces)
         var val_start = colon_idx + 1;
         while (val_start < full_decl.len and full_decl[val_start] == ' ') : (val_start += 1) {}
-
-        // Move the value to the front of the buffer (overlap is handled by std.mem.copy usually,
-        // but here we are destructively slicing).
-        // Safer: Duplicate the value part and free the full string.
         const value_part = try allocator.dupe(u8, full_decl[val_start..]);
         allocator.free(full_decl);
         return value_part;
     }
-
-    // Fallback: return full string if parsing failed (unlikely)
     return full_decl;
+}
+
+pub const getInlineStyle = getComputedStyle;
+
+pub fn setStyleProperty(
+    allocator: std.mem.Allocator,
+    element: *z.HTMLElement,
+    property: []const u8,
+    value: []const u8,
+) !void {
+    lxb_dom_element_style_remove_by_name(element, property.ptr, property.len);
+    const rule = try std.fmt.allocPrint(allocator, "{s}: {s}", .{ property, value });
+    defer allocator.free(rule);
+    _ = lxb_dom_element_style_parse(element, rule.ptr, rule.len);
+    try syncStyleAttribute(allocator, element);
 }
 
 pub fn removeInlineStyleProperty(
@@ -241,128 +193,141 @@ pub fn removeInlineStyleProperty(
     element: *z.HTMLElement,
     property: []const u8,
 ) !void {
-    // Remove from CSSOM
     lxb_dom_element_style_remove_by_name(element, property.ptr, property.len);
+    try syncStyleAttribute(allocator, element);
+}
 
-    // SYNC: Serialize CSSOM back to the 'style' attribute
-    // If we don't do this, the "style" attribute string will still contain the old value
+pub fn parseElementStyle(element: *z.HTMLElement) !void {
+    const style_attr = z.getAttribute_zc(element, "style");
+    if (style_attr == null) return;
+    _ = lxb_dom_element_style_parse(element, style_attr.?.ptr, style_attr.?.len);
+}
+
+// INTERNAL HELPER: Syncs the CSSOM state back to the string attribute `style="..."`
+// Should ONLY be called when modifying inline styles directly.
+fn syncStyleAttribute(allocator: std.mem.Allocator, element: *z.HTMLElement) !void {
     const new_attr_str = try serializeElementStyles(allocator, element);
     defer allocator.free(new_attr_str);
 
-    if (new_attr_str.len == 0) {
-        // If style is empty, remove the attribute entirely
-        if (z.hasAttribute(element, "style")) {
-            try z.removeAttribute(element, "style");
-        }
-    } else {
+    // 1. Always clear the existing attribute to avoid conflicts/re-parsing loops
+    if (z.hasAttribute(element, "style")) {
         try z.removeAttribute(element, "style");
+    }
+
+    // 2. Set the new value if it's not empty
+    if (new_attr_str.len > 0) {
         try z.setAttribute(element, "style", new_attr_str);
     }
 }
 
-/// [Styles] Set a specific inline style property.
-/// Equivalent to JS: `element.style.setProperty(prop, val)` or `element.style.prop = val`
-///
-/// This removes any existing inline declaration for this property and appends the new one.
-pub fn setStyleProperty(
+/// [Styles] Scan the document for <style> tags and parse their content into the stylesheet.
+/// This connects the DOM <style> elements to the CSS Engine.
+pub fn loadStyleTags(
     allocator: std.mem.Allocator,
-    element: *z.HTMLElement,
-    property: []const u8,
-    value: []const u8,
+    doc: *z.HTMLDocument,
+    parser: *z.CssStyleParser, // Removed the 'sst' argument
 ) !void {
-    // Remove old property from CSSOM to prevent duplicates
-    lxb_dom_element_style_remove_by_name(element, property.ptr, property.len);
+    const style_elements = try z.querySelectorAll(allocator, z.documentRoot(doc).?, "style");
+    defer allocator.free(style_elements);
 
-    // Add new property to CSSOM
-    // format"prop: value" because parse expects a declaration
-    const rule = try std.fmt.allocPrint(allocator, "{s}: {s}", .{ property, value });
-    defer allocator.free(rule);
+    for (style_elements) |el| {
+        const content = z.textContent_zc(z.elementToNode(el));
 
-    if (lxb_dom_element_style_parse(element, rule.ptr, rule.len) != z._OK) {
-        return error.StyleParseFailed;
-    }
+        if (content.len > 0) {
+            // Get the parser's memory pool
+            const parser_memory = lexbor_css_parser_memory_wrapper(@ptrCast(parser));
+            // Create a FRESH stylesheet for this specific <style> tag
+            // We use the parser's memory pool, so it gets cleaned up automatically later.
+            const tag_sst = lxb_css_stylesheet_create(parser_memory) orelse return error.StylesheetAllocFailed;
 
-    // SYNC: Serialize CSSOM back to the 'style' attribute
-    const new_attr_str = try serializeElementStyles(allocator, element);
-    defer allocator.free(new_attr_str);
+            if (lxb_css_stylesheet_parse(tag_sst, parser, content.ptr, content.len) != z._OK) {
+                lxb_css_stylesheet_destroy(tag_sst, true);
+                return error.ParseFailed;
+            }
 
-    if (z.hasAttribute(element, "style")) {
-        try z.removeAttribute(element, "style");
-    }
-    try z.setAttribute(element, "style", new_attr_str);
-}
-
-/// [Styles] Get the computed CSS declaration for a specific property.
-pub fn getComputedStyle(
-    allocator: std.mem.Allocator,
-    element: *z.HTMLElement,
-    property: []const u8,
-) !?[]u8 {
-    // 1. Get the declaration (Returns *const)
-    const decl = lxb_dom_element_style_by_name(element, property.ptr, property.len);
-    if (decl == null) return null;
-
-    // 2. Serialize
-    var writer = std.ArrayListUnmanaged(u8){};
-    errdefer writer.deinit(allocator);
-
-    const Context = struct {
-        list: *std.ArrayListUnmanaged(u8),
-        allocator: std.mem.Allocator,
-    };
-    var ctx = Context{ .list = &writer, .allocator = allocator };
-
-    const cb = struct {
-        fn impl(data: [*]const u8, len: usize, ptr: ?*anyopaque) callconv(.c) lxb_status_t {
-            const self: *Context = @ptrCast(@alignCast(ptr));
-            self.list.appendSlice(self.allocator, data[0..len]) catch return z._STOP;
-            return z._OK;
+            try z.attachStylesheet(doc, tag_sst);
         }
-    }.impl;
-
-    if (lxb_css_rule_declaration_serialize(decl.?, cb, &ctx) != z._OK) {
-        return error.StyleSerializeFailed;
     }
-
-    return try writer.toOwnedSlice(allocator);
 }
 
 // ============================================================================
-// TESTS
-// ============================================================================
 
+test "order" {
+    const allocator = std.testing.allocator;
+    const doc = try z.createDocument();
+    defer z.destroyDocument(doc);
+
+    try z.initDocumentCSS(doc, true);
+    defer z.destroyDocumentCSS(doc);
+
+    const parser = try z.createCssStyleParser();
+    defer z.destroyCssStyleParser(parser);
+
+    const sst = try z.createStylesheet();
+    defer z.destroyStylesheet(sst);
+
+    const html = "<html><head></head><body><div id='target'></div></body></html>";
+    try z.insertHTML(doc, html);
+
+    const css = "div { color: red; }";
+    try z.parseStylesheet(sst, parser, css);
+    try z.attachStylesheet(doc, sst);
+
+    const div = try z.querySelector(allocator, doc, "#target");
+
+    const color = try z.getComputedStyle(allocator, div.?, "color");
+    defer if (color) |c| allocator.free(c);
+    try std.testing.expect(std.mem.indexOf(u8, color.?, "red") != null);
+
+    // const div_style = try serializeElementStyles(allocator, div.?);
+
+    // defer allocator.free(div_style);
+    // z.print("{s}\n", .{div_style});
+    // try std.testing.expect(std.mem.indexOf(u8, div_style, "color: red") != null);
+
+    const has_div_style_attr = z.hasAttribute(div.?, "style");
+    try std.testing.expect(!has_div_style_attr);
+
+    try z.attachElementStyles(div.?);
+
+    // try z.prettyPrint(allocator, z.bodyNode(doc).?); // you see <div id="target">
+    var is_synced_style = z.hasAttribute(div.?, "style");
+
+    try std.testing.expect(!is_synced_style); // style setup with stylesheet, not inline, so no attribute 'style'
+
+    try syncStyleAttribute(allocator, div.?);
+    // forcing sync, this time it should appear
+    is_synced_style = z.hasAttribute(div.?, "style");
+    try std.testing.expect(is_synced_style);
+
+    try z.prettyPrint(allocator, z.bodyNode(doc).?); // you see <div id="target" style="color: red">
+}
 test "Styles: Manual Stylesheet Attachment" {
     const allocator = std.testing.allocator;
 
-    const html = "<html><head></head><body><div id='target'></div></body></html>";
-    const doc = try z.parseHTML(allocator, html);
+    const doc = try z.createDocument();
     defer z.destroyDocument(doc);
 
-    // 1. Init Document CSS
     try initDocumentCSS(doc, true);
     defer destroyDocumentCSS(doc);
 
-    // 2. Setup Parser and Stylesheet
     const parser = try createCssStyleParser();
     defer destroyCssStyleParser(parser);
 
     const sst = try createStylesheet();
-    // In Lexbor, attaching a stylesheet transfers ownership to the document/memory pool usually,
-    // but explicit destruction is safer in tests to prevent leaks if attachment fails.
     defer destroyStylesheet(sst);
 
-    // 3. Parse CSS
+    const html = "<html><head></head><body><div id='target'></div></body></html>";
+    try z.insertHTML(doc, html);
+
     const css = "#target { width: 100px; color: red; }";
     try parseStylesheet(sst, parser, css);
 
-    // 4. Attach Stylesheet to Document
     try attachStylesheet(doc, sst);
 
-    // 5. Apply styles to target
     const div = try z.querySelector(allocator, doc, "#target");
     try attachElementStyles(div.?);
 
-    // 6. Verify (Should now work!)
     const width = try getComputedStyle(allocator, div.?, "width");
     defer if (width) |w| allocator.free(w);
 
@@ -380,7 +345,6 @@ test "Styles: Inline Style (Fixed Order)" {
     const allocator = std.testing.allocator;
 
     // SCENARIO 1: The "Wrong" Order (Parse -> Init)
-    // This simulates your current issue.
     const html = "<html><body><div id='late' style='color: blue;'></div></body></html>";
     const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
@@ -389,14 +353,12 @@ test "Styles: Inline Style (Fixed Order)" {
 
     const div = z.querySelector(allocator, doc, "#late") catch unreachable;
 
-    // This would FAIL (return null) because the style wasn't parsed:
-    // const fail = try getInlineStyle(allocator, div.?, "color");
+    // FAILS because the style wasn't parsed:
+    // const fail = try getComputedStyle(allocator, div.?, "color");
 
-    // FIX: Manually trigger parsing for this element
+    // !! Manually trigger parsing for this element
     try parseElementStyle(div.?);
-
-    // Now it works!
-    const color = try getInlineStyle(allocator, div.?, "color");
+    const color = try getComputedStyle(allocator, div.?, "color");
     defer if (color) |c| allocator.free(c);
 
     try std.testing.expect(color != null);
@@ -406,28 +368,26 @@ test "Styles: Inline Style (Fixed Order)" {
 test "Styles: The Correct Order (Create -> Init -> Parse)" {
     const allocator = std.testing.allocator;
 
-    // 1. Create Empty Document FIRST
+    // 1.Create Empty Document FIRST
     const doc = try z.createDocument();
     defer z.destroyDocument(doc);
 
-    // 2. Init CSS Engine (Now it's watching!)
+    // 2.Init CSS Engine <-- now watching
     try initDocumentCSS(doc, true);
 
-    // 3. Parse HTML into the document (CSS Engine sees attributes as they are parsed)
+    // 3.Parse HTML into the document (CSS Engine sees attributes as they are parsed)
     const html = "<html><body><div id='correct' style='color: green;'></div></body></html>";
     try z.insertHTML(doc, html);
     // try z.prettyPrint(allocator, z.documentRoot(doc).?);
 
-    const div = z.querySelector(allocator, doc, "#correct") catch unreachable;
-
-    // Works immediately!
-    const color = try getInlineStyle(allocator, div.?, "color");
+    const div = try z.querySelector(allocator, doc, "#correct");
+    const color = try getComputedStyle(allocator, div.?, "color");
     defer if (color) |c| allocator.free(c);
 
     try std.testing.expect(color != null);
     try std.testing.expect(std.mem.indexOf(u8, color.?, "green") != null);
     try std.testing.expect(z.hasAttribute(div.?, "style"));
-    try removeInlineStyleProperty(allocator, div.?, "color");
+    try z.removeInlineStyleProperty(allocator, div.?, "color");
     try std.testing.expect(!z.hasAttribute(div.?, "style")); // ony oneproperty existed
     // try z.prettyPrint(allocator, z.documentRoot(doc).?);
 }
@@ -443,30 +403,128 @@ test "Styles: JS-like Getters and Setters" {
 
     const div = z.querySelector(allocator, doc, "#box") catch unreachable;
 
-    // 1. Test Getter (Initial)
-    const color = try getInlineStyle(allocator, div.?, "color");
+    // Test Getter <- JS: div.style.color
+    const color = try getComputedStyle(allocator, div.?, "color");
     defer if (color) |c| allocator.free(c);
     try std.testing.expectEqualStrings("red", color.?);
     // try z.prettyPrint(allocator, z.documentRoot(doc).?);
 
-    // 2. Test Setter (Change color)
-    // JS: div.style.color = "green";
+    // Test Setter <- JS: div.style.color = "green";
     try setStyleProperty(allocator, div.?, "color", "green");
     // try z.prettyPrint(allocator, z.documentRoot(doc).?);
 
-    const new_color = try getInlineStyle(allocator, div.?, "color");
+    const new_color = try getComputedStyle(allocator, div.?, "color");
     defer if (new_color) |c| allocator.free(c);
     try std.testing.expectEqualStrings("green", new_color.?);
 
-    // 4. Verify Attribute String Sync
-    // Lexbor should have automatically updated the string to match
+    // Check Attribute String SYNC
     const style_attr = z.getAttribute_zc(div.?, "style").?;
-    // Note: order is not guaranteed, but it should contain both
+    // order is not guaranteed, but it should contain both
     try std.testing.expect(std.mem.indexOf(u8, style_attr, "green") != null);
     try std.testing.expect(std.mem.indexOf(u8, style_attr, "width: 100px") != null);
 
-    try removeInlineStyleProperty(allocator, div.?, "width");
+    // Test Removal <- JS: div.style.removeProperty("width");
+    try z.removeInlineStyleProperty(allocator, div.?, "width");
     try std.testing.expect(z.hasAttribute(div.?, "style"));
     const after_removal = z.getAttribute_zc(div.?, "style").?;
     try std.testing.expect(std.mem.indexOf(u8, after_removal, "color") != null);
+}
+
+test "Styles: Dynamic Insert (Lexbor port)" {
+    const allocator = std.testing.allocator;
+
+    const doc = try z.createDocument();
+    defer z.destroyDocument(doc);
+    try initDocumentCSS(doc, true);
+
+    const parser = try createCssStyleParser();
+    defer destroyCssStyleParser(parser);
+    const sst = try createStylesheet();
+    defer destroyStylesheet(sst);
+
+    const css = ".father {width: 30%}";
+
+    const html = "<div id='parent' class='father'></div>";
+    try z.insertHTML(doc, html);
+
+    // !! ⚠️ Attach Stylesheet AFTER parsing the HTML
+    try parseStylesheet(sst, parser, css);
+    try attachStylesheet(doc, sst);
+
+    const parent_el = z.getElementById(doc, "parent").?;
+
+    // Check not attached yet
+
+    const st = try serializeElementStyles(allocator, parent_el);
+    defer allocator.free(st);
+    try std.testing.expect(std.mem.indexOf(u8, st, "width: 30%") != null);
+
+    // Check parent style
+    const p_width = try getComputedStyle(allocator, parent_el, "width");
+    defer if (p_width) |w| allocator.free(w);
+    try std.testing.expectEqualStrings("30%", p_width.?);
+
+    // Add Child dynamically
+    const child_el = try z.createElement(doc, "div");
+    try z.setAttribute(child_el, "style", "height: 100px");
+    z.appendChild(z.elementToNode(parent_el), z.elementToNode(child_el));
+
+    // !! Should be processed upon insertion <-- DYNAMIC STYLE APPLICATION
+    const c_height = try getComputedStyle(allocator, child_el, "height");
+    defer if (c_height) |h| allocator.free(h);
+    try std.testing.expectEqualStrings("100px", c_height.?);
+}
+
+test "Styles: Attribute Style (Lexbor port)" {
+    const allocator = std.testing.allocator;
+
+    const doc = try z.createDocument();
+    defer z.destroyDocument(doc);
+
+    try initDocumentCSS(doc, true);
+
+    const html = "<div id='d' style='width: 10px; width: 123%; height: 20pt !important; height: 10px'></div>";
+    try z.insertHTML(doc, html);
+
+    const div_el = z.getElementById(doc, "d").?;
+
+    const width = try getComputedStyle(allocator, div_el, "width");
+    defer if (width) |w| allocator.free(w);
+    try std.testing.expectEqualStrings("123%", width.?);
+
+    // 3. Check Height (Should be 20pt !important, !important overrides the later 10px)
+    const height = try getComputedStyle(allocator, div_el, "height");
+    defer if (height) |h| allocator.free(h);
+    try std.testing.expect(std.mem.indexOf(u8, height.?, "20pt") != null);
+}
+
+test "Styles: Stylesheet Attachment (Lexbor port)" {
+    const allocator = std.testing.allocator;
+
+    const doc = try z.createDocument();
+    defer z.destroyDocument(doc);
+    try initDocumentCSS(doc, true);
+
+    const parser = try createCssStyleParser();
+    defer destroyCssStyleParser(parser);
+    const sst = try createStylesheet();
+    defer destroyStylesheet(sst);
+
+    const css = "div {width: 5pt !important; height: 200px !important}";
+    try parseStylesheet(sst, parser, css);
+
+    const html = "<div id='d'></div>";
+    try z.insertHTML(doc, html);
+
+    try attachStylesheet(doc, sst);
+
+    const div_el = z.getElementById(doc, "d").?;
+
+    const width = try getComputedStyle(allocator, div_el, "width");
+    defer if (width) |w| allocator.free(w);
+    try std.testing.expect(std.mem.indexOf(u8, width.?, "5pt") != null);
+
+    const height = try getComputedStyle(allocator, div_el, "height");
+    defer if (height) |h| allocator.free(h);
+    try std.testing.expect(std.mem.indexOf(u8, height.?, "200px") != null);
 }

@@ -273,7 +273,25 @@ pub const ScriptEngine = struct {
 
     /// Loads HTML content into the Engine, replacing the current global document.
     pub fn loadHTML(self: *ScriptEngine, html: []const u8) !void {
-        try z.insertHTML(self.dom.doc, html);
+        const bridge = self.dom;
+
+        try z.initDocumentCSS(bridge.doc, true);
+
+        try z.insertHTML(bridge.doc, html);
+        try z.loadStyleTags(self.allocator, bridge.doc, bridge.css_style_parser);
+        // try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+    }
+
+    /// Loads an external CSS string (like a .css file)
+    pub fn loadCSS(self: *ScriptEngine, css: []const u8) !void {
+        const bridge = self.dom;
+
+        try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
+
+        // 2. Re-attach (or ensure it's attached)
+        // Calling this again is usually safe/no-op if already attached,
+        // or updates the document if Lexbor tracks versioning.
+        try z.attachStylesheet(bridge.doc, bridge.stylesheet);
     }
 };
 

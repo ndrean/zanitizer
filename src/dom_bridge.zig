@@ -20,7 +20,7 @@ pub const DOMBridge = struct {
     css_style_parser: *z.CssStyleParser,
     stylesheet: *z.CssStyleSheet,
 
-    // 1. FINALIZER (Lexbor owns the nodes, we just detach)
+    // (Lexbor owns the nodes, we just detach)
     fn domFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
 
     fn documentFinalizer(rt_ptr: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
@@ -45,7 +45,7 @@ pub const DOMBridge = struct {
 
     fn styleFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
 
-    // 2. INIT (Register Class & Create internal Doc)
+    // (Register Class & Create internal Doc)
     pub fn init(allocator: std.mem.Allocator, ctx: w.Context) !DOMBridge {
         const rc = RuntimeContext.get(ctx);
         var rt = ctx.getRuntime();
@@ -105,29 +105,6 @@ pub const DOMBridge = struct {
                     set_fn_val, // Setter function
                     z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
             }
-
-            // {
-            //     // Style Binding
-            //     const get_func = z.qjs.JS_NewCFunction2(
-            //         ctx.ptr,
-            //         js_style.get_element_style,
-            //         "get_style",
-            //         0,
-            //         z.qjs.JS_CFUNC_generic,
-            //         0,
-            //     );
-            //     const set_func = z.qjs.JS_NewCFunction2(
-            //         ctx.ptr,
-            //         js_style.set_element_style,
-            //         "set_style",
-            //         1,
-            //         z.qjs.JS_CFUNC_generic,
-            //         0,
-            //     );
-            //     const atom = ctx.newAtom("style");
-            //     defer ctx.freeAtom(atom);
-            //     _ = try ctx.definePropertyGetSet(el_proto, atom, get_func, set_func, .{ .configurable = true, .enumerable = true, .writable = false, .normal = false, .getset = true });
-            // }
 
             const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
             try ctx.setPropertyStr(
@@ -270,7 +247,7 @@ pub const DOMBridge = struct {
         // self.allocator.destroy(self); // BUG! ScriptEngine cleans DOMBridge struct
     }
 
-    // 3. INSTALLATION (Connect JS objects to Zig)
+    // (Connect JS objects to Zig)
     pub fn installAPIs(self: *DOMBridge) !void {
         const ctx = self.ctx;
         const rc = RuntimeContext.get(ctx);
@@ -300,14 +277,14 @@ pub const DOMBridge = struct {
         try ctx.setOpaque(doc_obj, self.doc);
         try ctx.setPropertyStr(doc_obj, "_native_doc", ctx.dupValue(doc_obj));
 
-        // 2. Install Manual Bindings (querySelector)
+        // Manual Bindings (querySelector)
         const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
         try ctx.setPropertyStr(doc_obj, "querySelector", qs_fn);
 
         const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
         try ctx.setPropertyStr(doc_obj, "querySelectorAll", qsa_fn);
 
-        // 5. Expose 'document' on global
+        // Expose 'document' on global
         try ctx.setPropertyStr(global, "document", doc_obj);
     }
 
@@ -315,12 +292,10 @@ pub const DOMBridge = struct {
         const ctx = self.ctx;
         const window_obj = ctx.newObject();
 
-        // Location
         const loc_obj = ctx.newObject();
         try ctx.setPropertyStr(loc_obj, "href", ctx.newString("about:blank"));
         try ctx.setPropertyStr(window_obj, "location", loc_obj);
 
-        // Navigator
         const nav_obj = ctx.newObject();
         try ctx.setPropertyStr(nav_obj, "userAgent", ctx.newString("Zexplorer/1.0"));
         try ctx.setPropertyStr(window_obj, "navigator", nav_obj);
@@ -344,6 +319,15 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(console, "error", error_fn);
 
         try ctx.setPropertyStr(global, "console", console);
+    }
+
+    pub fn applyStylesToElement(self: *DOMBridge, el: *z.HTMLElement) !void {
+        try z.attachElementStyles(
+            self.allocator,
+            el,
+            self.stylesheet,
+            &self.css_engine, // pass pointer to engine struct
+        );
     }
 
     // --- WRAPPERS (Helpers for bindings) ---

@@ -1478,6 +1478,7 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 - **EventListeners** (add, remove, dispatch) and _bubbling_ supported.
 - **ES6 Module System**: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
 - **CCSOM**: _inline_ CSS-inJS and <style></style> _StyleSheet_ support. The 1000+ CSS properties will not be coded but replaced with functional accessors: `Element.getPropertyValue()` and `Element.setPropertyValue()`.
+- Class `DOMParser`, `DocumentFragment` (and 'template' support), `console.log` support, access to `document` and `owned_document`. [WIP] port Zig struct into JS Class. CSS selectors.
 - `fetch` API (WIP).
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
 
@@ -2538,7 +2539,7 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 - `zig-quickjs` [License MIT](https://github.com/nDimensional/zig-quickjs/blob/main/LICENSE)
 - `zig-curl` [License MIT](https://github.com/jiacai2050/zig-curl/blob/main/LICENSE)
 
-## COCOMO
+## COCOMO analysis
 
 <https://github.com/boyter/scc>
 
@@ -2546,19 +2547,19 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ───────────────────────────────────────────────────────────────────────────────
 Language            Files       Lines    Blanks  Comments       Code Complexity
 ───────────────────────────────────────────────────────────────────────────────
-Zig                    54      25,859     2,485     2,738     20,636      2,410
-JavaScript              7         112        21        18         73          3
-Markdown                3       1,787       456         0      1,331          0
-C                       1         132        21        27         84         13
+Zig                    61      32,066     3,119     3,401     25,546      3,259
+Markdown                3       3,372       615         0      2,757          0
+C                       1         146        23        30         93         15
+HTML                    1          23         2         0         21          0
 License                 1          21         4         0         17          0
 YAML                    1          38         4         0         34          0
 ───────────────────────────────────────────────────────────────────────────────
-Total                  67      27,949     2,991     2,783     22,175      2,426
+Total                  68      35,666     3,767     3,431     28,468      3,274
 ───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $699,442
-Estimated Schedule Effort (organic) 12.01 months
-Estimated People Required (organic) 5.18
+Estimated Cost to Develop (organic) $909,222
+Estimated Schedule Effort (organic) 13.27 months
+Estimated People Required (organic) 6.09
 ───────────────────────────────────────────────────────────────────────────────
-Processed 1002659 bytes, 1.003 megabytes (SI)
+Processed 1287132 bytes, 1.287 megabytes (SI)
 ───────────────────────────────────────────────────────────────────────────────
 ```

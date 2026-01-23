@@ -3,12 +3,21 @@
 #include <lexbor/html/serialize.h>
 #include <lexbor/html/interfaces/template_element.h>
 #include <lexbor/html/tree.h>
+#include <lexbor/css/css.h>
 
 /**
  * Minimal C wrappers for lexbor functions that require access to
  * opaque struct internals. This enables Zig to work with lexbor
  * without accessing internal structures.
  */
+
+// Get the memory pool from a CSS parser
+lxb_css_memory_t *lexbor_css_parser_memory_wrapper(lxb_css_parser_t *parser)
+{
+  if (parser == NULL)
+    return NULL;
+  return parser->memory;
+}
 
 // Cast HTML Document -> DOM Document
 // Required because lxb_dom_interface_document is a C macro/inline

@@ -100,6 +100,9 @@ pub const LXB_DOM_NODE_TYPE_DOCUMENT = 9;
 pub const LXB_DOM_NODE_TYPE_FRAGMENT = 11;
 pub const LXB_DOM_NODE_TYPE_UNKNOWN = 0;
 
+pub const LXB_CSS_RULE_STYLE: c_uint = 4;
+pub const LXB_CSS_RULE_DECLARATION: c_uint = 7;
+
 //=================================================================================
 // Opaque lexbor structs
 
@@ -128,6 +131,16 @@ pub const CssSelectorSpecificity = opaque {};
 
 pub const CssStyleParser = opaque {};
 pub const CssStyleSheet = opaque {};
+pub const CssStyleDeclaration = opaque {};
+pub const CssSelectorsState = opaque {};
+pub const CssMemory = opaque {};
+pub const CssRule = opaque {};
+pub const CssRuleList = opaque {};
+pub const CssRuleStyle = opaque {}; // The "Qualified Rule" (div { ... })
+pub const CssRuleDeclaration = opaque {};
+pub const CssRuleDeclarationList = opaque {};
+pub const HtmlStyleElement = opaque {};
+// lxb_html_style_element_t
 
 //==============================================================================================
 
@@ -362,9 +375,9 @@ pub const getComputedStyle = styles.getComputedStyle;
 pub const createCssStyleParser = styles.createCssStyleParser;
 pub const destroyCssStyleParser = styles.destroyCssStyleParser;
 pub const setStyleProperty = styles.setStyleProperty;
-pub const getInlineStyle = styles.getInlineStyle;
 pub const parseElementStyle = styles.parseElementStyle;
 pub const removeInlineStyleProperty = styles.removeInlineStyleProperty;
+pub const loadStyleTags = styles.loadStyleTags;
 
 // ============================================================================================
 

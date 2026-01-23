@@ -354,7 +354,7 @@ pub const DOMParser = struct {
             _ = lxb_html_parser_destroy(parser);
             return Err.ParserInitFailed;
         }
-        std.debug.print("HTML Parser initialized successfully\n", .{});
+        // std.debug.print("HTML Parser initialized successfully\n", .{});
 
         return .{
             .allocator = allocator,

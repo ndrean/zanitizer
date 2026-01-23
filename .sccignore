@@ -1,3 +1,6 @@
 /zig-out
 /vendor/
 /images
+/js/
+/node_modules/
+/bench/

@@ -62,47 +62,49 @@ pub fn main() !void {
 
     setupSignalHandler();
 
-    // try js_framework_1_bench(allocator);
-    // try js_framework_2_bench(allocator);
-    // try js_framework_3_bench(allocator);
-    // try bench(allocator);
-    // try extractScript(allocator);
+    try js_framework_1_bench(allocator);
+    try js_framework_2_bench(allocator);
+    try js_framework_3_bench(allocator);
+    try bench(allocator);
+    try extractScript(allocator);
 
-    try inline_crud_css_js(allocator);
-    try eventListeners(allocator);
+    try stylesheet_txt(allocator);
+    try stylesheet_style_tag(allocator);
+    try additional_stylesheet_style_tag(allocator);
+    // try inline_crud_css_js(allocator);
+    // try eventListeners(allocator);
 
     // try transplante(allocator);
     // try fullCycle(allocator);
     // // try customPointClass(allocator);
     // // try demoPoint2Class(allocator);
-    // try domParser(allocator);
-    // try buildDOM(allocator);
+    try domParser(allocator);
+    try buildDOM(allocator);
 
-    // try css_in_js(allocator);
-    // try eventListener(allocator);
+    try eventListener(allocator);
     // // try performance2(allocator);
     // // // try demoCustomPointClass(allocator);
     // // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
-    // try first_QuickJS_test(allocator);
-    // try getValueFromQJSinZig(allocator);
-    // try simpleESM(allocator);
+    try first_QuickJS_test(allocator);
+    try getValueFromQJSinZig(allocator);
+    try simpleESM(allocator);
 
-    // try importModule(allocator);
-    // try test_event_loop(allocator);
-    // try promise_scope(allocator);
-    // try async_task_sequence_AB(allocator);
-    // try async_task_sequence_ABCDEFGH(allocator);
-    // try execute_Simple_Script_In_HTML(allocator);
-    // try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
-    // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
-    // try firstJSONPass(allocator);
-    // try simplifiedJSONPass(allocator);
-    // try async_CSV_Tuple_Parser(allocator);
-    // try JS_Proxy_And_Generators(allocator);
-    // try async_Fetch_API_Demo(allocator);
-    // try async_CSV_JSON_Parser(allocator);
+    try importModule(allocator);
+    try test_event_loop(allocator);
+    try promise_scope(allocator);
+    try async_task_sequence_AB(allocator);
+    try async_task_sequence_ABCDEFGH(allocator);
+    try execute_Simple_Script_In_HTML(allocator);
+    try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
+    try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
+    try firstJSONPass(allocator);
+    try simplifiedJSONPass(allocator);
+    try async_CSV_Tuple_Parser(allocator);
+    try JS_Proxy_And_Generators(allocator);
+    try async_Fetch_API_Demo(allocator);
+    try async_CSV_JSON_Parser(allocator);
 
-    // try demoWorker(allocator);
+    try demoWorker(allocator);
 }
 fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
     const engine = try ScriptEngine.init(allocator);
@@ -145,7 +147,7 @@ fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("100px", width_str);
 }
 
-fn css_in_js(allocator: std.mem.Allocator) !void {
+fn stylesheet_txt(allocator: std.mem.Allocator) !void {
     const html =
         \\<p id="pid">Some text</p>
         \\<form>
@@ -163,23 +165,151 @@ fn css_in_js(allocator: std.mem.Allocator) !void {
         \\function changeText() {
         \\  const p = document.getElementById("pid")
         \\  p.textContent = "New text"
-        \\  p.style.color = "red";
-        \\  p.style.fontSize = "30px";
+        \\  p.style.setProperty('color', "red");
+        \\  p.style.setProperty('font-size', "30px");
         \\}
-        \\ document.querySelector("button").addEventListener("click", () => {
-        \\ changeText();
+        \\const btn = document.querySelector("button");
+        \\btn.addEventListener("click", () => {
+        \\  changeText();
+        \\});
+        \\
+        \\ btn.dispatchEvent(new Event('click'), (e) => {
+        \\  console.log("Button clicked");
         \\});
     ;
-    _ = html;
-    _ = js;
 
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
-    const bridge = engine.dom_bridge;
+    const bridge = engine.dom;
+    try engine.loadHTML(html);
     try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
+    try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+    const val = try engine.eval(js, "style_test.js");
+    defer engine.ctx.freeValue(val);
 
     const p_el = z.getElementById(bridge.doc, "pid").?;
-    try bridge.applyStylesToElement(p_el);
+
+    const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+    const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+    defer if (computed_color) |c| allocator.free(c);
+    defer if (computed_font_size) |c| allocator.free(c);
+
+    try std.testing.expectEqualStrings("red", computed_color.?);
+    try std.testing.expectEqualStrings("30px", computed_font_size.?);
+    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+}
+
+fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
+    const html =
+        \\<html>
+        \\  <head>
+        \\    <style>
+        \\      #pid {  color: green;  font-size: 20px; }
+        \\    </style>
+        \\  </head>
+        \\  <body>
+        \\      <p id="pid">Some text</p>
+        \\      <form>
+        \\          <button type="button">Change text</button>
+        \\      </form>
+        \\  </body>
+        \\</html>
+    ;
+
+    const js =
+        \\function changeText() {
+        \\  const p = document.getElementById("pid")
+        \\  p.textContent = "New text"
+        \\}
+        \\const btn = document.querySelector("button");
+        \\btn.addEventListener("click", () => {
+        \\  changeText();
+        \\});
+        \\
+        \\ btn.dispatchEvent(new Event('click'), (e) => {
+        \\  console.log("Button clicked");
+        \\});
+    ;
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    const bridge = engine.dom;
+    try engine.loadHTML(html);
+    const val = try engine.eval(js, "style_test.js");
+    defer engine.ctx.freeValue(val);
+
+    const p_el = z.getElementById(bridge.doc, "pid").?;
+
+    const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+    const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+    defer if (computed_color) |c| allocator.free(c);
+    defer if (computed_font_size) |c| allocator.free(c);
+
+    try std.testing.expectEqualStrings("green", computed_color.?);
+    try std.testing.expectEqualStrings("20px", computed_font_size.?);
+    try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
+    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+}
+
+fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
+    const html =
+        \\<html>
+        \\  <head>
+        \\    <style>
+        \\      #pid {  color: green;  font-size: 20px; }
+        \\    </style>
+        \\  </head>
+        \\  <body>
+        \\      <p id="pid">Some text</p>
+        \\      <form>
+        \\          <button type="button">Change text</button>
+        \\      </form>
+        \\  </body>
+        \\</html>
+    ;
+
+    const css =
+        \\#pid {
+        \\  color: red;
+        \\  font-size: 30px;
+        \\}
+    ;
+
+    const js =
+        \\function changeText() {
+        \\  const p = document.getElementById("pid")
+        \\  p.textContent = "New text"
+        \\}
+        \\const btn = document.querySelector("button");
+        \\btn.addEventListener("click", () => {
+        \\  changeText();
+        \\});
+        \\
+        \\ btn.dispatchEvent(new Event('click'), (e) => {
+        \\  console.log("Button clicked");
+        \\});
+    ;
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    const bridge = engine.dom;
+    try engine.loadHTML(html);
+    try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
+    try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+    const val = try engine.eval(js, "style_test.js");
+    defer engine.ctx.freeValue(val);
+
+    const p_el = z.getElementById(bridge.doc, "pid").?;
+
+    const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+    const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+    defer if (computed_color) |c| allocator.free(c);
+    defer if (computed_font_size) |c| allocator.free(c);
+
+    try std.testing.expectEqualStrings("red", computed_color.?);
+    try std.testing.expectEqualStrings("30px", computed_font_size.?);
+    try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
+    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
 }
 
 fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
@@ -3782,7 +3912,7 @@ fn serverSideRenderingBenchmark(allocator: std.mem.Allocator) !void {
         \\      .post-title { color: #333; font-size: 1.5rem; }
         \\      .post-meta { color: #666; font-size: 0.9rem; }
         \\      /* More CSS rules... */
-        \\    </style>
+        \\    </style
         \\    <script src="/js/analytics.js"></>
         \\  </head>
         \\  <body class="blog-layout">
