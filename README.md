@@ -1477,7 +1477,7 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 - **Worker pool**: multi-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
 - **EventListeners** (add, remove, dispatch) and _bubbling_ supported.
 - **ES6 Module System**: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
-- **CCSOM**: _inline_ CSS-inJS and <style></style> _StyleSheet_ support. The 1000+ CSS properties will not be coded but replaced with functional accessors: `Element.getPropertyValue()` and `Element.setPropertyValue()`.
+- **CCSOM**: _inline_ CSS-inJS and _StyleSheet_ support. The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`) will not be coded but replaced with functional accessors: `Element.getPropertyValue()` and `Element.setPropertyValue()`.
 - Class `DOMParser`, `DocumentFragment` (and 'template' support), `console.log` support, access to `document` and `owned_document`. [WIP] port Zig struct into JS Class. CSS selectors.
 - `fetch` API (WIP).
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
@@ -1576,7 +1576,7 @@ fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("red", computed_color.?);
     try std.testing.expectEqualStrings("30px", computed_font_size.?);
     try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
-    
+
     try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
 }
 ```

@@ -83,6 +83,7 @@ const ReturnType = union(enum) {
 
 const bindings_def = @import("bindings.zig");
 const bindings = bindings_def.bindings;
+const css_properties = @import("css_properties.zig").css_properties;
 
 // ============================================================================
 // TEMPLATES - Complete function bodies with {placeholders}
@@ -782,6 +783,54 @@ const T = struct {
         \\    }}
         \\
     ;
+
+    // ========================================================================
+    // CSS PROPERTY on CSSStyleDeclaration
+    // ========================================================================
+    const CSS_PROP_GETTER =
+        \\// CSS Property Getter: style.{s}
+        \\pub fn js_css_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.css_style_decl);
+        \\    if (ptr == null) return ctx.throwTypeError("Not a CSSStyleDeclaration");
+        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const val = z.getComputedStyle(rc.allocator, el, "{s}") catch return w.EXCEPTION;
+        \\    defer if (val) |v| rc.allocator.free(v);
+        \\    if (val) |v| return ctx.newString(v);
+        \\    return ctx.newString("");
+        \\}}
+        \\
+    ;
+
+    const CSS_PROP_SETTER =
+        \\// CSS Property Setter: style.{s} = value
+        \\pub fn js_css_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.css_style_decl);
+        \\    if (ptr == null) return ctx.throwTypeError("Not a CSSStyleDeclaration");
+        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+        \\    defer ctx.freeZString(val_str);
+        \\    z.setStyleProperty(rc.allocator, el, "{s}", val_str) catch return w.EXCEPTION;
+        \\    return w.UNDEFINED;
+        \\}}
+        \\
+    ;
+
+    const INSTALL_CSS_PROPERTY =
+        \\    {{
+        \\        const atom = qjs.JS_NewAtom(ctx, "{s}");
+        \\        const get_fn = qjs.JS_NewCFunction2(ctx, js_css_get_{s}, "get_{s}", 0, qjs.JS_CFUNC_generic, 0);
+        \\        const set_fn = qjs.JS_NewCFunction2(ctx, js_css_set_{s}, "set_{s}", 1, qjs.JS_CFUNC_generic, 0);
+        \\        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        \\        qjs.JS_FreeAtom(ctx, atom);
+        \\    }}
+        \\
+    ;
 };
 
 // ============================================================================
@@ -947,6 +996,43 @@ fn getThisType(b: anytype) ThisType {
 }
 
 // ============================================================================
+// CSS PROPERTY GENERATORS
+// ============================================================================
+
+fn generateCSSBindings(writer: anytype) !void {
+    try writer.writeAll("\n// ============================================\n");
+    try writer.writeAll("// AUTO-GENERATED CSS PROPERTY ACCESSORS\n");
+    try writer.writeAll("// ============================================\n\n");
+
+    inline for (css_properties) |prop| {
+        const js_name = prop[0];
+        const css_name = prop[1];
+
+        // Getter: js_name for function name, css_name for the CSS property
+        try writer.print(T.CSS_PROP_GETTER, .{ js_name, js_name, css_name });
+        // Setter: js_name for function name, css_name for the CSS property
+        try writer.print(T.CSS_PROP_SETTER, .{ js_name, js_name, css_name });
+    }
+}
+
+fn generateCSSInstaller(writer: anytype) !void {
+    try writer.writeAll("\npub fn installCSSStyleDeclarationBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {\n");
+
+    // Install existing manual methods from js_CSSStyleDeclaration.zig
+    try writer.writeAll("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"getPropertyValue\", qjs.JS_NewCFunction(ctx, js_CSSStyleDeclaration.getPropertyValue, \"getPropertyValue\", 1));\n");
+    try writer.writeAll("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"setProperty\", qjs.JS_NewCFunction(ctx, js_CSSStyleDeclaration.setProperty, \"setProperty\", 2));\n");
+    try writer.writeAll("    _ = qjs.JS_SetPropertyStr(ctx, proto, \"removeProperty\", qjs.JS_NewCFunction(ctx, js_CSSStyleDeclaration.removeProperty, \"removeProperty\", 1));\n");
+
+    // Install all CSS property accessors
+    inline for (css_properties) |prop| {
+        const js_name = prop[0];
+        try writer.print(T.INSTALL_CSS_PROPERTY, .{ js_name, js_name, js_name, js_name, js_name });
+    }
+
+    try writer.writeAll("}\n");
+}
+
+// ============================================================================
 // MAIN GENERATOR
 // ============================================================================
 
@@ -982,13 +1068,19 @@ pub fn main() !void {
         \\
     );
 
-    // Generate bindings
+    // Generate DOM bindings
     for (bindings) |binding| {
         try generateBinding(writer, binding);
     }
 
-    // Generate installers
+    // Generate CSS property bindings
+    try generateCSSBindings(writer);
+
+    // Generate DOM installers
     try generateInstallers(writer);
+
+    // Generate CSS installer
+    try generateCSSInstaller(writer);
 
     // Write to file
     const file = try std.fs.cwd().createFile(output_file_path, .{});

@@ -12,6 +12,26 @@ const JSWorker = @import("js_worker.zig");
 const FetchBridge = @import("fetch_bridge.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
 
+const TIMEOUT_MS: i64 = 5000;
+
+/// avoid infinte loops like `white (true) {}` by setting a deadline
+export fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
+    // Cast the opaque pointer back to the ScriptEngine
+    if (opaque_ptr) |ptr| {
+        const engine: *ScriptEngine = @ptrCast(@alignCast(ptr));
+
+        // Check if a deadline is set
+        if (engine.interrupt_deadline > 0) {
+            // and if we have exceeded the deadline
+            if (std.time.milliTimestamp() > engine.interrupt_deadline) {
+                // TIMEOUT!
+                return 1;
+            }
+        }
+    }
+    return 0; // Continue
+}
+
 pub const ScriptEngine = struct {
     allocator: std.mem.Allocator,
     rt: *zqjs.Runtime,
@@ -19,6 +39,7 @@ pub const ScriptEngine = struct {
     loop: *EventLoop,
     rc: *RuntimeContext,
     dom: DOMBridge, // VALUE!! to own the DOMBridge struct so DOMBridge deinit its content and ScriptEngine
+    interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
 
     /// Initialize the entire JS Environment on the heap
     pub fn init(allocator: std.mem.Allocator) !*ScriptEngine {
@@ -29,13 +50,21 @@ pub const ScriptEngine = struct {
         // Runtime & Context
         self.rt = try zqjs.Runtime.init(allocator);
         errdefer self.rt.deinit();
+        self.rt.setMemoryLimit(16 * 1024 * 1024); // 16 MB
+        self.rt.setGCThreshold(1024 * 1024); // 1MB before GC
+        self.rt.setMaxStackSize(128 * 1024);
+
+        self.rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
+        self.rt.setCanBlock(false);
 
         self.rt.enableModuleLoader();
 
         self.ctx = zqjs.Context.init(self.rt);
-        // (Optional: set allocator on ctx if wrapper needs it, but RCtx handles mostly)
+
         self.ctx.setAllocator(&self.allocator);
         errdefer self.ctx.deinit();
+
+        try self.disableUnsafeFeatures();
 
         // Event Loop
         self.loop = try EventLoop.create(allocator, self.rt);
@@ -63,6 +92,23 @@ pub const ScriptEngine = struct {
         // _ = try self.ctx.setPropertyStr(global, "readFile", readFile_fn);
 
         return self;
+    }
+
+    pub fn disableUnsafeFeatures(self: *ScriptEngine) !void {
+        const global_obj = self.ctx.getGlobalObject();
+        defer self.ctx.freeValue(global_obj);
+
+        const keys_to_remove = [_][:0]const u8{
+            "eval",
+            "Function",
+            "WebAssembly", // If included in your build
+        };
+
+        for (keys_to_remove) |key| {
+            const atom = self.ctx.newAtom(key);
+            defer self.ctx.freeAtom(atom);
+            if (!try self.ctx.deleteProperty(global_obj, atom, 0)) return error.FailedToDisableFeature;
+        }
     }
 
     pub fn deinit(self: *ScriptEngine) void {
@@ -94,6 +140,8 @@ pub const ScriptEngine = struct {
     /// Evaluate code and returns the raw JS Value.
     /// ⚠️ The Caller OWNS this value and must free it with engine.ctx.freeValue(val).
     pub fn eval(self: *ScriptEngine, code: [:0]const u8, filename: [:0]const u8) !zqjs.Value {
+        self.interrupt_deadline = std.time.milliTimestamp() + TIMEOUT_MS;
+
         const val = self.ctx.eval(
             code,
             filename,
@@ -103,6 +151,8 @@ pub const ScriptEngine = struct {
             _ = self.ctx.checkAndPrintException();
             return error.JSException;
         };
+
+        self.interrupt_deadline = 0; // reset deadline after eval
 
         // Check for JS-level exceptions (syntax errors, throw new Error(), etc.)
         if (self.ctx.isException(val)) {
