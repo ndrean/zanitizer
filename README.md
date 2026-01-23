@@ -1512,6 +1512,76 @@ No AsyncIO, no WebSocket, no planned WASM support, no `window` support.
   
 ## Examples
 
+**Import CSS**
+
+```zig
+fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
+    const html =
+        \\<html>
+        \\  <head>
+        \\    <style>
+        \\      #pid {  color: green;  font-size: 20px; }
+        \\    </style>
+        \\  </head>
+        \\  <body>
+        \\      <p id="pid">Some text</p>
+        \\      <form>
+        \\          <button type="button">Change text</button>
+        \\      </form>
+        \\  </body>
+        \\</html>
+    ;
+
+    const css =
+        \\#pid {
+        \\  color: red;
+        \\  font-size: 30px;
+        \\}
+    ;
+
+    const js =
+        \\function changeText() {
+        \\  const p = document.getElementById("pid")
+        \\  p.textContent = "New text"
+        \\}
+        \\const btn = document.querySelector("button");
+        \\btn.addEventListener("click", () => {
+        \\  changeText();
+        \\});
+        \\
+        \\ btn.dispatchEvent(new Event('click'), (e) => {
+        \\  console.log("Button clicked");
+        \\});
+    ;
+
+    const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+
+    const bridge = engine.dom;
+
+    try engine.loadHTML(html);
+    try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
+    try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+
+    const val = try engine.eval(js, "style_test.js");
+    defer engine.ctx.freeValue(val);
+
+    const p_el = z.getElementById(bridge.doc, "pid").?;
+
+    const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+    const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+    defer if (computed_color) |c| allocator.free(c);
+    defer if (computed_font_size) |c| allocator.free(c);
+
+    try std.testing.expectEqualStrings("red", computed_color.?);
+    try std.testing.expectEqualStrings("30px", computed_font_size.?);
+    try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
+    
+    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+}
+```
+
+
 **Use Reactive DOM primitives in async JavaScript code executed by `Zig`**
 
 ```js
@@ -1761,7 +1831,8 @@ sequenceDiagram
 
 This project exposes a significant / essential subset of all available `lexbor` functions:
 
-- Direct parsing or parsing with a parser engine (document or fragment context-aware)
+- DOM parser engine (document or fragment context-aware)
+- CSS cascade stylesheet(s) and inline CSS (CSS-in-JS)
 - streaming and chunk processing
 - Serialization
 - Sanitization
@@ -1852,20 +1923,22 @@ const zexplorer = b.dependency("zexplorer", .{
 exe.root_module.addImport("zexplorer", zexplorer.module("zexplorer"));
 ```
 
-
 ## Example: Create document and parse
 
-You have two methods available.
+You have a few methods available.
 
-1. The `parseFromString()` creates a `<head>` and a `<body>` element and replaces BODY innerContent with the nodes created by the parsing of the given string.
+1. You  create a document with `createDocument()` and populate it with `inserHTML(doc, html)`
+2. The `parseHTML(allocator, "")` creates a `<head>` and a `<body>` element and replaces BODY innerContent with the nodes created by the parsing of the given string.
+3. The engine `doc  = DOMParser.parseFromString()`
 
 ```zig
 const z = @import("zexplorer");
+const allocator = std.testing.allocator;
 
 const doc: *HTMLDocument = try z.createDocument();
 defer z.destroyDocument(doc);
 
-try z.parseFromString(doc, "<div></div>");
+try z.insertHTML(doc, "<div></div>");
 const body: *DomNode = z.bodyNode(doc).?;
 
 // you can create programmatically and append elements to a node
@@ -1883,22 +1956,7 @@ Your document now contains this HTML:
 </body>
 ```
 
-You have a shortcut to directly create and parse an HTML string with `createDocFromString()`.
-
-```zig
-const doc: *HTMLDocument = try z.createDocFromString("<div></div><p></p>");
-defer z.destroyDocument(doc);
-```
-
-2. You have the _parser engine_:
-
-```zig
-var parser = try z.Parser.init(allocator);
-defer parser.deinit();
-const doc = try parser.parse("<div><p></p></div>");
-defer z.destroyDocument(doc);
-```
-
+[TODO] Ref in examples
 
 <hr>
 
@@ -1911,7 +1969,7 @@ test "scrap example.com" {
   const page = try z.get(allocator, "https://example.com");
   defer allocator.free(page);
 
-  const doc = try z.createDocFromString(page);
+  const doc = try z.parseHTML(allocator, page);
   defer z.destroyDocument(doc);
 
   const html = z.documentRoot(doc).?;
