@@ -232,7 +232,7 @@ pub fn useTemplateElement(
     allocator: std.mem.Allocator,
     template_elt: *z.HTMLElement,
     target: *z.DomNode,
-    sanitizer: z.SanitizeOptions,
+    sanitizer: z.SanitizerMode,
 ) !void {
     const template = z.elementToTemplate(template_elt) orelse return Err.NotATemplateElement;
     const template_content = templateDocumentFragment(template);
@@ -245,10 +245,10 @@ pub fn useTemplateElement(
         // Apply sanitization to cloned content before appending
         switch (sanitizer) {
             .none => {}, // No sanitization
-            .minimum => try z.sanitizeWithOptions(allocator, content, .minimum),
+            .minimum => try z.sanitizeWithMode(allocator, content, .minimum),
             .strict => try z.sanitizeStrict(allocator, content),
             .permissive => try z.sanitizePermissive(allocator, content),
-            .custom => |opts| try z.sanitizeWithOptions(allocator, content, .{ .custom = opts }),
+            .custom => |opts| try z.sanitizeWithMode(allocator, content, .{ .custom = opts }),
         }
         // z.appendFragment(target, content);
         try appendFragment(target, content);
@@ -1066,8 +1066,6 @@ test "Reproduction: Template Clone and Selector" {
     // "tbody tr:nth-child(2) a.lbl"
     const target = try z.querySelector(allocator, doc, "tbody tr:nth-child(2) a.lbl");
     try std.testing.expect(target != null);
-
-    std.debug.print("\n✅ Zig Test Passed: Selector found element!\n", .{});
 }
 
 test "js-with-template" {
@@ -1098,24 +1096,24 @@ test "js-with-template" {
     // Step 1: document.querySelector("template")
     const templ = try z.querySelector(allocator, doc, "template");
     try testing.expect(templ != null);
-    print("\n1. templ.tagName: {s}\n", .{z.tagName_zc(templ.?)});
+    // print("\n1. templ.tagName: {s}\n", .{z.tagName_zc(templ.?)}); // TEMLPATE
     try testing.expectEqualStrings("TEMPLATE", z.tagName_zc(templ.?));
 
     // Step 2: templ.content (returns DocumentFragment)
     const content = z.getTemplateContent(templ.?);
     try testing.expect(content != null);
-    print("2. templ.content.nodeName: {s}\n", .{z.nodeName_zc(z.fragmentToNode(content.?))});
+    // print("2. templ.content.nodeName: {s}\n", .{z.nodeName_zc(z.fragmentToNode(content.?))}); // #document-fragment
     try testing.expectEqualStrings("#document-fragment", z.nodeName_zc(z.fragmentToNode(content.?)));
 
     // Step 3: templ.content.firstElementChild - THIS IS THE KEY TEST
     const item = z.firstElementChild(content.?);
     if (item) |first_elt| {
-        print("3. templ.content.firstElementChild.tagName: {s}\n", .{z.tagName_zc(first_elt)});
+        // print("templ.content.firstElementChild.tagName: {s}\n", .{z.tagName_zc(first_elt)}); // TR
         try testing.expectEqualStrings("TR", z.tagName_zc(first_elt));
         const a_elt = try z.querySelector(allocator, first_elt, "a");
         try testing.expectEqualStrings("A", z.tagName_zc(a_elt.?));
     } else {
-        print("3. templ.content.firstElementChild: NULL!\n", .{});
+        // print("templ.content.firstElementChild: NULL!\n", .{});
         // Debug: what IS the first child?
         const first_child = z.firstChild(z.fragmentToNode(content.?));
         if (first_child) |fc| {
@@ -1141,8 +1139,6 @@ test "js-with-template" {
     // Verify 3 rows were added
     const rows = try z.querySelectorAll(allocator, doc, "tbody tr");
     defer allocator.free(rows);
-    print("4. tbody tr count: {d}\n", .{rows.len});
+    // print("4. tbody tr count: {d}\n", .{rows.len}); // 3
     try testing.expectEqual(@as(usize, 3), rows.len);
-
-    print("✅ js-with-template test passed!\n", .{});
 }

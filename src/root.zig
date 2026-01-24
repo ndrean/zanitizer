@@ -283,6 +283,7 @@ pub const replaceAll = lxb.replaceAll;
 pub const InsertPosition = lxb.InsertPosition;
 pub const insertAdjacentElement = lxb.insertAdjacentElement;
 pub const insertAdjacentHTML = lxb.insertAdjacentHTML;
+pub const insertAdjacentHTMLUnsafe = lxb.insertAdjacentHTMLUnsafe;
 pub const appendChild = lxb.appendChild;
 pub const appendChildren = lxb.appendChildren;
 
@@ -342,24 +343,26 @@ pub const isDangerousAttributeValue = colours.isDangerousAttributeValue;
 //=========================================================================================
 // Sanitizer
 
-pub const SanitizeOptions = sanitize.SanitizeOptions;
+pub const SanitizerMode = sanitize.SanitizerMode;
 pub const SanitizerOptions = sanitize.SanitizerOptions;
 pub const sanitizeNode = sanitize.sanitizeNode;
-pub const sanitizeWithOptions = sanitize.sanitizeWithOptions;
+pub const sanitizeWithMode = sanitize.sanitizeWithMode;
 pub const sanitizeStrict = sanitize.sanitizeStrict;
 pub const sanitizePermissive = sanitize.sanitizePermissive;
+pub const isCustomElement = sanitize.isCustomElement;
 
-// Unified HTML specification functions
-pub const isElementAttributeAllowed = sanitize.isElementAttributeAllowed;
-
-//============================================================================================
-// Framework Attribute System
-
+pub const AttrSpec = specs.AttrSpec;
+pub const ElementSpec = specs.ElementSpec;
 pub const FrameworkSpec = specs.FrameworkSpec;
+pub const DANGEROUS_ATTRIBUTES = specs.DANGEROUS_ATTRIBUTES;
+pub const DANGEROUS_JS_PATTERNS = specs.DANGEROUS_JS_PATTERNS;
 pub const FRAMEWORK_SPECS = specs.FRAMEWORK_SPECS;
+pub const validateUri = specs.validateUri;
+pub const validateStyle = specs.validateStyle;
 pub const isFrameworkAttribute = specs.isFrameworkAttribute;
 pub const getFrameworkSpec = specs.getFrameworkSpec;
 pub const isFrameworkAttributeSafe = specs.isFrameworkAttributeSafe;
+pub const isSafeMimeType = specs.isSafeMimeType;
 
 // ============================================================================================
 // CSS Styles integration functions
@@ -409,6 +412,8 @@ pub const classList = classes.classList;
 // Attributes
 
 pub const AttributePair = attrs.AttributePair;
+pub const AttributeIterator = attrs.AttributeIterator;
+pub const iterateAttributes = attrs.iterateAttributes;
 pub const hasAttribute = attrs.hasAttribute;
 pub const hasAttributes = attrs.hasAttributes;
 

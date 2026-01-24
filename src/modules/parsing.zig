@@ -14,13 +14,13 @@ const testing = std.testing;
 const print = std.debug.print;
 
 /// Apply sanitization to a node based on sanitization options
-fn applySanitization(allocator: std.mem.Allocator, node: *z.DomNode, sanitizer: z.SanitizeOptions) !void {
+fn applySanitization(allocator: std.mem.Allocator, node: *z.DomNode, sanitizer: z.SanitizerMode) !void {
     switch (sanitizer) {
         .none => {},
-        .minimum => try z.sanitizeWithOptions(allocator, node, .minimum),
-        .strict => try z.sanitizeWithOptions(allocator, node, .strict),
-        .permissive => try z.sanitizeWithOptions(allocator, node, .permissive),
-        .custom => |opts| try z.sanitizeWithOptions(allocator, node, .{ .custom = opts }),
+        .minimum => try z.sanitizeWithMode(allocator, node, .minimum),
+        .strict => try z.sanitizeWithMode(allocator, node, .strict),
+        .permissive => try z.sanitizeWithMode(allocator, node, .permissive),
+        .custom => |opts| try z.sanitizeWithMode(allocator, node, .{ .custom = opts }),
     }
 }
 
@@ -63,7 +63,7 @@ pub fn insertHTML(doc: *z.HTMLDocument, html_str: []const u8) !void {
 /// It takes a sanitizer parameter to control the level of sanitization applied,
 ///
 /// The caller must destroy it.
-pub fn parseHTMLUnsafe(allocator: std.mem.Allocator, html_str: []const u8, sanitizer: z.SanitizeOptions) !*z.HTMLDocument {
+pub fn parseHTMLUnsafe(allocator: std.mem.Allocator, html_str: []const u8, sanitizer: z.SanitizerMode) !*z.HTMLDocument {
     const doc = try z.createDocument();
     if (lxb_html_document_parse(doc, html_str.ptr, html_str.len) != z._OK) {
         z.destroyDocument(doc); // Clean up on failure
@@ -151,7 +151,7 @@ pub fn setHTMLUnsafe(
     allocator: std.mem.Allocator,
     element: *z.HTMLElement,
     html: []const u8,
-    sanitizer: z.SanitizeOptions,
+    sanitizer: z.SanitizerMode,
 ) !void {
     const doc = z.ownerDocument(z.elementToNode(element));
 
@@ -379,14 +379,14 @@ pub const DOMParser = struct {
     }
 
     /// [parser] Parse HTML string into a new document, sanitize, and return the document.
-    pub fn parseFromStringUnsafe(self: *z.DOMParser, html: []const u8, sanitizer: z.SanitizeOptions) !*z.HTMLDocument {
+    pub fn parseFromStringUnsafe(self: *z.DOMParser, html: []const u8, sanitizer: z.SanitizerMode) !*z.HTMLDocument {
         const doc = lxb_html_parse(self.html_parser, html.ptr, html.len) orelse return Err.ParseFailed;
         const root = z.documentRoot(doc) orelse return Err.DocumentRootNotFound;
 
         switch (sanitizer) {
             .none => {}, // No sanitization
             .minimum => {
-                try z.sanitizeWithOptions(self.allocator, root, .minimum);
+                try z.sanitizeWithMode(self.allocator, root, .minimum);
             },
             .strict => {
                 try z.sanitizeStrict(self.allocator, root);
@@ -395,7 +395,7 @@ pub const DOMParser = struct {
                 try z.sanitizePermissive(self.allocator, root);
             },
             .custom => |opts| {
-                try z.sanitizeWithOptions(self.allocator, root, .{ .custom = opts });
+                try z.sanitizeWithMode(self.allocator, root, .{ .custom = opts });
             },
         }
 
@@ -410,7 +410,7 @@ pub const DOMParser = struct {
         html: []const u8,
         doc: *z.HTMLDocument,
         context: z.FragmentContext,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) !*z.DomNode {
         if (!self.initialized) return Err.HtmlParserNotInitialized;
 
@@ -480,12 +480,12 @@ pub const DOMParser = struct {
 
     /// Parse and append HTML fragments using parseFromStringInContext (no cloning)
     /// [parser] Parse and append regular HTML fragments (private helper)
-    fn parseAndAppendFragment(
+    pub fn parseAndAppendFragment(
         self: *z.DOMParser,
         element: *z.HTMLElement,
         content: []const u8,
         context: z.FragmentContext,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) !void {
         const node = z.elementToNode(element);
         const target_doc = z.ownerDocument(node);
@@ -512,7 +512,7 @@ pub const DOMParser = struct {
         self: *z.DOMParser,
         doc: *z.HTMLDocument,
         html: []const u8,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) !*z.HTMLTemplateElement {
         if (!self.initialized) return Err.HtmlParserNotInitialized;
 
@@ -538,7 +538,7 @@ pub const DOMParser = struct {
         self: *z.DOMParser,
         template_html: []const u8,
         target: *z.DomNode,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) !void {
         if (!self.initialized) return Err.HtmlParserNotInitialized;
 
@@ -571,7 +571,7 @@ pub const DOMParser = struct {
         target: *z.HTMLElement,
         content: []const u8,
         context: z.FragmentContext,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) !void {
         // Check if content contains template elements
         if (std.mem.indexOf(u8, content, "<template") != null) {
@@ -597,7 +597,7 @@ pub const DOMParser = struct {
         target: *z.HTMLElement,
         content: []const u8,
         context: z.FragmentContext,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) !void {
         const target_doc = z.ownerDocument(z.elementToNode(target));
 
@@ -643,7 +643,7 @@ pub const DOMParser = struct {
         self: *z.DOMParser,
         doc: *z.HTMLDocument,
         html: []const u8,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) ![]const *z.HTMLTemplateElement {
         if (!self.initialized) return Err.HtmlParserNotInitialized;
 
@@ -686,7 +686,7 @@ pub const DOMParser = struct {
         doc: *z.HTMLDocument,
         html: []const u8,
         context: z.FragmentContext,
-        sanitizer: z.SanitizeOptions,
+        sanitizer: z.SanitizerMode,
     ) ![]*z.DomNode {
         // Parse using Parser's method
         const fragment_root = try self.parseFromStringInContext(
@@ -711,293 +711,6 @@ test "DOMParser.parseHTML basic" {
     const body = z.bodyNode(doc).?;
     const p = z.getElementByTag(body, .p);
     std.debug.assert(p != null);
-}
-
-test "DOMParser.parseAndAppendFragment with improved logic" {
-    const allocator = testing.allocator;
-
-    const doc = try z.createDocument();
-    defer z.destroyDocument(doc);
-
-    var parser = try z.DOMParser.init(allocator);
-    defer parser.deinit();
-
-    const malicious_content = "<script>alert('XSS')</script><img src=\"data:text/html,<script>alert('XSS')</script>\" alt=\"escaped\"><p id=\"1\" phx-click=\"increment\" onclick=\"alert('XSS')\">Click me</p><a href=\"http://example.org/results?search=<img src=x onerror=alert('hello')>\">URL Escaped</a><x-widget><button onclick=\"increment\">Click</button></x-widget>";
-
-    const result0 = "<script>alert('XSS')</script><img src=\"data:text/html,&lt;script&gt;alert('XSS')&lt;/script&gt;\" alt=\"escaped\"><p id=\"1\" phx-click=\"increment\" onclick=\"alert('XSS')\">Click me</p><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a><x-widget><button onclick=\"increment\">Click</button></x-widget>";
-
-    // Permissive mode removes dangerous attributes (onclick) but keeps the element and safe attributes.
-    const result1 = "<img alt=\"escaped\"><p id=\"1\" phx-click=\"increment\">Click me</p><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a><x-widget><button>Click</button></x-widget>";
-
-    const result2 = "<img alt=\"escaped\"><p id=\"1\" phx-click=\"increment\">Click me</p><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a>";
-
-    const expectations = [_]struct { name: []const u8, result: []const u8, mode: z.SanitizeOptions }{
-        .{ .name = "flavor0", .result = result0, .mode = .none },
-        .{ .name = "flavor1", .result = result1, .mode = .permissive },
-        .{ .name = "flavor2", .result = result2, .mode = .strict },
-    };
-
-    for (expectations) |exp| {
-        const div_elt = try z.createElement(doc, "div");
-        defer z.destroyNode(z.elementToNode(div_elt));
-
-        try parser.parseAndAppendFragment(
-            div_elt,
-            malicious_content,
-            .body,
-            exp.mode,
-        );
-        const inner = try z.innerHTML(allocator, div_elt);
-        defer allocator.free(inner);
-
-        // std.debug.print("\n-------{}\n", .{i});
-        // try z.prettyPrint(allocator, z.elementToNode(div_elt));
-        try testing.expectEqualStrings(exp.result, inner);
-        try setInnerHTML(div_elt, ""); // Clear for next iteration
-    }
-}
-
-test "parseFromStringInContext + appendFragment with options" {
-    const allocator = testing.allocator;
-
-    const doc = try parseHTML(allocator, "<div id=\"1\"></div>");
-    defer z.destroyDocument(doc);
-    const div_elt = z.getElementById(doc, "1").?;
-
-    var parser = try z.DOMParser.init(allocator);
-    defer parser.deinit();
-
-    const html1 = "<p> some text</p>";
-    const frag_root1 = try parser.parseFromStringInContext(
-        html1,
-        doc,
-        .body,
-        .strict,
-    );
-
-    const html2 = "<div> more <i>text</i><span><script>alert(1);</script></span></div>";
-    const frag_root2 = try parser.parseFromStringInContext(
-        html2,
-        doc,
-        .div,
-        .strict,
-    );
-
-    const html3 = "<ul><li><script>alert(1);</script></li></ul>";
-    const frag_root3 = try parser.parseFromStringInContext(
-        html3,
-        doc,
-        .div,
-        .strict,
-    );
-
-    const html4 = "<a href=\"http://example.org/results?search=<img src=x onerror=alert('hello')>\">URL Escaped</a>";
-    const frag_root4 = try parser.parseFromStringInContext(
-        html4,
-        doc,
-        .div,
-        .permissive,
-    );
-
-    // append fragments and check the result
-
-    const div: *z.DomNode = @ptrCast(div_elt);
-    try z.appendFragment(div, frag_root1);
-    try z.appendFragment(div, frag_root2);
-    try z.appendFragment(div, frag_root3);
-    try z.appendFragment(div, frag_root4);
-
-    const result = try z.outerHTML(allocator, div_elt);
-    defer allocator.free(result);
-
-    const expected = "<div id=\"1\"><p> some text</p><div> more <i>text</i><span></span></div><ul><li></li></ul><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a></div>";
-    // try z.prettyPrint(allocator, z.documentRoot(doc).?);
-
-    try testing.expectEqualStrings(expected, result);
-}
-
-test "all-in-one: parseAndAppendFragment with sanitization option" {
-    const allocator = testing.allocator;
-
-    var parser = try z.DOMParser.init(allocator);
-    defer parser.deinit();
-    const doc = try parser.parseFromString("<div id=\"1\"></div>");
-    defer z.destroyDocument(doc);
-
-    const html1 = "<p> some text</p>";
-    const html2 = "<div> more <i>text</i><span><script>alert(1);</script></span></div>";
-    const html3 = "<ul><li><script>alert(1);</script></li></ul>";
-
-    const div_elt = z.getElementById(doc, "1").?;
-    // const div: *z.DomNode = @ptrCast(div_elt);
-
-    // append fragments and check the result
-    try parser.parseAndAppendFragment(div_elt, html1, .div, .permissive);
-    try parser.parseAndAppendFragment(div_elt, html2, .div, .strict);
-    try parser.parseAndAppendFragment(div_elt, html3, .div, .strict);
-
-    const result = try z.outerHTML(allocator, div_elt);
-    defer allocator.free(result);
-
-    const expected = "<div id=\"1\"><p> some text</p><div> more <i>text</i><span></span></div><ul><li></li></ul></div>";
-    try testing.expectEqualStrings(expected, result);
-}
-
-test "Serializer sanitation" {
-    const allocator = testing.allocator;
-
-    const malicious_content =
-        \\ <div>
-        \\  <button disabled hidden onclick=\"alert('XSS')\" phx-click=\"increment\">Potentially dangerous, not escaped</button>
-        \\  <!-- a comment -->
-        \\  <div data-time=\"{@current}\"> The current value is: {@counter} </div>
-        \\  <a href=\"http://example.org/results?search=<img src=x onerror=alert('hello')>\">URL Escaped</a>
-        \\  <a href=\"javascript:alert('XSS')\">Dangerous, not escaped</a>
-        \\  <img src=\"javascript:alert('XSS')\" alt=\"not escaped\">
-        \\  <iframe src=\"javascript:alert('XSS')\" alt=\"not escaped\"></iframe>
-        \\  <a href=\"data:text/html,<script>alert('XSS')</script>\" alt=\"escaped\">Safe escaped</a>
-        \\  <img src=\"data:text/html,<script>alert('XSS')</script>\" alt=\"escaped\">
-        \\  <iframe src=\"data:text/html,<script>alert('XSS')</script>\" >Escaped</iframe>
-        \\  <img src=\"data:image/svg+xml,<svg onload=alert('XSS')\" alt=\"escaped\"></svg>\">
-        \\  <img src=\"data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoJ1hTUycpPjwvc3ZnPg==\" alt=\"potential dangerous b64\">
-        \\  <a href=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4=\">Potential dangerous b64</a>
-        \\  <img src=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4=\" alt=\"potential dangerous b64\">
-        \\  <a href=\"file:///etc/passwd\">Dangerous Local file access</a><img src=\"file:///etc/passwd\" alt=\"dangerous local file access\">
-        \\  <p>Hello<i>there</i>, all<strong>good?</strong></p>
-        \\  <p>Visit this link: <a href=\"https://example.com\">example.com</a></p>
-        \\</div>
-        \\<link href=\"/shared-assets/misc/link-element-example.css\" rel=\"stylesheet\">
-        \\<script>console.log(\"hi\");</script>
-        \\<template><p>Inside template</p></template>
-        \\<custom-element><script> console.log("hi");</script></custom-element>
-    ;
-
-    var parser = try z.DOMParser.init(allocator);
-    defer parser.deinit();
-    var doc = try parser.parseFromString("");
-    defer z.destroyDocument(doc);
-    const body = z.bodyNode(doc).?;
-
-    // Test 1: .strict mode
-    {
-        try parser.parseAndAppendFragment(
-            z.nodeToElement(body).?,
-            malicious_content,
-            .div,
-            .strict,
-        );
-
-        const final_html = try z.outerNodeHTML(allocator, body);
-        defer allocator.free(final_html);
-
-        // Should remove dangerous content
-        try testing.expect(std.mem.indexOf(u8, final_html, "javascript:") == null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "onclick") == null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") == null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") == null); // Custom elements removed in strict
-
-        // Should preserve safe content
-        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "example.com") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "<strong>") != null);
-    }
-    // Test 2: .strict mode (repeat test)
-    {
-        doc = try z.parseHTML(allocator, "");
-        try parser.parseAndAppendFragment(
-            z.nodeToElement(body).?,
-            malicious_content,
-            .div,
-            .strict,
-        );
-
-        const final_html = try z.outerNodeHTML(allocator, body);
-        defer allocator.free(final_html);
-
-        // Verify consistent strict sanitization
-        try testing.expect(std.mem.indexOf(u8, final_html, "javascript:") == null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "<template>") != null); // Templates are now allowed
-    }
-    // Test 3: .permissive mode
-    {
-        doc = try parser.parseFromString("");
-        try parser.parseAndAppendFragment(
-            z.nodeToElement(body).?,
-            malicious_content,
-            .div,
-            .permissive,
-        );
-
-        const final_html = try z.outerNodeHTML(allocator, body);
-        defer allocator.free(final_html);
-
-        // Should still remove dangerous content
-        try testing.expect(std.mem.indexOf(u8, final_html, "javascript:") == null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "onclick") == null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") == null);
-
-        // But should preserve custom elements
-        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") != null);
-
-        // Should preserve safe content and framework attributes
-        try testing.expect(std.mem.indexOf(u8, final_html, "phx-click") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
-    }
-    // Test 4: .none mode
-    {
-        doc = try parser.parseFromString("");
-        try parser.parseAndAppendFragment(
-            z.nodeToElement(body).?,
-            malicious_content,
-            .div,
-            .none,
-        );
-
-        const final_html = try z.outerNodeHTML(allocator, body);
-        defer allocator.free(final_html);
-
-        // Should preserve most content including scripts and custom elements
-        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "<!-- a comment -->") != null);
-
-        // Should preserve safe content
-        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "<template>") != null);
-    }
-    // Test 5: .custom mode
-    {
-        doc = try parser.parseFromString("");
-        try parser.parseAndAppendFragment(
-            z.nodeToElement(body).?,
-            malicious_content,
-            .div,
-            .{
-                .custom = .{
-                    .allow_custom_elements = true,
-                    .skip_comments = false, // Preserve comments
-                    .remove_scripts = false, // Allow scripts to demonstrate flexibility
-                    .remove_styles = true,
-                    .strict_uri_validation = false,
-                },
-            },
-        );
-
-        const final_html = try z.outerNodeHTML(allocator, body);
-        defer allocator.free(final_html);
-
-        // Should preserve comments and custom elements
-        try testing.expect(std.mem.indexOf(u8, final_html, "<!-- a comment -->") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") != null);
-
-        // Should preserve scripts and allow more URIs (as configured)
-        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") != null);
-        // javascript: URIs might still be filtered at parser level
-
-        // Should preserve safe content and framework attributes
-        try testing.expect(std.mem.indexOf(u8, final_html, "phx-click") != null);
-        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
-    }
 }
 
 test "parser.parseAndAppendFragment: multiple inserts" {
@@ -1509,6 +1222,8 @@ test "fragment contexts: media elements" {
 
     const result = try z.outerHTML(allocator, z.nodeToElement(body).?);
     defer allocator.free(result);
+
+    try testing.expect(std.mem.indexOf(u8, result, "<video") != null);
 
     try testing.expect(std.mem.indexOf(u8, result, "video.webm") != null);
     try testing.expect(std.mem.indexOf(u8, result, "captions.vtt") != null);

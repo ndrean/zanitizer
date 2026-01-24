@@ -300,7 +300,7 @@ test "order" {
     is_synced_style = z.hasAttribute(div.?, "style");
     try std.testing.expect(is_synced_style);
 
-    try z.prettyPrint(allocator, z.bodyNode(doc).?); // you see <div id="target" style="color: red">
+    // try z.prettyPrint(allocator, z.bodyNode(doc).?); // you see <div id="target" style="color: red">
 }
 test "Styles: Manual Stylesheet Attachment" {
     const allocator = std.testing.allocator;

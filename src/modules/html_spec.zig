@@ -21,6 +21,53 @@ pub const FrameworkSpec = struct {
     description: []const u8 = "",
 };
 
+/// Blacklist of Attributes that are inherently dangerous and should always be blocked unless explicitly handled by framework logic.
+pub const DANGEROUS_ATTRIBUTES = [_][]const u8{
+    // Script execution
+    "onclick",  "onload",    "onerror",   "onmouseover", "onfocus",        "onblur",       "onchange",  "onsubmit",  "onkeydown",          "onkeyup", "onmouseenter", "onmouseleave",
+    // post
+    "onresize", "onmessage", "onstorage", "onunload",    "onbeforeunload", "onhashchange",
+    // HTML injection vectors
+    "innerHTML", "outerHTML", "insertAdjacentHTML",
+
+    // Dangerous framework-specifics (if not using the framework safely)
+    "x-html",  "v-html",
+    "ng-bind-html",
+
+    // Legacy / Obscure
+    "integrity", // Can be abused to load malicious resources
+    "formaction", // Can hijack form submissions
+    "background", // Legacy background attribute can execute script in IE
+    // "dynsrc", // IE legacy ??
+    // "lowsrc", // IE legacy??
+};
+
+pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
+    "import(",
+    "eval(",
+    "function(",
+    "setTimeout(",
+    "setInterval(",
+    "new Function(",
+    "document.write",
+    "document.createElement",
+    "window.open",
+    "location.href",
+    ".innerHTML",
+    ".outerHTML",
+    "fetch(",
+    "XMLHttpRequest",
+    "WebSocket(",
+    "postMessage(",
+    "javascript:",
+    "vbscript:",
+    "data:",
+    "data:text/html",
+    "data:text/javascript",
+    "data:text/xml",
+    "data:image/svg",
+};
+
 /// Centralized list of supported web frameworks and their attribute prefixes
 /// This is the single source of truth for framework attribute validation
 pub const FRAMEWORK_SPECS = [_]FrameworkSpec{
@@ -38,6 +85,10 @@ pub const FRAMEWORK_SPECS = [_]FrameworkSpec{
     .{ .prefix = "bind:", .name = "Svelte Bind", .description = "Svelte binding directives" },
     .{ .prefix = "on:", .name = "Svelte Event", .description = "Svelte event handlers" },
     .{ .prefix = "use:", .name = "Svelte Action", .description = "Svelte action directives" },
+    .{ .prefix = "slot", .name = "Web Components", .description = "Web Components slots", .safe = false }, // Mark as unsafe by default
+    .{ .prefix = ":for", .name = "Framework loops", .description = "Framework loop directive" },
+    .{ .prefix = ":if", .name = "Framework conditionals", .description = "Framework conditional directive" },
+    .{ .prefix = ":let", .name = "Framework declarations", .description = "Framework declaration" },
 };
 
 /// Check if an attribute name matches any supported framework pattern
@@ -68,17 +119,21 @@ pub fn isFrameworkAttributeSafe(attr_name: []const u8) bool {
     return false; // Unknown framework attributes are not safe
 }
 
+/// Signature for attribute value validator functions
+pub const AttrValidator = *const fn ([]const u8) bool;
+
 /// Specification for an HTML attribute
 pub const AttrSpec = struct {
     name: []const u8,
     /// If null, any value is allowed. If provided, only these values are valid.
     valid_values: ?[]const []const u8 = null,
+    validator: ?AttrValidator = null,
     /// Whether this attribute is considered safe for sanitization
     safe: bool = true,
 };
 
 /// Specification for an HTML element
-const ElementSpec = struct {
+pub const ElementSpec = struct {
     tag_enum: z.HtmlTag,
     allowed_attrs: []const AttrSpec,
     /// Whether this element is void (self-closing)
@@ -90,11 +145,74 @@ const ElementSpec = struct {
     }
 };
 
+// --- VALIDATORS ---
+
+/// Helper for case-insensitive prefix check
+fn startsWithIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+    if (haystack.len < needle.len) return false;
+    for (haystack[0..needle.len], needle) |h, n| {
+        if (std.ascii.toLower(h) != std.ascii.toLower(n)) return false;
+    }
+    return true;
+}
+
+/// Validates that a URI is safe (no javascript:, vbscript:, data: blocks)
+/// Validates that a URI is safe.
+/// Strategy: Allow known-good protocols, Block known-bad protocols.
+pub fn validateUri(value: []const u8) bool {
+    const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+
+    if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "vbscript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "file:")) return false;
+
+    // Strict checks on data: URIs
+    if (startsWithIgnoreCase(trimmed, "data:")) {
+        // Only allow image data URIs
+        if (!startsWithIgnoreCase(trimmed, "data:image/")) return false;
+        // Block SVG images as they can contain scripts
+        if (startsWithIgnoreCase(trimmed, "data:image/svg")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/javascript")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/html")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/xml")) return false;
+
+        return true;
+    }
+
+    // default Allow (http, https, relative, mailto, etc.)
+    return true;
+}
+
+/// Validates style strings to prevent easy XSS vectors (url(), expression())
+pub fn validateStyle(value: []const u8) bool {
+    // Block CSS expressions (IE legacy vector)
+    if (std.mem.indexOf(u8, value, "expression") != null) return false;
+    if (std.mem.indexOf(u8, value, "behavior") != null) return false;
+
+    // Block external URLs in styles (prevents data exfiltration / drive-by)
+    // NOTE: This is strict. Remove if you want to allow background images.
+    if (std.mem.indexOf(u8, value, "url(") != null) return false;
+
+    // Block javascript: in styles (unlikely but possible in some older browsers)
+    if (std.mem.indexOf(u8, value, "javascript:") != null) return false;
+
+    return true;
+}
+
+fn validateSandbox(value: []const u8) bool {
+    // Check for dangerous sandbox values
+    if (std.mem.indexOf(u8, value, "allow-scripts") != null) {
+        return false;
+    }
+    // Could also validate other dangerous combinations
+    return true;
+}
+
 /// Common attributes that are allowed on most elements
 const common_attrs = [_]AttrSpec{
     .{ .name = "id" },
     .{ .name = "class" },
-    .{ .name = "style" },
+    .{ .name = "style", .validator = validateStyle },
     .{ .name = "title" },
     .{ .name = "lang" },
     .{ .name = "width" },
@@ -119,7 +237,7 @@ const table_attrs = [_]AttrSpec{
 
 /// Form-specific attributes
 const form_attrs = [_]AttrSpec{
-    .{ .name = "action" },
+    .{ .name = "action", .validator = validateUri },
     .{ .name = "method", .valid_values = &[_][]const u8{ "get", "post" } },
     .{ .name = "enctype" },
     .{ .name = "target" },
@@ -153,11 +271,13 @@ const svg_attrs = [_]AttrSpec{
     .{ .name = "fill" },
     .{ .name = "stroke" },
     .{ .name = "stroke-width" },
+    .{ .name = "href", .validator = validateUri },
+    .{ .name = "xlink:href", .validator = validateUri },
 } ++ common_attrs;
 
 /// Image-specific attributes
 const img_attrs = [_]AttrSpec{
-    .{ .name = "src" },
+    .{ .name = "src", .validator = validateUri },
     .{ .name = "alt" },
     .{ .name = "width" },
     .{ .name = "height" },
@@ -171,11 +291,17 @@ const img_attrs = [_]AttrSpec{
     .{ .name = "ismap", .valid_values = &[_][]const u8{""} }, // boolean
 } ++ common_attrs;
 
-const iframe_attrs = [_]AttrSpec{ .{ .name = "src" }, .{ .name = "sandbox" }, .{ .name = "srcdoc" }, .{ .name = "name" }, .{ .name = "loading" } } ++ common_attrs;
+const iframe_attrs = [_]AttrSpec{
+    .{ .name = "src", .validator = validateUri },
+    .{ .name = "sandbox", .validator = validateSandbox },
+    .{ .name = "srcdoc" },
+    .{ .name = "name" },
+    .{ .name = "loading" },
+} ++ common_attrs;
 
 /// Anchor-specific attributes
 const anchor_attrs = [_]AttrSpec{
-    .{ .name = "href" },
+    .{ .name = "href", .validator = validateUri },
     .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },
     .{ .name = "rel" },
     .{ .name = "type" },
@@ -240,6 +366,25 @@ const framework_attrs = [_]AttrSpec{
     .{ .name = "ng-submit" },
     .{ .name = "ng-change" },
 } ++ common_attrs;
+
+const custom_element_spec = ElementSpec{
+    .tag_enum = .custom,
+    .allowed_attrs = &([_]AttrSpec{
+        .{ .name = "class" },
+        .{ .name = "id" },
+        .{ .name = "style", .validator = validateStyle },
+        .{ .name = "src", .validator = validateUri },
+        .{ .name = "href", .validator = validateUri },
+        .{ .name = "title" },
+        .{ .name = "lang" },
+        .{ .name = "dir" },
+        .{ .name = "role" },
+        .{ .name = "tabindex" },
+        .{ .name = "aria" }, // prefix for aria-*
+        .{ .name = "data" }, // prefix for data-*
+    } ++ framework_attrs),
+    .void_element = false,
+};
 
 /// HTML element specifications
 pub const element_specs = [_]ElementSpec{
@@ -348,19 +493,20 @@ pub const element_specs = [_]ElementSpec{
         .{ .name = "muted", .valid_values = &[_][]const u8{""} },
         .{ .name = "preload", .valid_values = &[_][]const u8{ "none", "metadata", "auto" } },
     } ++ common_attrs) },
-    .{ .tag_enum = .source, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "src" },
-        .{ .name = "type" },
-        .{ .name = "media" },
-        .{ .name = "sizes" },
-        .{ .name = "srcset" },
-    } ++ common_attrs), .void_element = true },
+    .{ .tag_enum = .source, .allowed_attrs = &([_]AttrSpec{ .{ .name = "src" }, .{ .name = "type" }, .{ .name = "media" }, .{ .name = "sizes" }, .{ .name = "srcset" }, .{ .name = "" } } ++ common_attrs), .void_element = true },
+    .{ .tag_enum = .base, .allowed_attrs = &[_]AttrSpec{
+        .{ .name = "href", .validator = validateUri },
+        .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },
+    } ++ common_attrs, .void_element = true },
     .{ .tag_enum = .track, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "src" },
+        .{ .name = "src", .validator = validateUri },
         .{ .name = "kind", .valid_values = &[_][]const u8{ "subtitles", "captions", "descriptions", "chapters", "metadata" } },
         .{ .name = "srclang" },
         .{ .name = "label" },
-        .{ .name = "default", .valid_values = &[_][]const u8{""} },
+        .{
+            .name = "default",
+            .valid_values = &[_][]const u8{""},
+        },
     } ++ common_attrs), .void_element = true },
 
     // Semantic elements
@@ -408,11 +554,33 @@ pub const element_specs = [_]ElementSpec{
     } ++ common_attrs), .void_element = true },
     .{ .tag_enum = .link, .allowed_attrs = &([_]AttrSpec{
         .{ .name = "rel" },
-        .{ .name = "href" },
+        .{ .name = "href", .validator = validateUri },
         .{ .name = "type" },
         .{ .name = "media" },
         .{ .name = "sizes" },
     } ++ common_attrs), .void_element = true },
+    .{
+        .tag_enum = .embed,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "src", .validator = validateUri },
+            .{ .name = "type" },
+            .{ .name = "width" },
+            .{ .name = "height" },
+        } ++ common_attrs),
+        .void_element = true,
+    },
+    .{
+        .tag_enum = .object,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "data", .validator = validateUri },
+            .{ .name = "type" },
+            .{ .name = "width" },
+            .{ .name = "height" },
+            .{ .name = "name" },
+            .{ .name = "form" },
+            .{ .name = "usemap" },
+        } ++ common_attrs),
+    },
 
     // Void elements
     .{ .tag_enum = .br, .allowed_attrs = &common_attrs, .void_element = true },
@@ -428,15 +596,18 @@ pub const element_specs = [_]ElementSpec{
     .{ .tag_enum = .path, .allowed_attrs = &svg_attrs },
     .{ .tag_enum = .line, .allowed_attrs = &svg_attrs },
     .{ .tag_enum = .text, .allowed_attrs = &svg_attrs },
+    custom_element_spec,
 };
-
-// === STRING BASED LOOKUPS ===--------------------------
 
 /// Get the specification for an HTML element by tag name (legacy - prefer getElementSpecFast)
 fn getElementSpec(tag: []const u8) ?*const ElementSpec {
     // First try fast enum-based lookup
     if (z.tagFromQualifiedName(tag)) |tag_enum| {
         return getElementSpecByEnum(tag_enum);
+    }
+
+    if (z.isCustomElement(tag)) {
+        return &custom_element_spec;
     }
 
     // Fallback: Linear search for custom elements not in enum
@@ -502,6 +673,59 @@ fn getAllowedAttributes(allocator: std.mem.Allocator, element_tag: []const u8) !
         try attrs.append(allocator, attr_spec.name);
     }
     return attrs.toOwnedSlice(allocator);
+}
+
+/// Check if MIME type is safe (similar to DOMPurify's ALLOWED_URI_REGEXP)
+pub fn isSafeMimeType(mime: []const u8) bool {
+    const dangerous_mimes = [_][]const u8{
+        // Executable/plugin content
+        "application/x-java-applet",
+        "application/x-silverlight",
+        "application/x-shockwave-flash",
+        // HTML/script content
+        "text/html",
+        "application/xhtml+xml",
+        "text/xml",
+        "application/xml",
+        "text/xsl",
+        "application/xslt+xml",
+        // Script content
+        "application/javascript",
+        "text/javascript",
+        "application/ecmascript",
+        "text/ecmascript",
+        "application/x-ecmascript",
+        // ActiveX
+        "application/x-msdownload",
+        "application/x-ms-install",
+    };
+
+    for (dangerous_mimes) |danger| {
+        if (std.ascii.eqlIgnoreCase(mime, danger)) {
+            return false;
+        }
+    }
+
+    // Allow common safe types
+    const safe_patterns = [_][]const u8{
+        "image/",
+        "video/",
+        "audio/",
+        "text/plain",
+        "application/pdf",
+        "application/json",
+        "application/zip",
+        "application/x-gzip",
+    };
+
+    for (safe_patterns) |pattern| {
+        if (std.mem.startsWith(u8, mime, pattern)) {
+            return true;
+        }
+    }
+
+    // Unknown type - be conservative
+    return false;
 }
 
 // === ENUM-BASED LOOKUPS ===--------------------------
@@ -627,7 +851,8 @@ test "element spec lookup" {
 
     // Test unknown element
     const unknown_spec = getElementSpec("unknown-element");
-    try testing.expect(unknown_spec == null);
+    const name = unknown_spec.?.tagName();
+    try testing.expectEqualStrings("custom", name);
 
     // Test that fast path and legacy path return same result for known elements
     const div_spec_legacy = getElementSpec("div");
@@ -693,7 +918,8 @@ test "fast bridge functions" {
 
     // Test unknown element
     const unknown_spec = getElementSpecFast("unknown-element");
-    try testing.expect(unknown_spec == null);
+    const name = unknown_spec.?.tagName();
+    try testing.expectEqualStrings("custom", name);
 
     // Test isAttributeAllowedFast
     try testing.expect(isAttributeAllowedFast("table", "scope"));

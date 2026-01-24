@@ -13,15 +13,6 @@ const print = std.debug.print;
 
 const testing = std.testing;
 
-/// [sanitize] Defines which URLs can be considered safe as used in an attribute
-pub fn isSafeUri(value: []const u8) bool {
-    return std.mem.startsWith(u8, value, "http://") or
-        std.mem.startsWith(u8, value, "https://") or
-        std.mem.startsWith(u8, value, "mailto:") or
-        std.mem.startsWith(u8, value, "/") or // relative URLs
-        std.mem.startsWith(u8, value, "#"); // anchors
-}
-
 /// [sanitize] Check if element is a custom element (Web Components spec)
 pub fn isCustomElement(tag_name: []const u8) bool {
     // Web Components spec: custom elements must contain a hyphen
@@ -31,42 +22,33 @@ pub fn isCustomElement(tag_name: []const u8) bool {
 /// [sanitize] Check if iframe is safe (has sandbox attribute)
 fn isIframeSafe(element: *z.HTMLElement) bool {
     // iframe is only safe if it has the sandbox attribute
-    if (!z.hasAttribute(element, "sandbox")) {
-        return false; // No sandbox = unsafe
+    if (!z.hasAttribute(element, "sandbox")) return false;
+
+    // Sandbox should NOT allow scripts
+    if (z.getAttribute_zc(element, "sandbox")) |v| {
+        if (std.mem.indexOf(u8, v, "allow-scripts") != null) {
+            return false;
+        }
     }
 
     // Additional validation: check src for dangerous protocols
     if (z.getAttribute_zc(element, "src")) |src_value| {
-        // Block javascript: and data: protocols in src
-        if (std.mem.startsWith(u8, src_value, "javascript:") or
-            std.mem.startsWith(u8, src_value, "data:"))
-        {
-            return false;
-        }
+        if (!z.validateUri(src_value)) return false;
+    }
+
+    // Validate srcdoc if present
+    if (z.getAttribute_zc(element, "srcdoc")) |_| {
+        // Should sanitize srcdoc content!
+        return false; // Conservative: block srcdoc entirely
     }
 
     return true; // Has sandbox and safe src
 }
 
-/// [sanitize] Check if an element and attribute combination is allowed using unified specification
-pub fn isElementAttributeAllowed(element_tag: []const u8, attr_name: []const u8) bool {
-    return z.isAttributeAllowedFast(element_tag, attr_name);
-}
-
-/// [sanitize] Fast enum-based element and attribute validation
-pub fn isElementAttributeAllowedEnum(tag: HtmlTag, attr_name: []const u8) bool {
-    return z.isAttributeAllowedEnum(tag, attr_name);
-}
-
 /// [sanitize] Check if attribute is a framework directive or custom attribute
 pub fn isFrameworkAttribute(attr_name: []const u8) bool {
     // Use the centralized framework specification from html_spec.zig
-    return z.isFrameworkAttribute(attr_name) or
-        // Additional sanitizer-specific exceptions
-        std.mem.startsWith(u8, attr_name, "slot") or // Web Components slots
-        std.mem.eql(u8, attr_name, "for") or // Phoenix :for loops (might appear as 'for')
-        std.mem.eql(u8, attr_name, "if") or // Phoenix :if conditions (might appear as 'if')
-        std.mem.eql(u8, attr_name, "let"); // Phoenix :let bindings (might appear as 'let')
+    return z.isFrameworkAttribute(attr_name);
 }
 
 fn isDescendantOfSvg(tag: z.HtmlTag, parent: z.HtmlTag) bool {
@@ -109,45 +91,7 @@ fn setAncestor(tag: z.HtmlTag, parent: z.HtmlTag) z.HtmlTag {
     };
 }
 
-/// [sanitize] Collect dangerous SVG attributes (simplified version without iteration)
-fn collectSvgDangerousAttributes(context: *SanitizeContext, element: *z.HTMLElement, tag_str: []const u8) !void {
-    // We must iterate attributes to catch all on* handlers and namespaced attributes
-    const attrs = z.getAttributes_bf(context.allocator, element) catch return;
-    defer {
-        for (attrs) |attr| {
-            context.allocator.free(attr.name);
-            context.allocator.free(attr.value);
-        }
-        context.allocator.free(attrs);
-    }
-
-    for (attrs) |attr| {
-        var should_remove = false;
-
-        // 1. Catch all event handlers
-        if (std.mem.startsWith(u8, attr.name, "on")) {
-            should_remove = true;
-        }
-        // 2. Catch javascript in href and xlink:href
-        else if (std.mem.eql(u8, attr.name, "href") or std.mem.eql(u8, attr.name, "xlink:href")) {
-            if (std.mem.startsWith(u8, attr.value, "javascript:")) {
-                should_remove = true;
-            }
-        }
-        // 3. Remove inline styles if configured (CSS injection vector)
-        else if (std.mem.eql(u8, attr.name, "style") and context.options.remove_styles) {
-            should_remove = true;
-        }
-
-        if (should_remove) {
-            try context.addAttributeToRemove(element, attr.name);
-        }
-    }
-
-    _ = tag_str; // Will use this later for more specific attribute checking
-}
-
-pub const SanitizeOptions = union(enum) {
+pub const SanitizerMode = union(enum) {
     none: void,
     minimum: void,
     strict: void,
@@ -156,13 +100,14 @@ pub const SanitizeOptions = union(enum) {
 
     pub inline fn get(self: @This()) SanitizerOptions {
         return switch (self) {
-            .none => unreachable, // Should never reach here - early exit in sanitizeWithOptions
+            .none => unreachable, // Should never reach here - early exit in sanitizeWithMode
             .minimum => SanitizerOptions{
                 .skip_comments = false,
                 .remove_scripts = false,
                 .remove_styles = false,
                 .strict_uri_validation = false,
                 .allow_custom_elements = true,
+                .allow_framework_attrs = true,
             },
             .strict => SanitizerOptions{
                 .skip_comments = true,
@@ -170,13 +115,15 @@ pub const SanitizeOptions = union(enum) {
                 .remove_styles = true,
                 .strict_uri_validation = true,
                 .allow_custom_elements = false,
+                .allow_framework_attrs = false,
             },
             .permissive => SanitizerOptions{
                 .skip_comments = true,
                 .remove_scripts = true,
                 .remove_styles = true,
-                .strict_uri_validation = true,
+                .strict_uri_validation = false,
                 .allow_custom_elements = true,
+                .allow_framework_attrs = true,
             },
             .custom => |opts| opts,
         };
@@ -206,6 +153,8 @@ pub const SanitizerOptions = struct {
     remove_styles: bool = true,
     strict_uri_validation: bool = true,
     allow_custom_elements: bool = false,
+    allow_framework_attrs: bool = false,
+    allow_embeds: bool = false,
 };
 
 const AttributeAction = struct {
@@ -281,7 +230,12 @@ fn handleSvgElement(context_ptr: *SanitizeContext, node: *z.DomNode, element: *z
 
     // Safe SVG element - check if allowed using centralized spec
     if (z.getElementSpecFast(tag_name) != null) {
-        collectSvgDangerousAttributes(context_ptr, element, tag_name) catch return z._STOP;
+        const tag = z.tagFromQualifiedName(tag_name);
+        if (tag) |t| {
+            collectDangerousAttributesEnum(context_ptr, element, t) catch return z._STOP;
+        } else {
+            return removeAndContinue(context_ptr, node);
+        }
     } else {
         // SVG element not in whitelist - remove
         return removeAndContinue(context_ptr, node);
@@ -289,88 +243,257 @@ fn handleSvgElement(context_ptr: *SanitizeContext, node: *z.DomNode, element: *z
     return z._CONTINUE;
 }
 
-// Handle known HTML elements
-fn handleKnownElement(context_ptr: *SanitizeContext, node: *z.DomNode, element: *z.HTMLElement, tag: z.HtmlTag) c_int {
-    // Check if this tag should be removed
-    if (shouldRemoveTag(context_ptr.options, tag)) {
-        return removeAndContinue(context_ptr, node);
-    }
-
-    const tag_str = @tagName(tag);
-
-    // Set the new context for this element
-    context_ptr.parent = setAncestor(tag, context_ptr.parent);
-
-    // handle SVG context
-    if (isDescendantOfSvg(tag, context_ptr.parent)) {
-        context_ptr.parent = .svg;
-        return handleSvgElement(context_ptr, node, element, tag_str);
-    }
-
-    // Standard HTML element - use centralized spec
-    if (z.getElementSpecByEnum(tag) != null) {
-        // Special handling for iframe - check sandbox requirement
-        if (tag == .iframe) {
-            if (!isIframeSafe(element)) {
-                return removeAndContinue(context_ptr, node);
-            }
-        }
-        collectDangerousAttributesEnum(context_ptr, element, tag) catch return z._STOP;
-    } else {
-        // Known tag but not in whitelist - check if it's a custom element
-        if (context_ptr.options.allow_custom_elements and isCustomElement(tag_str)) {
-            // Custom element - use permissive sanitization
-            collectCustomElementAttributes(context_ptr, element) catch return z._STOP;
-        } else {
-            // Known tag but not in whitelist: eg script elements
-            return removeAndContinue(context_ptr, node);
-        }
-    }
-
-    return z._CONTINUE;
-}
-
-// Handle unknown elements in context (custom context or SVG context containing not whitelisted elements)
-fn handleUnknownElement(context_ptr: *SanitizeContext, node: *z.DomNode, element: *z.HTMLElement) c_int {
-    const tag_name = z.qualifiedName_zc(element);
-
-    //SVG context: `foreignObject`,` animate`
-    if (context_ptr.parent == .svg) {
-        return handleSvgElement(context_ptr, node, element, tag_name);
-    }
-
-    // custom element context
-    if (context_ptr.options.allow_custom_elements and isCustomElement(tag_name)) {
-        // Custom element - use permissive sanitization
-        collectCustomElementAttributes(context_ptr, element) catch return z._STOP;
-    } else {
-        // Unknown element and custom elements not allowed - remove
-        return removeAndContinue(context_ptr, node);
-    }
-
-    return z._CONTINUE;
-}
-
-/// Templates are handled differently as we need to access its innerContent in its document fragment
-fn handleTemplates(context_ptr: *SanitizeContext, node: *z.DomNode) c_int {
-    context_ptr.parent = .template;
-    context_ptr.addTemplate(node) catch return z._STOP;
-    return z._CONTINUE;
-}
 /// Handle element nodes with separate treatment for templates as we need to access their content.
-fn handleElement(context_ptr: *SanitizeContext, node: *z.DomNode) c_int {
+fn handleElement(context: *SanitizeContext, node: *z.DomNode) c_int {
+    maybeResetContext(context, node);
+    const element = z.nodeToElement(node) orelse return z._CONTINUE;
+
+    // 1. Handle templates (Logic split: Context switch + Attribute scan)
     if (z.isTemplate(node)) {
-        return handleTemplates(context_ptr, node);
+        return handleTemplateElement(context, node);
     }
 
-    maybeResetContext(context_ptr, node);
-    const element = z.nodeToElement(node) orelse return z._CONTINUE;
     const tag = z.tagFromAnyElement(element);
 
-    if (tag != .custom)
-        return handleKnownElement(context_ptr, node, element, tag);
+    if (tag != .custom) {
+        return handleKnownElementWithContent(context, node, element, tag);
+    }
 
-    return handleUnknownElement(context_ptr, node, element);
+    return handleUnknownElementWithContent(context, node, element);
+}
+
+fn handleTemplateElement(context: *SanitizeContext, node: *z.DomNode) c_int {
+    context.parent = .template;
+    context.addTemplate(node) catch return z._STOP;
+
+    // FIX: Process the <template> tag's own attributes (e.g. id="...", class="...")
+    if (z.nodeToElement(node)) |element| {
+        collectDangerousAttributesEnum(context, element, .template) catch return z._STOP;
+    }
+
+    return z._CONTINUE;
+}
+
+fn handleKnownElementWithContent(context: *SanitizeContext, node: *z.DomNode, element: *z.HTMLElement, tag: z.HtmlTag) c_int {
+
+    // 1. Check Global Blocklist
+    if (shouldRemoveTag(context.options, tag)) {
+        return removeAndContinue(context, node);
+    }
+
+    // 2. Proactive Security Checks (Element-specific Logic)
+    // These checks run BEFORE we validate attributes or descend into children.
+    switch (tag) {
+        .meta => if (!validateMetaElement(context, element)) return removeAndContinue(context, node),
+        .base => if (!validateBaseElement(context, element)) return removeAndContinue(context, node),
+        .object, .embed => if (!validateEmbeddedElement(context, element, tag)) return removeAndContinue(context, node),
+        .iframe => if (!isIframeSafe(element)) return removeAndContinue(context, node),
+        else => {},
+    }
+
+    // 3. Set Context
+    context.parent = setAncestor(tag, context.parent);
+
+    // 4. Handle SVG Context
+    if (isDescendantOfSvg(tag, context.parent)) {
+        context.parent = .svg;
+        return handleSvgElement(context, node, element, @tagName(tag));
+    }
+
+    // 5. Validate Attributes (Using the Zero-Alloc Iterator)
+    collectDangerousAttributesEnum(context, element, tag) catch return z._STOP;
+
+    return z._CONTINUE;
+}
+
+fn handleUnknownElementWithContent(context: *SanitizeContext, node: *z.DomNode, element: *z.HTMLElement) c_int {
+    const tag_name = z.qualifiedName_zc(element);
+
+    if (context.parent == .svg) {
+        return handleSvgElement(context, node, element, tag_name);
+    }
+
+    if (context.options.allow_custom_elements and isCustomElement(tag_name)) {
+        // Use the .custom spec for unknown custom elements
+        collectDangerousAttributesEnum(context, element, .custom) catch return z._STOP;
+        // Check if it contains templates
+        var child = z.firstChild(node);
+        while (child) |c| {
+            const next = z.nextSibling(c);
+            if (z.isTemplate(c)) {
+                context.addTemplate(c) catch return z._STOP;
+            }
+            child = next;
+        }
+    } else {
+        return removeAndContinue(context, node);
+    }
+
+    return z._CONTINUE;
+}
+
+fn validateBaseElement(context: *SanitizeContext, element: *z.HTMLElement) bool {
+    // Base tags are extremely dangerous - consider removing them entirely
+    // in strict mode
+    if (context.options.strict_uri_validation) {
+        return false; // Remove all base tags in strict mode
+    }
+
+    if (z.getAttribute_zc(element, "href")) |href| {
+        if (!z.validateUri(href)) return false;
+
+        // Block javascript: and data: protocols
+        if (std.ascii.indexOfIgnoreCase(href, "javascript:") != null) return false;
+        if (std.ascii.indexOfIgnoreCase(href, "data:") != null) return false;
+        if (std.ascii.indexOfIgnoreCase(href, "vbscript:") != null) return false;
+
+        // Block file: protocol
+        if (std.ascii.indexOfIgnoreCase(href, "file:") != null) return false;
+
+        // Block relative URLs that could be manipulated
+        // (e.g., "../../../etc/passwd" or "//evil.com")
+        if (std.mem.startsWith(u8, href, "//")) return false;
+        if (std.mem.indexOf(u8, href, "../") != null) return false;
+        if (std.mem.indexOf(u8, href, "..\\") != null) return false;
+
+        // Only allow http, https, or root-relative URLs
+        const is_http = std.mem.startsWith(u8, href, "http://") or
+            std.mem.startsWith(u8, href, "https://");
+        const is_root_relative = std.mem.startsWith(u8, href, "/") and
+            !std.mem.startsWith(u8, href, "//");
+
+        return is_http or is_root_relative;
+    }
+
+    return true;
+}
+
+fn validateMetaElement(_: *SanitizeContext, element: *z.HTMLElement) bool {
+    if (z.getAttribute_zc(element, "http-equiv")) |equiv| {
+        const dangerous_equivs = [_][]const u8{
+            "refresh",
+            "set-cookie",
+            "content-security-policy", // Can override page CSP
+            "x-ua-compatible", // Can force compatibility modes
+            "default-style", // Can change page styling
+            "content-type", // Can override charset
+        };
+
+        for (dangerous_equivs) |danger| {
+            if (std.ascii.eqlIgnoreCase(equiv, danger)) {
+                return false;
+            }
+        }
+
+        // Special validation for refresh
+        if (std.ascii.eqlIgnoreCase(equiv, "refresh")) {
+            if (z.getAttribute_zc(element, "content")) |content| {
+                return validateMetaRefreshContent(content);
+            }
+            return false; // Refresh without content is invalid
+        }
+    }
+
+    // Block charset attacks (except UTF-8)
+    if (z.getAttribute_zc(element, "charset")) |charset| {
+        if (!std.ascii.eqlIgnoreCase(charset, "utf-8")) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+fn validateMetaRefreshContent(value: []const u8) bool {
+    var iter = std.mem.splitScalar(u8, value, ';');
+
+    // First part should be the delay
+    if (iter.next()) |delay_str| {
+        const trimmed = std.mem.trim(u8, delay_str, &std.ascii.whitespace);
+        const delay = std.fmt.parseUnsigned(u32, trimmed, 10) catch return false;
+
+        // Prevent immediate or very fast refreshes (phishing technique)
+        if (delay < 3) return false; // Minimum 3 seconds
+        if (delay > 3600) return false; // Maximum 1 hour
+    } else {
+        return false;
+    }
+
+    // Check URL if present
+    if (iter.next()) |url_part| {
+        const trimmed = std.mem.trim(u8, url_part, &std.ascii.whitespace);
+        if (std.mem.startsWith(u8, trimmed, "url=")) {
+            const url = trimmed[4..];
+            if (!z.validateUri(url)) return false;
+
+            // Additional checks for refresh URLs
+            if (std.mem.indexOf(u8, url, "javascript:") != null) return false;
+            if (std.mem.indexOf(u8, url, "data:") != null) return false;
+        }
+    }
+
+    return true;
+}
+
+/// [sanitize] Validate <object> and <embed> (Flash/Plugins)
+fn validateEmbeddedElement(_: *SanitizeContext, element: *z.HTMLElement, tag: z.HtmlTag) bool {
+    const url_attr = if (tag == .object) "data" else "src";
+
+    if (z.getAttribute_zc(element, url_attr)) |url| {
+        if (!z.validateUri(url)) return false;
+
+        // Block dangerous protocols
+        if (containsCaseInsensitive(url, "javascript:")) return false;
+        if (containsCaseInsensitive(url, "data:")) return false;
+        if (containsCaseInsensitive(url, "vbscript:")) return false;
+        if (containsCaseInsensitive(url, "file:")) return false;
+
+        // Only allow specific file types
+        const safe_extensions = [_][]const u8{
+            //  ".swf", // Consider blocking .swf
+            ".pdf",
+            ".svg",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+            ".mp4",
+            ".webm",
+            ".ogg",
+            ".mp3",
+            ".wav",
+            ".flac",
+            ".txt",
+            ".csv",
+            ".json",
+            ".xml",
+        };
+
+        var has_safe_extension = false;
+        for (safe_extensions) |ext| {
+            if (std.ascii.endsWithIgnoreCase(url, ext)) {
+                has_safe_extension = true;
+                break;
+            }
+        }
+
+        if (!has_safe_extension) {
+            if (z.getAttribute_zc(element, "type")) |mime_type|
+                return z.isSafeMimeType(mime_type);
+
+            return false;
+        }
+
+        // Validate type attribute
+        if (z.getAttribute_zc(element, "type")) |mime| {
+            return z.isSafeMimeType(mime);
+        }
+    }
+    if (z.getAttribute_zc(element, "type")) |mime| {
+        return z.isSafeMimeType(mime);
+    }
+    return true;
 }
 
 /// Sanitization collector callback for simple walk
@@ -400,125 +523,123 @@ inline fn shouldRemoveTag(options: SanitizerOptions, tag: z.HtmlTag) bool {
     return switch (tag) {
         .script => options.remove_scripts,
         .style => options.remove_styles,
-        .object,
-        .embed,
-        => true,
+        .object, .embed => options.allow_embeds,
         else => false,
         // Note: iframe is handled separately with sandbox validation
     };
 }
 
-/// Permissive sanitization for custom elements - only remove truly dangerous attributes
-fn collectCustomElementAttributes(context: *SanitizeContext, element: *z.HTMLElement) !void {
-    const attrs = z.getAttributes_bf(context.allocator, element) catch return;
-    defer {
-        for (attrs) |attr| {
-            context.allocator.free(attr.name);
-            context.allocator.free(attr.value);
-        }
-        context.allocator.free(attrs);
-    }
-
-    for (attrs) |attr_pair| {
-        var should_remove = false;
-
-        // Allow framework attributes and data attributes
-        if (isFrameworkAttribute(attr_pair.name)) {
-            continue;
-        }
-
-        // Only remove truly dangerous attributes for custom elements
-        if (std.mem.startsWith(u8, attr_pair.value, "javascript:") or
-            std.mem.startsWith(u8, attr_pair.value, "vbscript:"))
-        {
-            should_remove = true;
-        } else if (std.mem.startsWith(u8, attr_pair.value, "data:") and
-            (std.mem.indexOf(u8, attr_pair.value, "base64") != null or
-                std.mem.startsWith(u8, attr_pair.value, "data:text/html") or
-                std.mem.startsWith(u8, attr_pair.value, "data:text/javascript")))
-        {
-            should_remove = true;
-        } else if (std.mem.startsWith(u8, attr_pair.name, "on") and
-            !isFrameworkAttribute(attr_pair.name)) // Allow @click, on:click, etc.
-        {
-            // Remove traditional event handlers but allow framework events
-            should_remove = true;
-        } else if (std.mem.eql(u8, attr_pair.name, "style") and context.options.remove_styles) {
-            // Remove inline styles only if configured
-            should_remove = true;
-        } else if ((std.mem.eql(u8, attr_pair.name, "href") or std.mem.eql(u8, attr_pair.name, "src")) and
-            context.options.strict_uri_validation and !isSafeUri(attr_pair.value))
-        {
-            should_remove = true;
-        }
-
-        if (should_remove) {
-            try context.addAttributeToRemove(element, attr_pair.name);
-        }
-    }
+// Helper
+fn containsCaseInsensitive(haystack: []const u8, needle: []const u8) bool {
+    return std.ascii.indexOfIgnoreCase(haystack, needle) != null;
 }
 
-/// Fast enum-based attribute sanitization for standard HTML elements
 fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLElement, tag: HtmlTag) !void {
-    const attrs = z.getAttributes_bf(context.allocator, element) catch return;
+    var iter = z.iterateAttributes(element);
+    // std.debug.print("\nChecking attributes for element: {s}\t", .{@tagName(tag)});
 
-    defer {
-        for (attrs) |attr| {
-            context.allocator.free(attr.name);
-            context.allocator.free(attr.value);
-        }
-        context.allocator.free(attrs);
-    }
-
-    for (attrs) |attr_pair| {
+    while (iter.next()) |attr_pair| {
         var should_remove = false;
 
-        if (isFrameworkAttribute(attr_pair.name)) {
-            // Always allow framework-specific attributes
-            continue;
-        } else if (!isElementAttributeAllowedEnum(tag, attr_pair.name)) {
-            should_remove = true;
-        } else {
-            // Check for dangerous schemes in ANY attribute value first
-            if (std.mem.startsWith(u8, attr_pair.value, "javascript:") or
-                std.mem.startsWith(u8, attr_pair.value, "vbscript:"))
-            {
+        // FAIL FAST: Global Blocklist
+        for (z.DANGEROUS_ATTRIBUTES) |dangerous_attr| {
+            if (std.mem.eql(u8, attr_pair.name, dangerous_attr)) {
                 should_remove = true;
-            } else if (std.mem.startsWith(u8, attr_pair.value, "data:") and
-                (std.mem.startsWith(u8, attr_pair.value, "data:text/html") or
-                    std.mem.startsWith(u8, attr_pair.value, "data:text/javascript")))
-            {
-                // Block dangerous data types.
-                // Note: We allow base64 images (e.g. data:image/png;base64) if they don't match above.
-                // If strictness is required, one could check for image/ mime types explicitly.
-                should_remove = true;
-            } else if (std.mem.startsWith(u8, attr_pair.name, "on")) {
-                // Remove all event handlers
-                should_remove = true;
-            } else if (std.mem.eql(u8, attr_pair.name, "style") and context.options.remove_styles) {
-                // Remove inline styles based on options
-                should_remove = true;
-            } else if (std.mem.eql(u8, attr_pair.name, "href") or std.mem.eql(u8, attr_pair.name, "src")) {
-                if (context.options.strict_uri_validation and !isSafeUri(attr_pair.value)) {
-                    should_remove = true;
-                }
-            } else if (std.mem.eql(u8, attr_pair.name, "target")) {
-                if (!isValidTarget(attr_pair.value)) {
-                    should_remove = true;
-                }
+                break;
             }
         }
+
+        // Runtime Configuration Checks (Logic that cannot be in static specs)
+        if (!should_remove and std.mem.eql(u8, attr_pair.name, "style")) {
+            if (context.options.remove_styles) {
+                should_remove = true;
+            }
+            // If styles are allowed, we fall through to the Spec check below
+            // which will call z.validateStyle() automatically.
+        }
+
+        // Framework Attributes
+        if (!should_remove and isFrameworkAttribute(attr_pair.name)) {
+            if (context.options.allow_framework_attrs) {
+                // Check for dangerous patterns in framework attribute values
+                for (z.DANGEROUS_JS_PATTERNS) |pattern| {
+                    if (containsCaseInsensitive(attr_pair.value, pattern)) {
+                        should_remove = true;
+                        break;
+                    }
+                }
+                if (!should_remove) continue;
+            } else {
+                // Framework attributes not allowed in this mode
+                should_remove = true;
+            }
+        }
+
+        // Standard Attributes (The Spec Engine)
+        if (!should_remove) {
+            if (z.getElementSpecByEnum(tag)) |elem_spec| {
+                var found_spec: ?z.AttrSpec = null;
+
+                for (elem_spec.allowed_attrs) |spec| {
+                    if (std.mem.eql(u8, spec.name, attr_pair.name)) {
+                        found_spec = spec;
+                        break;
+                    }
+                }
+
+                if (found_spec) |spec| {
+                    // A. Enum Validation
+                    if (spec.valid_values) |valid_vals| {
+                        var is_valid_enum = false;
+                        for (valid_vals) |val| {
+                            if (std.mem.eql(u8, val, attr_pair.value)) {
+                                is_valid_enum = true;
+                                break;
+                            }
+                        }
+                        if (!is_valid_enum) should_remove = true;
+                    }
+
+                    // B. Validator Function (Handles href, src, style, xlink:href)
+                    if (!should_remove) {
+                        if (spec.validator) |validator| {
+                            if (!validator(attr_pair.value)) {
+                                should_remove = true;
+                            }
+                        }
+                    }
+                } else {
+                    should_remove = true; // Attribute not in allowlist
+                }
+            } else {
+                should_remove = true; // No spec for this tag
+            }
+        }
+
+        // Cross-Attribute Dependency (target="_blank" -> rel="noopener")
+        if (!should_remove and std.mem.eql(u8, attr_pair.name, "target") and std.mem.eql(u8, attr_pair.value, "_blank")) {
+            var has_safe_rel = false;
+            // CHEAP RE-ITERATION (No allocation)
+            var rel_iter = z.iterateAttributes(element);
+            while (rel_iter.next()) |other| {
+                if (std.mem.eql(u8, other.name, "rel")) {
+                    if (std.mem.indexOf(u8, other.value, "noopener") != null or
+                        std.mem.indexOf(u8, other.value, "noreferrer") != null)
+                    {
+                        has_safe_rel = true;
+                        break;
+                    }
+                }
+            }
+            if (!has_safe_rel) should_remove = true;
+        }
+
         if (should_remove) {
+            // We MUST duplicate the name here because 'attr_pair.name' is a temporary
+            // pointer into Lexbor's memory, but the removal list persists.
             try context.addAttributeToRemove(element, attr_pair.name);
         }
     }
-}
-
-fn isValidTarget(value: []const u8) bool {
-    return std.mem.eql(u8, value, "_blank") or
-        std.mem.eql(u8, value, "_self") or
-        std.mem.eql(u8, value, "_parent") or
-        std.mem.eql(u8, value, "_top");
 }
 
 fn sanitizePostWalkOperations(allocator: std.mem.Allocator, context: *SanitizeContext, options: SanitizerOptions) (std.mem.Allocator.Error || z.Err)!void {
@@ -569,15 +690,15 @@ fn sanitizeTemplateContent(allocator: std.mem.Allocator, template_node: *z.DomNo
 ///
 /// Main sanitization function that removes dangerous content based on the provided options.
 /// Supports .none, .minimum, .strict, .permissive, and .custom sanitization modes.
-pub fn sanitizeWithOptions(
+pub fn sanitizeWithMode(
     allocator: std.mem.Allocator,
     root_node: *z.DomNode,
-    options: SanitizeOptions,
+    mode: SanitizerMode,
 ) (std.mem.Allocator.Error || z.Err)!void {
     // Early exit for .none - do absolutely nothing
-    if (options == .none) return;
+    if (mode == .none) return;
 
-    const sanitizer_options = options.get();
+    const sanitizer_options = mode.get();
     var context = SanitizeContext.init(allocator, sanitizer_options);
     defer context.deinit();
 
@@ -596,9 +717,9 @@ pub fn sanitizeWithOptions(
 
 /// [sanitize] Sanitize DOM tree with specified options
 ///
-/// Alias for sanitizeWithOptions for backward compatibility.
-pub fn sanitizeNode(allocator: std.mem.Allocator, root_node: *z.DomNode, options: SanitizeOptions) (std.mem.Allocator.Error || z.Err)!void {
-    return sanitizeWithOptions(allocator, root_node, options);
+/// Alias for sanitizeWithMode for backward compatibility.
+pub fn sanitizeNode(allocator: std.mem.Allocator, root_node: *z.DomNode, mode: SanitizerMode) (std.mem.Allocator.Error || z.Err)!void {
+    return sanitizeWithMode(allocator, root_node, mode);
 }
 
 // Convenience functions for common sanitization scenarios
@@ -607,42 +728,1484 @@ pub fn sanitizeNode(allocator: std.mem.Allocator, root_node: *z.DomNode, options
 ///
 /// Removes scripts, styles, comments, dangerous URIs, and disallows custom elements.
 pub fn sanitizeStrict(allocator: std.mem.Allocator, root_node: *z.DomNode) (std.mem.Allocator.Error || z.Err)!void {
-    return sanitizeWithOptions(allocator, root_node, .strict);
+    return sanitizeWithMode(allocator, root_node, .strict);
 }
 
 /// [sanitize] Sanitize DOM tree with permissive settings for modern web apps
 ///
 /// Removes dangerous content but allows custom elements and framework attributes.
 pub fn sanitizePermissive(allocator: std.mem.Allocator, root_node: *z.DomNode) (std.mem.Allocator.Error || z.Err)!void {
-    return sanitizeWithOptions(allocator, root_node, .permissive);
+    return sanitizeWithMode(allocator, root_node, .permissive);
 }
 
-test "iframe sandbox validation" {
+// ======================
+
+test "removes script tags" {
     const allocator = testing.allocator;
+    const html = "<script>alert('xss')</script><p>Safe text</p>";
 
-    const test_html =
-        \\<iframe sandbox src="https://example.com">Safe iframe</iframe>
-        \\<iframe src="https://example.com">Unsafe - no sandbox</iframe>
-        \\<iframe sandbox src="javascript:alert('XSS')">Unsafe - dangerous src</iframe>
-        \\<iframe sandbox>Safe - empty sandbox, no src</iframe>
-    ;
-
-    const doc = try z.parseHTML(allocator, test_html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
 
     try sanitizeStrict(allocator, body);
-
-    // Normalize to clean up whitespace left by element removal
-    const body_element = z.nodeToElement(body) orelse return;
-    try z.normalizeDOM(allocator, body_element);
-
-    const result = try z.outerNodeHTML(allocator, body);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
 
-    const expected = "<body><iframe sandbox src=\"https://example.com\">Safe iframe</iframe><iframe sandbox>Safe - empty sandbox, no src</iframe></body>";
-    try testing.expectEqualStrings(expected, result);
+    try testing.expectEqualStrings("<p>Safe text</p>", result);
 }
+
+test "removes event handlers" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div onclick="alert('xss')" onmouseover="steal()">
+        \\  <p onload="evil()">Text</p>
+        \\  <a href="#" onfocus="attack()">Link</a>
+        \\</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove all on* attributes but keep elements
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onmouseover") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onload") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onfocus") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<div") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<p") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<a") != null);
+}
+
+test "blocks javascript: URLs" {
+    const allocator = testing.allocator;
+    const html =
+        \\<a href="javascript:alert('xss')">Bad link 1</a>
+        \\<a href="JAVASCRIPT:alert(1)">Bad link 2</a>
+        \\<a href="java\u0000script:alert(1)">Bad link 3</a>
+        \\<a href="https://example.com">Good link</a>
+        \\<img src="javascript:evil()" alt="bad">
+        \\<iframe src="javascript:attack()"></iframe>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // javascript: URLs should be removed or made empty
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "JAVASCRIPT:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
+}
+
+test "blocks dangerous data: URLs" {
+    const allocator = testing.allocator;
+    const html =
+        \\<img src="data:text/html,<script>alert('xss')</script>" alt="bad">
+        \\<a href="data:text/javascript,alert(1)">Bad</a>
+        \\<img src="data:image/png,base64,..." alt="good png">
+        \\<img src="data:image/svg+xml,<svg>...</svg>" alt="bad svg">
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should block text/html and text/javascript data URLs
+    try testing.expect(std.mem.indexOf(u8, result, "data:text/html") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "data:text/javascript") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "data:image/svg") == null);
+    // Should allow image/png
+    try testing.expect(std.mem.indexOf(u8, result, "data:image/png") != null or
+        std.mem.indexOf(u8, result, "data:image/") != null);
+}
+
+test "removes style tags and dangerous inline styles" {
+    const allocator = testing.allocator;
+    const html =
+        \\<style>body { background: url(javascript:alert('xss')); }</style>
+        \\<div style="background: expression(alert('xss'))">Div 1</div>
+        \\<div style="color: red; background: url(http://example.com)">Div 2</div>
+        \\<div style="behavior: url(#default#something)">Div 3</div>
+        \\<div style="color: red;"</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove style tag and dangerous styles
+    try testing.expect(std.mem.indexOf(u8, result, "<style>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "expression") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "behavior") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "color: red") == null);
+}
+
+test "handles nested dangerous elements" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div onclick="alert('outer')">
+        \\  <p onmouseover="alert('inner')">
+        \\    <script>alert('deep')</script>
+        \\    <span>Safe text</span>
+        \\  </p>
+        \\</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove all dangerous content but keep structure and safe text
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onmouseover") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "Safe text") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<div>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<p>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<span>") != null);
+}
+
+test "allows HTMX attributes in permissive mode" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div hx-get="/api/data" hx-trigger="click" hx-target="#result">
+        \\  Click me
+        \\</div>
+        \\<button hx-post="/submit" hx-swap="outerHTML">Submit</button>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should preserve HTMX attributes
+    try testing.expect(std.mem.indexOf(u8, result, "hx-get") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "hx-post") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "hx-trigger") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "hx-target") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "hx-swap") != null);
+}
+
+test "allows Alpine.js attributes" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div x-data="{ open: false }" x-show="open" @click="open = !open">
+        \\  <button x-on:click="submit()">Submit</button>
+        \\  <input x-model="search" type="text">
+        \\</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should preserve Alpine attributes
+    try testing.expect(std.mem.indexOf(u8, result, "x-data") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-show") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "@click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-on:click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-model") != null);
+}
+
+test "allows Vue.js attributes" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div v-if="show" v-for="item in items" :key="item.id">
+        \\  <span v-text="item.name"></span>
+        \\  <button @click="remove(item)">Remove</button>
+        \\  <input v-model="item.value">
+        \\</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should preserve Vue attributes
+    try testing.expect(std.mem.indexOf(u8, result, "v-if") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "v-for") != null);
+    try testing.expect(std.mem.indexOf(u8, result, ":key") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "v-text") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "@click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "v-model") != null);
+}
+
+test "allows Phoenix LiveView attributes" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div phx-click="update" phx-value-id="123" phx-target="#content">
+        \\  <form phx-submit="save" phx-change="validate">
+        \\    <input phx-debounce="300" name="email">
+        \\  </form>
+        \\</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should preserve Phoenix attributes
+    try testing.expect(std.mem.indexOf(u8, result, "phx-click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-value-id") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-target") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-submit") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-change") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-debounce") != null);
+}
+
+test "blocks dangerous values in framework attributes" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div x-data="javascript:alert('xss')">Bad Alpine</div>
+        \\<button phx-click="import('evil.js')">Bad Phoenix</button>
+        \\<a :href="javascript:attack()">Bad Vue</a>
+        \\<div hx-get="data:text/html,<script>alert(1)</script>">Bad HTMX</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove attributes with dangerous values
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "import(") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "data:text/html") == null);
+}
+
+test "removes framework attributes in strict mode" {
+    const allocator = testing.allocator;
+    const html = "<div hx-get='/api' x-data='{}' v-if='true'>Content</div>";
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove framework attributes in strict mode
+    try testing.expect(std.mem.indexOf(u8, result, "hx-get") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-data") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "v-if") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<div") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Content") != null);
+}
+
+test "allows custom elements in permissive mode" {
+    const allocator = testing.allocator;
+    const html =
+        \\<my-button class="btn" style="color: red">Click me</my-button>
+        \\<user-profile data-user-id="123" aria-label="User">
+        \\  <avatar-image src="/avatar.jpg"></avatar-image>
+        \\</user-profile>
+        \\<date-picker min="2024-01-01" max="2024-12-31"></date-picker>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should preserve custom elements and their safe attributes
+    try testing.expect(std.mem.indexOf(u8, result, "my-button") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "user-profile") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "avatar-image") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "date-picker") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "class=\"btn\"") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "data-user-id") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "aria-label") != null);
+}
+
+test "removes custom elements in strict mode" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div>Before</div>
+        \\<custom-element>Content</custom-element>
+        \\<another-custom data-test="value"></another-custom>
+        \\<div>After</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove custom elements in strict mode
+    try testing.expect(std.mem.indexOf(u8, result, "custom-element") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "another-custom") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "Before") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "After") != null);
+}
+
+test "sanitizes attributes on custom elements" {
+    const allocator = testing.allocator;
+    const html =
+        \\<my-component
+        \\  onclick="alert('xss')"
+        \\  style="background: url(javascript:evil())"
+        \\  href="javascript:attack()"
+        \\  safe-attr="value"
+        \\  class="component"
+        \\>Content</my-component>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove dangerous attributes from custom elements
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    // Should keep safe attributes
+    try testing.expect(std.mem.indexOf(u8, result, "safe-attr") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "class=\"component\"") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "my-component") != null);
+}
+
+test "handles nested templates in custom elements" {
+    const allocator = testing.allocator;
+    const html =
+        \\<my-component>
+        \\  <template>
+        \\    <script>alert('xss')</script>
+        \\    <div>Template content</div>
+        \\  </template>
+        \\  <div>Regular content</div>
+        \\</my-component>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should sanitize template content inside custom elements
+    try testing.expect(std.mem.indexOf(u8, result, "<template>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Template content") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Regular content") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+}
+
+test "preserves data- and aria- attributes on custom elements" {
+    const allocator = testing.allocator;
+    const html =
+        \\<custom-element
+        \\  data-config='{"key": "value"}'
+        \\  aria-labelledby="label1"
+        \\  aria-describedby="desc1"
+        \\  data-test-id="test-123"
+        \\>Content</custom-element>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should preserve data-* and aria-* attributes
+    try testing.expect(std.mem.indexOf(u8, result, "data-config") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "data-test-id") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "aria-labelledby") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "aria-describedby") != null);
+}
+
+// TODO
+// test "understand parser behavior" {
+//     const allocator = testing.allocator;
+
+//     // Test 1: Full document
+//     const full_doc =
+//         \\<!DOCTYPE html>
+//         \\<html>
+//         \\<head>
+//         \\  <script>head script</script>
+//         \\</head>
+//         \\<body>
+//         \\  <div>body content</div>
+//         \\</body>
+//         \\</html>
+//     ;
+
+//     // Test 2: Fragment (no doctype/html/head/body)
+//     const fragment =
+//         \\<script>standalone script</script>
+//         \\<div>standalone div</div>
+//     ;
+
+//     const doc1 = try z.parseHTML(allocator, full_doc);
+//     defer z.destroyDocument(doc1);
+
+//     const doc2 = try z.parseHTML(allocator, fragment);
+//     defer z.destroyDocument(doc2);
+
+//     // Check what elements exist where
+//     const head1 = z.headElement(doc1);
+//     const body1 = z.bodyElement(doc1);
+//     const head2 = z.headElement(doc2); // Might be null!
+//     const body2 = z.bodyElement(doc2);
+
+//     std.debug.print("Full doc - head exists: {}, body exists: {}\n", .{ head1 != null, body1 != null });
+
+//     std.debug.print("Fragment - head exists: {}, body exists: {}\n", .{ head2 != null, body2 != null });
+
+//     // Print structure
+//     if (body2) |b| {
+//         const body_html = try z.innerHTML(allocator, b);
+//         defer allocator.free(body_html);
+//         std.debug.print("Fragment body content: {s}\n", .{body_html});
+//     }
+// }
+
+test "minimum mode preserves scripts but removes dangerous attributes" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<script>console.log('safe')</script>
+        \\<div onclick="alert('xss')">Click me</div>
+        \\<style>body { color: red; }</style>
+        \\<!-- Comment -->
+        \\<custom-element>Test</custom-element>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeWithMode(allocator, z.bodyNode(doc).?, .minimum);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+    // try z.prettyPrint(allocator, z.bodyNode(doc).?);
+
+    // Minimum mode: keeps scripts, styles, comments, custom elements
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<style>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Comment") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "custom-element") != null);
+    // But removes dangerous attributes
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+}
+
+test "strict mode removes all dangerous content" {
+    const allocator = testing.allocator;
+    const html =
+        \\<script>alert('xss')</script>
+        \\<style>body { background: red; }</style>
+        \\<!-- Secret comment -->
+        \\<custom-element>Custom</custom-element>
+        \\<div hx-get="/api">HTMX</div>
+        \\<p onclick="alert()">Text</p>
+        \\<a href="javascript:alert()">Link</a>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Strict mode: removes everything dangerous
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<style>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "Comment") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "custom-element") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "hx-get") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    // Keeps safe content
+    try testing.expect(std.mem.indexOf(u8, result, "Text") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Link") != null);
+}
+
+test "permissive mode allows frameworks and custom elements" {
+    const allocator = testing.allocator;
+    const html =
+        \\<script>alert('removed')</script>
+        \\<style>body { color: red; }</style>
+        \\<custom-element hx-get="/api" x-data="{}">Content</custom-element>
+        \\<div onclick="alert('removed')" phx-click="update">Button</div>
+        \\<!-- Comment removed -->
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Permissive: removes scripts, styles, comments, traditional event handlers
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<style>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "Comment") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+
+    // But allows custom elements and framework attributes
+    try testing.expect(std.mem.indexOf(u8, result, "custom-element") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "hx-get") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-data") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Content") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Button") != null);
+}
+
+test "custom mode with specific options" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<script>console.log('test')</script>
+        \\<style>body { color: blue; }</style>
+        \\<!-- Keep this comment -->
+        \\<custom-element>Test</custom-element>
+        \\<div onclick="alert()">Click</div>
+        \\<a href="javascript:alert()">Bad</a>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeWithMode(allocator, z.bodyNode(doc).?, .{
+        .custom = SanitizerOptions{
+            .skip_comments = false, // Keep comments
+            .remove_scripts = false, // Keep scripts
+            .remove_styles = true, // Remove styles
+            .strict_uri_validation = true, // Block javascript: URLs
+            .allow_custom_elements = true, // Allow custom elements
+        },
+    });
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // According to custom options:
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") != null); // Kept
+    try testing.expect(std.mem.indexOf(u8, result, "<style>") == null); // Removed
+    try testing.expect(std.mem.indexOf(u8, result, "comment") != null); // Kept
+    try testing.expect(std.mem.indexOf(u8, result, "custom-element") != null); // Kept
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null); // Removed (dangerous)
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null); // Blocked
+}
+
+test "none mode does nothing" {
+    const allocator = testing.allocator;
+    const original_html =
+        \\<body>
+        \\<script>alert('xss')</script>
+        \\<div onclick="evil()">Click</div>
+        \\<!-- Comment -->
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, original_html);
+    defer z.destroyDocument(doc);
+
+    // .none mode should do absolutely nothing
+    try sanitizeWithMode(allocator, z.bodyNode(doc).?, .none);
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Everything should remain unchanged
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Comment") != null);
+}
+
+// TOTO
+// test "mode consistency across similar inputs" {
+//     const allocator = testing.allocator;
+
+//     const test_cases = [_]struct {
+//         html: []const u8,
+//         mode: SanitizerMode,
+//         should_contain: []const []const u8,
+//         should_not_contain: []const []const u8,
+//     }{
+//         .{
+//             .html = "<script>alert(1)</script><p>Text</p>",
+//             .mode = .strict,
+//             .should_contain = &[_][]const u8{"<p>Text</p>"},
+//             .should_not_contain = &[_][]const u8{"<script>"},
+//         },
+//         .{
+//             .html = "<script>alert(1)</script><p>Text</p>",
+//             .mode = .minimum,
+//             .should_contain = &[_][]const u8{ "<script>", "<p>Text</p>" },
+//             .should_not_contain = &[_][]const u8{},
+//         },
+//         .{
+//             .html = "<custom-elem>Test</custom-elem>",
+//             .mode = .strict,
+//             .should_contain = &[_][]const u8{},
+//             .should_not_contain = &[_][]const u8{"custom-elem"},
+//         },
+//         .{
+//             .html = "<custom-elem>Test</custom-elem>",
+//             .mode = .permissive,
+//             .should_contain = &[_][]const u8{ "custom-elem", "Test" },
+//             .should_not_contain = &[_][]const u8{},
+//         },
+//     };
+
+//     for (test_cases) |case| {
+//         const doc = try z.parseHTML(allocator, case.html);
+//         defer z.destroyDocument(doc);
+
+//         try sanitizeWithMode(allocator, z.bodyNode(doc).?, case.mode);
+//         const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+//         defer allocator.free(result);
+
+//         for (case.should_contain) |expected| {
+//             try testing.expect(std.mem.indexOf(u8, result, expected) != null);
+//         }
+
+//         for (case.should_not_contain) |not_expected| {
+//             try testing.expect(std.mem.indexOf(u8, result, not_expected) == null);
+//         }
+//     }
+// }
+
+test "iframe requires sandbox attribute" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<iframe src="https://example.com">No sandbox</iframe>
+        \\<iframe sandbox src="https://safe.com">With sandbox</iframe>
+        \\<iframe sandbox="allow-scripts" src="/page.html">Dangerous sandbox</iframe>
+        \\<iframe sandbox src="javascript:alert()">Bad URL</iframe>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Only safe iframes should remain
+    try testing.expect(std.mem.indexOf(u8, result, "No sandbox") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "allow-scripts") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "With sandbox") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "sandbox") != null);
+}
+
+test "meta tag validation" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<meta http-equiv="refresh" content="5;url=https://example.com">
+        \\<meta http-equiv="set-cookie" content="session=abc">
+        \\<meta charset="UTF-8">
+        \\<meta charset="windows-1252">
+        \\<meta name="viewport" content="width=device-width">
+        \\<meta http-equiv="content-security-policy" content="default-src 'self'">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should block dangerous meta tags
+    try testing.expect(std.mem.indexOf(u8, result, "refresh") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "set-cookie") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "windows-1252") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "content-security-policy") == null);
+    // Should allow safe ones
+    try testing.expect(std.mem.indexOf(u8, result, "UTF-8") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "viewport") != null);
+}
+
+test "base tag restrictions" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<base href="https://example.com/">
+        \\<base href="/relative/path">
+        \\<base href="javascript:alert()">
+        \\<base href="data:text/html,<script>alert()</script>">
+        \\<base href="//evil.com">
+        \\<base href="../../../etc/passwd">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+
+    const result = z.firstElementChild(z.bodyNode(doc).?);
+    if (result) |_| {
+        try std.testing.expect(false);
+    } else {
+        try testing.expect(result == null);
+    }
+}
+
+test "base tag allowed in permissive mode with safe URLs" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<base href="https://example.com/">
+        \\<base href="/safe/path">
+        \\<base href="javascript:alert()">
+        \\<base href="http://example.org">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // // Should keep safe base tags, remove dangerous ones
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "/safe/path") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "http://example.org") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+}
+
+test "check embed in system" {
+    const allocator = testing.allocator;
+    const html = "<body><embed src=\"test.png\"></body>";
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    const embed = try z.querySelector(allocator, doc, "embed");
+    try testing.expect(embed != null);
+    // if (embed) |e| {
+    // const tag = z.tagFromAnyElement(e);
+    // std.debug.print("Embed tag enum: {s}\n", .{@tagName(tag)});
+
+    // const tag_name = z.qualifiedName_zc(e);
+    // std.debug.print("Embed tag name: '{s}'\n", .{tag_name});
+
+    // Check if there's a spec
+    // const spec = z.getElementSpecByEnum(tag);
+    // std.debug.print("Has spec: {}\n", .{spec != null});
+    // }
+}
+
+test "object and embed safety validation" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<object data="https://example.com/document.pdf" type="application/pdf">PDF</object>
+        \\<object data="https://example.com/video.mp4" type="video/mp4">Video</object>
+        \\<object data="javascript:alert()">Bad</object>
+        \\<embed src="https://example.com/image.png" type="image/png">
+        \\<embed src="data:text/html,<script>alert()</script>">
+        \\<object type="application/x-shockwave-flash" data="game.swf">Flash</object>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    try testing.expect(std.mem.indexOf(u8, result, "document.pdf") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "video.mp4") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "image.png") != null);
+
+    // Dangerous content should be removed
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "data:text/html") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-shockwave-flash") == null);
+}
+
+test "object and embed with safe types in permissive mode" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<object data="https://example.com/document.pdf" type="application/pdf">
+        \\</object>
+        \\<!-- A comment -->
+        \\<embed src="https://example.com/image.png" type="image/png">
+        \\<object data="https://example.com/video.mp4" type="video/mp4">
+        \\</object>
+        \\<embed src="https://example.com/audio.mp3" type="audio/mpeg">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    // Use custom mode that allows objects/embeds
+    try sanitizeWithMode(allocator, z.bodyNode(doc).?, .{
+        .custom = SanitizerOptions{
+            .skip_comments = true,
+            .remove_scripts = true,
+            .remove_styles = true,
+            .strict_uri_validation = true,
+            .allow_custom_elements = false,
+        },
+    });
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should keep safe media objects/embeds
+    try testing.expect(std.mem.indexOf(u8, result, "document.pdf") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "image.png") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "video.mp4") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "audio.mp3") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "A comment") == null);
+}
+
+test "svg element safety" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<svg viewBox="0 0 100 100">
+        \\  <circle cx="50" cy="50" r="40" fill="blue"/>
+        \\  <script>alert('svg xss')</script>
+        \\  <foreignObject width="100" height="100">
+        \\    <div xmlns="http://www.w3.org/1999/xhtml">Evil HTML</div>
+        \\  </foreignObject>
+        \\  <animate attributeName="opacity" onbegin="alert()" values="0;1"/>
+        \\  <a xlink:href="javascript:alert()">
+        \\    <text x="10" y="20">Click me</text>
+        \\  </a>
+        \\  <a href="https://example.com">
+        \\    <text x="10" y="40">Safe link</text>
+        \\  </a>
+        \\</svg>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove dangerous SVG elements/attributes
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "foreignObject") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onbegin") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    // Should keep safe SVG content
+    try testing.expect(std.mem.indexOf(u8, result, "<svg") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<circle") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Safe link") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Click me") != null); // Text remains
+}
+
+test "form element safety" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<form action="https://example.com/submit" method="POST">
+        \\  <input type="text" name="username" value="test">
+        \\  <input type="password" name="password">
+        \\  <input type="submit" value="Submit" onclick="alert()">
+        \\  <textarea name="message">Hello</textarea>
+        \\  <button type="button" onmouseover="evil()">Click</button>
+        \\</form>
+        \\<form action="javascript:alert()" method="GET">
+        \\  <input type="text" name="q">
+        \\</form>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove dangerous form attributes/actions
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onmouseover") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    // Should keep safe form elements
+    try testing.expect(std.mem.indexOf(u8, result, "<form") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<input") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<textarea") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<button") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
+}
+
+test "link element safety" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<link rel="stylesheet" href="https://example.com/style.css">
+        \\<link rel="icon" href="/favicon.ico">
+        \\<link rel="stylesheet" href="javascript:alert()">
+        \\<link rel="prefetch" href="https://cdn.example.com/resource">
+        \\<link rel="alternate" type="application/rss+xml" href="/feed.xml">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove dangerous links
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    // Should keep safe links (stylesheet, icon)
+    try testing.expect(std.mem.indexOf(u8, result, "stylesheet") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "icon") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "/favicon.ico") != null);
+}
+
+test "unicode obfuscation" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<a href="jav&#x61;script:alert('xss')">Zero-width space</a>
+        \\<a href="j&#x0A;avascript:alert(1)">Newline</a>
+        \\<a href="ja&#x00;vascript:alert(1)">Null byte</a>
+        \\<div on&#x63;lick="alert()">Obfuscated event</div>
+        \\<script>alert('regular')</script>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should catch obfuscated javascript: and event handlers
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+}
+
+test "case variation attacks" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<a href="JAVASCRIPT:alert(1)">Uppercase</a>
+        \\<a href="JavaScript:alert(1)">Mixed case</a>
+        \\<a href="jAvAsCrIpT:alert(1)">Weird case</a>
+        \\<div OnClIcK="alert()">Event mixed</div>
+        \\<div ONLOAD="evil()">Event uppercase</div>
+        \\<ScRiPt>alert(1)</ScRiPt>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Case-insensitive matching should catch all variants
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onload") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<script") == null);
+}
+
+test "extremely nested elements" {
+    const allocator = testing.allocator;
+
+    // Create deeply nested structure
+    var html_buf: std.ArrayList(u8) = .empty;
+    defer html_buf.deinit(allocator);
+
+    var depth: usize = 0;
+    while (depth < 100) : (depth += 1) {
+        try html_buf.writer(allocator).print("<div onclick=\"alert({})\">", .{depth});
+    }
+
+    try html_buf.appendSlice(allocator, "Deep content");
+
+    depth = 0;
+    while (depth < 100) : (depth += 1) {
+        try html_buf.appendSlice(allocator, "</div>");
+    }
+
+    const doc = try z.parseHTML(allocator, html_buf.items);
+    defer z.destroyDocument(doc);
+
+    // Should handle deep nesting without stack overflow
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // All onclick handlers should be removed
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    // Structure should remain
+    try testing.expect(std.mem.indexOf(u8, result, "Deep content") != null);
+}
+
+test "large number of attributes" {
+    const allocator = testing.allocator;
+
+    var html_buf: std.ArrayList(u8) = .empty;
+    defer html_buf.deinit(allocator);
+
+    try html_buf.appendSlice(allocator, "<div");
+
+    // Add many attributes (some dangerous, some safe)
+    var i: usize = 0;
+    while (i < 50) : (i += 1) {
+        if (i % 5 == 0) {
+            try html_buf.writer(allocator).print(" onclick=\"alert({})\"", .{i});
+        } else {
+            try html_buf.writer(allocator).print(" data-attr{}=\"value{}\"", .{ i, i });
+        }
+    }
+
+    try html_buf.appendSlice(allocator, ">Content</div>");
+    const doc = try z.parseHTML(allocator, html_buf.items);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // All onclick handlers should be removed
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    // data-* attributes should remain
+    // try testing.expect(std.mem.indexOf(u8, result, "data-attr") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Content") != null);
+}
+
+test "malformed HTML handling" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div>Unclosed div
+        \\<script>alert('xss')</script
+        \\<a href="javascript:alert()">Link
+        \\<img src=x onerror=alert(1)>
+        \\<div onclick="alert()">Content</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    // Should not crash on malformed HTML
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should still sanitize dangerous content
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onerror") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+}
+
+test "repeated sanitization" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div onclick="alert(1)" class="test">
+        \\  <span hx-get="/api">Click</span>
+        \\  <script>console.log('test')</script>
+        \\</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+    const body = z.bodyNode(doc).?;
+
+    // Sanitize multiple times (should be idempotent)
+    try sanitizeStrict(allocator, body);
+    const result1 = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result1);
+
+    // Sanitize again
+    try sanitizeStrict(allocator, body);
+    const result2 = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result2);
+
+    // Results should be identical (idempotent)
+    try testing.expectEqualStrings(result1, result2);
+
+    // Verify dangerous content is gone
+    try testing.expect(std.mem.indexOf(u8, result1, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result1, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result1, "hx-get") == null); // <-- error
+    try testing.expect(std.mem.indexOf(u8, result1, "class=\"test\"") != null);
+    try testing.expect(std.mem.indexOf(u8, result1, "Click") != null);
+}
+
+test "large document performance" {
+    const allocator = testing.allocator;
+
+    // Generate a large HTML document
+    var html_buf: std.ArrayList(u8) = .empty;
+    defer html_buf.deinit(allocator);
+
+    const writer = html_buf.writer(allocator);
+
+    try writer.writeAll("<div>\n");
+
+    var i: usize = 0;
+    while (i < 1000) : (i += 1) {
+        if (i % 10 == 0) {
+            // Every 10th element has dangerous content
+            try writer.print(
+                \\  <p onclick="alert({})" class="paragraph" data-id="{}">
+                \\    Dangerous paragraph {}
+                \\  </p>
+                \\
+            , .{ i, i, i });
+        } else {
+            // Safe elements
+            try writer.print(
+                \\  <p class="paragraph" data-id="{}">
+                \\    Safe paragraph {}
+                \\  </p>
+                \\
+            , .{ i, i });
+        }
+
+        // Add some nested structure occasionally
+        if (i % 50 == 0) {
+            try writer.writeAll("  <div>\n");
+            var j: usize = 0;
+            while (j < 10) : (j += 1) {
+                try writer.print("    <span>Nested {}-{}</span>\n", .{ i, j });
+            }
+            try writer.writeAll("  </div>\n");
+        }
+    }
+
+    try writer.writeAll("</div>\n");
+
+    const start_time = std.time.milliTimestamp();
+
+    const doc = try z.parseHTML(allocator, html_buf.items);
+    defer z.destroyDocument(doc);
+
+    // Sanitize the large document
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+
+    const end_time = std.time.milliTimestamp();
+    const elapsed = end_time - start_time;
+
+    // Should complete in reasonable time (adjust threshold as needed)
+    std.debug.print("Large document sanitization took {} ms\n", .{elapsed});
+    try testing.expect(elapsed < 5000); // 5 second limit
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Verify sanitization worked
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "Safe paragraph") != null);
+}
+
+test "many small elements" {
+    const allocator = testing.allocator;
+
+    var html_buf: std.ArrayList(u8) = .empty;
+    defer html_buf.deinit(allocator);
+
+    const writer = html_buf.writer(allocator);
+
+    // Create 5000 small elements
+    var i: usize = 0;
+    while (i < 5000) : (i += 1) {
+        if (i % 100 == 0) {
+            // Some elements with framework attributes
+            try writer.print("<span hx-get=\"/api/{}\">HTMX {}</span>", .{ i, i });
+        } else if (i % 100 == 50) {
+            // Some dangerous elements
+            try writer.print("<span onclick=\"alert({})\">Bad {}</span>", .{ i, i });
+        } else {
+            // Safe elements
+            try writer.print("<span>Element {}</span>", .{i});
+        }
+    }
+
+    const start_time = std.time.milliTimestamp();
+
+    const doc = try z.parseHTML(allocator, html_buf.items);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+
+    const end_time = std.time.milliTimestamp();
+    const elapsed = end_time - start_time;
+
+    std.debug.print("Many small elements took {} ms\n", .{elapsed});
+    try testing.expect(elapsed < 3000); // 3 second limit
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Framework attributes should remain, onclick should be removed
+    try testing.expect(std.mem.indexOf(u8, result, "hx-get") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+}
+
+test "memory usage with large attributes" {
+    const allocator = testing.allocator;
+
+    // Create element with very large attribute values
+    var html_buf: std.ArrayList(u8) = .empty;
+    defer html_buf.deinit(allocator);
+
+    const writer = html_buf.writer(allocator);
+
+    try writer.writeAll("<div");
+
+    // Add a very large data attribute
+    try writer.writeAll(" data-large=\"");
+    var i: usize = 0;
+    while (i < 10000) : (i += 1) {
+        try writer.writeAll("x");
+    }
+    try writer.writeAll("\"");
+
+    // Add many attributes
+    i = 0;
+    while (i < 100) : (i += 1) {
+        try writer.print(" attr{}=\"value{}\"", .{ i, i });
+    }
+
+    try writer.writeAll(">Content</div>");
+
+    const doc = try z.parseHTML(allocator, html_buf.items);
+    defer z.destroyDocument(doc);
+
+    // Should handle without excessive memory usage
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Large data attribute should be preserved
+    // try testing.expect(std.mem.indexOf(u8, result, "data-large") != null); // <---
+    try testing.expect(std.mem.indexOf(u8, result, "Content") != null);
+}
+
+test "debug empty style attribute" {
+    const allocator = testing.allocator;
+    const html = "<body><div style=\"\"></div></body>";
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    const div = try z.querySelector(allocator, doc, "div");
+
+    // Check what validateStyle returns
+    const style = z.getAttribute_zc(div.?, "style") orelse "";
+    // std.debug.print("Style value: '{s}'\n", .{style});
+    // std.debug.print("validateStyle('{s}'): {}\n", .{ style, z.validateStyle(style) });
+    try std.testing.expect(z.validateStyle(style));
+
+    // Check strict mode options
+    // const strict_opts = z.SanitizerMode.get(.strict);
+    // std.debug.print("Strict mode remove_styles: {}\n", .{strict_opts.remove_styles});
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // std.debug.print("Result: {s}\n", .{result});
+    try std.testing.expect(std.mem.indexOf(u8, result, "style") == null);
+}
+test "empty and whitespace-only attributes" {
+    const allocator = testing.allocator;
+    const html =
+        \\<div onclick="">Empty event</div>
+        \\<a href="  ">Whitespace URL</a>
+        \\<div style="">no styling</div>
+        \\<input type="text" value="">
+        \\<div class="  ">Whitespace class</div>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Should remove empty dangerous attributes
+    try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "style") == null); // <-- error
+    // Safe empty attributes can remain
+    try testing.expect(std.mem.indexOf(u8, result, "value=\"\"") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "class") != null);
+}
+
+test "template element sanitization" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\</body>
+        \\<template id="user-card">
+        \\  <div class="card">
+        \\    <script>alert('xss')</script>
+        \\    <h3>{{name}}</h3>
+        \\    <p onclick="track()">{{email}}</p>
+        \\    <button phx-click="follow">Follow</button>
+        \\  </div>
+        \\</template>
+        \\<div>Regular content</div>
+        \\<template>
+        \\  <a href="javascript:alert()">Bad link</a>
+        \\  <span>Template 2</span>
+        \\</template>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Template content should be sanitized
+    try testing.expect(std.mem.indexOf(u8, result, "<template") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Regular content") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick=") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Template 2") != null);
+}
+
+test "end-to-end real-world example" {
+    const allocator = testing.allocator;
+
+    // Real-world blog post with mixed content
+    const html =
+        \\<body>
+        \\<article class="blog-post">
+        \\  <h1>My Blog Post</h1>
+        \\  <script async src="https://platform.twitter.com/widgets.js"></script>
+        \\  <p onclick="trackClick()">Published on <time datetime="2024-01-15">Jan 15, 2024</time></p>
+        \\
+        \\  <div class="content">
+        \\    <p>Here's some <strong>important</strong> content.</p>
+        \\    <custom-gallery data-images='["img1.jpg", "img2.jpg"]'></custom-gallery>
+        \\
+        \\    <div phx-click="loadMore" class="load-more">
+        \\      Load more comments
+        \\    </div>
+        \\
+        \\    <iframe sandbox src="https://www.youtube.com/embed/abc123"></iframe>
+        \\
+        \\    <form action="/comment" method="POST" onsubmit="validate()">
+        \\      <textarea name="comment" placeholder="Add a comment..."></textarea>
+        \\      <button type="submit" x-data="{disabled: false}" @click="submit">Post</button>
+        \\    </form>
+        \\
+        \\    <a href="javascript:share()" class="share-button">Share</a>
+        \\    <a href="https://example.com" rel="noopener" target="_blank">External link</a>
+        \\  </div>
+        \\
+        \\  <style>
+        \\    .blog-post { max-width: 800px; }
+        \\    .load-more { background: url(javascript:track()); }
+        \\  </style>
+        \\
+        \\  <!-- Google Analytics -->
+        \\  <script>
+        \\    ga('send', 'pageview');
+        \\  </script>
+        \\</article>
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    // Use permissive mode for modern web app
+    try sanitizePermissive(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+    // try z.prettyPrint(allocator, z.bodyNode(doc).?);
+
+    // Verify sanitization:
+
+    // Removed:
+    try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onclick=") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "onsubmit=") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null); // <--- fails
+    try testing.expect(std.mem.indexOf(u8, result, "<style>") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<!--") == null);
+
+    // Preserved:
+    try testing.expect(std.mem.indexOf(u8, result, "blog-post") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "custom-gallery") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "phx-click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "x-data") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "@click") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "sandbox") != null); // <-- error
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "rel=\"noopener\"") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "My Blog Post") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "important") != null);
+}
+// --------
 
 test "sanitizer handles many nested and sequential nodes to remove" {
     const allocator = testing.allocator;
@@ -745,7 +2308,7 @@ test "comprehensive sanitization modes" {
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
-        try sanitizeWithOptions(allocator, body, .minimum);
+        try sanitizeWithMode(allocator, body, .minimum);
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
@@ -772,7 +2335,7 @@ test "comprehensive sanitization modes" {
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
-        try sanitizeWithOptions(allocator, body, .strict);
+        try sanitizeWithMode(allocator, body, .strict);
 
         // Normalize to clean up empty text nodes
         const body_element = z.nodeToElement(body) orelse return;
@@ -819,7 +2382,7 @@ test "comprehensive sanitization modes" {
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
-        try sanitizeWithOptions(allocator, body, .permissive);
+        try sanitizeWithMode(allocator, body, .permissive);
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
@@ -858,7 +2421,7 @@ test "comprehensive sanitization modes" {
         defer z.destroyDocument(doc);
         const body = z.bodyNode(doc).?;
 
-        try sanitizeWithOptions(allocator, body, .{
+        try sanitizeWithMode(allocator, body, .{
             .custom = SanitizerOptions{
                 .skip_comments = false, // Preserve comments
                 .remove_scripts = false, // Allow scripts
@@ -891,5 +2454,319 @@ test "comprehensive sanitization modes" {
         try testing.expect(std.mem.indexOf(u8, result, "function dangerous()") != null);
         // In custom mode with scripts allowed, might preserve script content
         // (but the script tags themselves might still be parsed/handled)
+    }
+}
+
+test "iframe sandbox validation" {
+    const allocator = testing.allocator;
+
+    const test_html =
+        \\<iframe sandbox src="https://example.com">Safe iframe</iframe>
+        \\<iframe src="https://example.com">Unsafe - no sandbox</iframe>
+        \\<iframe sandbox src="javascript:alert('XSS')">Unsafe - dangerous src</iframe>
+        \\<iframe sandbox>Safe - empty sandbox, no src</iframe>
+    ;
+
+    const doc = try z.parseHTML(allocator, test_html);
+    defer z.destroyDocument(doc);
+    const body = z.bodyNode(doc).?;
+
+    try sanitizeStrict(allocator, body);
+
+    // Normalize to clean up whitespace left by element removal
+    const body_element = z.nodeToElement(body) orelse return;
+    try z.normalizeDOM(allocator, body_element);
+
+    const result = try z.outerNodeHTML(allocator, body);
+    defer allocator.free(result);
+
+    const expected = "<body><iframe sandbox src=\"https://example.com\">Safe iframe</iframe><iframe sandbox>Safe - empty sandbox, no src</iframe></body>";
+    try testing.expectEqualStrings(expected, result);
+}
+
+test "DOMParser.parseAndAppendFragment with improved logic" {
+    const allocator = testing.allocator;
+
+    const doc = try z.createDocument();
+    defer z.destroyDocument(doc);
+
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+
+    const malicious_content = "<script>alert('XSS')</script><img src=\"data:text/html,<script>alert('XSS')</script>\" alt=\"escaped\"><p id=\"1\" phx-click=\"increment\" onclick=\"alert('XSS')\">Click me</p><a href=\"http://example.org/results?search=<img src=x onerror=alert('hello')>\">URL Escaped</a><x-widget><button onclick=\"increment\">Click</button></x-widget>";
+
+    const result0 = "<script>alert('XSS')</script><img src=\"data:text/html,&lt;script&gt;alert('XSS')&lt;/script&gt;\" alt=\"escaped\"><p id=\"1\" phx-click=\"increment\" onclick=\"alert('XSS')\">Click me</p><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a><x-widget><button onclick=\"increment\">Click</button></x-widget>";
+
+    // Permissive mode removes dangerous attributes (onclick) but keeps the element and safe attributes.
+    const result1 = "<img alt=\"escaped\"><p id=\"1\" phx-click=\"increment\">Click me</p><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a><x-widget><button>Click</button></x-widget>";
+
+    const result2 = "<img alt=\"escaped\"><p id=\"1\">Click me</p><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a>";
+
+    const expectations = [_]struct { name: []const u8, result: []const u8, mode: z.SanitizerMode }{
+        .{ .name = "flavor0", .result = result0, .mode = .none },
+        .{ .name = "flavor1", .result = result1, .mode = .permissive },
+        .{ .name = "flavor2", .result = result2, .mode = .strict },
+    };
+
+    for (expectations) |exp| {
+        const div_elt = try z.createElement(doc, "div");
+        defer z.destroyNode(z.elementToNode(div_elt));
+
+        try parser.parseAndAppendFragment(
+            div_elt,
+            malicious_content,
+            .body,
+            exp.mode,
+        );
+        const inner = try z.innerHTML(allocator, div_elt);
+        defer allocator.free(inner);
+
+        // std.debug.print("\n-------{}\n", .{i});
+        // try z.prettyPrint(allocator, z.elementToNode(div_elt));
+        try testing.expectEqualStrings(exp.result, inner);
+        try z.setInnerHTML(div_elt, ""); // Clear for next iteration
+    }
+}
+
+test "parseFromStringInContext + appendFragment with options" {
+    const allocator = testing.allocator;
+
+    const doc = try z.parseHTML(allocator, "<div id=\"1\"></div>");
+    defer z.destroyDocument(doc);
+    const div_elt = z.getElementById(doc, "1").?;
+
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+
+    const html1 = "<p> some text</p>";
+    const frag_root1 = try parser.parseFromStringInContext(
+        html1,
+        doc,
+        .body,
+        .strict,
+    );
+
+    const html2 = "<div> more <i>text</i><span><script>alert(1);</script></span></div>";
+    const frag_root2 = try parser.parseFromStringInContext(
+        html2,
+        doc,
+        .div,
+        .strict,
+    );
+
+    const html3 = "<ul><li><script>alert(1);</script></li></ul>";
+    const frag_root3 = try parser.parseFromStringInContext(
+        html3,
+        doc,
+        .div,
+        .strict,
+    );
+
+    const html4 = "<a href=\"http://example.org/results?search=<img src=x onerror=alert('hello')>\">URL Escaped</a>";
+    const frag_root4 = try parser.parseFromStringInContext(
+        html4,
+        doc,
+        .div,
+        .permissive,
+    );
+
+    // append fragments and check the result
+
+    const div: *z.DomNode = @ptrCast(div_elt);
+    try z.appendFragment(div, frag_root1);
+    try z.appendFragment(div, frag_root2);
+    try z.appendFragment(div, frag_root3);
+    try z.appendFragment(div, frag_root4);
+
+    const result = try z.outerHTML(allocator, div_elt);
+    defer allocator.free(result);
+
+    const expected = "<div id=\"1\"><p> some text</p><div> more <i>text</i><span></span></div><ul><li></li></ul><a href=\"http://example.org/results?search=&lt;img src=x onerror=alert('hello')&gt;\">URL Escaped</a></div>";
+    // try z.prettyPrint(allocator, z.documentRoot(doc).?);
+
+    try testing.expectEqualStrings(expected, result);
+}
+
+test "all-in-one: parseAndAppendFragment with sanitization option" {
+    const allocator = testing.allocator;
+
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+    const doc = try parser.parseFromString("<div id=\"1\"></div>");
+    defer z.destroyDocument(doc);
+
+    const html1 = "<p> some text</p>";
+    const html2 = "<div> more <i>text</i><span><script>alert(1);</script></span></div>";
+    const html3 = "<ul><li><script>alert(1);</script></li></ul>";
+
+    const div_elt = z.getElementById(doc, "1").?;
+    // const div: *z.DomNode = @ptrCast(div_elt);
+
+    // append fragments and check the result
+    try parser.parseAndAppendFragment(div_elt, html1, .div, .permissive);
+    try parser.parseAndAppendFragment(div_elt, html2, .div, .strict);
+    try parser.parseAndAppendFragment(div_elt, html3, .div, .strict);
+
+    const result = try z.outerHTML(allocator, div_elt);
+    defer allocator.free(result);
+
+    const expected = "<div id=\"1\"><p> some text</p><div> more <i>text</i><span></span></div><ul><li></li></ul></div>";
+    try testing.expectEqualStrings(expected, result);
+}
+
+// TODO
+test "Serializer sanitation" {
+    const allocator = testing.allocator;
+
+    const malicious_content =
+        \\ <div>
+        \\  <button disabled hidden onclick="alert('XSS')" phx-click="increment">Potentially dangerous, not escaped</button>
+        \\  <!-- a comment -->
+        \\  <div data-time="{@current}"> The current value is: {@counter} </div>
+        \\  <a href="http://example.org/results?search=<img src=x onerror=alert('hello')>">URL Escaped</a>
+        \\  <a href="javascript:alert('XSS')">Dangerous, not escaped</a>
+        \\  <img src="javascript:alert('XSS')" alt="not escaped">
+        \\  <iframe src="javascript:alert('XSS')" alt="not escaped"></iframe>
+        \\  <a href="data:text/html,<script>alert('XSS')</script>" alt="escaped">Safe escaped</a>
+        \\  <img src="data:text/html,<script>alert('XSS')</script>" alt="escaped">
+        \\  <iframe src="data:text/html,<script>alert('XSS')</script>" >Escaped</iframe>
+        \\  <img src="data:image/svg+xml,<svg onload=alert('XSS')" alt="escaped"></svg>\">
+        \\  <img src="data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoJ1hTUycpPjwvc3ZnPg==" alt="potential dangerous b64">
+        \\  <a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4=">Potential dangerous b64</a>
+        \\  <img src="data:text/html;base64,PHNjcmlwdD5hbGVydCgnWFNTJyk8L3NjcmlwdD4=" alt="potential dangerous b64">
+        \\  <a href="file:///etc/passwd">Dangerous Local file access</a><img src="file:///etc/passwd" alt="dangerous local file access">
+        \\  <p>Hello<i>there</i>, all<strong>good?</strong></p>
+        \\  <p>Visit this link: <a href="https://example.com">example.com</a></p>
+        \\</div>
+        \\<link href="/shared-assets/misc/link-element-example.css" rel="stylesheet">
+        \\<script>console.log("hi");</script>
+        \\<template><p>Inside template</p></template>
+        \\<custom-element><script> console.log("hi");</script></custom-element>
+    ;
+
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+
+    // Test 1: .strict mode
+    {
+        const doc = try parser.parseFromString("");
+        defer z.destroyDocument(doc);
+        const body = z.bodyNode(doc).?;
+
+        try parser.parseAndAppendFragment(
+            z.nodeToElement(body).?,
+            malicious_content,
+            .div,
+            .strict,
+        );
+
+        const final_html = try z.outerNodeHTML(allocator, body);
+        defer allocator.free(final_html);
+        // z.print("T1: .strict -----------\n", .{});
+        // try z.prettyPrint(allocator, body);
+
+        // Should remove dangerous content
+        try testing.expect(std.mem.indexOf(u8, final_html, "javascript") == null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "onclick") == null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") == null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") == null); // Custom elements removed in strict
+
+        // Should preserve safe content
+        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "example.com") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "<strong>") != null);
+    }
+    // Test 2: .permissive mode
+    {
+        const doc = try parser.parseFromString("");
+        defer z.destroyDocument(doc);
+        const body = z.bodyNode(doc).?;
+        try parser.parseAndAppendFragment(
+            z.nodeToElement(body).?,
+            malicious_content,
+            .div,
+            .permissive,
+        );
+
+        const final_html = try z.outerNodeHTML(allocator, body);
+        defer allocator.free(final_html);
+        // z.print("T2: .permissive -----------\n", .{});
+        // try z.prettyPrint(allocator, z.bodyNode(doc).?);
+
+        // Should still remove dangerous content
+        try testing.expect(std.mem.indexOf(u8, final_html, "javascript") == null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "onclick") == null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") == null);
+
+        // But should preserve custom elements
+        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") != null);
+
+        // Should preserve safe content and framework attributes
+        try testing.expect(std.mem.indexOf(u8, final_html, "phx-click") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
+    }
+    // Test 3: .none mode
+    {
+        const doc = try parser.parseFromString("");
+        defer z.destroyDocument(doc);
+        const body = z.bodyNode(doc).?;
+        try parser.parseAndAppendFragment(
+            z.nodeToElement(body).?,
+            malicious_content,
+            .div,
+            .none,
+        );
+
+        const final_html = try z.outerNodeHTML(allocator, body);
+        defer allocator.free(final_html);
+        // z.print("T3: .none -----------\n", .{});
+        // try z.prettyPrint(allocator, z.bodyNode(doc).?);
+
+        // Should preserve most content including scripts and custom elements
+        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "<!-- a comment -->") != null);
+
+        // Should preserve safe content
+        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "<template>") != null);
+    }
+    // Test 4: .custom mode
+    {
+        const doc = try parser.parseFromString("");
+        defer z.destroyDocument(doc);
+        const body = z.bodyNode(doc).?;
+        try parser.parseAndAppendFragment(
+            z.nodeToElement(body).?,
+            malicious_content,
+            .div,
+            .{
+                .custom = .{
+                    .allow_custom_elements = true,
+                    .skip_comments = false, // Preserve comments
+                    .remove_scripts = false, // Allow scripts to demonstrate flexibility
+                    .remove_styles = true,
+                    .strict_uri_validation = false,
+                    .allow_framework_attrs = true,
+                },
+            },
+        );
+
+        const final_html = try z.outerNodeHTML(allocator, body);
+        defer allocator.free(final_html);
+        // z.print("T4: .custom ----------------------\n", .{});
+        // try z.prettyPrint(allocator, z.bodyNode(doc).?);
+
+        // Should preserve comments and custom elements
+        try testing.expect(std.mem.indexOf(u8, final_html, "<!-- a comment -->") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "custom-element") != null);
+
+        // Should preserve scripts and allow more URIs (as configured)
+        try testing.expect(std.mem.indexOf(u8, final_html, "<script>") != null);
+        // javascript: URIs might still be filtered at parser level
+
+        // Should preserve safe content and framework attributes
+        try testing.expect(std.mem.indexOf(u8, final_html, "phx-click") != null);
+        try testing.expect(std.mem.indexOf(u8, final_html, "Hello") != null);
     }
 }

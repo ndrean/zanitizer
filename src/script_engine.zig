@@ -368,3 +368,79 @@ fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
         .url = try loop.allocator.dupe(u8, url_str),
     };
 }
+
+// ============================================================================
+/// [security] Custom Module Normalizer
+/// This acts as a firewall for 'import'. It runs BEFORE the file is loaded.
+fn js_secure_module_normalize(
+    ctx: ?*qjs.JSContext,
+    module_base_name: ?[*:0]const u8,
+    module_name: ?[*:0]const u8,
+    opaque_ptr: ?*anyopaque,
+) callconv(.C) ?[*:0]u8 {
+    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+    const allocator = allocator_ptr.*;
+
+    const name = module_name orelse return null;
+    const name_slice = std.mem.span(name);
+
+    // (Block Remote: SSRF)
+    if (std.mem.startsWith(u8, name_slice, "http:") or
+        std.mem.startsWith(u8, name_slice, "https:") or
+        std.mem.startsWith(u8, name_slice, "//"))
+    {
+        return null;
+    }
+
+    // (Resolve Path: fiex nested)
+    // We must resolve relative to base_name to support folder structures
+    var resolved_path: []u8 = undefined;
+
+    if (module_base_name) |base| {
+        const base_slice = std.mem.span(base);
+        // If base is empty or ".", handle appropriately
+        const base_dir = if (base_slice.len > 0) std.fs.path.dirname(base_slice) orelse "." else ".";
+        resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch return null;
+    } else {
+        // Entry point or absolute import
+        resolved_path = std.fs.path.resolve(allocator, &.{name_slice}) catch return null;
+    }
+    // We defer freeing this ZIG string, because we will copy it to a C string below
+    defer allocator.free(resolved_path);
+
+    // (LFI Prevention)
+    // Ensure the resolved path is actually inside our CWD (or specific root)
+    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return null;
+    defer allocator.free(cwd);
+
+    // If resolved path doesn't start with CWD, it's trying to escape (e.g. ../../)
+    // Note: realpathAlloc removes . and .. so this comparison is safe
+    if (!std.mem.startsWith(u8, resolved_path, cwd)) {
+        // std.debug.print("Blocked LFI attempt: {s}\n", .{resolved_path});
+        return null;
+    }
+
+    // (Convenience)
+    // If file doesn't exist, try adding .js
+    var final_path = resolved_path; // Borrow the slice
+    var final_path_owned: ?[]u8 = null; // Track if we alloc a new string
+
+    // Simple access check
+    const file_exists = if (std.fs.cwd().access(final_path, .{})) |_| true else |_| false;
+
+    if (!file_exists) {
+        // Try appending .js
+        const with_ext = std.fmt.allocPrint(allocator, "{s}.js", .{final_path}) catch return null;
+        if (std.fs.cwd().access(with_ext, .{}) != error.AccessError) {
+            final_path = with_ext; // Re-point slice
+            final_path_owned = with_ext; // Mark for freeing
+        } else {
+            allocator.free(with_ext);
+            // Let it fail naturally if neither exists, so JS gets the original error
+        }
+    }
+    defer if (final_path_owned) |p| allocator.free(p);
+
+    //  Allocate to QuickJS memory
+    return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
+}

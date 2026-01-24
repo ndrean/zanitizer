@@ -292,6 +292,31 @@ pub fn getAttributes_bf(allocator: std.mem.Allocator, element: *z.HTMLElement) !
     return result;
 }
 
+/// Zero-allocation iterator for DOM attributes.
+/// Yields slices that point directly into Lexbor's memory.
+pub const AttributeIterator = struct {
+    current: ?*DomAttr,
+
+    pub fn next(self: *@This()) ?AttributePair {
+        const attr = self.current orelse return null;
+
+        const name = getAttributeName_zc(attr);
+        const value = getAttributeValue_zc(attr);
+
+        self.current = lxb_dom_element_next_attribute_noi(attr);
+
+        return AttributePair{
+            .name = name,
+            .value = value,
+        };
+    }
+};
+
+/// Create a zero-allocation iterator for an element's attributes
+pub fn iterateAttributes(element: *z.HTMLElement) AttributeIterator {
+    return .{ .current = lxb_dom_element_first_attribute_noi(element) };
+}
+
 // ----------------------------------------------------------
 
 /// [attributes] Remove attribute from element

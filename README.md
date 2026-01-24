@@ -1,4 +1,4 @@
-# zexplorer: Scriptable Headless Browser
+# zexplorer: a QuickJS DOM aware extension
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
@@ -1477,10 +1477,12 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 - **Worker pool**: multi-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
 - **EventListeners** (add, remove, dispatch) and _bubbling_ supported.
 - **ES6 Module System**: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
-- **CCSOM**: _inline_ CSS-inJS and _StyleSheet_ support. The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`) will not be coded but replaced with functional accessors: `Element.getPropertyValue()` and `Element.setPropertyValue()`.
+- **CCSOM**: _inline_ CSS-inJS and _StyleSheet_ support. [WIP] The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`). Currently,  functional accessors: `Element.getPropertyValue()` and `Element.setProperty()` and `getComputedStyles()`.
 - Class `DOMParser`, `DocumentFragment` (and 'template' support), `console.log` support, access to `document` and `owned_document`. [WIP] port Zig struct into JS Class. CSS selectors.
+- **DOM Sanitizer**. Handles templates. To become closer to `DOMPurify`, [TODO] Missing full support of SVG sanitization and only basic CSS sanitization.
 - `fetch` API (WIP).
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
+- **Security: RCE**. WIP.
 
 **Expectations**:
 

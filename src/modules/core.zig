@@ -1582,6 +1582,15 @@ fn insertChildNodesAfter(reference_node: *z.DomNode, parent_node: *z.DomNode) vo
     }
 }
 
+pub fn insertAdjacentHTML(
+    allocator: std.mem.Allocator,
+    target: *z.HTMLElement,
+    position: anytype,
+    html: []const u8,
+) !void {
+    return insertAdjacentHTMLUnsafe(allocator, target, position, html, .none);
+}
+
 /// [core] Insert HTML string at the specified position relative to the target element
 ///
 /// [JS] `Element.insertAdjacentHTML()` method
@@ -1595,12 +1604,12 @@ fn insertChildNodesAfter(reference_node: *z.DomNode, parent_node: *z.DomNode) vo
 /// try insertAdjacentHTML(allocator, target.?, "beforeend", "<p>New content</p>", .permissive);
 /// ---
 /// ```
-pub fn insertAdjacentHTML(
+pub fn insertAdjacentHTMLUnsafe(
     allocator: std.mem.Allocator,
     target: *z.HTMLElement,
     position: anytype,
     html: []const u8,
-    sanitizer: z.SanitizeOptions,
+    sanitizer: z.SanitizerMode,
 ) !void {
     const T = @TypeOf(position);
     const pos_enum: InsertPosition = switch (@typeInfo(T)) {
@@ -1675,13 +1684,13 @@ test "enum / string insertAdjacentHTML" {
 
     const target = z.getElementById(doc, "target");
 
-    try insertAdjacentHTML(allocator, target.?, .beforebegin, "<p>Before Begin</p>", .strict);
+    try insertAdjacentHTMLUnsafe(allocator, target.?, .beforebegin, "<p>Before Begin</p>", .strict);
 
-    try insertAdjacentHTML(allocator, target.?, "afterbegin", "<span>After Begin</span>", .strict);
+    try insertAdjacentHTMLUnsafe(allocator, target.?, "afterbegin", "<span>After Begin</span>", .strict);
 
-    try insertAdjacentHTML(allocator, target.?, .beforeend, "<span>Before End</span>", .strict);
+    try insertAdjacentHTMLUnsafe(allocator, target.?, .beforeend, "<span>Before End</span>", .strict);
 
-    try insertAdjacentHTML(allocator, target.?, .afterend, "<p>After End</p>", .strict);
+    try insertAdjacentHTMLUnsafe(allocator, target.?, .afterend, "<p>After End</p>", .strict);
 
     const html = try z.outerHTML(allocator, z.nodeToElement(body).?);
     defer allocator.free(html);
@@ -1707,12 +1716,12 @@ test "enum / string insertAdjacentHTML" {
     // try testing.expectEqualStrings(expected_html, html);
 
     // Test 5: Error handling for invalid position string
-    const invalid_result = insertAdjacentHTML(allocator, target.?, "invalid", "<p>Test</p>", .strict);
+    const invalid_result = insertAdjacentHTMLUnsafe(allocator, target.?, "invalid", "<p>Test</p>", .strict);
     try testing.expectError(Err.InvalidPosition, invalid_result);
 
     // Test 6: More natural usage examples
-    try insertAdjacentHTML(allocator, target.?, .beforeend, "<em>Direct enum</em>", .strict);
-    try insertAdjacentHTML(allocator, target.?, "beforeend", "<strong>Direct string</strong>", .strict);
+    try insertAdjacentHTMLUnsafe(allocator, target.?, .beforeend, "<em>Direct enum</em>", .strict);
+    try insertAdjacentHTMLUnsafe(allocator, target.?, "beforeend", "<strong>Direct string</strong>", .strict);
 }
 
 test "insertAdjacentHTML - all positions" {
@@ -1724,7 +1733,7 @@ test "insertAdjacentHTML - all positions" {
     const body = z.bodyNode(doc).?;
     const target = z.getElementById(doc, "target");
 
-    try insertAdjacentHTML(
+    try insertAdjacentHTMLUnsafe(
         allocator,
         target.?,
         .beforebegin,
@@ -1732,7 +1741,7 @@ test "insertAdjacentHTML - all positions" {
         .permissive,
     );
 
-    try insertAdjacentHTML(
+    try insertAdjacentHTMLUnsafe(
         allocator,
         target.?,
         .afterbegin,
@@ -1740,7 +1749,7 @@ test "insertAdjacentHTML - all positions" {
         .permissive,
     );
 
-    try insertAdjacentHTML(
+    try insertAdjacentHTMLUnsafe(
         allocator,
         target.?,
         .beforeend,
@@ -1748,7 +1757,7 @@ test "insertAdjacentHTML - all positions" {
         .permissive,
     );
 
-    try insertAdjacentHTML(
+    try insertAdjacentHTMLUnsafe(
         allocator,
         target.?,
         .afterend,
@@ -1784,7 +1793,7 @@ test "insertAdjacentHTML - preserve order with multiple elements" {
         const target = z.getElementById(doc, "target");
 
         // Insert multiple elements at once
-        try insertAdjacentHTML(
+        try insertAdjacentHTMLUnsafe(
             allocator,
             target.?,
             .afterend,
@@ -1792,7 +1801,7 @@ test "insertAdjacentHTML - preserve order with multiple elements" {
             .permissive,
         );
 
-        try insertAdjacentHTML(
+        try insertAdjacentHTMLUnsafe(
             allocator,
             target.?,
             .beforeend,
@@ -1800,7 +1809,7 @@ test "insertAdjacentHTML - preserve order with multiple elements" {
             .permissive,
         );
 
-        try insertAdjacentHTML(
+        try insertAdjacentHTMLUnsafe(
             allocator,
             target.?,
             .afterbegin,
@@ -1808,7 +1817,7 @@ test "insertAdjacentHTML - preserve order with multiple elements" {
             .permissive,
         );
 
-        try insertAdjacentHTML(
+        try insertAdjacentHTMLUnsafe(
             allocator,
             target.?,
             .beforebegin,
@@ -1816,7 +1825,7 @@ test "insertAdjacentHTML - preserve order with multiple elements" {
             .permissive,
         );
 
-        try insertAdjacentHTML(
+        try insertAdjacentHTMLUnsafe(
             allocator,
             target.?,
             .beforebegin,
@@ -2565,7 +2574,7 @@ test "bigger test with string-to-DOM scenarios" {
 
             defer allocator.free(updated_content);
 
-            try z.insertAdjacentHTML(
+            try z.insertAdjacentHTMLUnsafe(
                 allocator,
                 app_div.?,
                 .beforeend,
