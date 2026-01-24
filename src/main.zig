@@ -2992,7 +2992,7 @@ fn demoNormalizer(gpa: std.mem.Allocator) !void {
     try z.parseFromString(doc, messy_html);
 
     const body_elt1 = z.bodyElement(doc).?;
-    try z.normalizeDOMwithOptions(
+    try z.minifyDOMwithOptions(
         gpa,
         body_elt1,
         .{ .skip_comments = true },
@@ -3004,7 +3004,7 @@ fn demoNormalizer(gpa: std.mem.Allocator) !void {
     std.debug.assert(std.mem.eql(u8, expected_noc, result1));
 
     // -- string normalization
-    const cleaned = try z.normalizeHtmlStringWithOptions(
+    const cleaned = try z.minifyHtmlStringWithOptions(
         gpa,
         messy_html,
         .{ .remove_comments = true },
@@ -3077,7 +3077,7 @@ fn demoTemplate(allocator: std.mem.Allocator) !void {
         .none,
     );
 
-    try z.normalizeDOM(allocator, z.nodeToElement(body).?);
+    try z.minifyDOM(allocator, z.nodeToElement(body).?);
 
     const resulting_html = try z.innerHTML(allocator, z.nodeToElement(body).?);
     defer allocator.free(resulting_html);
@@ -3324,7 +3324,7 @@ fn demoSetInnerHTML(allocator: std.mem.Allocator) !void {
 
     // try z.prettyPrint(allocator,z.documentRoot(doc).?);
 
-    try z.normalizeDOM(allocator, new_div_elt);
+    try z.minifyDOM(allocator, new_div_elt);
 
     // Show result after setInnerHTML
     const html_new_div = try z.innerHTML(
@@ -3676,7 +3676,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     const docA1 = try z.createDocument();
     defer z.destroyDocument(docA1);
     for (0..iterations) |_| {
-        const normalized = try z.normalizeHtmlStringWithOptions(allocator, medium_html, .{
+        const normalized = try z.minifyHtmlStringWithOptions(allocator, medium_html, .{
             .remove_comments = true,
             .remove_whitespace_text_nodes = true,
         });
@@ -3695,7 +3695,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     defer parserA2.deinit();
     const bodyA2 = z.bodyElement(docA2);
     for (0..iterations) |_| {
-        const normalized = try z.normalizeHtmlStringWithOptions(allocator, medium_html, .{
+        const normalized = try z.minifyHtmlStringWithOptions(allocator, medium_html, .{
             .remove_comments = true,
             .remove_whitespace_text_nodes = true,
         });
@@ -3714,7 +3714,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     defer parserA3.deinit();
     const bodyA3 = z.bodyElement(docA3);
     for (0..iterations) |_| {
-        const normalized = try z.normalizeHtmlStringWithOptions(allocator, medium_html, .{
+        const normalized = try z.minifyHtmlStringWithOptions(allocator, medium_html, .{
             .remove_comments = true,
             .remove_whitespace_text_nodes = true,
         });
@@ -3732,7 +3732,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
     // C1: String normalization → createDocFromString (fresh doc each time)
     timer.reset();
     for (0..iterations) |_| {
-        const normalized = try z.normalizeHtmlStringWithOptions(allocator, medium_html, .{
+        const normalized = try z.minifyHtmlStringWithOptions(allocator, medium_html, .{
             .remove_comments = true,
             .remove_whitespace_text_nodes = true,
         });
@@ -3757,7 +3757,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
         const docB1 = try parserB1.parse(medium_html, .none);
         defer z.destroyDocument(docB1);
         const bodyB1 = z.bodyElement(docB1);
-        try z.normalizeDOMwithOptions(allocator, bodyB1.?, .{ .skip_comments = true });
+        try z.minifyDOMwithOptions(allocator, bodyB1.?, .{ .skip_comments = true });
     }
     const timeB1 = timer.read();
     const msB1 = @as(f64, @floatFromInt(timeB1)) / ns_to_ms;
@@ -3768,7 +3768,7 @@ fn cleanBenchmark(allocator: std.mem.Allocator, medium_html: []const u8, iterati
         const docB2 = try z.createDocFromString(medium_html);
         defer z.destroyDocument(docB2);
         const bodyB2 = z.bodyElement(docB2);
-        try z.normalizeDOMwithOptions(allocator, bodyB2.?, .{ .skip_comments = true });
+        try z.minifyDOMwithOptions(allocator, bodyB2.?, .{ .skip_comments = true });
     }
     const timeB2 = timer.read();
     const msB2 = @as(f64, @floatFromInt(timeB2)) / ns_to_ms;

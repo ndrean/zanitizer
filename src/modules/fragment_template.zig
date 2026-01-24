@@ -967,7 +967,7 @@ test "HTMX template" {
     const html_node = z.documentRoot(doc).?;
     const html_element = z.nodeToElement(html_node).?;
 
-    try z.normalizeDOMwithOptions(allocator, html_element, .{ .skip_comments = true });
+    try z.minifyDOMwithOptions(allocator, html_element, .{ .skip_comments = true });
 
     var css_engine = try z.CssSelectorEngine.init(allocator);
     defer css_engine.deinit();

@@ -1,4 +1,4 @@
-//! String based HTML string comment or whitespace only text nodes cleaner
+//! FOR TESTS ONLY !!! String based HTML string comment or whitespace only text nodes cleaner
 const std = @import("std");
 const z = @import("../root.zig");
 const Err = z.Err;
@@ -155,7 +155,7 @@ test "string based normalize text behaviour" {
 
         const outer = try z.outerHTML(allocator, body);
         defer allocator.free(outer);
-        const normed = try z.normalizeHtmlString(allocator, outer);
+        const normed = try z.minifyHtmlString(allocator, outer);
         defer allocator.free(normed);
 
         const expected =
@@ -170,7 +170,7 @@ test "string based normalize text behaviour" {
     // remove whitespace-only text nodes not multiline
     {
         const html1 = "<div>\n  \t  <p>Hello world</p>   \n\t  </div>";
-        const normalized1 = try z.normalizeHtmlString(allocator, html1);
+        const normalized1 = try z.minifyHtmlString(allocator, html1);
         defer allocator.free(normalized1);
 
         const expected1 = "<div><p>Hello world</p></div>";
@@ -184,7 +184,7 @@ test "string based normalize text behaviour" {
             \\  <p>Normal text</p>
             \\</div>
         ;
-        const normalized2 = try z.normalizeHtmlString(allocator, html2);
+        const normalized2 = try z.minifyHtmlString(allocator, html2);
         defer allocator.free(normalized2);
 
         const expected2 = "<div><pre>  preserve  this  </pre><p>Normal text</p></div>";
@@ -193,7 +193,7 @@ test "string based normalize text behaviour" {
     // preserve SCRIPT tags
     {
         const html3 = "<div>\n  <script>\n  console.log('test');\n  </script>\n  <span>Text</span>  \n</div>";
-        const normalized3 = try z.normalizeHtmlString(allocator, html3);
+        const normalized3 = try z.minifyHtmlString(allocator, html3);
         defer allocator.free(normalized3);
 
         const expected3 = "<div><script>\n  console.log('test');\n  </script><span>Text</span></div>";
@@ -214,7 +214,7 @@ test "string based normalize text behaviour" {
     {
 
         // Keep comments
-        const normalized_keep = try z.normalizeHtmlStringWithOptions(
+        const normalized_keep = try z.minifyHtmlStringWithOptions(
             allocator,
             html_with_comments,
             .{
@@ -229,7 +229,7 @@ test "string based normalize text behaviour" {
     }
     // option remove comment
     {
-        const normalized_remove = try z.normalizeHtmlStringWithOptions(
+        const normalized_remove = try z.minifyHtmlStringWithOptions(
             allocator,
             html_with_comments,
             .{

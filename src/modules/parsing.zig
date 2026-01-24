@@ -971,8 +971,8 @@ test "parseFragmentNodes - moving SVG elements" {
         \\</svg>
     ;
 
-    // remove the 2 #text nodes by normalizing the input
-    const normed = try z.normalizeHtmlString(allocator, mixed_html_svg);
+    // remove the 2 #text nodes by minifying the input
+    const normed = try z.minifyHtmlString(allocator, mixed_html_svg);
     defer allocator.free(normed);
 
     const nodes = try parser.parseFragmentNodes(

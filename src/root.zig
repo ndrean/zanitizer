@@ -178,6 +178,8 @@ pub const ownerDocument = lxb.ownerDocument;
 pub const bodyElement = lxb.bodyElement;
 pub const bodyNode = lxb.bodyNode;
 pub const documentBody = lxb.documentBody;
+pub const headElement = lxb.headElement;
+pub const headNode = lxb.headNode;
 
 pub const cloneNode = lxb.cloneNode;
 pub const importNode = lxb.importNode;
@@ -250,18 +252,22 @@ pub const escapeHtml = text.escapeHtml;
 pub const nodeValue_zc = text.nodeValue_zc;
 pub const setNodeValue = text.setNodeValue;
 
-// DOM based normalization
-pub const isWhitespaceOnly = norm.isWhitespaceOnly;
+// DOM Node.normalize() - true DOM spec implementation
 pub const normalizeDOM = norm.normalizeDOM;
-pub const normalizeDOMwithOptions = norm.normalizeDOMwithOptions;
+pub const normalizeElement = norm.normalizeElement;
 
-pub const normalizeDOMForDisplay = norm.normalizeDOMForDisplay;
+// DOM minification - removes whitespace nodes (non-standard)
+pub const isWhitespaceOnly = norm.isWhitespaceOnly;
+pub const minifyDOM = norm.minifyDOM;
+pub const minifyDOMwithOptions = norm.minifyDOMwithOptions;
+pub const minifyDOMForDisplay = norm.minifyDOMForDisplay;
+pub const MinifyOptions = norm.MinifyOptions;
 
-// String based normalization
-pub const StringNormalizeOptions = cleaner.StringNormalizeOptions;
+// String based minification
+pub const StringMinifyOptions = cleaner.StringNormalizeOptions;
 
-pub const normalizeHtmlString = cleaner.normalizeHtmlString;
-pub const normalizeHtmlStringWithOptions = cleaner.normalizeHtmlStringWithOptions;
+pub const minifyHtmlString = cleaner.normalizeHtmlString;
+pub const minifyHtmlStringWithOptions = cleaner.normalizeHtmlStringWithOptions;
 
 pub const normalizeText = cleaner.normalizeText;
 

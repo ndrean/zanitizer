@@ -159,25 +159,24 @@ pub const SanitizerOptions = struct {
 
 const AttributeAction = struct {
     element: *z.HTMLElement,
-    attr_name: []u8, // owned copy for deferred removal
-    needs_free: bool,
+    attr_name: []const u8, // arena-owned copy for deferred removal
 };
 
 // Context for simple_walk sanitization callback
+// All temporary allocations use the arena for single bulk deallocation
 const SanitizeContext = struct {
-    allocator: std.mem.Allocator,
+    arena: std.heap.ArenaAllocator,
     options: SanitizerOptions,
     parent: z.HtmlTag = .html,
 
-    // Dynamic storage for operations
-    // We use ArrayLists to handle documents of any size/complexity safely
+    // Dynamic storage - all use arena allocator
     nodes_to_remove: std.ArrayListUnmanaged(*z.DomNode),
     attributes_to_remove: std.ArrayListUnmanaged(AttributeAction),
     template_nodes: std.ArrayListUnmanaged(*z.DomNode),
 
-    fn init(alloc: std.mem.Allocator, opts: SanitizerOptions) @This() {
+    fn init(backing_allocator: std.mem.Allocator, opts: SanitizerOptions) @This() {
         return @This(){
-            .allocator = alloc,
+            .arena = std.heap.ArenaAllocator.init(backing_allocator),
             .options = opts,
             .nodes_to_remove = .empty,
             .attributes_to_remove = .empty,
@@ -185,33 +184,30 @@ const SanitizeContext = struct {
         };
     }
 
+    /// Single bulk deallocation - arena handles everything
     fn deinit(self: *@This()) void {
-        for (self.attributes_to_remove.items) |action| {
-            if (action.needs_free) {
-                self.allocator.free(action.attr_name);
-            }
-        }
-        self.attributes_to_remove.deinit(self.allocator);
-        self.nodes_to_remove.deinit(self.allocator);
-        self.template_nodes.deinit(self.allocator);
+        self.arena.deinit();
+    }
+
+    /// Get arena allocator for all temporary allocations
+    inline fn alloc(self: *@This()) std.mem.Allocator {
+        return self.arena.allocator();
     }
 
     fn addNodeToRemove(self: *@This(), node: *z.DomNode) !void {
-        try self.nodes_to_remove.append(self.allocator, node);
+        try self.nodes_to_remove.append(self.alloc(), node);
     }
 
     fn addAttributeToRemove(self: *@This(), element: *z.HTMLElement, attr_name: []const u8) !void {
-        const owned_name = try self.allocator.dupe(u8, attr_name);
-
-        try self.attributes_to_remove.append(self.allocator, AttributeAction{
+        const owned_name = try self.alloc().dupe(u8, attr_name);
+        try self.attributes_to_remove.append(self.alloc(), AttributeAction{
             .element = element,
             .attr_name = owned_name,
-            .needs_free = true,
         });
     }
 
     fn addTemplate(self: *@This(), template_node: *z.DomNode) !void {
-        try self.template_nodes.append(self.allocator, template_node);
+        try self.template_nodes.append(self.alloc(), template_node);
     }
 };
 
@@ -1857,7 +1853,7 @@ test "malformed HTML handling" {
     try testing.expect(std.mem.indexOf(u8, result, "onclick") == null);
 }
 
-test "repeated sanitization" {
+test "idempotnent sanitization" {
     const allocator = testing.allocator;
     const html =
         \\<div onclick="alert(1)" class="test">
@@ -1946,9 +1942,8 @@ test "large document performance" {
     const end_time = std.time.milliTimestamp();
     const elapsed = end_time - start_time;
 
-    // Should complete in reasonable time (adjust threshold as needed)
-    std.debug.print("Large document sanitization took {} ms\n", .{elapsed});
-    try testing.expect(elapsed < 5000); // 5 second limit
+    // std.debug.print("Large document sanitization took {} ms\n", .{elapsed});
+    try testing.expect(elapsed < 10);
 
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
@@ -1991,8 +1986,8 @@ test "many small elements" {
     const end_time = std.time.milliTimestamp();
     const elapsed = end_time - start_time;
 
-    std.debug.print("Many small elements took {} ms\n", .{elapsed});
-    try testing.expect(elapsed < 3000); // 3 second limit
+    // std.debug.print("Many small elements took {} ms\n", .{elapsed});
+    try testing.expect(elapsed < 10);
 
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
@@ -2337,9 +2332,9 @@ test "comprehensive sanitization modes" {
 
         try sanitizeWithMode(allocator, body, .strict);
 
-        // Normalize to clean up empty text nodes
+        // Minify to clean up empty text nodes
         const body_element = z.nodeToElement(body) orelse return;
-        try z.normalizeDOM(allocator, body_element);
+        try z.minifyDOM(allocator, body_element);
 
         const result = try z.outerNodeHTML(allocator, body);
         defer allocator.free(result);
@@ -2473,9 +2468,9 @@ test "iframe sandbox validation" {
 
     try sanitizeStrict(allocator, body);
 
-    // Normalize to clean up whitespace left by element removal
+    // Minify to clean up whitespace left by element removal
     const body_element = z.nodeToElement(body) orelse return;
-    try z.normalizeDOM(allocator, body_element);
+    try z.minifyDOM(allocator, body_element);
 
     const result = try z.outerNodeHTML(allocator, body);
     defer allocator.free(result);
@@ -2614,7 +2609,6 @@ test "all-in-one: parseAndAppendFragment with sanitization option" {
     try testing.expectEqualStrings(expected, result);
 }
 
-// TODO
 test "Serializer sanitation" {
     const allocator = testing.allocator;
 

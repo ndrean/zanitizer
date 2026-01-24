@@ -23,6 +23,7 @@ pub const LexborError = error{
     NoNode,
     NoBodyElement,
     NoFirstChild,
+    NoDocumentRoot,
     EmptyTextContent,
     SetTextContentFailed,
     ChunkBeginFailed,

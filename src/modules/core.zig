@@ -28,6 +28,7 @@ extern "c" fn lxb_dom_document_create_comment(doc: *z.HTMLDocument, data: [*]con
 extern "c" fn lxb_dom_comment_interface_destroy(doc: *z.Comment) *z.Comment;
 extern "c" fn lxb_dom_node_insert_child(parent: *z.DomNode, child: *z.DomNode) void;
 extern "c" fn lxb_html_document_body_element_noi(doc: *z.HTMLDocument) ?*z.HTMLElement;
+extern "c" fn lxb_html_document_head_element_noi(doc: *z.HTMLDocument) ?*z.HTMLElement;
 extern "c" fn lxb_dom_document_root(doc: *z.HTMLDocument) ?*z.DomNode;
 extern "c" fn lexbor_node_owner_document_wrapper(node: *z.DomNode) *z.HTMLDocument;
 extern "c" fn lxb_dom_node_parent_noi(node: *z.DomNode) ?*z.DomNode;
@@ -264,6 +265,26 @@ pub fn bodyNode(doc: *z.HTMLDocument) ?*z.DomNode {
     // return node;
 }
 
+/// [core] Get the document's head element
+///
+/// Returns the <head> element from the document's struct.
+/// Note: lexbor stores the head pointer directly in the document struct,
+/// which is set during parsing of full HTML documents.
+///
+/// ## Example
+/// ```
+/// const head = z.headElement(doc).?;
+/// ```
+pub fn headElement(doc: *z.HTMLDocument) ?*z.HTMLElement {
+    return lxb_html_document_head_element_noi(doc);
+}
+
+/// [core] Get the document's head as a node
+pub fn headNode(doc: *z.HTMLDocument) ?*z.DomNode {
+    const head_element = headElement(doc) orelse return null;
+    return @ptrCast(head_element);
+}
+
 // [Helper] Polymorphic getter for .body
 /// Accepts a generic Node, checks if it is a Document, and returns the body.
 pub fn documentBody(node: *z.DomNode) ?*z.HTMLElement {
@@ -291,6 +312,87 @@ test "documentBody" {
         try std.testing.expectEqualSlices(u8, "body", qualifiedName_zc(db.?));
         try std.testing.expectEqualSlices(u8, "body", qualifiedName_zc(z.documentBody(p).?));
     }
+}
+
+test "headElement - parseHTML creates full document" {
+    const allocator = std.testing.allocator;
+
+    // Full document with explicit head - head pointer is populated
+    const doc1 = try z.parseHTML(allocator, "<html><head><title>Test</title></head><body><p>World</p></body></html>");
+    defer z.destroyDocument(doc1);
+    try std.testing.expect(headElement(doc1) != null);
+    try std.testing.expect(bodyElement(doc1) != null);
+    try std.testing.expectEqualSlices(u8, "HEAD", z.nodeName_zc(headNode(doc1).?));
+
+    // Body-only content - lexbor still creates html/head/body structure
+    const doc2 = try z.parseHTML(allocator, "<div>Just content</div>");
+    defer z.destroyDocument(doc2);
+    try std.testing.expect(headElement(doc2) != null);
+    try std.testing.expect(bodyElement(doc2) != null);
+
+    // Empty document - still creates full structure
+    const doc3 = try z.parseHTML(allocator, "");
+    defer z.destroyDocument(doc3);
+    try std.testing.expect(headElement(doc3) != null);
+    try std.testing.expect(bodyElement(doc3) != null);
+}
+
+test "headElement - DOMParser.parseFromString creates full document" {
+    const allocator = std.testing.allocator;
+    var parser = try z.DOMParser.init(allocator);
+    defer parser.deinit();
+
+    // DOMParser also creates full html/head/body structure
+    const doc = try parser.parseFromString("<div>Content</div>");
+    defer z.destroyDocument(doc);
+
+    try std.testing.expect(headElement(doc) != null);
+    try std.testing.expect(bodyElement(doc) != null);
+    try std.testing.expectEqualSlices(u8, "HEAD", z.nodeName_zc(headNode(doc).?));
+}
+
+test "headElement - createElement and appendChild to head" {
+    const allocator = std.testing.allocator;
+    const doc = try z.parseHTML(allocator, "");
+    defer z.destroyDocument(doc);
+
+    const head = headElement(doc).?;
+    const head_node = z.elementToNode(head);
+
+    // Create and append a <link> element
+    const link = try z.createElement(doc, "link");
+    try z.setAttribute(link, "rel", "stylesheet");
+    try z.setAttribute(link, "href", "style.css");
+    z.appendChild(head_node, z.elementToNode(link));
+
+    // Create and append a <style> element
+    const style = try z.createElement(doc, "style");
+    try z.setTextContent(allocator, z.elementToNode(style), "body { color: red; }");
+    z.appendChild(head_node, z.elementToNode(style));
+
+    // Verify children were added
+    const html = try z.innerHTML(allocator, head);
+    defer allocator.free(html);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<link") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<style>") != null);
+}
+
+test "headElement - setInnerHTML on head" {
+    const allocator = std.testing.allocator;
+    const doc = try z.parseHTML(allocator, "");
+    defer z.destroyDocument(doc);
+
+    const head = headElement(doc).?;
+
+    // setInnerHTML works on <head> - context-aware parsing
+    try z.setInnerHTML(head, "<title>My Page</title><meta charset=\"utf-8\"><link rel=\"icon\" href=\"favicon.ico\">");
+
+    const html = try z.innerHTML(allocator, head);
+    defer allocator.free(html);
+
+    try std.testing.expect(std.mem.indexOf(u8, html, "<title>My Page</title>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<meta") != null);
+    try std.testing.expect(std.mem.indexOf(u8, html, "<link") != null);
 }
 
 test "appendchild" {

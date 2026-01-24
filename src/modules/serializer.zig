@@ -201,10 +201,10 @@ const ProcessCtx = struct {
 /// ---
 ///```
 pub fn prettyPrint(allocator: std.mem.Allocator, node: *z.DomNode) !void {
-    // First, apply aggressive normalization for clean TTY display
+    // First, apply aggressive minification for clean TTY display
     if (z.nodeToElement(node)) |element| {
-        z.normalizeDOMForDisplay(allocator, element) catch {
-            // If normalization fails, continue with original content
+        z.minifyDOMForDisplay(allocator, element) catch {
+            // If minification fails, continue with original content
         };
     }
 
@@ -492,7 +492,21 @@ pub fn printDocStruct(doc: *z.HTMLDocument) !void {
     walkTree(root, 0);
 }
 
-pub fn ppDoc(allocator: std.mem.Allocator, doc: *z.HTMLDocument) !void {
-    const root = z.documentRoot(doc).?;
+/// [serializer] Pretty print entire document with syntax highlighting
+///
+/// Convenience wrapper that gets the document root and calls prettyPrint.
+/// Uses ANSI colors for different HTML elements, attributes, and values.
+///
+/// ## Example
+/// ```zig
+/// const doc = try z.parseHTML(allocator, "<html>...</html>");
+/// defer z.destroyDocument(doc);
+/// try z.printDOM(allocator, doc);
+/// ```
+pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument) !void {
+    const root = z.documentRoot(doc) orelse return;
     try prettyPrint(allocator, root);
 }
+
+/// Alias for backwards compatibility
+pub const ppDoc = printDOM;
