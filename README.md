@@ -1583,7 +1583,6 @@ fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
 }
 ```
 
-
 **Use Reactive DOM primitives in async JavaScript code executed by `Zig`**
 
 ```js
@@ -1904,6 +1903,7 @@ graph TD
     style Start fill:#bbf,stroke:#333
     style Exit fill:#f66,stroke:#333
 ```
+
 ---
 
 ## Install
@@ -2144,7 +2144,7 @@ pub fn main() !void {
     const gpa = std.heap.c_allocator;
 
     // One-time setup (server startup)
-    const doc = try z.createDocFromString(blog_html);
+    const doc = try z.parseHTML(gpa, blog_html);
     defer z.destroyDocument(doc);
 
     var css_engine = try z.createCssEngine(allocator);
@@ -2275,7 +2275,7 @@ const html_string =
 You parse this HTML string:
 
 ```zig
-const doc = try z.createDocFromString(html_string);
+const doc = try z.parseHTML(allocator, html_string);
 defer z.destroyDocument(doc);
 
 const body = z.bodyNode(doc).?;
@@ -2308,14 +2308,14 @@ The result is shown below.
 You can create a sanitized document with the parser (a ready-to-use parsing engine).
 
 ```c
-var parser = try z.Parser.init(testing.allocator);
+var parser = try z.DOMParser.init(testing.allocator);
 defer parser.deinit();
 
-const doc = try parser.parse(html, .none);
+const doc = try parser.parseFromString(html, .none);
 defer z.destroyDocument(doc);
 ```
 
-<hr>
+---
 
 ## Example: Processing streams
 
@@ -2459,86 +2459,6 @@ std.debug.assert(footer_token_list.contains("new-footer"));
 _ = try footer_token_list.toggle("new-footer");
 std.debug.assert(!footer_token_list.contains("new-footer"));
 ```
-
-<hr>
-
-## Example: HTML Normalization
-
-The library provides both DOM-based and string-based HTML normalization to clean up whitespace and comments.
-
-This helps to visualize a clean output in the terminal and also minimize what is potentially sent back over the wire (e.g. when using `HTMX` frontend).
-
-DOM-based normalization works on parsed documents and provides browser-like behavior. It is the best choice.
-
-We take the example below:
-
-```zig
-const doc = try z.createDocument();
-defer z.destroyDocument(doc);
-
-const messy_html = 
-    \\<div>
-    \\<!-- comment -->
-    \\
-    \\<p>Content</p>
-    \\
-    \\<pre>  preserve  this  </pre>
-    \\
-    \\</div>
-;
-```
-
-```zig
-const expected = "<div><!-- comment --><p>Content</p><pre>  preserve  this  </pre></div>";
-```
-
-Dom-base normalization:
-
-```zig
-try z.parseFromString(doc, messy_html);
-
-const body_elt1 = z.bodyElement(doc).?;
-try z.normalizeDOM(gpa, body_elt1);
-
-const result1 = try z.innerHTML(gpa, body_elt1);
-defer gpa.free(result1);
-
-std.debug.assert(std.mem.eql(u8, expected, result1));
-```
-
-String-based "pre-normalization":
-
-```zig
-const cleaned = try z.normalizeHtmlStringWithOptions(
-    gpa,
-    messy_html,
-    .{ .remove_comments = false },
-);
-defer gpa.free(cleaned);
-
-std.debug.assert(std.mem.eql(u8, cleaned, result1));
-
-try z.parseFromString(doc, cleaned);
-const body_elt2 = z.bodyElement(doc).?;
-const result2 = try z.innerHTML(gpa, body_elt2);
-defer gpa.free(result2);
-
-std.debug.assert(std.mem.eql(u8, result2, result1));
-```
-
-Some results shown in the _ main.zig_  file of parsing a 38kB HTML string (average 500 iterations using `std.heap.c_allocator` and `-release=fast`).
-
-To parse a 38kB string, it takes 50µs on average.
-
-The overhead of normalization:
-
-```txt
---- Speed Results ---
-createDoc -> parseFromString:                        0.05 ms/op, 830 kB/s
-new parser -> new doc = parser.parse -> DOMnorm:     0.06 ms/op, 660 kB/s
-createDoc -> normString -> parseFromString:   0.08 ms/op, 470 kB/s
-```
----
 
 ## Other examples in _main.zig_
 
