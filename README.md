@@ -2538,15 +2538,13 @@ createDoc -> parseFromString:                        0.05 ms/op, 830 kB/s
 new parser -> new doc = parser.parse -> DOMnorm:     0.06 ms/op, 660 kB/s
 createDoc -> normString -> parseFromString:   0.08 ms/op, 470 kB/s
 ```
-
-<hr>
-
+---
 
 ## Other examples in _main.zig_
 
 The file _main.zig_ shows more use cases with parsing and serialization as well as the tests  (`setInnerHTML`, `setInnerSafeHTML`, `insertAdjacentElement` or `insertAdjacentHTML`...)
 
-<hr>
+---
 
 ## Building the lib
 
@@ -2599,6 +2597,8 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 - `zig-quickjs` [License MIT](https://github.com/nDimensional/zig-quickjs/blob/main/LICENSE)
 - `zig-curl` [License MIT](https://github.com/jiacai2050/zig-curl/blob/main/LICENSE)
 
+---
+
 ## COCOMO analysis
 
 <https://github.com/boyter/scc>
@@ -2607,19 +2607,18 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ───────────────────────────────────────────────────────────────────────────────
 Language            Files       Lines    Blanks  Comments       Code Complexity
 ───────────────────────────────────────────────────────────────────────────────
-Zig                    61      32,066     3,119     3,401     25,546      3,259
-Markdown                3       3,372       615         0      2,757          0
-C                       1         146        23        30         93         15
+Zig                    63      36,064     3,157     3,374     29,533      3,595
+Markdown                3       3,425       623         0      2,802          0
+C                       1         155        24        31        100         17
 HTML                    1          23         2         0         21          0
 License                 1          21         4         0         17          0
-YAML                    1          38         4         0         34          0
 ───────────────────────────────────────────────────────────────────────────────
-Total                  68      35,666     3,767     3,431     28,468      3,274
+Total                  69      39,688     3,810     3,405     32,473      3,612
 ───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $909,222
-Estimated Schedule Effort (organic) 13.27 months
-Estimated People Required (organic) 6.09
+Estimated Cost to Develop (organic) $1,043,984
+Estimated Schedule Effort (organic) 13.98 months
+Estimated People Required (organic) 6.63
 ───────────────────────────────────────────────────────────────────────────────
-Processed 1287132 bytes, 1.287 megabytes (SI)
+Processed 1462363 bytes, 1.462 megabytes (SI)
 ───────────────────────────────────────────────────────────────────────────────
 ```

@@ -105,7 +105,20 @@ pub fn main() !void {
     try async_CSV_JSON_Parser(allocator);
 
     try demoWorker(allocator);
+
+    // lexb =====
+
+    try simpleParsingsMethods(allocator);
+    try demoNormalizer(allocator);
+    try demoTemplate(allocator);
+    try demoParserReUse(allocator);
+    try demoStreamParser(allocator);
+    try demoInsertAdjacentElement(allocator);
+    try demoInsertAdjacentHTML(allocator);
+    try demoSetInnerHTML(allocator);
+    try demoSuspiciousAttributes(allocator);
 }
+
 fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
@@ -2946,13 +2959,14 @@ fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 // const css_content = try zexplore_example_com(gpa, "https://www.example.com");
 
 /// use `parseFromString` or `createDocFromString` to create a document with a BODY element populated by the input string
-fn demoSimpleParsing(_: std.mem.Allocator) !void {
+/// ==========================================================
+fn simpleParsingsMethods(gpa: std.mem.Allocator) !void {
     const html = "<div></div>";
     {
         const doc = try z.createDocument();
         defer z.destroyDocument(doc);
 
-        try z.parseFromString(doc, html);
+        try z.insertHTML(doc, html);
 
         const body = z.bodyNode(doc).?;
         const div = z.firstChild(body).?;
@@ -2960,13 +2974,26 @@ fn demoSimpleParsing(_: std.mem.Allocator) !void {
         std.debug.assert(std.mem.eql(u8, tag_name, "DIV"));
     }
     {
-        const doc = try z.createDocFromString(html);
+        const doc = try z.parseHTML(gpa, html);
         defer z.destroyDocument(doc);
 
         const body = z.bodyNode(doc).?;
         const div = z.firstChild(body).?;
         const tag_name = z.nodeName_zc(div);
         std.debug.assert(std.mem.eql(u8, tag_name, "DIV"));
+    }
+    {
+        var parser = try z.DOMParser.init(gpa);
+        defer parser.deinit();
+
+        const doc = try parser.parseFromString(html);
+        defer z.destroyDocument(doc);
+        const body = z.bodyNode(doc).?;
+        const div = z.firstChild(body).?;
+        const tag_name = z.nodeName_zc(div);
+        std.debug.assert(std.mem.eql(u8, tag_name, "DIV"));
+        const header = z.headElement(doc);
+        try std.testing.expect(header != null);
     }
 }
 
@@ -2985,11 +3012,11 @@ fn demoNormalizer(gpa: std.mem.Allocator) !void {
     // const expected = "<div><!-- comment --><p>Content</p><pre>  preserve  this  </pre></div>";
     const expected_noc = "<div><p>Content</p><pre>  preserve  this  </pre></div>";
 
-    const doc = try z.createDocument();
-    defer z.destroyDocument(doc);
+    var parser = try z.DOMParser.init(gpa);
+    defer parser.deinit();
 
-    // -- DOM-based normalization
-    try z.parseFromString(doc, messy_html);
+    const doc = try parser.parseFromString(messy_html);
+    defer z.destroyDocument(doc);
 
     const body_elt1 = z.bodyElement(doc).?;
     try z.minifyDOMwithOptions(
@@ -3010,10 +3037,10 @@ fn demoNormalizer(gpa: std.mem.Allocator) !void {
         .{ .remove_comments = true },
     );
     defer gpa.free(cleaned);
-    z.print("\n\n Normalized sring: {s}\n\n", .{cleaned});
+    // z.print("\n\n Normalized sring: {s}\n\n", .{cleaned});
     std.debug.assert(std.mem.eql(u8, cleaned, result1));
 
-    try z.parseFromString(doc, cleaned);
+    _ = try parser.parseFromString(cleaned);
     const body_elt2 = z.bodyElement(doc).?;
     const result2 = try z.innerHTML(gpa, body_elt2);
     defer gpa.free(result2);
@@ -3050,13 +3077,13 @@ fn demoTemplate(allocator: std.mem.Allocator) !void {
 
     // var parser = try z.Parser.init(allocator);
     // defer parser.deinit();
-    const doc = try z.createDocFromString(html);
+    const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
     const body = z.bodyNode(doc).?;
 
     const template_elt = z.getElementById(
-        body,
+        doc,
         "productrow",
     ).?;
 
@@ -3094,10 +3121,11 @@ fn demoTemplate(allocator: std.mem.Allocator) !void {
 }
 
 fn demoParserReUse(allocator: std.mem.Allocator) !void {
-    var parser = try z.Parser.init(allocator);
+    z.print("\n\n=== Demonstrate parser engine reuse -------------\n\n", .{});
+    var parser = try z.DOMParser.init(allocator);
     defer parser.deinit();
 
-    const doc = try parser.parse("<div><ul></ul></div>", .none);
+    const doc = try parser.parseFromString("<div><ul></ul></div>");
     defer z.destroyDocument(doc);
 
     const body = z.bodyNode(doc).?;
@@ -3118,16 +3146,13 @@ fn demoParserReUse(allocator: std.mem.Allocator) !void {
             .none,
         );
     }
-    // z.print("\n === Demonstrate parser engine reuse ===\n\n", .{});
-    // z.print("\n Insert interpolated <li id=\"item-X\"> Item X</li>\n\n", .{});
 
-    // try z.prettyPrint(allocator, body);
-    // z.print("\n\n", .{});
+    try z.prettyPrint(allocator, body);
 }
 
 /// use Stream engine
 fn demoStreamParser(allocator: std.mem.Allocator) !void {
-    z.print("\n === Demonstrate parsing streams on-the-fly ===\n\n", .{});
+    z.print("\n\n === Demonstrate parsing streams on-the-fly ---------\n\n", .{});
     var streamer = try z.Stream.init(allocator);
     defer streamer.deinit();
 
@@ -3168,14 +3193,14 @@ fn demoStreamParser(allocator: std.mem.Allocator) !void {
     // const html_node = z.documentRoot(html_doc).?;
 
     // z.print("\n\n", .{});
-    // try z.prettyPrint(allocator, html_node);
+    try z.prettyPrint(allocator, z.documentRoot(html_doc).?);
     // z.print("\n\n", .{});
     // try z.printDocStruct(html_doc);
     // z.print("\n\n", .{});
 }
 
 fn demoInsertAdjacentElement(allocator: std.mem.Allocator) !void {
-    const doc = try z.createDocFromString(
+    const doc = try z.parseHTML(allocator,
         \\<div id="container">
         \\ <p id="target">Target</p>
         \\</div>
@@ -3184,7 +3209,7 @@ fn demoInsertAdjacentElement(allocator: std.mem.Allocator) !void {
     errdefer z.destroyDocument(doc);
 
     const body = z.bodyNode(doc).?;
-    const target = z.getElementById(body, "target").?;
+    const target = z.getElementById(doc, "target").?;
 
     const before_end_elem = try z.createElementWithAttrs(
         doc,
@@ -3235,7 +3260,7 @@ fn demoInsertAdjacentElement(allocator: std.mem.Allocator) !void {
 
     const html = try z.outerHTML(allocator, z.nodeToElement(body).?);
     defer allocator.free(html);
-    // z.print("\n=== Demonstrate insertAdjacentElement ===\n\n", .{});
+    z.print("\n\n=== Demonstrate insertAdjacentElement ----------- \n\n", .{});
     // try z.prettyPrint(allocator, body);
 
     // Normalize whitespace for clean comparison
@@ -3248,8 +3273,7 @@ fn demoInsertAdjacentElement(allocator: std.mem.Allocator) !void {
 }
 
 fn demoInsertAdjacentHTML(allocator: std.mem.Allocator) !void {
-    // const allocator = std.testing.allocator;
-    const doc = try z.createDocFromString(
+    const doc = try z.parseHTML(allocator,
         \\<div id="container">
         \\    <p id="target">Target</p>
         \\</div>
@@ -3258,14 +3282,13 @@ fn demoInsertAdjacentHTML(allocator: std.mem.Allocator) !void {
     errdefer z.destroyDocument(doc);
 
     const body = z.bodyNode(doc).?;
-    const target = z.getElementById(body, "target").?;
+    const target = z.getElementById(doc, "target").?;
 
     try z.insertAdjacentHTML(
         allocator,
         target,
         .beforeend,
         "<span class=\"before end\"></span>",
-        .none,
     );
 
     try z.insertAdjacentHTML(
@@ -3273,7 +3296,6 @@ fn demoInsertAdjacentHTML(allocator: std.mem.Allocator) !void {
         target,
         "afterend",
         "<span class=\"after end\">After End</span>",
-        .none,
     );
 
     try z.insertAdjacentHTML(
@@ -3281,7 +3303,6 @@ fn demoInsertAdjacentHTML(allocator: std.mem.Allocator) !void {
         target,
         "afterbegin",
         "<span class=\"after begin\"></span>",
-        .none,
     );
 
     try z.insertAdjacentHTML(
@@ -3289,7 +3310,6 @@ fn demoInsertAdjacentHTML(allocator: std.mem.Allocator) !void {
         target,
         "beforebegin",
         "<span class=\"before begin\"></span>",
-        .none,
     );
 
     // Show result after insertAdjacentElement
@@ -3312,26 +3332,21 @@ fn demoInsertAdjacentHTML(allocator: std.mem.Allocator) !void {
 
 /// `setInnerHTML` and `innerHTML` with `normalize` for easy comparison (remove whitespace only text nodes)
 fn demoSetInnerHTML(allocator: std.mem.Allocator) !void {
-    // z.print("\n=== Demonstrate setInnerHTML & innerHTML ===\n\n", .{});
+    z.print("\n\n=== Demonstrate setInnerHTML & innerHTML ------- \n\n", .{});
     const doc = try z.createDocument();
     defer z.destroyDocument(doc);
-    try z.parseFromString(doc, "<div id=\"target\"></div>");
+    try z.insertHTML(doc, "<div id=\"target\"></div>");
 
-    const body = z.bodyNode(doc).?;
-    const div = z.getElementById(body, "target").?;
+    const div = z.getElementById(doc, "target").?;
 
-    const new_div_elt = try z.setInnerHTML(div, "<p class=\"new-content\">New Content</p>");
+    try z.setInnerHTML(div, "<p class=\"new-content\">New Content</p>");
 
     // try z.prettyPrint(allocator,z.documentRoot(doc).?);
 
-    try z.minifyDOM(allocator, new_div_elt);
-
     // Show result after setInnerHTML
-    const html_new_div = try z.innerHTML(
-        allocator,
-        new_div_elt,
-    );
+    const html_new_div = try z.innerHTML(allocator, div);
     defer allocator.free(html_new_div);
+    try z.minifyDOM(allocator, z.nodeToElement(z.documentRoot(doc).?).?);
 
     const expected = "<p class=\"new-content\">New Content</p>";
 
@@ -3361,7 +3376,7 @@ fn demoSearchComparison(allocator: std.mem.Allocator) !void {
         \\</div>
     ;
 
-    const doc = try z.createDocFromString(test_html);
+    const doc = try z.parseHTML(allocator, test_html);
     defer z.destroyDocument(doc);
     const body = z.bodyNode(doc).?;
     // try z.prettyPrint(allocator, body);
@@ -3455,14 +3470,14 @@ fn demoSuspiciousAttributes(allocator: std.mem.Allocator) !void {
         \\</div>
     ;
 
-    const doc = try z.createDocFromString(malicious_content);
+    const doc = try z.parseHTML(allocator, malicious_content);
     defer z.destroyDocument(doc);
 
     const body = z.bodyNode(doc).?;
     // const div = z.firstChild(body).?;
     // const text = z.firstChild(div).?;
     // const com = z.nextSibling(text).?;
-    z.print("\n=== Demo visualiazing DOM and sanitization ------\n", .{});
+    z.print("\n\n=== Demo visualiazing DOM and sanitization ------\n", .{});
     try z.prettyPrint(allocator, body);
     z.print("\n", .{});
 
