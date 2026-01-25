@@ -62,64 +62,65 @@ pub fn main() !void {
 
     setupSignalHandler();
 
-    try js_framework_1_bench(allocator);
-    try js_framework_2_bench(allocator);
-    try js_framework_3_bench(allocator);
-    try bench(allocator);
-    try extractScript(allocator);
+    // try extractScript(allocator);
+    // try simpleESM(allocator);
+    // try importModule(allocator);
+    // try js_framework_1_bench(allocator);
+    // try js_framework_2_bench(allocator);
+    // try js_framework_3_bench(allocator);
+    // try bench(allocator);
 
+    try inline_crud_css_js(allocator);
     try stylesheet_txt(allocator);
     try stylesheet_style_tag(allocator);
-    try additional_stylesheet_style_tag(allocator);
-    // try inline_crud_css_js(allocator);
+    try link_and_script(allocator);
     // try eventListeners(allocator);
 
     // try transplante(allocator);
     // try fullCycle(allocator);
     // // try customPointClass(allocator);
     // // try demoPoint2Class(allocator);
-    try domParser(allocator);
-    try buildDOM(allocator);
+    // try domParser(allocator);
+    // try buildDOM(allocator);
 
-    try eventListener(allocator);
+    // try eventListener(allocator);
     // // try performance2(allocator);
     // // // try demoCustomPointClass(allocator);
     // // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
-    try first_QuickJS_test(allocator);
-    try getValueFromQJSinZig(allocator);
-    try simpleESM(allocator);
+    // try first_QuickJS_test(allocator);
+    // try getValueFromQJSinZig(allocator);
 
-    try importModule(allocator);
-    try test_event_loop(allocator);
-    try promise_scope(allocator);
-    try async_task_sequence_AB(allocator);
-    try async_task_sequence_ABCDEFGH(allocator);
-    try execute_Simple_Script_In_HTML(allocator);
-    try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
-    try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
-    try firstJSONPass(allocator);
-    try simplifiedJSONPass(allocator);
-    try async_CSV_Tuple_Parser(allocator);
-    try JS_Proxy_And_Generators(allocator);
-    try async_Fetch_API_Demo(allocator);
-    try async_CSV_JSON_Parser(allocator);
+    // try test_event_loop(allocator);
+    // try promise_scope(allocator);
+    // try async_task_sequence_AB(allocator);
+    // try async_task_sequence_ABCDEFGH(allocator);
+    // try execute_Simple_Script_In_HTML(allocator);
+    // try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
+    // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
+    // try firstJSONPass(allocator);
+    // try simplifiedJSONPass(allocator);
+    // try async_CSV_Tuple_Parser(allocator);
+    // try JS_Proxy_And_Generators(allocator);
+    // try async_Fetch_API_Demo(allocator);
+    // try async_CSV_JSON_Parser(allocator);
 
-    try demoWorker(allocator);
+    // try demoWorker(allocator);
 
-    // lexb =====
+    // // lexb =====
 
-    try simpleParsingsMethods(allocator);
-    try demoNormalizer(allocator);
-    try demoTemplate(allocator);
-    try demoParserReUse(allocator);
-    try demoStreamParser(allocator);
-    try demoInsertAdjacentElement(allocator);
-    try demoInsertAdjacentHTML(allocator);
-    try demoSetInnerHTML(allocator);
-    try demoSuspiciousAttributes(allocator);
+    // try simpleParsingsMethods(allocator);
+    // try demoNormalizer(allocator);
+    // try demoTemplate(allocator);
+    // try demoParserReUse(allocator);
+    // try demoStreamParser(allocator);
+    // try demoInsertAdjacentElement(allocator);
+    // try demoInsertAdjacentHTML(allocator);
+    // try demoSetInnerHTML(allocator);
+    // try demoSuspiciousAttributes(allocator);
 }
 
 fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
+    z.print("\n=== CSS-in-JS:1 with INLINE styles--------------------------------\n\n", .{});
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
 
@@ -143,7 +144,7 @@ fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
         \\ div_style.removeProperty('font-size');
         \\ ({color: color_str, width: width_str});
     ;
-    const result = try engine.eval(script, "test.js");
+    const result = try engine.eval(script, "test.js", .global);
     defer engine.ctx.freeValue(result);
 
     const color_val = engine.ctx.getPropertyStr(result, "color");
@@ -161,6 +162,8 @@ fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
 }
 
 fn stylesheet_txt(allocator: std.mem.Allocator) !void {
+    z.print("\n=== CSS-in-JS:1 with 'external' parse|attach_Stylesheet() --------------------------------\n\n", .{});
+
     const html =
         \\<p id="pid">Some text</p>
         \\<form>
@@ -193,11 +196,14 @@ fn stylesheet_txt(allocator: std.mem.Allocator) !void {
 
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
+
     const bridge = engine.dom;
     try engine.loadHTML(html);
+
     try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
     try z.attachStylesheet(bridge.doc, bridge.stylesheet);
-    const val = try engine.eval(js, "style_test.js");
+
+    const val = try engine.eval(js, "style_test.js", .global);
     defer engine.ctx.freeValue(val);
 
     const p_el = z.getElementById(bridge.doc, "pid").?;
@@ -209,10 +215,12 @@ fn stylesheet_txt(allocator: std.mem.Allocator) !void {
 
     try std.testing.expectEqualStrings("red", computed_color.?);
     try std.testing.expectEqualStrings("30px", computed_font_size.?);
-    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+
+    try z.printDOM(allocator, engine.dom.doc, "CSS external");
 }
 
 fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
+    z.print("\n=== CSS-in-JS:2 with <style>Stylesheet --------------------------------\n\n", .{});
     const html =
         \\<html>
         \\  <head>
@@ -248,7 +256,7 @@ fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
     defer engine.deinit();
     const bridge = engine.dom;
     try engine.loadHTML(html);
-    const val = try engine.eval(js, "style_test.js");
+    const val = try engine.eval(js, "style_test.js", .global);
     defer engine.ctx.freeValue(val);
 
     const p_el = z.getElementById(bridge.doc, "pid").?;
@@ -261,56 +269,33 @@ fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("green", computed_color.?);
     try std.testing.expectEqualStrings("20px", computed_font_size.?);
     try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
-    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+    try z.printDOM(allocator, engine.dom.doc, "CSS with <style> element");
 }
 
-fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
+fn link_and_script(allocator: std.mem.Allocator) !void {
+    z.print("\n=== CSS-in-JS:3 <script> anad <link> with 'external' file --------------------------------\n\n", .{});
     const html =
         \\<html>
         \\  <head>
-        \\    <style>
-        \\      #pid {  color: green;  font-size: 20px; }
-        \\    </style>
+        \\    <link rel="stylesheet" href="style.css">
         \\  </head>
         \\  <body>
         \\      <p id="pid">Some text</p>
         \\      <form>
         \\          <button type="button">Change text</button>
         \\      </form>
+        \\      <script type="module" src="main.js"></script>
         \\  </body>
         \\</html>
-    ;
-
-    const css =
-        \\#pid {
-        \\  color: red;
-        \\  font-size: 30px;
-        \\}
-    ;
-
-    const js =
-        \\function changeText() {
-        \\  const p = document.getElementById("pid")
-        \\  p.textContent = "New text"
-        \\}
-        \\const btn = document.querySelector("button");
-        \\btn.addEventListener("click", () => {
-        \\  changeText();
-        \\});
-        \\
-        \\ btn.dispatchEvent(new Event('click'), (e) => {
-        \\  console.log("Button clicked");
-        \\});
     ;
 
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
     const bridge = engine.dom;
     try engine.loadHTML(html);
-    try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
-    try z.attachStylesheet(bridge.doc, bridge.stylesheet);
-    const val = try engine.eval(js, "style_test.js");
-    defer engine.ctx.freeValue(val);
+    try engine.loadExternalStylesheets("js/js-and-css/");
+    try engine.executeScripts(allocator, "js/js-and-css");
+    try engine.run();
 
     const p_el = z.getElementById(bridge.doc, "pid").?;
 
@@ -319,10 +304,11 @@ fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
     defer if (computed_color) |c| allocator.free(c);
     defer if (computed_font_size) |c| allocator.free(c);
 
-    try std.testing.expectEqualStrings("red", computed_color.?);
-    try std.testing.expectEqualStrings("30px", computed_font_size.?);
+    try std.testing.expectEqualStrings("green", computed_color.?);
+    try std.testing.expectEqualStrings("20px", computed_font_size.?);
     try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
-    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+
+    try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
 
 fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
@@ -347,7 +333,7 @@ fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
     const c_code = try allocator.dupeZ(u8, code);
     defer allocator.free(c_code);
 
-    const val = try engine.eval(c_code, "bench_script");
+    const val = try engine.eval(c_code, "bench_script", .global);
     engine.ctx.freeValue(val);
 
     // const clicker_js = @embedFile("../js/js-fram/clicker.js");
@@ -358,7 +344,7 @@ fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
     defer allocator.free(clicker_js);
     const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
     defer allocator.free(clicker_c_code);
-    const clicker = try engine.eval(clicker_c_code, "clicker.js");
+    const clicker = try engine.eval(clicker_c_code, "clicker.js", .global);
     engine.ctx.freeValue(clicker);
 
     const end = std.time.nanoTimestamp();
@@ -385,9 +371,9 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
     const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
     defer allocator.free(code);
 
-    const c_code = try allocator.dupeZ(u8, code);
-    defer allocator.free(c_code);
-    const val = try engine.eval(c_code, "bench_script");
+    // const c_code = try allocator.dupeZ(u8, code);
+    // defer allocator.free(c_code);
+    const val = try engine.eval(code, "bench_script", .global);
     engine.ctx.freeValue(val);
 
     // const driver_js = @embedFile("../js/js-fram/driver.js");
@@ -396,9 +382,9 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
     defer driver_file.close();
     const driver_js = try driver_file.readToEndAlloc(allocator, 1024 * 10);
     defer allocator.free(driver_js);
-    const driver_c_code = try allocator.dupeZ(u8, driver_js);
-    defer allocator.free(driver_c_code);
-    const driver = try engine.eval(driver_c_code, "driver.js");
+    // const driver_c_code = try allocator.dupeZ(u8, driver_js);
+    // defer allocator.free(driver_c_code);
+    const driver = try engine.eval(driver_js, "driver.js", .global);
     engine.ctx.freeValue(driver);
 
     const end = std.time.nanoTimestamp();
@@ -426,9 +412,9 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
     const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
     defer allocator.free(code);
 
-    const c_code = try allocator.dupeZ(u8, code);
-    defer allocator.free(c_code);
-    const val = try engine.eval(c_code, "bench_script");
+    // const c_code = try allocator.dupeZ(u8, code);
+    // defer allocator.free(c_code);
+    const val = try engine.eval(code, "bench_script", .global);
     engine.ctx.freeValue(val);
 
     const clicker_file = try std.fs.cwd().openFile("js/js-fram-3/clicker.js", .{});
@@ -439,9 +425,9 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
     // const clicker_js = @embedFile("../js/js-fram/clicker.js");
     // The click script <-- needs to be in "/src" to work
 
-    const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
-    defer allocator.free(clicker_c_code);
-    const clicker = try engine.eval(clicker_c_code, "clicker.js");
+    // const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
+    // defer allocator.free(clicker_c_code);
+    const clicker = try engine.eval(clicker_js, "clicker.js", .global);
     engine.ctx.freeValue(clicker);
 
     const end = std.time.nanoTimestamp();
@@ -473,7 +459,7 @@ fn bench(allocator: std.mem.Allocator) !void {
     for (c_scripts) |code| {
         // const c_code = try allocator.dupeZ(u8, code);
         // defer allocator.free(c_code);
-        const val = engine.eval(code, "bench_script") catch |err| {
+        const val = engine.eval(code, "bench_script", .global) catch |err| {
             std.debug.print("Script Error: {}\n", .{err});
             return err;
         };
@@ -519,20 +505,7 @@ fn extractScript(allocator: std.mem.Allocator) !void {
         \\</html>
     ;
     try engine.loadHTML(html);
-    const c_scripts = try engine.getC_Scripts();
-    defer {
-        for (c_scripts) |code| allocator.free(code);
-        allocator.free(c_scripts);
-    }
-
-    // try engine.run();
-    z.print("{}\n", .{c_scripts.len});
-    for (c_scripts) |code| {
-        const val = try engine.eval(code, "inline_script");
-        defer engine.ctx.freeValue(val);
-        const res = try engine.ctx.toInt32(val);
-        z.print("[Zig] Script result: {d}\n\n", .{res});
-    }
+    try engine.executeScripts(allocator, "");
 }
 
 fn eventListener(allocator: std.mem.Allocator) !void {
@@ -756,7 +729,7 @@ fn domParser(allocator: std.mem.Allocator) !void {
         \\ pDoc.body.innerHTML;
     ;
 
-    const val = try engine.eval(script, "script");
+    const val = try engine.eval(script, "script", .global);
     defer engine.ctx.freeValue(val);
     const html = try engine.ctx.toZString(val);
     defer engine.ctx.freeZString(html);
@@ -789,7 +762,7 @@ fn buildDOM(allocator: std.mem.Allocator) !void {
 
     z.print("\n=== perseHTML -------------------------\n\n", .{});
 
-    const val = try engine.eval(script, "script");
+    const val = try engine.eval(script, "script", .global);
     defer engine.ctx.freeValue(val);
     const result_str = try engine.ctx.toZString(val);
     defer engine.ctx.freeZString(result_str);
@@ -971,41 +944,11 @@ fn getValueFromQJSinZig(allocator: std.mem.Allocator) !void {
 }
 
 // ESM Modules ----------------------------------------------------------------
-// [TODO] Rework using ScriptEngine
+
 fn simpleESM(allocator: std.mem.Allocator) !void {
-    const rt = try zqjs.Runtime.init(allocator);
-    defer {
-        rt.runGC();
-        rt.deinit();
-    }
-
-    // !! Enable the Module Loader (reads from disk)
-    rt.setModuleLoader();
-
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-
-    var loop = try EventLoop.create(allocator, rt);
-    defer loop.destroy();
-
-    // Allocates, zeroes classes, and links to context automatically.
-    const rc = try RCtx.create(allocator, ctx, loop);
-    defer rc.destroy();
-
     z.print("\n=== ESM Module Demo --------------------------------\n\n", .{});
-
-    // find where to register the DOM Class ID
-    var dom = try DOMBridge.init(allocator, ctx);
-    defer dom.deinit();
-    try dom.installAPIs();
-    try loop.install(ctx);
-
-    // Manual Install 'console.log' works
-    // const console = ctx.newObject();
-    // _ = try ctx.setPropertyStr(console, "log", ctx.newCFunction(js_consoleLog, "log", 1));
-    // const global = ctx.getGlobalObject();
-    // defer ctx.freeValue(global);
-    // _ = try ctx.setPropertyStr(global, "console", console);
+    var engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
 
     const source = std.fs.cwd().readFileAlloc(allocator, "js/app.js", 1024 * 1024) catch |err| {
         z.print("Error: Could not find 'app.js' in current directory.\n", .{});
@@ -1013,24 +956,8 @@ fn simpleESM(allocator: std.mem.Allocator) !void {
     };
     defer allocator.free(source);
 
-    //    .type = .module tells QuickJS to treat top-level variables as scoped,
-    //    enable strict mode, and allow 'import' statements.
-    const val = try ctx.eval(
-        source,
-        "js/apps.js",
-        .{ .type = .module },
-    );
-    defer ctx.freeValue(val);
-
-    if (ctx.isException(val)) {
-        _ = ctx.checkAndPrintException();
-    }
-
-    // Execute Module Jobs
-    // Imports are resolved asynchronously. You must pump the job queue.
-    while ((try rt.executePendingJob()) != null) {}
-
-    try loop.run(.Script);
+    try engine.runModule(source, "js/app.js");
+    try engine.run();
 }
 
 fn importModule(allocator: std.mem.Allocator) !void {
@@ -1046,19 +973,11 @@ fn importModule(allocator: std.mem.Allocator) !void {
         z.print("Error: Could not  find 'js/import_test.js'\n", .{});
         return err;
     };
-
     defer allocator.free(source);
 
-    const c_source = try allocator.dupeZ(u8, source);
-    defer allocator.free(c_source);
-
-    // 2. Evaluate as Module
-    // Our loader will see 'import ... from "js/vendor/es-toolkit.min.js"'
-    // and automatically load that file too.
-    const val = try engine.evalModule(c_source, "import_test.js");
-    defer engine.ctx.freeValue(val);
-
     // Imports are resolved asynchronously
+    try engine.runModule(source, "import_test.js");
+
     try engine.run();
 }
 
@@ -1228,7 +1147,7 @@ fn async_task_sequence_AB(allocator: std.mem.Allocator) !void {
     z.print("\n=== Async Task Sequence 1 --------------------------------\n\n", .{});
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
-    const val = try engine.eval(src, "test.js");
+    const val = try engine.eval(src, "test.js", .global);
     try engine.run();
     defer engine.ctx.freeValue(val);
 
@@ -1275,7 +1194,7 @@ fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator) !void {
     const engine = try ScriptEngine.init(allocator);
     defer engine.deinit();
 
-    const val = try engine.eval(src, "test.js");
+    const val = try engine.eval(src, "test.js", .global);
     defer engine.ctx.freeValue(val);
     try engine.run(); // EventLoop run
 
@@ -1310,7 +1229,7 @@ fn test_event_loop(allocator: std.mem.Allocator) !void {
         \\globalThis.count; // Should be 0 initially
     ;
 
-    const result1 = try engine.eval(timeout_test, "<timeout_test>");
+    const result1 = try engine.eval(timeout_test, "<timeout_test>", .global);
     defer engine.ctx.freeValue(result1);
     try engine.run();
 
@@ -1334,7 +1253,7 @@ fn test_event_loop(allocator: std.mem.Allocator) !void {
         \\intervalId;
     ;
 
-    const result2 = try engine.eval(interval_test, "<interval_test>");
+    const result2 = try engine.eval(interval_test, "<interval_test>", .global);
     defer engine.ctx.freeValue(result2);
 
     // Test 3: Multiple timers with different delays
@@ -1347,7 +1266,7 @@ fn test_event_loop(allocator: std.mem.Allocator) !void {
         \\"Timers scheduled";
     ;
 
-    const result3 = try engine.eval(multiple_timers, "<multiple>");
+    const result3 = try engine.eval(multiple_timers, "<multiple>", .global);
     defer engine.ctx.freeValue(result3);
 
     const scheduled_msg = z.qjs.JS_ToCString(engine.ctx.ptr, result3);
@@ -1412,12 +1331,12 @@ fn test_event_loop(allocator: std.mem.Allocator) !void {
 
     // _ = async_test_0; // Avoid unused variable warning
 
-    const result4 = try engine.eval(async_test_0, "<async0>");
+    const result4 = try engine.eval(async_test_0, "<async0>", .global);
     defer engine.ctx.freeValue(result4);
 
-    const result5 = try engine.eval(async_test_1, "<async1>");
+    const result5 = try engine.eval(async_test_1, "<async1>", .global);
     defer engine.ctx.freeValue(result5);
-    const result6 = try engine.eval(async_test_2, "<async2>");
+    const result6 = try engine.eval(async_test_2, "<async2>", .global);
     // catch |err| {
     //     // 1. Check if QuickJS has an exception pending
     //     if (ctx.checkAndPrintException()) {
@@ -1851,7 +1770,7 @@ fn simplifiedJSONPass(allocator: std.mem.Allocator) !void {
         \\}
     ;
 
-    const res = try engine.eval(js_code, "init.js");
+    const res = try engine.eval(js_code, "init.js", .global);
     engine.ctx.freeValue(res);
 
     const result = try engine.call(User, "upgradeUser", my_user);
@@ -1935,7 +1854,7 @@ fn async_CSV_JSON_Parser(allocator: std.mem.Allocator) !void {
         \\}
     ;
 
-    const res = try engine.eval(script, "test.js");
+    const res = try engine.eval(script, "test.js", .global);
     engine.ctx.freeValue(res);
     try engine.run();
 }
@@ -1986,7 +1905,7 @@ fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator) !void {
 
     // Or map it to objects if you really need to pass it to a UI library
     // const uiData = rows.map(([id, name, price]) => ({ id, name, price }));
-    const res = try engine.eval(script, "test2.js");
+    const res = try engine.eval(script, "test2.js", .global);
     engine.ctx.freeValue(res);
     try engine.run();
 }
@@ -2031,7 +1950,7 @@ fn async_Fetch_API_Demo(allocator: std.mem.Allocator) !void {
         \\  });
     ;
 
-    const res = try engine.eval(script, "<fetch>");
+    const res = try engine.eval(script, "<fetch>", .global);
     engine.ctx.freeValue(res);
     try engine.run();
 }
@@ -3927,7 +3846,7 @@ fn serverSideRenderingBenchmark(allocator: std.mem.Allocator) !void {
         \\      .post-title { color: #333; font-size: 1.5rem; }
         \\      .post-meta { color: #666; font-size: 0.9rem; }
         \\      /* More CSS rules... */
-        \\    </style
+        \\    </
         \\    <script src="/js/analytics.js"></>
         \\  </head>
         \\  <body class="blog-layout">

@@ -408,8 +408,9 @@ pub const Runtime = struct {
     }
 
     // Module system- ================================================================
-    /// Enable ES6 Module Loading (import/export).
-    /// Supports relative paths and automatically appends '.js' if missing.
+
+    // /// Enable ES6 Module Loading (import/export).
+    // /// Supports relative paths and automatically appends '.js' if missing.
     pub fn enableModuleLoader(self: *Runtime) void {
         // We pass the Runtime's allocator to the C-callbacks via the opaque pointer
         qjs.JS_SetModuleLoaderFunc(
@@ -419,8 +420,26 @@ pub const Runtime = struct {
             @ptrCast(&self.allocator),
         );
     }
+    // pub fn enableModuleLoader(
+    //     self: *Runtime,
+    //     firewall_cb: ?*const fn (?*qjs.JSContext, [*c]const u8, [*c]const u8, ?*anyopaque) [*c]u8,
+    //     loader: ?*const fn (?*qjs.JSContext, [*c]const u8, ?*anyopaque) ?*qjs.JSModuleDef,
+    // ) void {
+    //     // We pass the Runtime's allocator to the C-callbacks via the opaque pointer
+    //     qjs.JS_SetModuleLoaderFunc(
+    //         self.ptr,
+    //         firewall_cb, //js_module_normalize,
+    //         loader, //js_module_loader,
+    //         @ptrCast(&self.allocator),
+    //     );
+    // }
 
-    fn js_module_normalize(ctx: ?*qjs.JSContext, base_ptr: [*c]const u8, req_name_ptr: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) [*c]u8 {
+    pub fn js_module_normalize(
+        ctx: ?*qjs.JSContext,
+        base_ptr: [*c]const u8,
+        req_name_ptr: [*c]const u8,
+        opaque_ptr: ?*anyopaque,
+    ) callconv(.c) [*c]u8 {
         if (base_ptr == null) {
             return qjs.js_strdup(ctx, req_name_ptr);
         }
@@ -467,20 +486,20 @@ pub const Runtime = struct {
         return true;
     }
 
-    // The C-Compatible Loader Function
-    fn js_module_loader(ctx: ?*qjs.JSContext, module_name_ptr: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef {
-        // Recover the context wrapper: we passed '&self.allocator' in setModuleLoader
+    // Standard Module Loader: Reads file from disk -> Compiles to Module
+    ///
+    /// Generic utility that can be used by any QuickJS app.
+    pub fn js_module_loader(ctx: ?*qjs.JSContext, module_name_ptr: [*c]const u8, opaque_ptr: ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef {
         const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
         const allocator = allocator_ptr.*;
         // Zig slice for module name
         const module_name_slice = std.mem.span(module_name_ptr);
 
-        // Sanity check: prevent directory traversal in production!
-
+        // read source file
         const source = std.fs.cwd().readFileAllocOptions(
             allocator,
             module_name_slice,
-            1024 * 1024,
+            1024 * 1024 * 5,
             null, // No specific alignment
             std.mem.Alignment.fromByteUnits(1),
             0 // Sentinel value: \0
@@ -489,46 +508,36 @@ pub const Runtime = struct {
             _ = qjs.JS_ThrowReferenceError(ctx, "Failed to load module '%s': %s", module_name_ptr, @errorName(err).ptr);
             return null;
         };
-
         defer allocator.free(source);
 
-        // const source = std.fs.cwd().readFileAlloc(
-        //     allocator,
-        //     name_span,
-        //     1_000_000,
-        // ) catch {
-        //     _ = qjs.JS_ThrowReferenceError(ctx, "Could not load module '%s'", module_name);
-        //     return null;
-        // };
-        // defer allocator.free(source);
-
-        // Compile the module
-        // JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY
-
-        const flags = qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY;
+        // compile
         const func_val = qjs.JS_Eval(
             ctx,
             source.ptr,
             source.len,
             module_name_ptr,
-            flags,
+            qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
         );
 
         if (qjs.JS_IsException(func_val)) return null;
-
         return @ptrCast(func_val.u.ptr);
     }
 
-    /// Set the module loader function for ES6 modules.
+    /// Set the module loader function for ES6 import modules.
     ///
     /// Tells QuickJS to use the provided internal loaders for ES6 modules and uses the provided allocator from the Runtime.
+    ///
     /// Runs once.
-    pub fn setModuleLoader(self: *const Runtime) void {
+    pub fn setModuleLoader(
+        self: *const Runtime,
+        normalize_func: ?*const fn (?*qjs.JSContext, [*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) [*c]u8,
+        loader_func: ?*const fn (?*qjs.JSContext, [*c]const u8, ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef,
+    ) void {
         // We pass the Runtime's allocator as the 'opaque' user data
         qjs.JS_SetModuleLoaderFunc(
             self.ptr,
-            js_module_normalize,
-            js_module_loader,
+            normalize_func, //js_module_normalize,
+            loader_func,
             @constCast(&self.allocator),
         );
     }
@@ -993,6 +1002,7 @@ pub const Context = packed struct {
 
         const result = qjs.JS_Eval(self.ptr, input.ptr, input.len, filename, c_flags);
         if (qjs.JS_IsException(result)) {
+            _ = self.checkAndPrintException();
             return error.Exception;
         } else {
             return result;

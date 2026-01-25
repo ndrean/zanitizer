@@ -2,6 +2,10 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
+const security = @import("js_security.zig");
+
+const isSafePath = security.isSafePath;
+const js_secure_module_normalize = security.js_secure_module_normalize;
 
 // Import your sub-systems
 const EventLoop = @import("event_loop.zig").EventLoop;
@@ -57,7 +61,13 @@ pub const ScriptEngine = struct {
         self.rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
         self.rt.setCanBlock(false);
 
-        self.rt.enableModuleLoader();
+        // Security firewall
+        // self.rt.enableModuleLoader();
+        self.rt.setModuleLoader(
+            js_secure_module_normalize,
+            // zqjs.Runtime.js_module_normalize,
+            zqjs.Runtime.js_module_loader,
+        );
 
         self.ctx = zqjs.Context.init(self.rt);
 
@@ -139,13 +149,20 @@ pub const ScriptEngine = struct {
 
     /// Evaluate code and returns the raw JS Value.
     /// ⚠️ The Caller OWNS this value and must free it with engine.ctx.freeValue(val).
-    pub fn eval(self: *ScriptEngine, code: [:0]const u8, filename: [:0]const u8) !zqjs.Value {
+    pub fn eval(self: *ScriptEngine, code: []const u8, filename: []const u8, eval_type: zqjs.Context.EvalType) !zqjs.Value {
         self.interrupt_deadline = std.time.milliTimestamp() + TIMEOUT_MS;
 
+        const c_code = try self.allocator.dupeZ(u8, code);
+        defer self.allocator.free(c_code);
+
+        const c_name = try self.allocator.dupeZ(u8, filename);
+        defer self.allocator.free(c_name);
+
+        // type = .global
         const val = self.ctx.eval(
-            code,
-            filename,
-            .{ .type = .global },
+            c_code,
+            c_name,
+            .{ .type = eval_type },
         ) catch {
             // The exception is still in the context, print it before returning
             _ = self.ctx.checkAndPrintException();
@@ -260,16 +277,22 @@ pub const ScriptEngine = struct {
         return parsed;
     }
 
-    pub fn evalModule(self: *ScriptEngine, code: [:0]const u8, filename: [:0]const u8) !zqjs.Value {
+    pub fn evalModule(self: *ScriptEngine, code: []const u8, filename: []const u8) !zqjs.Value {
         const flags: c_int = @intCast(qjs.JS_EVAL_TYPE_MODULE);
+
+        const c_code = self.allocator.dupeZ(u8, code) catch return error.OutOfMemory;
+        defer self.allocator.free(c_code);
+
+        const c_name = self.allocator.dupeZ(u8, filename) catch return error.OutOfMemory;
+        defer self.allocator.free(c_name);
 
         // Raw call to avoid wrapper defaults if wrapper.eval forces GLOBAL
         const len = code.len;
         const val = qjs.JS_Eval(
             self.ctx.ptr,
-            code.ptr,
+            c_code.ptr,
             len,
-            filename.ptr,
+            c_name.ptr,
             flags,
         );
 
@@ -281,6 +304,7 @@ pub const ScriptEngine = struct {
     }
 
     /// Extracts content from all inline <script> tags.
+    ///
     /// Caller owns the returned slice and the strings inside it.
     pub fn getC_Scripts(self: *ScriptEngine) ![][:0]const u8 {
         // 1. Find all script tags
@@ -328,6 +352,11 @@ pub const ScriptEngine = struct {
         try z.initDocumentCSS(bridge.doc, true);
 
         try z.insertHTML(bridge.doc, html);
+        // try z.applySanitization(
+        //     self.allocator,
+        //     z.documentRoot(bridge.doc).?,
+        //     .strict,
+        // );
         try z.loadStyleTags(self.allocator, bridge.doc, bridge.css_style_parser);
         // try z.attachStylesheet(bridge.doc, bridge.stylesheet);
     }
@@ -343,6 +372,170 @@ pub const ScriptEngine = struct {
         // or updates the document if Lexbor tracks versioning.
         try z.attachStylesheet(bridge.doc, bridge.stylesheet);
     }
+
+    pub fn loadFileModule(self: *ScriptEngine, path: []const u8) !void {
+        const source = std.fs.cwd().readFileAlloc(self.allocator, path, 1024 * 1024 * 10) catch {
+            return error.FileNotFound;
+        };
+        defer self.allocator.free(source);
+
+        const c_path = try self.allocator.dupeZ(u8, path);
+        defer self.allocator.free(c_path);
+
+        const c_code = try self.allocator.dupeZ(u8, source);
+        defer self.allocator.free(c_code);
+
+        return self.runModule(c_code, c_path);
+    }
+
+    pub fn runModule(self: *ScriptEngine, code: []const u8, filename: []const u8) !void {
+        const c_module = try self.allocator.dupeZ(u8, code);
+        defer self.allocator.free(c_module);
+
+        const c_name = try self.allocator.dupeZ(u8, filename);
+        defer self.allocator.free(c_name);
+
+        const module_obj = self.ctx.eval(c_module, c_name, .{
+            .type = .module,
+            .compile_only = true,
+        }) catch |err| {
+            _ = self.ctx.checkAndPrintException();
+            return err;
+        };
+
+        const result = self.ctx.evalFunction(module_obj);
+        defer self.ctx.freeValue(result);
+
+        if (self.ctx.isException(result)) {
+            _ = self.ctx.checkAndPrintException(); // Runtime error during execution
+            return error.JSException;
+        }
+    }
+
+    /// [host] Process all <script> tags in the document (Inline and Remote)
+    /// [host] Process all <script> tags in the document (Inline and Remote)
+    pub fn executeScripts(self: *ScriptEngine, allocator: std.mem.Allocator, base_dir: []const u8) !void {
+        const scripts = try z.querySelectorAll(self.allocator, self.dom.doc, "script");
+        defer allocator.free(scripts);
+        if (scripts.len == 0) return; // Handle no scripts case gracefully
+
+        for (scripts, 0..) |script, i| {
+            var code: []const u8 = undefined;
+            var filename: []u8 = undefined;
+            var needs_free = false;
+
+            // Define the defer logic at the loop scope, so it runs AFTER execution
+            defer if (needs_free) self.allocator.free(filename);
+
+            // CASE A: External Script (<script src="...">)
+            if (z.getAttribute_zc(script, "src")) |src| {
+                const full_path = try std.fs.path.resolve(self.allocator, &.{ base_dir, src });
+                defer self.allocator.free(full_path);
+
+                // 1. Security Check
+                if (!isSafePath(self.allocator, full_path)) {
+                    z.print("Security Alert: Blocked script loading for '{s}'\n", .{src});
+                    continue;
+                }
+
+                // 2. Read File
+                code = std.fs.cwd().readFileAlloc(self.allocator, full_path, 1024 * 1024 * 5) catch |err| {
+                    z.print("Failed to load script '{s}': {any}\n", .{ full_path, err });
+                    continue;
+                };
+
+                // 3. Set Filename (CRITICAL FOR IMPORTS)
+                // We use 'src' (e.g., "main.js") combined with base_dir logic if possible,
+                // or just the clean relative path.
+                // Ideally, pass the path relative to CWD so stack traces look nice.
+                // Here we dupe 'src' because imports inside it are relative to IT.
+                // Better: Use the relative path from CWD to the file.
+                filename = try std.fs.path.join(self.allocator, &.{ base_dir, src });
+                needs_free = true;
+            }
+            // CASE B: Inline Script
+            else {
+                const text = z.textContent_zc(z.elementToNode(script));
+                if (text.len == 0) continue;
+
+                // Inline scripts don't need FS reads, but we duplicate text to own the memory (if needed)
+                // For z.textContent_zc, it returns a slice from Lexbor's tree.
+                // We MUST duplicate it because Lexbor might move memory, but for 'code' passed to runModule it's usually fine.
+                // However, runModule expects us to own 'code' if we free it?
+                // Actually runModule dupes it immediately. So we just need valid memory.
+                code = text; // Just borrow from Lexbor
+
+                filename = try std.fmt.allocPrint(self.allocator, "inline-script-{d}.js", .{i});
+                needs_free = true;
+            }
+
+            // Cleanup code if we allocated it (External scripts only in this logic)
+            // But wait, for external scripts 'code' is allocated by readFileAlloc.
+            // For inline, it's borrowed. We need to handle 'code' cleanup too.
+            const code_needs_free = (z.getAttribute_zc(script, "src") != null);
+            defer if (code_needs_free) self.allocator.free(code);
+
+            // EXECUTE
+            const type_attr = z.getAttribute_zc(script, "type");
+            const is_module = if (type_attr) |t| std.mem.eql(u8, t, "module") else false;
+
+            if (is_module) {
+                // Returns Promise (ignored here)
+                self.runModule(code, filename) catch |err| {
+                    z.print("Module execution failed: {any}\n", .{err});
+                };
+            } else {
+                // Classic Script
+                // We must use .global type
+                const val = self.eval(code, filename, .global) catch |err| {
+                    z.print("Script execution failed: {any}\n", .{err});
+                    continue;
+                };
+                self.ctx.freeValue(val);
+            }
+        }
+    }
+
+    /// Scans the DOM for <link rel="stylesheet"> and loads them securely
+    pub fn loadExternalStylesheets(self: *ScriptEngine, base_dir: []const u8) !void {
+        const links = try z.querySelectorAll(self.allocator, self.dom.doc, "link");
+        defer self.allocator.free(links);
+
+        for (links) |link_el| {
+            const rel = z.getAttribute_zc(link_el, "rel") orelse continue;
+            if (!std.mem.eql(u8, rel, "stylesheet")) continue;
+
+            const href = z.getAttribute_zc(link_el, "href") orelse continue;
+
+            // Resolve & Secure Check
+            const full_path = try std.fs.path.resolve(self.allocator, &.{ base_dir, href });
+            defer self.allocator.free(full_path);
+
+            if (!isSafePath(self.allocator, full_path)) {
+                std.debug.print("Security Alert: Blocked CSS loading for '{s}'\n", .{href});
+                continue;
+            }
+
+            const css_content = std.fs.cwd().readFileAlloc(self.allocator, full_path, 1024 * 1024 * 5) catch continue;
+            defer self.allocator.free(css_content);
+
+            try self.loadCSS(css_content);
+        }
+    }
+
+    // Helper to check for remote URLs
+    fn isRemote(url: []const u8) bool {
+        return std.mem.startsWith(u8, url, "http:") or
+            std.mem.startsWith(u8, url, "https:") or
+            std.mem.startsWith(u8, url, "//");
+    }
+
+    // // Helper to check LFI (Local File Inclusion)
+    // fn isPathSafe(allocator: std.mem.Allocator, full_path: []const u8) bool {
+    //     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return false;
+    //     defer allocator.free(cwd);
+    //     return std.mem.startsWith(u8, full_path, cwd);
+    // }
 };
 
 // ============================================================================
@@ -370,77 +563,94 @@ fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
 }
 
 // ============================================================================
-/// [security] Custom Module Normalizer
-/// This acts as a firewall for 'import'. It runs BEFORE the file is loaded.
-fn js_secure_module_normalize(
-    ctx: ?*qjs.JSContext,
-    module_base_name: ?[*:0]const u8,
-    module_name: ?[*:0]const u8,
-    opaque_ptr: ?*anyopaque,
-) callconv(.C) ?[*:0]u8 {
-    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-    const allocator = allocator_ptr.*;
 
-    const name = module_name orelse return null;
-    const name_slice = std.mem.span(name);
+// fn js_secure_module_normalize(
+//     ctx: ?*qjs.JSContext,
+//     module_base_name: [*c]const u8,
+//     module_name: [*c]const u8,
+//     opaque_ptr: ?*anyopaque,
+// ) callconv(.c) [*c]u8 {
+//     const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+//     const allocator = allocator_ptr.*;
 
-    // (Block Remote: SSRF)
-    if (std.mem.startsWith(u8, name_slice, "http:") or
-        std.mem.startsWith(u8, name_slice, "https:") or
-        std.mem.startsWith(u8, name_slice, "//"))
-    {
-        return null;
-    }
+//     // 1. Safety Checks
+//     if (module_name == null) return null;
+//     const name_slice = std.mem.span(module_name);
 
-    // (Resolve Path: fiex nested)
-    // We must resolve relative to base_name to support folder structures
-    var resolved_path: []u8 = undefined;
+//     // 2. BLOCK REMOTE (SSRF Prevention)
+//     if (std.mem.startsWith(u8, name_slice, "http:") or
+//         std.mem.startsWith(u8, name_slice, "https:") or
+//         std.mem.startsWith(u8, name_slice, "//"))
+//     {
+//         _ = qjs.JS_ThrowReferenceError(ctx, "Security: Remote imports blocked '%s'", module_name);
+//         return null;
+//     }
 
-    if (module_base_name) |base| {
-        const base_slice = std.mem.span(base);
-        // If base is empty or ".", handle appropriately
-        const base_dir = if (base_slice.len > 0) std.fs.path.dirname(base_slice) orelse "." else ".";
-        resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch return null;
-    } else {
-        // Entry point or absolute import
-        resolved_path = std.fs.path.resolve(allocator, &.{name_slice}) catch return null;
-    }
-    // We defer freeing this ZIG string, because we will copy it to a C string below
-    defer allocator.free(resolved_path);
+//     // 3. RESOLVE PATH (Fixes nested imports)
+//     var resolved_path: []u8 = undefined;
 
-    // (LFI Prevention)
-    // Ensure the resolved path is actually inside our CWD (or specific root)
-    const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return null;
-    defer allocator.free(cwd);
+//     // Logic: resolve(base_dir, requested_name)
+//     // Note: std.fs.path.resolve returns an ABSOLUTE LOGICAL path
+//     if (module_base_name) |base| {
+//         const base_slice = std.mem.span(base);
+//         // Ensure we have a valid directory from the base
+//         const base_dir = if (base_slice.len > 0) std.fs.path.dirname(base_slice) orelse "." else ".";
+//         resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch return null;
+//     } else {
+//         resolved_path = std.fs.path.resolve(allocator, &.{name_slice}) catch return null;
+//     }
+//     defer allocator.free(resolved_path);
 
-    // If resolved path doesn't start with CWD, it's trying to escape (e.g. ../../)
-    // Note: realpathAlloc removes . and .. so this comparison is safe
-    if (!std.mem.startsWith(u8, resolved_path, cwd)) {
-        // std.debug.print("Blocked LFI attempt: {s}\n", .{resolved_path});
-        return null;
-    }
+//     // 4. SANDBOX CHECK (LFI Prevention)
+//     var is_safe = false;
 
-    // (Convenience)
-    // If file doesn't exist, try adding .js
-    var final_path = resolved_path; // Borrow the slice
-    var final_path_owned: ?[]u8 = null; // Track if we alloc a new string
+//     if (std.fs.path.isAbsolute(resolved_path)) {
+//         // CASE A: Absolute Path (e.g. /home/user/project/js/math.js)
+//         // Must start with the CWD's absolute path.
+//         if (std.process.getCwdAlloc(allocator)) |cwd| {
+//             defer allocator.free(cwd);
+//             if (std.mem.startsWith(u8, resolved_path, cwd)) {
+//                 is_safe = true;
+//             }
+//         } else |_| {
+//             // If we can't determine CWD, fail closed.
+//             is_safe = false;
+//         }
+//     } else {
+//         // CASE B: Relative Path (e.g. js/math.js)
+//         // Must NOT start with ".." (which means escaping up).
+//         // Note: 'resolve' collapses inner "..", so checking the prefix is sufficient.
+//         if (!std.mem.startsWith(u8, resolved_path, "..")) {
+//             is_safe = true;
+//         }
+//     }
 
-    // Simple access check
-    const file_exists = if (std.fs.cwd().access(final_path, .{})) |_| true else |_| false;
+//     if (!is_safe) {
+//         _ = qjs.JS_ThrowReferenceError(ctx, "Security: Path traversal detected '%s'", resolved_path.ptr);
+//         return null;
+//     }
 
-    if (!file_exists) {
-        // Try appending .js
-        const with_ext = std.fmt.allocPrint(allocator, "{s}.js", .{final_path}) catch return null;
-        if (std.fs.cwd().access(with_ext, .{}) != error.AccessError) {
-            final_path = with_ext; // Re-point slice
-            final_path_owned = with_ext; // Mark for freeing
-        } else {
-            allocator.free(with_ext);
-            // Let it fail naturally if neither exists, so JS gets the original error
-        }
-    }
-    defer if (final_path_owned) |p| allocator.free(p);
+//     // 5. EXTENSION HANDLING
+//     var final_path = resolved_path;
+//     var final_path_owned: ?[]u8 = null;
 
-    //  Allocate to QuickJS memory
-    return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
-}
+//     // Check if exact file exists
+//     const exact_exists = if (std.fs.cwd().access(final_path, .{})) |_| true else |_| false;
+
+//     if (!exact_exists) {
+//         // Try appending .js
+//         const with_ext = std.fmt.allocPrint(allocator, "{s}.js", .{final_path}) catch return null;
+//         if (std.fs.cwd().access(with_ext, .{}) == error.FileNotFound) {
+//             allocator.free(with_ext);
+//             // Both failed. Throw error so user knows WHY it failed.
+//             _ = qjs.JS_ThrowReferenceError(ctx, "Module not found: '%s' (looked in %s)", module_name, final_path.ptr);
+//             return null;
+//         }
+//         final_path = with_ext;
+//         final_path_owned = with_ext;
+//     }
+//     defer if (final_path_owned) |p| allocator.free(p);
+
+//     // 6. RETURN TO QUICKJS
+//     return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
+// }

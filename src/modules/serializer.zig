@@ -503,7 +503,10 @@ pub fn printDocStruct(doc: *z.HTMLDocument) !void {
 /// defer z.destroyDocument(doc);
 /// try z.printDOM(allocator, doc);
 /// ```
-pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument) !void {
+pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
+    if (title.len > 0) {
+        try z.documentSetTitle(doc, title);
+    }
     const root = z.documentRoot(doc) orelse return;
     try prettyPrint(allocator, root);
 }

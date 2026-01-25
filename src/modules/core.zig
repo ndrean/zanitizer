@@ -57,6 +57,12 @@ extern "c" fn lxb_dom_node_last_child_noi(node: *z.DomNode) ?*z.DomNode;
 
 extern "c" fn lexbor_html_interface_document_wrapper(doc: *z.HTMLDocument) ?*z.DomDocument;
 
+// return title with whitespace collapsed
+extern "c" fn lxb_html_document_title(doc: *z.HTMLDocument, len: *usize) ?[*:0]const u8;
+// returns raw title tet as-is
+extern "c" fn lxb_html_document_title_raw(doc: *z.HTMLDocument, len: *usize) [*:0]const u8;
+extern "c" fn lxb_html_document_title_set(doc: *z.HTMLDocument, title: [*]const u8, len: usize) c_int;
+
 //===========================================================================
 // CORE DOCUMENT FUNCTIONS
 //===========================================================================
@@ -285,6 +291,31 @@ pub fn headNode(doc: *z.HTMLDocument) ?*z.DomNode {
     return @ptrCast(head_element);
 }
 
+/// [core] Get document title (zero-copy, lexbor-owned memory)
+pub fn documentGetTitle(doc: *z.HTMLDocument) ?[]const u8 {
+    var len: usize = 0;
+    const ptr = lxb_html_document_title_raw(doc, &len);
+    if (len == 0) return null;
+    return ptr[0..len];
+}
+
+pub fn documentSetTitle(doc: *z.HTMLDocument, title: []const u8) !void {
+    if (lxb_html_document_title_set(doc, title.ptr, title.len) != 0) return error.SetTitleError;
+}
+
+pub fn setMeta(doc: *z.HTMLDocument, attrs: []const z.AttributePair) !void {
+    const meta = try z.createElement(doc, "meta");
+    const elt: *z.HTMLElement = @ptrCast(meta);
+    for (attrs) |attr| {
+        const name = attr.name;
+        const value = attr.value;
+        try z.setAttribute(elt, name, value);
+    }
+
+    const head = z.headElement(doc) orelse return error.NoHead;
+    appendChild(z.elementToNode(head), z.elementToNode(elt));
+}
+
 // [Helper] Polymorphic getter for .body
 /// Accepts a generic Node, checks if it is a Document, and returns the body.
 pub fn documentBody(node: *z.DomNode) ?*z.HTMLElement {
@@ -335,6 +366,20 @@ test "headElement - parseHTML creates full document" {
     defer z.destroyDocument(doc3);
     try std.testing.expect(headElement(doc3) != null);
     try std.testing.expect(bodyElement(doc3) != null);
+}
+
+test "meta" {
+    const allocator = std.testing.allocator;
+    const doc = try z.parseHTML(allocator, "");
+    defer destroyDocument(doc);
+    try setMeta(doc, &.{ .{ .name = "name", .value = "description" }, .{ .name = "content", .value = "test" } });
+    const meta = try z.querySelector(allocator, z.documentRoot(doc).?, "meta");
+    const description = z.getAttribute_zc(meta.?, "name");
+    try std.testing.expectEqualStrings("description", description.?);
+    const content = z.getAttribute_zc(meta.?, "content");
+    try std.testing.expectEqualStrings("test", content.?);
+
+    // try z.printDOM(allocator, doc, "meta test   ");
 }
 
 test "headElement - DOMParser.parseFromString creates full document" {

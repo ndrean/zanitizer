@@ -68,6 +68,25 @@ pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
     "data:image/svg",
 };
 
+/// Check if an attribute is in the dangerous blacklist
+/// Includes explicit event handlers (onclick, etc.) and dangerous framework attributes
+pub fn isDangerousAttribute(attr: []const u8) bool {
+    // Check explicit blacklist
+    for (DANGEROUS_ATTRIBUTES) |dangerous| {
+        if (std.mem.eql(u8, attr, dangerous)) {
+            return true;
+        }
+    }
+    // Also catch any on* event handlers not in the list
+    if (std.mem.startsWith(u8, attr, "on") and attr.len > 2) {
+        // Check if it looks like an event handler (onX where X is lowercase letter)
+        if (attr.len > 2 and std.ascii.isAlphabetic(attr[2])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Centralized list of supported web frameworks and their attribute prefixes
 /// This is the single source of truth for framework attribute validation
 pub const FRAMEWORK_SPECS = [_]FrameworkSpec{

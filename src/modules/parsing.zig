@@ -14,7 +14,7 @@ const testing = std.testing;
 const print = std.debug.print;
 
 /// Apply sanitization to a node based on sanitization options
-fn applySanitization(allocator: std.mem.Allocator, node: *z.DomNode, sanitizer: z.SanitizerMode) !void {
+pub fn applySanitization(allocator: std.mem.Allocator, node: *z.DomNode, sanitizer: z.SanitizerMode) !void {
     switch (sanitizer) {
         .none => {},
         .minimum => try z.sanitizeWithMode(allocator, node, .minimum),

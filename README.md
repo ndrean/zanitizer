@@ -55,8 +55,8 @@ zxp loc/index.html loc/bench.js loc/test-runner.js
   </body>
 </html>
 ```
-</details>
 
+</details>
 
 <details><summary>jsdom runner script:</summary>
 
@@ -108,7 +108,6 @@ fn bench(allocator: std.mem.Allocator) !void {
 </details>
 
 **Results**
-
 
 | #rows     | Zexplorer | jsdom  |
 | --------- | --------- | ------ |
@@ -687,6 +686,101 @@ fn js_framework_bench(allocator: std.mem.Allocator) !void {
 
 ---
 
+### CSS and JS executed (using file sources)
+
+```css
+/* js/js-and-css/style.css */
+#pid {
+  color: green;
+  font-size: 20px;
+}
+```
+
+```js
+// js/js-and-css/main.js
+const changeText = () =>{
+  const p = document.getElementById("pid");
+  p.textContent = "New text";
+}
+
+const btn = document.querySelector("button");
+btn.addEventListener("click", () => {
+  changeText();
+});
+
+btn.dispatchEvent(new Event("click"), (e) => {
+  console.log("Button clicked");
+});
+```
+
+```html
+<!-- js/js-and-css/index.html -->
+<html>
+  <head>
+    <link rel="stylesheet" href="style.css">
+  </head>
+ <body>
+  <p id="pid">Some text</p>
+  <form>
+    <button type="button">Change text</button>
+  </form>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
+```
+
+The following `Zig` code runs successfully:
+
+```zig
+fn css_js_external_file(allocator: std.mem.Allocator) !void {
+  const engine = try ScriptEngine.init(allocator);
+    defer engine.deinit();
+    const bridge = engine.dom;
+    try engine.loadHTML(html);
+    try engine.loadExternalStylesheets("js/js-and-css/");
+    try engine.executeScripts(allocator, "js/js-and-css");
+    try engine.run();
+
+    const p_el = z.getElementById(bridge.doc, "pid").?;
+
+    const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+    const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+    defer if (computed_color) |c| allocator.free(c);
+    defer if (computed_font_size) |c| allocator.free(c);
+
+    try std.testing.expectEqualStrings("green", computed_color.?);
+    try std.testing.expectEqualStrings("20px", computed_font_size.?);
+    try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
+
+    try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
+}
+```
+
+ and you have a view on the DOM:
+
+```txt
+<html>
+  <head>
+    <link rel="stylesheet" href="style.css">
+    <title>
+      "link-stylesheet and Script with 'external' file"
+    </title>
+  </head>
+  <body>
+    <p id="pid">
+      "New text"
+    </p>
+    <form>
+      <button type="button">
+        "Change text"
+      </button>
+    </form>
+    <script type="module" src="main.js">
+    </script>
+  </body>
+</html>
+```
+
 ### Using Templates
 
 <details><summary>index2.html with templates</summary>
@@ -1038,7 +1132,6 @@ fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
 </details>
 
 **Results**
-
 
 | Operation        | zexplorer | jsdom   | Chrome (Approx) |
 | ---------------- | --------- | ------- | --------------- |
@@ -1454,7 +1547,6 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 
 </details>
 
-
 **Results**
 
 | Operation            | zexplorer | jsdom   |
@@ -1487,7 +1579,7 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 **Expectations**:
 
 - instant start, low footprint
-- No JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts. 
+- No JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts.
 - For long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig`: embed native Zig functions for this! (data processing, CSV parsing, batch and send to Zig...)
 
 ## Use cases
@@ -1960,7 +2052,7 @@ Your document now contains this HTML:
 
 [TODO] Ref in examples
 
-<hr>
+---
 
 ## Example: scrap the web and explore a page
 
@@ -2002,7 +2094,7 @@ test "scrap example.com" {
 }
 ```
 
-<br>
+---
 
 You will get a colourful print in your terminal, where the attributes, values, html elements get coloured.
 
@@ -2011,7 +2103,6 @@ You will get a colourful print in your terminal, where the attributes, values, h
 <img width="965" height="739" alt="Screenshot 2025-09-09 at 13 54 12" src="https://github.com/user-attachments/assets/ff770cdb-95ab-468b-aa5e-5bbc30cf6649" />
 
 </details>
-<br>
 
 You will also see the value of the `href` attribute of a the first `<a>` link:
 
@@ -2052,7 +2143,7 @@ a:link, a:visited {
 
 </details>
 
-<hr>
+---
 
 ## HTMX Server-Side Rendering with Template Interpolation
 
@@ -2130,7 +2221,8 @@ post?" hx-target="closest .blog-post">
 ```
 
 </details>
-<br>
+
+---
 
 The code below parses the whole HTML delivered when the client connects, and starts the parser and css engine.
 
@@ -2251,7 +2343,7 @@ count);
 }
 ```
 
-<hr>
+---
 
 ## Example: scan a page for potential malicious content
 
@@ -2284,9 +2376,11 @@ try z.prettyPrint(allocator, body);
 
 You get the following output in your terminal.
 
-<br>
+---
+
 <img width="931" height="499" alt="Screenshot 2025-09-09 at 16 08 19" src="https://github.com/user-attachments/assets/45cfea8b-73d9-401e-8c23-457e0a6f92e1" />
-<br>
+
+---
 
 We can then run a _sanitization_ process against the DOM, so you get a context where the attributes are whitelisted.
 
@@ -2297,11 +2391,9 @@ try z.prettyPrint(allocator, body);
 
 The result is shown below.
 
-<br>
 <img width="900" height="500" alt="Screenshot 2025-09-09 at 16 11 30" src="https://github.com/user-attachments/assets/ff7fa678-328b-495a-8a81-2ff465141be3" />
 
-<br>
-<hr>
+---
 
 ## Example: using the parser with sanitization option
 
@@ -2393,7 +2485,7 @@ chunk:  </tbody></table></body></html>;
   <img src="https://github.com/ndrean/z-html/blob/main/images/tree-table.png" width="300" alt="image"/>
 </p>
 
-<hr>
+---
 
 ## Example: Search examples and attributes and classList DOMTOkenList like
 

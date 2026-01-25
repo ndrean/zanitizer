@@ -180,6 +180,9 @@ pub const bodyNode = lxb.bodyNode;
 pub const documentBody = lxb.documentBody;
 pub const headElement = lxb.headElement;
 pub const headNode = lxb.headNode;
+pub const setMeta = lxb.setMeta;
+pub const documentGetTitle = lxb.documentGetTitle;
+pub const documentSetTitle = lxb.documentSetTitle;
 
 pub const cloneNode = lxb.cloneNode;
 pub const importNode = lxb.importNode;
@@ -335,7 +338,8 @@ pub const templateContentFirstElementChild = frag_temp.templateContentFirstEleme
 // Debug printing utilities
 pub const printDocStruct = serialize.printDocStruct;
 pub const prettyPrint = serialize.prettyPrint;
-pub const ppDoc = serialize.ppDoc;
+pub const printDOM = serialize.printDOM;
+pub const ppDoc = serialize.ppDoc; // Alias for printDOM
 //======================================================================================
 // Colouring and syntax highlighting
 pub const ElementStyles = colours.ElementStyles;
@@ -354,6 +358,7 @@ pub const SanitizerOptions = sanitize.SanitizerOptions;
 pub const sanitizeNode = sanitize.sanitizeNode;
 pub const sanitizeWithMode = sanitize.sanitizeWithMode;
 pub const sanitizeStrict = sanitize.sanitizeStrict;
+pub const applySanitization = parse.applySanitization;
 pub const sanitizePermissive = sanitize.sanitizePermissive;
 pub const isCustomElement = sanitize.isCustomElement;
 
@@ -361,6 +366,7 @@ pub const AttrSpec = specs.AttrSpec;
 pub const ElementSpec = specs.ElementSpec;
 pub const FrameworkSpec = specs.FrameworkSpec;
 pub const DANGEROUS_ATTRIBUTES = specs.DANGEROUS_ATTRIBUTES;
+pub const isDangerousAttribute = specs.isDangerousAttribute;
 pub const DANGEROUS_JS_PATTERNS = specs.DANGEROUS_JS_PATTERNS;
 pub const FRAMEWORK_SPECS = specs.FRAMEWORK_SPECS;
 pub const validateUri = specs.validateUri;

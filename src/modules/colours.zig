@@ -318,46 +318,29 @@ pub const SyntaxStyle = struct {
     pub const danger = Style.INVERSE_RED; // for <script>, <style> content
 };
 
-/// Check if the attribute is a known HTML attribute,
+/// Check if the attribute is a known HTML attribute (fallback when no element context)
 ///
-/// Check if attribute is known, including ARIA, data-*, or framework attributes (Phoenix, Alpine, Vue, HTMX)
-/// This is a fallback function when no element context is available
+/// This is used by the syntax highlighter when we don't have element context.
+/// Delegates to html_spec for all validation - no duplication.
+///
+/// Priority:
+/// 1. Reject dangerous event handlers (onclick, onload, etc.)
+/// 2. Accept framework prefixes (hx-, phx-, x-, v-, aria-, data-, etc.)
+/// 3. Accept standard HTML attributes
 pub fn isKnownAttribute(attr: []const u8) bool {
-    // Primary: Use unified specification
-    if (isStandardHtmlAttribute(attr)) {
+    // 1. Reject dangerous event handlers first
+    if (html_spec.isDangerousAttribute(attr)) {
+        return false;
+    }
+
+    // 2. Check framework prefixes (HTMX, Phoenix, Alpine, Vue, aria-*, data-*, etc.)
+    if (html_spec.getFrameworkSpec(attr) != null) {
         return true;
     }
 
-    // Fallback: Handle dynamic framework attribute patterns when no element context available
-    // These are now mostly covered by the unified spec, but kept for backwards compatibility
-
-    // ARIA and data attributes (handled by unified spec prefix matching)
-    if (std.mem.startsWith(u8, attr, "aria-") and attr.len > 5) {
-        return true; // aria-*
-    }
-    if (std.mem.startsWith(u8, attr, "data-") and attr.len > 5) {
-        return true; // data-*
-    }
-
-    // Framework dynamic attributes (x-on:click, v-bind:value, etc.)
-    if (std.mem.startsWith(u8, attr, "x-on:") or std.mem.startsWith(u8, attr, "x-bind:")) {
-        return true; // Alpine.js dynamic
-    }
-    if (std.mem.startsWith(u8, attr, "v-on:") or std.mem.startsWith(u8, attr, "v-bind:")) {
-        return true; // Vue.js dynamic
-    }
-    if (std.mem.startsWith(u8, attr, "phx-value-")) {
-        return true; // Phoenix dynamic
-    }
-
-    // HTMX (not yet in unified spec)
-    if (std.mem.startsWith(u8, attr, "hx-") and attr.len > 3) {
-        return true; // hx-*
-    }
-
-    // Explicitly reject dangerous event handlers
-    if (std.mem.startsWith(u8, attr, "on") and attr.len > 2) {
-        return false; // onclick, onload, etc.
+    // 3. Check if it's a standard HTML attribute used on any element
+    if (isStandardHtmlAttribute(attr)) {
+        return true;
     }
 
     return false;

@@ -225,7 +225,7 @@ fn syncStyleAttribute(allocator: std.mem.Allocator, element: *z.HTMLElement) !vo
 pub fn loadStyleTags(
     allocator: std.mem.Allocator,
     doc: *z.HTMLDocument,
-    parser: *z.CssStyleParser, // Removed the 'sst' argument
+    parser: *z.CssStyleParser,
 ) !void {
     const style_elements = try z.querySelectorAll(allocator, z.documentRoot(doc).?, "style");
     defer allocator.free(style_elements);

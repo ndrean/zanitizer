@@ -556,50 +556,50 @@ test "normalization for display: removal of comments don't leave empty text node
     try testing.expectEqualStrings(expected, result);
 }
 // TODO
-// test "template normalize" {
-//     const allocator = testing.allocator;
+test "template normalize" {
+    const allocator = testing.allocator;
 
-//     const html =
-//         \\<div>
-//         \\  <p>Before template</p>
-//         \\  <template id="test">
-//         \\  <!-- comment in template -->
-//         \\  <span>  Template content  </span><em>  </em>
-//         \\  <strong>  Bold text</strong>
-//         \\  </template>
-//         \\  <p>After template</p>
-//         \\</div>
-//     ;
+    const html =
+        \\<div>
+        \\  <p>Before template</p>
+        \\  <template id="test">
+        \\  <!-- comment in template -->
+        \\  <span>  Template content  </span><em>  </em>
+        \\  <strong>  Bold text</strong>
+        \\  </template>
+        \\  <p>After template</p>
+        \\</div>
+    ;
 
-//     const doc = try z.parseHTML(allocator, html);
-//     defer z.destroyDocument(doc);
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
 
-//     const root = z.documentRoot(doc).?;
+    const root = z.documentRoot(doc).?;
 
-//     try z.minifyDOMwithOptions(
-//         allocator,
-//         z.nodeToElement(root).?,
-//         .{
-//             .skip_comments = true,
-//         },
-//     );
+    try z.minifyDOMwithOptions(
+        allocator,
+        z.nodeToElement(root).?,
+        .{
+            .skip_comments = true,
+        },
+    );
 
-//     const serialized = try z.outerHTML(allocator, z.nodeToElement(root).?);
-//     defer allocator.free(serialized);
+    const serialized = try z.outerHTML(allocator, z.nodeToElement(root).?);
+    defer allocator.free(serialized);
 
-//     const expected =
-//         \\<html><head></head><body><div>
-//         \\  <p>Before template</p>
-//         \\  <template id="test">
-//         \\
-//         \\  <span>  Template content  </span><em>  </em>
-//         \\  <strong>  Bold text</strong>
-//         \\  </template>
-//         \\  <p>After template</p></div></body></html>
-//     ;
+    const expected =
+        \\<html><head></head><body><div>
+        \\  <p>Before template</p>
+        \\  <template id="test">
+        \\  
+        \\  <span>  Template content  </span><em>  </em>
+        \\  <strong>  Bold text</strong>
+        \\  </template>
+        \\  <p>After template</p></div></body></html>
+    ;
 
-//     try testing.expectEqualStrings(expected, serialized);
-// }
+    try testing.expectEqualStrings(expected, serialized);
+}
 
 test "string vs DOM minification" {
     const allocator = testing.allocator;
