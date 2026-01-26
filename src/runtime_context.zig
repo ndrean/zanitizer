@@ -4,13 +4,15 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+const js_security = @import("js_security.zig");
 
 pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
     loop: *EventLoop,
     dom_bridge: ?*anyopaque = null, // !!! circular ref with ScriptEngine, so use anyopaque
+    sandbox: *js_security.Sandbox, // ScriptEngine owns this
+    sandbox_root: []const u8, // for worker threads
     global_document: ?*z.HTMLDocument = null,
-
     // Worker-specific data (null for main thread)
     worker_core: ?*anyopaque = null,
 
@@ -33,7 +35,13 @@ pub const RuntimeContext = struct {
 
     /// Install this struct into the JS Context
     /// Static Factory: Allocates, Initializes, and Installs the Context state.
-    pub fn create(allocator: std.mem.Allocator, ctx: zqjs.Context, loop: *EventLoop) !*RuntimeContext {
+    pub fn create(
+        allocator: std.mem.Allocator,
+        ctx: zqjs.Context,
+        loop: *EventLoop,
+        sandbox: *js_security.Sandbox,
+        sandbox_root: []const u8,
+    ) !*RuntimeContext {
         const self = try allocator.create(RuntimeContext);
 
         // Initialize fields (ensures .classes is zeroed)
@@ -41,6 +49,8 @@ pub const RuntimeContext = struct {
             .allocator = allocator,
             .loop = loop,
             .classes = .{},
+            .sandbox = sandbox,
+            .sandbox_root = sandbox_root,
         };
 
         // Install into QuickJS immediately

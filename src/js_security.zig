@@ -389,7 +389,13 @@ pub fn js_secure_module_loader(
 
     // 2. Read Content (Standard)
     const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
-    const source = file.readToEndAlloc(sandbox.allocator, MAX_SIZE) catch {
+    const source = file.readToEndAllocOptions(
+        sandbox.allocator,
+        MAX_SIZE,
+        null,
+        std.mem.Alignment.fromByteUnits(1),
+        0,
+    ) catch {
         _ = qjs.JS_ThrowInternalError(ctx, "Module too large or read failed");
         return null;
     };

@@ -540,6 +540,220 @@ pub const CssSanitizer = struct {
         // Allow other URLs if configured
         return self.options.allow_css_urls;
     }
+    /// Sanitize a full CSS stylesheet (with selectors and at-rules)
+    ///
+    /// This is for sanitizing <style> element content or external CSS files.
+    /// Unlike inline styles, stylesheets contain selectors, at-rules, etc.
+    ///
+    /// Returns a sanitized stylesheet string. The caller owns the returned memory.
+    pub fn sanitizeStylesheet(self: *@This(), input: []const u8) anyerror![]const u8 {
+        if (input.len == 0) return "";
+
+        var result: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer result.deinit(self.allocator);
+
+        var i: usize = 0;
+        while (i < input.len) {
+            // Skip whitespace
+            while (i < input.len and std.ascii.isWhitespace(input[i])) {
+                try result.append(self.allocator, input[i]);
+                i += 1;
+            }
+            if (i >= input.len) break;
+
+            // Check for at-rules
+            if (input[i] == '@') {
+                const at_rule_end = self.findAtRuleEnd(input[i..]);
+                const at_rule = input[i .. i + at_rule_end];
+
+                if (self.isAtRuleSafe(at_rule)) {
+                    // Process the at-rule - for @media/@supports, sanitize the contents
+                    if (self.isBlockAtRule(at_rule)) {
+                        try self.processBlockAtRule(&result, at_rule);
+                    } else {
+                        // Simple at-rule like @charset - pass through
+                        try result.appendSlice(self.allocator, at_rule);
+                    }
+                }
+                // Dangerous at-rules are completely dropped
+
+                i += at_rule_end;
+                continue;
+            }
+
+            // Check for comments
+            if (i + 1 < input.len and input[i] == '/' and input[i + 1] == '*') {
+                const comment_end = std.mem.indexOf(u8, input[i + 2 ..], "*/");
+                if (comment_end) |end| {
+                    // Skip comment entirely
+                    i += end + 4;
+                } else {
+                    // Unterminated comment - skip rest
+                    break;
+                }
+                continue;
+            }
+
+            // Find the next rule block (selector { declarations })
+            const block_start = std.mem.indexOfScalar(u8, input[i..], '{');
+            if (block_start) |start| {
+                const selector = input[i .. i + start];
+                i += start + 1;
+
+                // Find matching closing brace
+                const block_end = self.findMatchingBrace(input[i..]);
+                if (block_end) |end| {
+                    const declarations = input[i .. i + end];
+
+                    // Sanitize the selector and declarations
+                    if (self.isSelectorSafe(selector)) {
+                        try result.appendSlice(self.allocator, std.mem.trim(u8, selector, &std.ascii.whitespace));
+                        try result.appendSlice(self.allocator, " { ");
+
+                        // Sanitize declarations using the simple filter
+                        // (simpleCssFilter is more reliable for stylesheet content)
+                        const sanitized_decls = try self.simpleCssFilter(declarations);
+                        defer {
+                            if (sanitized_decls.len > 0) {
+                                self.allocator.free(sanitized_decls);
+                            }
+                        }
+                        try result.appendSlice(self.allocator, sanitized_decls);
+
+                        try result.appendSlice(self.allocator, " }\n");
+                    }
+
+                    i += end + 1;
+                } else {
+                    // Malformed CSS - skip to end
+                    break;
+                }
+            } else {
+                // No more blocks
+                break;
+            }
+        }
+
+        return try result.toOwnedSlice(self.allocator);
+    }
+
+    /// Find the end of an at-rule (including its block if any)
+    fn findAtRuleEnd(self: *@This(), input: []const u8) usize {
+        _ = self;
+        var i: usize = 1; // Skip the @
+
+        // Find the at-rule name end
+        while (i < input.len and !std.ascii.isWhitespace(input[i]) and input[i] != '{' and input[i] != ';') {
+            i += 1;
+        }
+
+        // Skip to { or ;
+        while (i < input.len and input[i] != '{' and input[i] != ';') {
+            i += 1;
+        }
+
+        if (i >= input.len) return input.len;
+
+        if (input[i] == ';') {
+            return i + 1;
+        }
+
+        if (input[i] == '{') {
+            // Find matching closing brace
+            var depth: usize = 1;
+            i += 1;
+            while (i < input.len and depth > 0) {
+                if (input[i] == '{') depth += 1;
+                if (input[i] == '}') depth -= 1;
+                i += 1;
+            }
+            return i;
+        }
+
+        return i;
+    }
+
+    /// Check if an at-rule is safe
+    fn isAtRuleSafe(self: *@This(), at_rule: []const u8) bool {
+        _ = self;
+        // Extract the at-rule name
+        var name_end: usize = 1;
+        while (name_end < at_rule.len and !std.ascii.isWhitespace(at_rule[name_end]) and at_rule[name_end] != '{' and at_rule[name_end] != ';') {
+            name_end += 1;
+        }
+        const name = at_rule[1..name_end];
+
+        // Dangerous at-rules
+        if (specs.startsWithIgnoreCase(name, "import")) return false;
+        if (specs.startsWithIgnoreCase(name, "charset") and name.len > 7) return false; // @charset is ok, but not @charsetX
+        if (specs.startsWithIgnoreCase(name, "namespace")) return false;
+
+        return true;
+    }
+
+    /// Check if an at-rule contains a block
+    fn isBlockAtRule(self: *@This(), at_rule: []const u8) bool {
+        _ = self;
+        return std.mem.indexOfScalar(u8, at_rule, '{') != null;
+    }
+
+    /// Process a block at-rule like @media or @supports
+    fn processBlockAtRule(self: *@This(), result: *std.ArrayListUnmanaged(u8), at_rule: []const u8) anyerror!void {
+        const block_start = std.mem.indexOfScalar(u8, at_rule, '{') orelse return;
+        const prelude = at_rule[0..block_start];
+
+        // Find matching closing brace
+        var depth: usize = 1;
+        var block_end: usize = block_start + 1;
+        while (block_end < at_rule.len and depth > 0) {
+            if (at_rule[block_end] == '{') depth += 1;
+            if (at_rule[block_end] == '}') depth -= 1;
+            block_end += 1;
+        }
+
+        const block_content = at_rule[block_start + 1 .. block_end - 1];
+
+        // Write prelude
+        try result.appendSlice(self.allocator, std.mem.trim(u8, prelude, &std.ascii.whitespace));
+        try result.appendSlice(self.allocator, " {\n");
+
+        // Recursively sanitize block content
+        const sanitized_content = try self.sanitizeStylesheet(block_content);
+        defer {
+            if (sanitized_content.len > 0) {
+                self.allocator.free(sanitized_content);
+            }
+        }
+        try result.appendSlice(self.allocator, sanitized_content);
+
+        try result.appendSlice(self.allocator, "}\n");
+    }
+
+    /// Find the matching closing brace
+    fn findMatchingBrace(self: *@This(), input: []const u8) ?usize {
+        _ = self;
+        var depth: usize = 1;
+        var i: usize = 0;
+        while (i < input.len and depth > 0) {
+            if (input[i] == '{') depth += 1;
+            if (input[i] == '}') depth -= 1;
+            if (depth == 0) return i;
+            i += 1;
+        }
+        return null;
+    }
+
+    /// Check if a CSS selector is safe
+    fn isSelectorSafe(self: *@This(), selector: []const u8) bool {
+        _ = self;
+        const trimmed = std.mem.trim(u8, selector, &std.ascii.whitespace);
+        if (trimmed.len == 0) return false;
+
+        // Block some dangerous pseudo-selectors
+        if (containsCaseInsensitive(trimmed, ":has(")) return false;
+
+        return true;
+    }
 };
 
 /// Helper function: find matching parenthesis
@@ -679,4 +893,63 @@ test "CSS sanitizer - @import blocked" {
 
     // Should return empty because containsDangerousPatterns catches @import
     try testing.expectEqualStrings("", result);
+}
+
+test "CSS sanitizer - stylesheet with selectors" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const input =
+        \\.header { color: red; font-size: 16px; }
+        \\.evil { -moz-binding: url('evil.xml'); }
+        \\p { margin: 10px; }
+    ;
+    const result = try sanitizer.sanitizeStylesheet(input);
+    defer testing.allocator.free(result);
+
+    // Safe rules should pass through
+    try testing.expect(std.mem.indexOf(u8, result, ".header") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "color: red") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "margin: 10px") != null);
+
+    // Dangerous property should be blocked
+    try testing.expect(std.mem.indexOf(u8, result, "-moz-binding") == null);
+}
+
+test "CSS sanitizer - stylesheet @import blocked" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const input =
+        \\@import url('evil.css');
+        \\.header { color: red; }
+    ;
+    const result = try sanitizer.sanitizeStylesheet(input);
+    defer testing.allocator.free(result);
+
+    // @import should be completely removed
+    try testing.expect(std.mem.indexOf(u8, result, "@import") == null);
+
+    // Safe rule should remain
+    try testing.expect(std.mem.indexOf(u8, result, ".header") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "color: red") != null);
+}
+
+test "CSS sanitizer - stylesheet @media preserved" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const input =
+        \\@media screen and (max-width: 600px) {
+        \\  .header { color: blue; }
+        \\}
+    ;
+    const result = try sanitizer.sanitizeStylesheet(input);
+    defer testing.allocator.free(result);
+
+    // @media should be preserved
+    try testing.expect(std.mem.indexOf(u8, result, "@media") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "max-width") != null);
+    try testing.expect(std.mem.indexOf(u8, result, ".header") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "color: blue") != null);
 }

@@ -1,6 +1,7 @@
 //! List of errors
 pub const LexborError = error{
     AllocationFailed,
+    AttributeSetFailed,
     DocCreateFailed,
     DocumentNotFound,
     ParseFailed,
@@ -32,6 +33,8 @@ pub const LexborError = error{
     ChunkEndFailed,
     SerializeFailed,
     RemoveWhitespaceFailed,
+    CssMemoryCreateFailed,
+    CssMemoryInitFailed,
     CssParserCreateFailed,
     CssParserInitFailed,
     CssSelectorsCreateFailed,

@@ -10,7 +10,9 @@ A project to run a fast JavaScript runtime parser extended with DOM APIs.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
-This library can be used for:
+**Security**: Runtime limits (memory, stack size, interuptible) for DoS, sandboxed File loading with no symlink for LFI. Loaded HTML and CSS are optionally sanitized.
+
+This program can be used for:
 
 - ➡ One-shot usage (examples in _/examples_  TODO)
 - ➡ long-running with event-loop/async (example TODO)

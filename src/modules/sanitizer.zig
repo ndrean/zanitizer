@@ -7,11 +7,15 @@
 //! - ensure safe URI usage
 const std = @import("std");
 const z = @import("../root.zig");
+const css = @import("sanitizer_css.zig");
 const HtmlTag = z.HtmlTag;
 const Err = z.Err;
 const print = std.debug.print;
 
 const testing = std.testing;
+
+pub const CssSanitizer = css.CssSanitizer;
+pub const CssSanitizerOptions = css.CssSanitizerOptions;
 
 /// [sanitize] Check if element is a custom element (Web Components spec)
 pub fn isCustomElement(tag_name: []const u8) bool {
@@ -55,12 +59,15 @@ fn isDescendantOfSvg(tag: z.HtmlTag, parent: z.HtmlTag) bool {
     return tag == .svg or parent == .svg;
 }
 
+/// Check if an SVG element is dangerous using the centralized spec
+/// Uses allowlist approach: if not in SVG_ALLOWED_ELEMENTS, it's blocked
 fn isDangerousSvgDescendant(tag_name: []const u8) bool {
-    return std.mem.eql(u8, tag_name, "script") or
-        std.mem.eql(u8, tag_name, "foreignObject") or
-        std.mem.eql(u8, tag_name, "animate") or // Can have onbegin, onend events
-        std.mem.eql(u8, tag_name, "animateTransform") or
-        std.mem.eql(u8, tag_name, "set");
+    // First check explicit dangerous list (fast path for known threats)
+    if (z.isSvgElementDangerous(tag_name)) {
+        return true;
+    }
+    // Allowlist approach: if not in allowed list, consider dangerous
+    return !z.isSvgElementAllowed(tag_name);
 }
 
 /// Helper to set the parent context to avoid walking up the DOM tree
@@ -161,11 +168,20 @@ pub const SanitizerOptions = struct {
     /// Remove id/name attributes that shadow DOM properties (e.g., id="location")
     /// Prevents DOM Clobbering attacks. Enabled by default like DOMPurify's SANITIZE_DOM.
     sanitize_dom_clobbering: bool = true,
+    /// When styles are allowed (remove_styles=false), sanitize inline style attribute values
+    /// using the CSS sanitizer to remove dangerous CSS like expressions, url(), etc.
+    sanitize_inline_styles: bool = true,
 };
 
 const AttributeAction = struct {
     element: *z.HTMLElement,
     attr_name: []const u8, // arena-owned copy for deferred removal
+};
+
+const AttributeUpdateAction = struct {
+    element: *z.HTMLElement,
+    attr_name: []const u8, // arena-owned copy
+    new_value: []const u8, // arena-owned sanitized value
 };
 
 // Context for simple_walk sanitization callback
@@ -174,10 +190,13 @@ const SanitizeContext = struct {
     arena: std.heap.ArenaAllocator,
     options: SanitizerOptions,
     parent: z.HtmlTag = .html,
+    /// Optional CSS sanitizer for inline style sanitization (externally owned)
+    css_sanitizer: ?*css.CssSanitizer = null,
 
     // Dynamic storage - all use arena allocator
     nodes_to_remove: std.ArrayListUnmanaged(*z.DomNode),
     attributes_to_remove: std.ArrayListUnmanaged(AttributeAction),
+    attributes_to_update: std.ArrayListUnmanaged(AttributeUpdateAction),
     template_nodes: std.ArrayListUnmanaged(*z.DomNode),
 
     fn init(backing_allocator: std.mem.Allocator, opts: SanitizerOptions) @This() {
@@ -186,8 +205,15 @@ const SanitizeContext = struct {
             .options = opts,
             .nodes_to_remove = .empty,
             .attributes_to_remove = .empty,
+            .attributes_to_update = .empty,
             .template_nodes = .empty,
         };
+    }
+
+    fn initWithCss(backing_allocator: std.mem.Allocator, opts: SanitizerOptions, css_san: ?*css.CssSanitizer) @This() {
+        var ctx = init(backing_allocator, opts);
+        ctx.css_sanitizer = css_san;
+        return ctx;
     }
 
     /// Single bulk deallocation - arena handles everything
@@ -209,6 +235,16 @@ const SanitizeContext = struct {
         try self.attributes_to_remove.append(self.alloc(), AttributeAction{
             .element = element,
             .attr_name = owned_name,
+        });
+    }
+
+    fn addAttributeToUpdate(self: *@This(), element: *z.HTMLElement, attr_name: []const u8, new_value: []const u8) !void {
+        const owned_name = try self.alloc().dupe(u8, attr_name);
+        const owned_value = try self.alloc().dupe(u8, new_value);
+        try self.attributes_to_update.append(self.alloc(), AttributeUpdateAction{
+            .element = element,
+            .attr_name = owned_name,
+            .new_value = owned_value,
         });
     }
 
@@ -555,9 +591,32 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
         if (!should_remove and std.mem.eql(u8, attr_pair.name, "style")) {
             if (context.options.remove_styles) {
                 should_remove = true;
+            } else if (context.options.sanitize_inline_styles) {
+                // Styles are allowed but need sanitization
+                if (context.css_sanitizer) |css_san| {
+                    // Use CSS sanitizer to clean the style value
+                    const sanitized = css_san.sanitizeStyleString(attr_pair.value) catch {
+                        // On sanitization error, remove the style attribute
+                        should_remove = true;
+                        continue;
+                    };
+                    // If sanitized is different from original, queue an update
+                    if (!std.mem.eql(u8, sanitized, attr_pair.value)) {
+                        if (sanitized.len == 0) {
+                            // Empty result means remove the attribute
+                            should_remove = true;
+                        } else {
+                            // Queue attribute update with sanitized value
+                            try context.addAttributeToUpdate(element, attr_pair.name, sanitized);
+                            // Don't remove - we're updating instead
+                            continue;
+                        }
+                    }
+                    // If same, fall through to spec validation
+                }
+                // If no CSS sanitizer, fall through to the Spec check below
+                // which will call z.validateStyle() automatically.
             }
-            // If styles are allowed, we fall through to the Spec check below
-            // which will call z.validateStyle() automatically.
         }
 
         // DOM Clobbering Protection: remove id/name that shadow DOM properties
@@ -654,19 +713,29 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
 }
 
 fn sanitizePostWalkOperations(allocator: std.mem.Allocator, context: *SanitizeContext, options: SanitizerOptions) (std.mem.Allocator.Error || z.Err)!void {
+    return sanitizePostWalkOperationsWithCss(allocator, context, options, null);
+}
+
+fn sanitizePostWalkOperationsWithCss(allocator: std.mem.Allocator, context: *SanitizeContext, options: SanitizerOptions, css_sanitizer: ?*css.CssSanitizer) (std.mem.Allocator.Error || z.Err)!void {
     // 1. Remove attributes first (safest operation)
     for (context.attributes_to_remove.items) |action| {
         try z.removeAttribute(action.element, action.attr_name);
+    }
+
+    // 1b. Update attributes (for sanitized inline styles)
+    for (context.attributes_to_update.items) |action| {
+        try z.setAttribute(action.element, action.attr_name, action.new_value);
     }
 
     // 2. Process templates (recurse into them)
     // We do this before destroying nodes, in case a template is inside a node to be destroyed.
     // (Wasteful but safe from use-after-free).
     for (context.template_nodes.items) |template_node| {
-        try sanitizeTemplateContent(
+        try sanitizeTemplateContentWithCss(
             allocator,
             template_node,
             options,
+            css_sanitizer,
         );
     }
 
@@ -681,11 +750,14 @@ fn sanitizePostWalkOperations(allocator: std.mem.Allocator, context: *SanitizeCo
 }
 
 fn sanitizeTemplateContent(allocator: std.mem.Allocator, template_node: *z.DomNode, options: SanitizerOptions) (std.mem.Allocator.Error || z.Err)!void {
+    return sanitizeTemplateContentWithCss(allocator, template_node, options, null);
+}
+
+fn sanitizeTemplateContentWithCss(allocator: std.mem.Allocator, template_node: *z.DomNode, options: SanitizerOptions, css_sanitizer: ?*css.CssSanitizer) (std.mem.Allocator.Error || z.Err)!void {
     const template = z.nodeToTemplate(template_node) orelse return;
     const content_node = z.templateContent(template);
-    // const content_node = z.fragmentToNode(content);
 
-    var template_context = SanitizeContext.init(allocator, options);
+    var template_context = SanitizeContext.initWithCss(allocator, options, css_sanitizer);
     defer template_context.deinit();
 
     z.simpleWalk(
@@ -694,7 +766,7 @@ fn sanitizeTemplateContent(allocator: std.mem.Allocator, template_node: *z.DomNo
         &template_context,
     );
 
-    try sanitizePostWalkOperations(allocator, &template_context, options);
+    try sanitizePostWalkOperationsWithCss(allocator, &template_context, options, css_sanitizer);
 }
 
 /// [sanitize] Sanitize DOM tree with configurable options
@@ -706,11 +778,25 @@ pub fn sanitizeWithMode(
     root_node: *z.DomNode,
     mode: SanitizerMode,
 ) (std.mem.Allocator.Error || z.Err)!void {
+    return sanitizeWithCss(allocator, root_node, mode, null);
+}
+
+/// [sanitize] Sanitize DOM tree with CSS sanitizer for inline style sanitization
+///
+/// Main sanitization function with optional CSS sanitizer. When css_sanitizer is provided
+/// and options.sanitize_inline_styles is true, inline style attributes will be sanitized
+/// rather than removed (if styles are allowed via remove_styles=false).
+pub fn sanitizeWithCss(
+    allocator: std.mem.Allocator,
+    root_node: *z.DomNode,
+    mode: SanitizerMode,
+    css_sanitizer: ?*css.CssSanitizer,
+) (std.mem.Allocator.Error || z.Err)!void {
     // Early exit for .none - do absolutely nothing
     if (mode == .none) return;
 
     const sanitizer_options = mode.get();
-    var context = SanitizeContext.init(allocator, sanitizer_options);
+    var context = SanitizeContext.initWithCss(allocator, sanitizer_options, css_sanitizer);
     defer context.deinit();
 
     z.simpleWalk(
@@ -719,10 +805,11 @@ pub fn sanitizeWithMode(
         &context,
     );
 
-    try sanitizePostWalkOperations(
+    try sanitizePostWalkOperationsWithCss(
         allocator,
         &context,
         sanitizer_options,
+        css_sanitizer,
     );
 }
 
@@ -1695,6 +1782,10 @@ test "svg element safety" {
         \\  <a href="https://example.com">
         \\    <text x="10" y="40">Safe link</text>
         \\  </a>
+        \\  <use xlink:href="external.svg#icon"/>
+        \\  <image href="external.png"/>
+        \\  <text x="50" y="50">Safe text</text>
+        \\  <rect x="0" y="0" width="10" height="10"/>
         \\</svg>
         \\</body>
     ;
@@ -1706,17 +1797,29 @@ test "svg element safety" {
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
 
-    // Should remove dangerous SVG elements/attributes
+    // Should remove dangerous SVG elements
     try testing.expect(std.mem.indexOf(u8, result, "<script>") == null);
     try testing.expect(std.mem.indexOf(u8, result, "foreignObject") == null);
     try testing.expect(std.mem.indexOf(u8, result, "onbegin") == null);
     try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<animate") == null);
+
+    // SVG <a> elements are blocked (can contain javascript: URLs)
+    try testing.expect(std.mem.indexOf(u8, result, "<a ") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<a>") == null);
+
+    // SVG <use> elements are blocked (external resource loading / XSS)
+    try testing.expect(std.mem.indexOf(u8, result, "<use") == null);
+
+    // SVG <image> elements are blocked (external resource loading / SSRF)
+    try testing.expect(std.mem.indexOf(u8, result, "<image") == null);
+
     // Should keep safe SVG content
     try testing.expect(std.mem.indexOf(u8, result, "<svg") != null);
     try testing.expect(std.mem.indexOf(u8, result, "<circle") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Safe link") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "Click me") != null); // Text remains
+    try testing.expect(std.mem.indexOf(u8, result, "<rect") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<text") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Safe text") != null);
 }
 
 test "form element safety" {

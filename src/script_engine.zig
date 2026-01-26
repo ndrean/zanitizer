@@ -78,14 +78,18 @@ pub const ScriptEngine = struct {
         self.ctx.setAllocator(&self.allocator);
         errdefer self.ctx.deinit();
 
-        try self.disableUnsafeFeatures();
-
         // Event Loop
         self.loop = try EventLoop.create(allocator, self.rt);
         errdefer self.loop.destroy();
 
         // Runtime Context: allocates, zeroes classes, sets the opaque pointer
-        self.rc = try RuntimeContext.create(allocator, self.ctx, self.loop);
+        self.rc = try RuntimeContext.create(
+            allocator,
+            self.ctx,
+            self.loop,
+            &self.sandbox,
+            sandbox_root,
+        );
         errdefer self.rc.destroy();
 
         const dom_bridge = try DOMBridge.init(allocator, self.ctx);
@@ -105,6 +109,12 @@ pub const ScriptEngine = struct {
         // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
         // _ = try self.ctx.setPropertyStr(global, "readFile", readFile_fn);
 
+        // _ = self.ctx.eval(
+        //     "Object.freeze(globalThis);",
+        //     "<internal>",
+        //     z.qjs.JS_EVAL_TYPE_GLOBAL,
+        // );
+        try self.disableUnsafeFeatures();
         return self;
     }
 
@@ -116,6 +126,8 @@ pub const ScriptEngine = struct {
             "eval",
             "Function",
             "WebAssembly", // If included in your build
+            "Atomics",
+            "ShareArrayBuffer",
         };
 
         for (keys_to_remove) |key| {

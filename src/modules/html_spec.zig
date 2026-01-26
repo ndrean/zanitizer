@@ -103,6 +103,113 @@ pub const DANGEROUS_CSS_VALUES = [_][]const u8{
     "var(",
 };
 
+//=========================================================================================================
+// SVG SECURITY: Element and Attribute Allowlists
+//=========================================================================================================
+
+/// SVG elements that are safe for rendering (allowlist approach)
+/// These are purely visual elements with no scripting or external resource loading capability
+pub const SVG_ALLOWED_ELEMENTS = std.StaticStringMap(void).initComptime(.{
+    // Container elements
+    .{ "svg", {} },
+    .{ "g", {} },
+    .{ "defs", {} },
+    .{ "symbol", {} },
+    .{ "clipPath", {} },
+    .{ "mask", {} },
+    .{ "pattern", {} },
+    .{ "marker", {} },
+
+    // Shape elements
+    .{ "circle", {} },
+    .{ "ellipse", {} },
+    .{ "line", {} },
+    .{ "path", {} },
+    .{ "polygon", {} },
+    .{ "polyline", {} },
+    .{ "rect", {} },
+
+    // Text elements
+    .{ "text", {} },
+    .{ "tspan", {} },
+    .{ "textPath", {} },
+
+    // Gradient elements
+    .{ "linearGradient", {} },
+    .{ "radialGradient", {} },
+    .{ "stop", {} },
+
+    // Filter elements (visual effects only)
+    .{ "filter", {} },
+    .{ "feBlend", {} },
+    .{ "feColorMatrix", {} },
+    .{ "feComponentTransfer", {} },
+    .{ "feComposite", {} },
+    .{ "feConvolveMatrix", {} },
+    .{ "feDiffuseLighting", {} },
+    .{ "feDisplacementMap", {} },
+    .{ "feFlood", {} },
+    .{ "feGaussianBlur", {} },
+    .{ "feMerge", {} },
+    .{ "feMergeNode", {} },
+    .{ "feMorphology", {} },
+    .{ "feOffset", {} },
+    .{ "feSpecularLighting", {} },
+    .{ "feTile", {} },
+    .{ "feTurbulence", {} },
+    .{ "feDistantLight", {} },
+    .{ "fePointLight", {} },
+    .{ "feSpotLight", {} },
+    .{ "feFuncR", {} },
+    .{ "feFuncG", {} },
+    .{ "feFuncB", {} },
+    .{ "feFuncA", {} },
+
+    // Descriptive elements
+    .{ "title", {} },
+    .{ "desc", {} },
+    .{ "metadata", {} },
+});
+
+/// SVG elements that are dangerous and must be blocked
+/// These can execute scripts, load external resources, or escape SVG context
+pub const SVG_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
+    // Script execution
+    .{ "script", {} },
+
+    // External resource loading (SSRF, XSS via external SVG)
+    .{ "image", {} }, // Can load external images/SVG via href
+    .{ "use", {} }, // Can reference external SVG fragments via href
+    .{ "feImage", {} }, // Filter that loads external images
+
+    // HTML embedding (escapes SVG context)
+    .{ "foreignObject", {} }, // Embeds arbitrary HTML/XHTML
+
+    // Animation with event handlers (can trigger JS)
+    .{ "animate", {} }, // onbegin, onend, onrepeat events
+    .{ "animateMotion", {} },
+    .{ "animateTransform", {} },
+    .{ "set", {} },
+    .{ "animateColor", {} }, // Deprecated but still dangerous
+
+    // Links (can contain javascript: URLs)
+    .{ "a", {} },
+
+    // Other potentially dangerous
+    .{ "switch", {} }, // Can be used for conditional content loading
+    .{ "view", {} }, // Can trigger navigation
+});
+
+/// Check if an SVG element is in the allowlist
+pub fn isSvgElementAllowed(tag_name: []const u8) bool {
+    return SVG_ALLOWED_ELEMENTS.has(tag_name);
+}
+
+/// Check if an SVG element is explicitly dangerous
+pub fn isSvgElementDangerous(tag_name: []const u8) bool {
+    return SVG_DANGEROUS_ELEMENTS.has(tag_name);
+}
+
 /// DOM Clobbering Protection
 /// These are property names that, when used as `id` or `name` attributes,
 /// can shadow built-in DOM properties and break JavaScript code.
@@ -155,6 +262,8 @@ pub const DOM_CLOBBERING_NAMES = std.StaticStringMap(void).initComptime(.{
     .{ "prompt", {} },
     .{ "fetch", {} },
     .{ "XMLHttpRequest", {} },
+    .{"__proto__"},
+    .{"constructor"},
 });
 
 /// Check if a value would cause DOM clobbering when used as id or name attribute
@@ -183,22 +292,27 @@ pub fn isDangerousAttribute(attr: []const u8) bool {
 
 /// Centralized list of supported web frameworks and their attribute prefixes
 /// This is the single source of truth for framework attribute validation
+///
+/// SECURITY NOTE: Event handler attributes (prefixed with @ or containing :on, etc.)
+/// are marked as unsafe because they contain executable JavaScript.
+/// DOMPurify allows them because browsers don't execute framework-specific handlers,
+/// but in environments with a JS runtime (like QuickJS), they become real XSS vectors.
 pub const FRAMEWORK_SPECS = [_]FrameworkSpec{
     .{ .prefix = "hx-", .name = "HTMX", .description = "HTMX attributes for server-side interactions" },
     .{ .prefix = "phx-", .name = "Phoenix LiveView", .description = "Phoenix LiveView events and bindings" },
-    .{ .prefix = "x-", .name = "Alpine.js", .description = "Alpine.js directives" },
-    .{ .prefix = "v-", .name = "Vue.js", .description = "Vue.js directives" },
-    .{ .prefix = "@", .name = "Vue.js Events", .description = "Vue.js event handlers (@click, etc.)" },
+    .{ .prefix = "x-", .name = "Alpine.js", .description = "Alpine.js directives" }, // x-on: checked separately
+    .{ .prefix = "v-", .name = "Vue.js", .description = "Vue.js directives" }, // v-on: checked separately
+    .{ .prefix = "@", .name = "Vue.js Events", .description = "Vue.js event handlers (@click, etc.)", .safe = false }, // Contains JS!
     .{ .prefix = ":", .name = "Vue.js/Phoenix Directives", .description = "Directive syntax (:if, :for, etc.)" },
     .{ .prefix = "data-", .name = "HTML Data", .description = "Standard HTML data attributes" },
     .{ .prefix = "aria-", .name = "ARIA", .description = "Accessibility attributes" },
     .{ .prefix = "*ng", .name = "Angular", .description = "Angular structural directives (*ngFor, *ngIf)" },
     .{ .prefix = "[", .name = "Angular Property", .description = "Angular property binding" },
-    .{ .prefix = "(", .name = "Angular Event", .description = "Angular event binding" },
+    .{ .prefix = "(", .name = "Angular Event", .description = "Angular event binding", .safe = false }, // Contains JS!
     .{ .prefix = "bind:", .name = "Svelte Bind", .description = "Svelte binding directives" },
-    .{ .prefix = "on:", .name = "Svelte Event", .description = "Svelte event handlers" },
+    .{ .prefix = "on:", .name = "Svelte Event", .description = "Svelte event handlers", .safe = false }, // Contains JS!
     .{ .prefix = "use:", .name = "Svelte Action", .description = "Svelte action directives" },
-    .{ .prefix = "slot", .name = "Web Components", .description = "Web Components slots", .safe = false }, // Mark as unsafe by default
+    .{ .prefix = "slot", .name = "Web Components", .description = "Web Components slots", .safe = false },
     .{ .prefix = ":for", .name = "Framework loops", .description = "Framework loop directive" },
     .{ .prefix = ":if", .name = "Framework conditionals", .description = "Framework conditional directive" },
     .{ .prefix = ":let", .name = "Framework declarations", .description = "Framework declaration" },
@@ -226,10 +340,48 @@ pub fn getFrameworkSpec(attr_name: []const u8) ?FrameworkSpec {
 
 /// Check if a framework attribute is safe (not dangerous)
 pub fn isFrameworkAttributeSafe(attr_name: []const u8) bool {
+    // First check if it's a framework event handler (contains executable JS)
+    if (isFrameworkEventHandler(attr_name)) {
+        return false;
+    }
+
     if (getFrameworkSpec(attr_name)) |spec| {
         return spec.safe;
     }
     return false; // Unknown framework attributes are not safe
+}
+
+/// Check if a framework attribute is an event handler (contains executable JavaScript)
+/// These are dangerous in environments with a JS runtime (like QuickJS)
+pub fn isFrameworkEventHandler(attr_name: []const u8) bool {
+    // Alpine.js: x-on:click, x-on:submit, etc.
+    if (std.mem.startsWith(u8, attr_name, "x-on:")) return true;
+    if (std.mem.startsWith(u8, attr_name, "x-on.")) return true; // x-on.prevent, etc.
+
+    // Vue.js: v-on:click, v-on:submit, etc.
+    if (std.mem.startsWith(u8, attr_name, "v-on:")) return true;
+
+    // HTMX: hx-on:click, hx-on::before-request, etc.
+    if (std.mem.startsWith(u8, attr_name, "hx-on:")) return true;
+    if (std.mem.startsWith(u8, attr_name, "hx-on-")) return true; // Alternative syntax
+
+    // Phoenix LiveView: phx-click, phx-submit, phx-change, etc.
+    if (std.mem.startsWith(u8, attr_name, "phx-click")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-submit")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-change")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-blur")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-focus")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-keyup")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-keydown")) return true;
+    if (std.mem.startsWith(u8, attr_name, "phx-window-")) return true;
+
+    // Vue.js shorthand already handled by @ prefix being unsafe
+
+    // Angular already handled by ( prefix being unsafe
+
+    // Svelte already handled by on: prefix being unsafe
+
+    return false;
 }
 
 /// Signature for attribute value validator functions
@@ -269,8 +421,51 @@ pub fn startsWithIgnoreCase(haystack: []const u8, needle: []const u8) bool {
     return true;
 }
 
+/// Validates SVG href/xlink:href attributes
+/// SVG URIs are more restricted because they can:
+/// - Load external resources (SSRF risk)
+/// - Execute code via javascript: URLs
+/// - Load malicious SVG via data: URLs
+///
+/// Allowed:
+/// - Fragment identifiers: #id (for <use href="#icon">)
+/// - Relative paths (no protocol)
+/// - Safe image data URIs (not SVG)
+///
+/// Blocked:
+/// - External URLs (http://, https://) - prevents SSRF
+/// - javascript:, vbscript:, file:
+/// - data:image/svg (can contain scripts)
+/// - data:text/* (can contain scripts)
+pub fn validateSvgUri(value: []const u8) bool {
+    const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+    if (trimmed.len == 0) return false;
+
+    // Always block dangerous protocols
+    if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "vbscript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "file:")) return false;
+
+    // Fragment identifiers are always safe (#icon, #symbol-name)
+    if (trimmed[0] == '#') return true;
+
+    // Block external URLs by default (http://, https://, //)
+    // These can be used for SSRF attacks
+    if (startsWithIgnoreCase(trimmed, "http:")) return false;
+    if (startsWithIgnoreCase(trimmed, "https:")) return false;
+    if (trimmed.len >= 2 and trimmed[0] == '/' and trimmed[1] == '/') return false;
+
+    // Block data: URLs in SVG context (too dangerous)
+    // Even data:image/png could be crafted maliciously in SVG
+    if (startsWithIgnoreCase(trimmed, "data:")) return false;
+
+    // Allow relative paths (no protocol)
+    // e.g., "icons/symbol.svg#icon-name", "./image.png"
+    return true;
+}
+
 /// Validates that a URI is safe (no javascript:, vbscript:, data: blocks)
-/// Validates that a URI is safe.
+/// Validates that a URI is safe for HTML elements (img src, a href, etc.)
 /// Strategy: Allow known-good protocols, Block known-bad protocols.
 pub fn validateUri(value: []const u8) bool {
     const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
@@ -384,8 +579,8 @@ const svg_attrs = [_]AttrSpec{
     .{ .name = "fill" },
     .{ .name = "stroke" },
     .{ .name = "stroke-width" },
-    .{ .name = "href", .validator = validateUri },
-    .{ .name = "xlink:href", .validator = validateUri },
+    .{ .name = "href", .validator = validateSvgUri },
+    .{ .name = "xlink:href", .validator = validateSvgUri },
 } ++ common_attrs;
 
 /// Image-specific attributes
@@ -995,6 +1190,12 @@ pub fn getElementSpecByEnum(tag: z.HtmlTag) ?*const ElementSpec {
 
 /// Fast enum-based attribute validation
 pub fn isAttributeAllowedEnum(tag: z.HtmlTag, attr_name: []const u8) bool {
+    // SECURITY: Block framework event handlers that contain executable JavaScript
+    // These are safe in browsers (no framework runtime) but dangerous with QuickJS
+    if (isFrameworkEventHandler(attr_name)) {
+        return false;
+    }
+
     const spec = getElementSpecByEnum(tag) orelse return false;
 
     for (spec.allowed_attrs) |attr_spec| {
@@ -1002,12 +1203,11 @@ pub fn isAttributeAllowedEnum(tag: z.HtmlTag, attr_name: []const u8) bool {
             return attr_spec.safe;
         }
         // Handle prefix matches for framework and data attributes
+        // NOTE: Event handlers (x-on:*, v-on:*) are blocked above
         if ((std.mem.eql(u8, attr_spec.name, "aria") and std.mem.startsWith(u8, attr_name, "aria-")) or
             (std.mem.eql(u8, attr_spec.name, "data") and std.mem.startsWith(u8, attr_name, "data-")) or
-            (std.mem.eql(u8, attr_spec.name, "x-on") and std.mem.startsWith(u8, attr_name, "x-on:")) or
             (std.mem.eql(u8, attr_spec.name, "x-bind") and std.mem.startsWith(u8, attr_name, "x-bind:")) or
             (std.mem.eql(u8, attr_spec.name, "phx-value") and std.mem.startsWith(u8, attr_name, "phx-value-")) or
-            (std.mem.eql(u8, attr_spec.name, "v-on") and std.mem.startsWith(u8, attr_name, "v-on:")) or
             (std.mem.eql(u8, attr_spec.name, "v-bind") and std.mem.startsWith(u8, attr_name, "v-bind:")))
         {
             return attr_spec.safe;
@@ -1213,4 +1413,69 @@ test "DOM element integration functions" {
         }
     }
     try testing.expect(found_scope);
+}
+
+test "framework event handlers are blocked (XSS prevention)" {
+    // These framework event handlers contain executable JavaScript
+    // They are dangerous in environments with a JS runtime (like QuickJS)
+
+    // Test isFrameworkEventHandler correctly identifies event handlers
+    try testing.expect(isFrameworkEventHandler("x-on:click"));
+    try testing.expect(isFrameworkEventHandler("x-on:submit"));
+    try testing.expect(isFrameworkEventHandler("v-on:click"));
+    try testing.expect(isFrameworkEventHandler("hx-on:click"));
+    try testing.expect(isFrameworkEventHandler("phx-click")); // Phoenix
+
+    // Non-event framework attributes should pass
+    try testing.expect(!isFrameworkEventHandler("x-show"));
+    try testing.expect(!isFrameworkEventHandler("x-bind:class"));
+    try testing.expect(!isFrameworkEventHandler("v-if"));
+    try testing.expect(!isFrameworkEventHandler("hx-get"));
+    try testing.expect(!isFrameworkEventHandler("data-id"));
+
+    // Test isFrameworkAttributeSafe blocks event handlers
+    // These are blocked via isFrameworkEventHandler check OR via spec.safe = false
+    try testing.expect(!isFrameworkAttributeSafe("x-on:click"));
+    try testing.expect(!isFrameworkAttributeSafe("@click")); // Vue shorthand (safe = false in spec)
+    try testing.expect(!isFrameworkAttributeSafe("(click)")); // Angular (safe = false in spec)
+    try testing.expect(!isFrameworkAttributeSafe("on:click")); // Svelte (safe = false in spec)
+
+    // Safe framework attributes should pass
+    try testing.expect(isFrameworkAttributeSafe("x-show"));
+    try testing.expect(isFrameworkAttributeSafe("data-id"));
+    try testing.expect(isFrameworkAttributeSafe("aria-label"));
+
+    // Test isAttributeAllowedEnum blocks event handlers on elements
+    try testing.expect(!isAttributeAllowedEnum(.button, "x-on:click"));
+    try testing.expect(!isAttributeAllowedEnum(.div, "v-on:submit"));
+    try testing.expect(!isAttributeAllowedEnum(.form, "hx-on:htmx:after-request"));
+}
+
+test "SVG URI validation is stricter than HTML" {
+    // Fragment identifiers are always safe (for <use href="#icon">)
+    try testing.expect(validateSvgUri("#icon"));
+    try testing.expect(validateSvgUri("#my-symbol"));
+
+    // Relative paths are allowed
+    try testing.expect(validateSvgUri("icons.svg#arrow"));
+    try testing.expect(validateSvgUri("./sprites.svg#logo"));
+
+    // Block dangerous protocols
+    try testing.expect(!validateSvgUri("javascript:alert(1)"));
+    try testing.expect(!validateSvgUri("vbscript:evil"));
+    try testing.expect(!validateSvgUri("file:///etc/passwd"));
+
+    // Block external URLs (SSRF prevention)
+    try testing.expect(!validateSvgUri("http://evil.com/malware.svg"));
+    try testing.expect(!validateSvgUri("https://attacker.com/payload.svg"));
+    try testing.expect(!validateSvgUri("//evil.com/script.svg"));
+
+    // Block ALL data: URLs in SVG context
+    try testing.expect(!validateSvgUri("data:image/png;base64,abc"));
+    try testing.expect(!validateSvgUri("data:image/svg+xml,<svg>"));
+    try testing.expect(!validateSvgUri("data:text/html,<script>"));
+
+    // Compare with HTML validator - HTML is more permissive
+    try testing.expect(validateUri("https://example.com/image.png")); // HTML allows https
+    try testing.expect(!validateSvgUri("https://example.com/image.png")); // SVG blocks it
 }

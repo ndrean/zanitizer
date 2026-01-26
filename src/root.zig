@@ -383,6 +383,13 @@ pub const getFrameworkSpec = specs.getFrameworkSpec;
 pub const isFrameworkAttributeSafe = specs.isFrameworkAttributeSafe;
 pub const isSafeMimeType = specs.isSafeMimeType;
 
+// SVG Security
+pub const SVG_ALLOWED_ELEMENTS = specs.SVG_ALLOWED_ELEMENTS;
+pub const SVG_DANGEROUS_ELEMENTS = specs.SVG_DANGEROUS_ELEMENTS;
+pub const isSvgElementAllowed = specs.isSvgElementAllowed;
+pub const isSvgElementDangerous = specs.isSvgElementDangerous;
+pub const validateSvgUri = specs.validateSvgUri;
+
 // ============================================================================================
 // CSS Styles integration functions
 

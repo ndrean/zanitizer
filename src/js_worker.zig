@@ -7,6 +7,9 @@ const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const Mailbox = z.Mailbox;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const js_security = @import("js_security.zig");
+
+// -------------------------------------------------------------------------
 
 pub const WorkerMessage = struct {
     tag: enum { PostMessage, Terminate, Error },
@@ -21,8 +24,13 @@ const WorkerCore = struct {
     outbox: Mailbox(WorkerMessage),
     terminate_flag: std.atomic.Value(bool),
     script_path: [:0]const u8,
+    sandbox_root: [:0]const u8,
 
-    pub fn init(allocator: std.mem.Allocator, script_path: []const u8) !*WorkerCore {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        script_path: []const u8,
+        sandbox_root: []const u8,
+    ) !*WorkerCore {
         std.debug.print("[WorkerCore] Init\n", .{});
         const self = try allocator.create(WorkerCore);
         self.* = .{
@@ -32,6 +40,7 @@ const WorkerCore = struct {
             .outbox = Mailbox(WorkerMessage).init(allocator),
             .terminate_flag = std.atomic.Value(bool).init(false),
             .script_path = try allocator.dupeZ(u8, script_path),
+            .sandbox_root = try allocator.dupeZ(u8, sandbox_root),
         };
         std.debug.print("[Core] Initialized count: 1\n", .{});
         return self;
@@ -50,6 +59,7 @@ const WorkerCore = struct {
             self.inbox.deinit();
             self.outbox.deinit();
             self.allocator.free(self.script_path);
+            self.allocator.free(self.sandbox_root);
             self.allocator.destroy(self);
         }
     }
@@ -73,11 +83,18 @@ const WorkerThread = struct {
         defer _ = gpa.deinit();
         const allocator = gpa.allocator();
 
+        var sandbox = js_security.Sandbox.init(allocator, core.sandbox_root) catch return;
+        defer sandbox.deinit();
+
         const rt = zqjs.Runtime.init(allocator) catch return;
         defer rt.deinit();
 
         rt.setInterruptHandler(js_interrupt_handler, @ptrCast(core));
-        rt.enableModuleLoader();
+        rt.setModuleLoader(
+            js_security.js_secure_module_normalize,
+            js_security.js_secure_module_loader,
+            &sandbox,
+        );
 
         const ctx = zqjs.Context.init(rt);
         defer ctx.deinit();
@@ -88,7 +105,13 @@ const WorkerThread = struct {
         std.debug.print("[Thread] Installing event loop...\n", .{});
 
         // Store WorkerCore in RuntimeContext for access from JS callbacks
-        const rc = RuntimeContext.create(allocator, ctx, loop) catch return;
+        const rc = RuntimeContext.create(
+            allocator,
+            ctx,
+            loop,
+            &sandbox,
+            core.sandbox_root,
+        ) catch return;
         defer rc.destroy();
         // const rc = RuntimeContext.get(ctx);
 
@@ -231,10 +254,15 @@ pub const JSWorker = struct {
         loop: *EventLoop,
         ctx: zqjs.Context,
         script_path: []const u8,
+        sandbox_root: []const u8,
         obj: zqjs.Value,
     ) !*JSWorker {
         std.debug.print("[JSWorker] Create\n", .{});
-        const core = try WorkerCore.init(allocator, script_path);
+        const core = try WorkerCore.init(
+            allocator,
+            script_path,
+            sandbox_root,
+        );
         errdefer core.release();
 
         const self = try allocator.create(JSWorker);
@@ -246,7 +274,11 @@ pub const JSWorker = struct {
         };
 
         core.retain();
-        const thread = try std.Thread.spawn(.{}, WorkerThread.run, .{core});
+        const thread = try std.Thread.spawn(
+            .{},
+            WorkerThread.run,
+            .{core},
+        );
         thread.detach();
 
         return self;
@@ -403,11 +435,19 @@ fn js_importScripts(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv:
     return zqjs.UNDEFINED;
 }
 
-pub fn js_Worker_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+pub fn js_Worker_constructor(
+    ctx_ptr: ?*qjs.JSContext,
+    new_target: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     if (argc < 1) return ctx.throwTypeError("Worker constructor requires scriptPath argument");
 
-    const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+    // const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
+    const rc = RuntimeContext.get(ctx);
+    const loop = rc.loop;
+    const sandbox_root = rc.sandbox_root;
 
     const path_cstr = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeCString(path_cstr);
@@ -423,7 +463,14 @@ pub fn js_Worker_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, 
     const obj = ctx.newObjectProtoClass(proto, loop.worker_class_id);
     if (ctx.isException(obj)) return obj;
 
-    const worker = JSWorker.create(loop.allocator, loop, ctx, script_path, obj) catch {
+    const worker = JSWorker.create(
+        loop.allocator,
+        loop,
+        ctx,
+        script_path,
+        sandbox_root,
+        obj,
+    ) catch {
         ctx.freeValue(obj);
         return ctx.throwError();
     };

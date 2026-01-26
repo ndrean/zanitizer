@@ -1101,6 +1101,7 @@ pub const Context = packed struct {
         return qjs.JS_PromiseResult(self.ptr, promise);
     }
 
+    // TODO pb using this anyopaque
     pub inline fn newPromiseCapability(self: Context, resolving_funcs: []anyopaque) Value {
         return qjs.JS_NewPromiseCapability(self.ptr, resolving_funcs);
     }

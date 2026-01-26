@@ -71,7 +71,7 @@ pub fn main() !void {
     try link_and_script(allocator, sandbox_root);
 
     try extractScript(allocator, sandbox_root);
-    try simpleESM(allocator, sandbox_root);
+    // try simpleESM(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
     // try js_framework_2_bench(allocator);
@@ -105,10 +105,10 @@ pub fn main() !void {
     // try simplifiedJSONPass(allocator);
     // try async_CSV_Tuple_Parser(allocator);
     // try JS_Proxy_And_Generators(allocator);
-    // try async_Fetch_API_Demo(allocator);
+    try async_Fetch_API_Demo(allocator, sandbox_root);
     // try async_CSV_JSON_Parser(allocator);
 
-    // try demoWorker(allocator);
+    try demoWorker(allocator, sandbox_root);
 
     // // lexb =====
 
@@ -841,8 +841,8 @@ fn performance1(allocator: std.mem.Allocator) !void {
     // try z.prettyPrint(allocator, body_node.?);
 }
 
-fn demoWorker(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn demoWorker(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== Worker Thread Demo -------------------------\n\n", .{});
@@ -1917,8 +1917,8 @@ fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator) !void {
 
 // Fetch API -------------------------------------------------------------
 
-fn async_Fetch_API_Demo(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn async_Fetch_API_Demo(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== Async Fetch API Demo ----------------------------------------\n\n", .{});
