@@ -1,6 +1,6 @@
 // app.js
-import { add, PI } from "./math.js";
-import { createSignal, createEffect } from "vendor/solid.js";
+import { add, PI } from "../math/math.js";
+import { createSignal, createEffect } from "../vendor/solid.js";
 
 console.log("[JS] ❇️ Loading 'math.js' module...");
 const result = add(PI, 10);
@@ -25,7 +25,7 @@ const id = setInterval(() => {
   if (iterations >= max_iter) {
     clearInterval(id);
     console.log(
-      `[JS] Stopped after ${max_iter} iterations. Final value is: ${count()}`
+      `[JS] Stopped after ${max_iter} iterations. Final value is: ${count()}`,
     );
   }
 }, 1000);

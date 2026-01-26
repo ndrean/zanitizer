@@ -52,9 +52,14 @@ const FetchTask = struct {
     data: *FetchContext,
 };
 
-fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+fn js_fetch(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 1) return ctx.throwTypeError("fetch requires a URL string");
+    if (argc < 1) return ctx.throwTypeError("fetch requires an URL string");
 
     const url_str = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeCString(url_str);
@@ -308,20 +313,25 @@ pub fn onFetchComplete(ctx: zqjs.Context, ptr: *anyopaque) void {
         const resp = ctx.newObject();
         defer ctx.freeValue(resp);
 
-        // ✅ Correctly handle i64 status
+        // ✅ 1. Status & OK (Standard Compliance)
         const status_val = ctx.newInt64(task.data.status);
         ctx.setPropertyStr(resp, "status", status_val) catch {};
-        // Don't free status_val - setPropertyStr takes ownership
 
-        // 1. Headers
+        const is_ok = (task.data.status >= 200 and task.data.status < 300);
+        const ok_val = ctx.newBool(is_ok);
+        ctx.setPropertyStr(resp, "ok", ok_val) catch {};
+
+        // ✅ 2. URL (Standard Compliance)
+        const url_val = ctx.newString(task.data.url);
+        ctx.setPropertyStr(resp, "url", url_val) catch {};
+
+        // 3. Headers
         const headers = ctx.newObject();
         for (task.data.resp_headers_lines) |line| {
             if (std.mem.indexOfScalar(u8, line, ':')) |idx| {
                 const key = std.ascii.allocLowerString(task.loop.allocator, std.mem.trim(u8, line[0..idx], " ")) catch continue;
                 defer task.loop.allocator.free(key);
                 const val = std.mem.trim(u8, line[idx + 1 ..], " ");
-
-                // Create JS string and set property (setPropertyStr takes ownership)
                 const val_js = ctx.newString(val);
                 const c_key = task.loop.allocator.dupeZ(u8, key) catch {
                     ctx.freeValue(val_js);
@@ -329,25 +339,20 @@ pub fn onFetchComplete(ctx: zqjs.Context, ptr: *anyopaque) void {
                 };
                 defer task.loop.allocator.free(c_key);
                 ctx.setPropertyStr(headers, c_key, val_js) catch {};
-                // Don't free val_js - setPropertyStr takes ownership
             }
         }
         ctx.setPropertyStr(resp, "headers", headers) catch {};
-        // Don't free headers - setPropertyStr takes ownership
 
-        // 2. Body
+        // 4. Body
         if (task.data.resp_body) |b| {
             const ab = ctx.newArrayBufferCopy(b);
             ctx.setPropertyStr(resp, "_body", ab) catch {};
-            // Don't free ab - setPropertyStr takes ownership
         } else {
             const empty = ctx.newArrayBufferCopy(&.{});
             ctx.setPropertyStr(resp, "_body", empty) catch {};
-            // Don't free empty - setPropertyStr takes ownership
         }
 
-        // 3. Methods
-        // ✅ FIX: All are methods now, including text()
+        // 5. Methods
         ctx.setPropertyStr(resp, "text", ctx.newCFunction(js_res_text, "text", 0)) catch {};
         ctx.setPropertyStr(resp, "json", ctx.newCFunction(js_res_json, "json", 0)) catch {};
         ctx.setPropertyStr(resp, "arrayBuffer", ctx.newCFunction(js_res_arrayBuffer, "arrayBuffer", 0)) catch {};

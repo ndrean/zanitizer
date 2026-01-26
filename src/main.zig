@@ -60,20 +60,24 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
+    const sandbox_root = try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer allocator.free(sandbox_root);
+
     setupSignalHandler();
 
-    // try extractScript(allocator);
-    // try simpleESM(allocator);
+    try inline_crud_css_js(allocator, sandbox_root);
+    try stylesheet_txt(allocator, sandbox_root);
+    try stylesheet_style_tag(allocator, sandbox_root);
+    try link_and_script(allocator, sandbox_root);
+
+    try extractScript(allocator, sandbox_root);
+    try simpleESM(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
     // try js_framework_2_bench(allocator);
     // try js_framework_3_bench(allocator);
     // try bench(allocator);
 
-    try inline_crud_css_js(allocator);
-    try stylesheet_txt(allocator);
-    try stylesheet_style_tag(allocator);
-    try link_and_script(allocator);
     // try eventListeners(allocator);
 
     // try transplante(allocator);
@@ -119,9 +123,9 @@ pub fn main() !void {
     // try demoSuspiciousAttributes(allocator);
 }
 
-fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
+fn inline_crud_css_js(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== CSS-in-JS:1 with INLINE styles--------------------------------\n\n", .{});
-    const engine = try ScriptEngine.init(allocator);
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     // with inline styles
@@ -161,7 +165,7 @@ fn inline_crud_css_js(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("100px", width_str);
 }
 
-fn stylesheet_txt(allocator: std.mem.Allocator) !void {
+fn stylesheet_txt(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== CSS-in-JS:1 with 'external' parse|attach_Stylesheet() --------------------------------\n\n", .{});
 
     const html =
@@ -194,7 +198,7 @@ fn stylesheet_txt(allocator: std.mem.Allocator) !void {
         \\});
     ;
 
-    const engine = try ScriptEngine.init(allocator);
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     const bridge = engine.dom;
@@ -219,7 +223,7 @@ fn stylesheet_txt(allocator: std.mem.Allocator) !void {
     try z.printDOM(allocator, engine.dom.doc, "CSS external");
 }
 
-fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
+fn stylesheet_style_tag(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== CSS-in-JS:2 with <style>Stylesheet --------------------------------\n\n", .{});
     const html =
         \\<html>
@@ -252,7 +256,7 @@ fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
         \\});
     ;
 
-    const engine = try ScriptEngine.init(allocator);
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
     const bridge = engine.dom;
     try engine.loadHTML(html);
@@ -272,7 +276,7 @@ fn stylesheet_style_tag(allocator: std.mem.Allocator) !void {
     try z.printDOM(allocator, engine.dom.doc, "CSS with <style> element");
 }
 
-fn link_and_script(allocator: std.mem.Allocator) !void {
+fn link_and_script(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== CSS-in-JS:3 <script> anad <link> with 'external' file --------------------------------\n\n", .{});
     const html =
         \\<html>
@@ -289,7 +293,7 @@ fn link_and_script(allocator: std.mem.Allocator) !void {
         \\</html>
     ;
 
-    const engine = try ScriptEngine.init(allocator);
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
     const bridge = engine.dom;
     try engine.loadHTML(html);
@@ -471,8 +475,8 @@ fn bench(allocator: std.mem.Allocator) !void {
     std.debug.print("\n⚡️ Zig Engine Time: {d}ms\n\n", .{ms});
 }
 
-fn extractScript(allocator: std.mem.Allocator) !void {
-    var engine = try ScriptEngine.init(allocator);
+fn extractScript(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== Extract Script from HTML --------------------------------\n\n", .{});
@@ -945,18 +949,19 @@ fn getValueFromQJSinZig(allocator: std.mem.Allocator) !void {
 
 // ESM Modules ----------------------------------------------------------------
 
-fn simpleESM(allocator: std.mem.Allocator) !void {
+fn simpleESM(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== ESM Module Demo --------------------------------\n\n", .{});
-    var engine = try ScriptEngine.init(allocator);
+    var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    const source = std.fs.cwd().readFileAlloc(allocator, "js/app.js", 1024 * 1024) catch |err| {
+    const source = std.fs.cwd().readFileAlloc(allocator, "js/solidjs/app.js", 1024 * 1024) catch |err| {
         z.print("Error: Could not find 'app.js' in current directory.\n", .{});
         return err;
     };
     defer allocator.free(source);
 
-    try engine.runModule(source, "js/app.js");
+    try engine.runModule(source, "js/solidjs/app.js");
+
     try engine.run();
 }
 

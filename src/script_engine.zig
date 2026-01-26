@@ -2,10 +2,10 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const security = @import("js_security.zig");
+const js_security = @import("js_security.zig");
 
-const isSafePath = security.isSafePath;
-const js_secure_module_normalize = security.js_secure_module_normalize;
+// const isSafePath = security.isSafePath;
+// const js_secure_module_normalize = security.js_secure_module_normalize;
 
 // Import your sub-systems
 const EventLoop = @import("event_loop.zig").EventLoop;
@@ -13,7 +13,7 @@ const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge; // Assuming your DOM logic is here
 const async_bindings = @import("async_bindings_generated.zig");
 const JSWorker = @import("js_worker.zig");
-const FetchBridge = @import("fetch_bridge.zig").FetchBridge;
+const FetchBridge = @import("js_fetch.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
 
 const TIMEOUT_MS: i64 = 5000;
@@ -44,12 +44,16 @@ pub const ScriptEngine = struct {
     rc: *RuntimeContext,
     dom: DOMBridge, // VALUE!! to own the DOMBridge struct so DOMBridge deinit its content and ScriptEngine
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
+    sandbox: js_security.Sandbox,
 
     /// Initialize the entire JS Environment on the heap
-    pub fn init(allocator: std.mem.Allocator) !*ScriptEngine {
+    pub fn init(allocator: std.mem.Allocator, sandbox_root: []const u8) !*ScriptEngine {
         const self = try allocator.create(ScriptEngine);
         self.allocator = allocator;
         errdefer allocator.destroy(self);
+
+        self.sandbox = try js_security.Sandbox.init(allocator, sandbox_root);
+        errdefer self.sandbox.deinit();
 
         // Runtime & Context
         self.rt = try zqjs.Runtime.init(allocator);
@@ -64,9 +68,9 @@ pub const ScriptEngine = struct {
         // Security firewall
         // self.rt.enableModuleLoader();
         self.rt.setModuleLoader(
-            js_secure_module_normalize,
-            // zqjs.Runtime.js_module_normalize,
-            zqjs.Runtime.js_module_loader,
+            js_security.js_secure_module_normalize,
+            js_security.js_secure_module_loader,
+            &self.sandbox,
         );
 
         self.ctx = zqjs.Context.init(self.rt);
@@ -122,6 +126,7 @@ pub const ScriptEngine = struct {
     }
 
     pub fn deinit(self: *ScriptEngine) void {
+        self.sandbox.deinit();
         self.dom.deinit();
         if (self.rc.last_result) |val| {
             self.ctx.freeValue(val);
@@ -303,38 +308,38 @@ pub const ScriptEngine = struct {
         return val;
     }
 
-    /// Extracts content from all inline <script> tags.
-    ///
-    /// Caller owns the returned slice and the strings inside it.
-    pub fn getC_Scripts(self: *ScriptEngine) ![][:0]const u8 {
-        // 1. Find all script tags
-        const scripts = try z.querySelectorAll(self.allocator, self.dom.doc, "script");
-        defer self.allocator.free(scripts);
+    // /// Extracts content from all inline <script> tags.
+    // ///
+    // /// Caller owns the returned slice and the strings inside it.
+    // pub fn getC_Scripts(self: *ScriptEngine) ![][:0]const u8 {
+    //     // 1. Find all script tags
+    //     const scripts = try z.querySelectorAll(self.allocator, self.dom.doc, "script");
+    //     defer self.allocator.free(scripts);
 
-        var code_list: std.ArrayList([:0]const u8) = .empty;
-        errdefer {
-            for (code_list.items) |s| self.allocator.free(s);
-            code_list.deinit(self.allocator);
-        }
+    //     var code_list: std.ArrayList([:0]const u8) = .empty;
+    //     errdefer {
+    //         for (code_list.items) |s| self.allocator.free(s);
+    //         code_list.deinit(self.allocator);
+    //     }
 
-        for (scripts) |script_el| {
-            // 2. Filter out external scripts (<script src="...">)
-            if (z.hasAttribute(script_el, "src")) continue;
+    //     for (scripts) |script_el| {
+    //         // 2. Filter out external scripts (<script src="...">)
+    //         if (z.hasAttribute(script_el, "src")) continue;
 
-            // 3. Extract content
-            // Note: z.elementToNode is needed if textContent expects a Node
-            const node = z.elementToNode(script_el);
-            const content = z.textContent_zc(node);
+    //         // 3. Extract content
+    //         // Note: z.elementToNode is needed if textContent expects a Node
+    //         const node = z.elementToNode(script_el);
+    //         const content = z.textContent_zc(node);
 
-            // Only add if not empty
-            if (content.len > 0) {
-                const c_content = try self.allocator.dupeZ(u8, content);
-                try code_list.append(self.allocator, c_content);
-            }
-        }
+    //         // Only add if not empty
+    //         if (content.len > 0) {
+    //             const c_content = try self.allocator.dupeZ(u8, content);
+    //             try code_list.append(self.allocator, c_content);
+    //         }
+    //     }
 
-        return try code_list.toOwnedSlice(self.allocator);
-    }
+    //     return try code_list.toOwnedSlice(self.allocator);
+    // }
 
     // Helper to expose C functions easily
     pub fn registerFunction(self: *ScriptEngine, name: [:0]const u8, func: qjs.JSCFunction, args: c_int) !void {
@@ -343,6 +348,27 @@ pub const ScriptEngine = struct {
 
         const js_fn = self.ctx.newCFunction(func, name, args);
         _ = try self.ctx.setPropertyStr(global, name, js_fn);
+    }
+
+    /// [helper] Resolves a path logically inside the sandbox.
+    /// Returns a path strictly relative to the sandbox root (no leading '/').
+    /// Caller owns the memory.
+    fn resolvePathInSandbox(self: *ScriptEngine, base_dir: []const u8, user_path: []const u8) ![]u8 {
+        // 1. Logically join paths relative to a fake root "/"
+        // This collapses ".." segments safely.
+        // e.g. "js/libs/" + "../../secrets" -> "/secrets"
+        const resolved = try std.fs.path.resolve(self.allocator, &.{ "/", base_dir, user_path });
+        defer self.allocator.free(resolved);
+        z.print("CONT---", .{});
+
+        // 2. Strip the fake root "/" to get a clean relative path
+        // e.g. "/js/app.js" -> "js/app.js"
+        const clean_path = if (std.mem.startsWith(u8, resolved, "/")) resolved[1..] else resolved;
+
+        // 3. Safety Check: If it's empty, they are trying to open the directory itself
+        if (clean_path.len == 0) return error.AccessDenied;
+
+        return self.allocator.dupe(u8, clean_path);
     }
 
     /// Loads HTML content into the Engine, replacing the current global document.
@@ -415,65 +441,55 @@ pub const ScriptEngine = struct {
     /// [host] Process all <script> tags in the document (Inline and Remote)
     /// [host] Process all <script> tags in the document (Inline and Remote)
     pub fn executeScripts(self: *ScriptEngine, allocator: std.mem.Allocator, base_dir: []const u8) !void {
-        const scripts = try z.querySelectorAll(self.allocator, self.dom.doc, "script");
+        const scripts = try z.querySelectorAll(
+            self.allocator,
+            self.dom.doc,
+            "script",
+        );
         defer allocator.free(scripts);
-        if (scripts.len == 0) return; // Handle no scripts case gracefully
+        if (scripts.len == 0) return;
 
         for (scripts, 0..) |script, i| {
-            var code: []const u8 = undefined;
-            var filename: []u8 = undefined;
-            var needs_free = false;
+            var code_owned: ?[]u8 = null;
+            var filename_owned: ?[]u8 = null;
 
-            // Define the defer logic at the loop scope, so it runs AFTER execution
-            defer if (needs_free) self.allocator.free(filename);
+            defer {
+                if (filename_owned) |f| self.allocator.free(f);
+                if (code_owned) |c| self.allocator.free(c);
+            }
+
+            var filename: []const u8 = "";
+            var code: []const u8 = "";
 
             // CASE A: External Script (<script src="...">)
             if (z.getAttribute_zc(script, "src")) |src| {
-                const full_path = try std.fs.path.resolve(self.allocator, &.{ base_dir, src });
-                defer self.allocator.free(full_path);
-
-                // 1. Security Check
-                if (!isSafePath(self.allocator, full_path)) {
-                    z.print("Security Alert: Blocked script loading for '{s}'\n", .{src});
-                    continue;
-                }
-
-                // 2. Read File
-                code = std.fs.cwd().readFileAlloc(self.allocator, full_path, 1024 * 1024 * 5) catch |err| {
-                    z.print("Failed to load script '{s}': {any}\n", .{ full_path, err });
+                // resolve Path relative to Sandbox
+                const rel_path = self.resolvePathInSandbox(base_dir, src) catch |err| {
+                    z.print("Security: Blocked script path '{s}' (Error: {any})\n", .{ src, err });
                     continue;
                 };
 
-                // 3. Set Filename (CRITICAL FOR IMPORTS)
-                // We use 'src' (e.g., "main.js") combined with base_dir logic if possible,
-                // or just the clean relative path.
-                // Ideally, pass the path relative to CWD so stack traces look nice.
-                // Here we dupe 'src' because imports inside it are relative to IT.
-                // Better: Use the relative path from CWD to the file.
-                filename = try std.fs.path.join(self.allocator, &.{ base_dir, src });
-                needs_free = true;
+                filename_owned = rel_path;
+                filename = rel_path;
+
+                const file_content = self.sandbox.dir.readFileAlloc(self.allocator, filename, 5 * 1024 * 1024) catch |err| {
+                    z.print("Failed to load script '{s}' from sandbox: {any}\n", .{ filename, err });
+                    continue;
+                };
+                code_owned = file_content;
+                code = file_content;
             }
             // CASE B: Inline Script
             else {
                 const text = z.textContent_zc(z.elementToNode(script));
                 if (text.len == 0) continue;
 
-                // Inline scripts don't need FS reads, but we duplicate text to own the memory (if needed)
-                // For z.textContent_zc, it returns a slice from Lexbor's tree.
-                // We MUST duplicate it because Lexbor might move memory, but for 'code' passed to runModule it's usually fine.
-                // However, runModule expects us to own 'code' if we free it?
-                // Actually runModule dupes it immediately. So we just need valid memory.
-                code = text; // Just borrow from Lexbor
-
-                filename = try std.fmt.allocPrint(self.allocator, "inline-script-{d}.js", .{i});
-                needs_free = true;
+                code = text; // borrowed from Lexbor
+                // virtual filename for stack
+                const name = try std.fmt.allocPrint(self.allocator, "inline-script-{d}.js", .{i});
+                filename_owned = name;
+                filename = name;
             }
-
-            // Cleanup code if we allocated it (External scripts only in this logic)
-            // But wait, for external scripts 'code' is allocated by readFileAlloc.
-            // For inline, it's borrowed. We need to handle 'code' cleanup too.
-            const code_needs_free = (z.getAttribute_zc(script, "src") != null);
-            defer if (code_needs_free) self.allocator.free(code);
 
             // EXECUTE
             const type_attr = z.getAttribute_zc(script, "type");
@@ -502,22 +518,31 @@ pub const ScriptEngine = struct {
         defer self.allocator.free(links);
 
         for (links) |link_el| {
+            var path_owned: ?[]u8 = null;
+            var css_owned: ?[]u8 = null;
+
+            defer {
+                if (path_owned) |ptr| self.allocator.free(ptr);
+                if (css_owned) |ptr| self.allocator.free(ptr);
+            }
+
             const rel = z.getAttribute_zc(link_el, "rel") orelse continue;
             if (!std.mem.eql(u8, rel, "stylesheet")) continue;
 
             const href = z.getAttribute_zc(link_el, "href") orelse continue;
 
             // Resolve & Secure Check
-            const full_path = try std.fs.path.resolve(self.allocator, &.{ base_dir, href });
-            defer self.allocator.free(full_path);
-
-            if (!isSafePath(self.allocator, full_path)) {
-                std.debug.print("Security Alert: Blocked CSS loading for '{s}'\n", .{href});
+            const rel_path = self.resolvePathInSandbox(base_dir, href) catch |err| {
+                z.print("Security: Blocked CSS path '{s}' (Error: {any})\n", .{ href, err });
                 continue;
-            }
+            };
+            path_owned = rel_path;
 
-            const css_content = std.fs.cwd().readFileAlloc(self.allocator, full_path, 1024 * 1024 * 5) catch continue;
-            defer self.allocator.free(css_content);
+            const css_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                z.print("Failed to load CSS '{s}': {any}\n", .{ rel_path, err });
+                continue;
+            };
+            css_owned = css_content;
 
             try self.loadCSS(css_content);
         }

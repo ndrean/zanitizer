@@ -68,6 +68,100 @@ pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
     "data:image/svg",
 };
 
+/// Patterns that indicate the entire CSS should be rejected (not per-property filtering)
+/// For example, @import means external CSS loading which is always dangerous
+/// Note: Property-level patterns like expression() are handled in DANGEROUS_CSS_VALUES
+pub const DANGEROUS_CSS_PATTERNS = [_][]const u8{
+    "-moz-binding:", // Firefox XBL binding - always dangerous
+    "javascript:",
+    "vbscript:",
+    "data:text/html",
+    "data:text/javascript",
+    "data:application/xhtml",
+    "@import", // External CSS loading
+    "@charset", // Can be used to bypass sanitization
+    "@namespace", // Can enable SVG/XLink attacks
+};
+
+pub const DANGEROUS_CSS_PROPERTIES = [_][]const u8{
+    "behavior",
+    "-moz-binding",
+    "-webkit-user-modify",
+    "-o-link",
+    "-o-link-source",
+    "filter", // when used with progid:
+};
+
+pub const DANGEROUS_CSS_VALUES = [_][]const u8{
+    "url(javascript:",
+    "url(vbscript:",
+    "url(data:text/html",
+    "url(data:text/javascript",
+    "expression(",
+    "eval(",
+    "calc(",
+    "var(",
+};
+
+/// DOM Clobbering Protection
+/// These are property names that, when used as `id` or `name` attributes,
+/// can shadow built-in DOM properties and break JavaScript code.
+/// Example: <img id="location"> makes window.location return the img element
+pub const DOM_CLOBBERING_NAMES = std.StaticStringMap(void).initComptime(.{
+    // Window properties
+    .{ "location", {} },
+    .{ "document", {} },
+    .{ "window", {} },
+    .{ "self", {} },
+    .{ "top", {} },
+    .{ "parent", {} },
+    .{ "frames", {} },
+    .{ "opener", {} },
+    .{ "closed", {} },
+    .{ "length", {} },
+    .{ "name", {} },
+    .{ "navigator", {} },
+    .{ "history", {} },
+    .{ "screen", {} },
+    .{ "localStorage", {} },
+    .{ "sessionStorage", {} },
+    // Document properties
+    .{ "cookie", {} },
+    .{ "domain", {} },
+    .{ "referrer", {} },
+    .{ "body", {} },
+    .{ "head", {} },
+    .{ "forms", {} },
+    .{ "images", {} },
+    .{ "links", {} },
+    .{ "scripts", {} },
+    .{ "anchors", {} },
+    .{ "URL", {} },
+    .{ "documentElement", {} },
+    .{ "defaultView", {} },
+    // Common methods that get clobbered
+    .{ "createElement", {} },
+    .{ "getElementById", {} },
+    .{ "getElementsByTagName", {} },
+    .{ "getElementsByClassName", {} },
+    .{ "querySelector", {} },
+    .{ "querySelectorAll", {} },
+    .{ "write", {} },
+    .{ "writeln", {} },
+    .{ "open", {} },
+    .{ "close", {} },
+    .{ "alert", {} },
+    .{ "confirm", {} },
+    .{ "prompt", {} },
+    .{ "fetch", {} },
+    .{ "XMLHttpRequest", {} },
+});
+
+/// Check if a value would cause DOM clobbering when used as id or name attribute
+pub fn isDomClobberingName(value: []const u8) bool {
+    return DOM_CLOBBERING_NAMES.has(value);
+}
+
 /// Check if an attribute is in the dangerous blacklist
 /// Includes explicit event handlers (onclick, etc.) and dangerous framework attributes
 pub fn isDangerousAttribute(attr: []const u8) bool {
@@ -167,7 +261,7 @@ pub const ElementSpec = struct {
 // --- VALIDATORS ---
 
 /// Helper for case-insensitive prefix check
-fn startsWithIgnoreCase(haystack: []const u8, needle: []const u8) bool {
+pub fn startsWithIgnoreCase(haystack: []const u8, needle: []const u8) bool {
     if (haystack.len < needle.len) return false;
     for (haystack[0..needle.len], needle) |h, n| {
         if (std.ascii.toLower(h) != std.ascii.toLower(n)) return false;
@@ -746,6 +840,141 @@ pub fn isSafeMimeType(mime: []const u8) bool {
     // Unknown type - be conservative
     return false;
 }
+
+// === CSS --------------------------------------------
+/// Whitelist of safe CSS properties
+pub const SAFE_CSS_PROPERTIES = std.StaticStringMap(void).initComptime(.{
+    // Layout
+    .{ "display", {} },
+    .{ "position", {} },
+    .{ "top", {} },
+    .{ "right", {} },
+    .{ "bottom", {} },
+    .{ "left", {} },
+    .{ "width", {} },
+    .{ "height", {} },
+    .{ "min-width", {} },
+    .{ "min-height", {} },
+    .{ "max-width", {} },
+    .{ "max-height", {} },
+
+    // Box model
+    .{ "margin", {} },
+    .{ "margin-top", {} },
+    .{ "margin-right", {} },
+    .{ "margin-bottom", {} },
+    .{ "margin-left", {} },
+    .{ "padding", {} },
+    .{ "padding-top", {} },
+    .{ "padding-right", {} },
+    .{ "padding-bottom", {} },
+    .{ "padding-left", {} },
+    .{ "border", {} },
+    .{ "border-top", {} },
+    .{ "border-right", {} },
+    .{ "border-bottom", {} },
+    .{ "border-left", {} },
+    .{ "border-width", {} },
+    .{ "border-style", {} },
+    .{ "border-color", {} },
+    .{ "border-radius", {} },
+    .{ "box-sizing", {} },
+    .{ "box-shadow", {} },
+
+    // Typography
+    .{ "color", {} },
+    .{ "font-family", {} },
+    .{ "font-size", {} },
+    .{ "font-weight", {} },
+    .{ "font-style", {} },
+    .{ "line-height", {} },
+    .{ "text-align", {} },
+    .{ "text-decoration", {} },
+    .{ "text-transform", {} },
+    .{ "letter-spacing", {} },
+    .{ "word-spacing", {} },
+    .{ "white-space", {} },
+    .{ "word-break", {} },
+    .{ "word-wrap", {} },
+
+    // Visual
+    .{ "background", {} },
+    .{ "background-color", {} },
+    .{ "background-image", {} },
+    .{ "background-position", {} },
+    .{ "background-size", {} },
+    .{ "background-repeat", {} },
+    .{ "background-attachment", {} },
+    .{ "opacity", {} },
+    .{ "visibility", {} },
+    .{ "z-index", {} },
+    .{ "overflow", {} },
+    .{ "overflow-x", {} },
+    .{ "overflow-y", {} },
+    .{ "cursor", {} },
+
+    // Flexbox
+    .{ "flex", {} },
+    .{ "flex-direction", {} },
+    .{ "flex-wrap", {} },
+    .{ "flex-flow", {} },
+    .{ "justify-content", {} },
+    .{ "align-items", {} },
+    .{ "align-content", {} },
+    .{ "align-self", {} },
+    .{ "order", {} },
+
+    // Grid
+    .{ "grid", {} },
+    .{ "grid-template-columns", {} },
+    .{ "grid-template-rows", {} },
+    .{ "grid-template-areas", {} },
+    .{ "grid-column", {} },
+    .{ "grid-row", {} },
+
+    // Transforms & transitions
+    .{ "transform", {} },
+    .{ "transform-origin", {} },
+    .{ "transition", {} },
+    .{ "transition-property", {} },
+    .{ "transition-duration", {} },
+    .{ "transition-timing-function", {} },
+    .{ "transition-delay", {} },
+
+    // Animations (limited)
+    .{ "animation", {} },
+    .{ "animation-name", {} },
+    .{ "animation-duration", {} },
+    .{ "animation-timing-function", {} },
+    .{ "animation-delay", {} },
+    .{ "animation-iteration-count", {} },
+    .{ "animation-direction", {} },
+    .{ "animation-fill-mode", {} },
+
+    // Lists
+    .{ "list-style", {} },
+    .{ "list-style-type", {} },
+    .{ "list-style-position", {} },
+    .{ "list-style-image", {} },
+
+    // Tables
+    .{ "border-collapse", {} },
+    .{ "border-spacing", {} },
+    .{ "caption-side", {} },
+    .{ "empty-cells", {} },
+    .{ "table-layout", {} },
+
+    // Miscellaneous
+    .{ "content", {} },
+    .{ "quotes", {} },
+    .{ "counter-reset", {} },
+    .{ "counter-increment", {} },
+    .{ "resize", {} },
+    .{ "user-select", {} },
+    .{ "pointer-events", {} },
+    .{ "clip", {} },
+    .{ "clip-path", {} },
+});
 
 // === ENUM-BASED LOOKUPS ===--------------------------
 

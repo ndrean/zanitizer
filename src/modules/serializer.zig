@@ -88,10 +88,12 @@ pub fn getHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
 
 /// [serializer] Get element's inner HTML
 ///
-/// Caller needs to free the returned slice
+/// Caller needs to free the returned slice.
+/// Returns an empty slice if the element has no children.
 pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
-    if (z.firstElementChild(element) == null) {
-        return Err.NoFirstChild;
+    // Return empty string for elements with no children (matches browser behavior)
+    if (z.firstChild(z.elementToNode(element)) == null) {
+        return try allocator.alloc(u8, 0);
     }
 
     var str = lxbString{
@@ -107,7 +109,7 @@ pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
     }
 
     if (str.data == null or str.length == 0) {
-        return Err.EmptyTextContent;
+        return try allocator.alloc(u8, 0);
     }
     const result = try allocator.alloc(u8, str.length);
     @memcpy(result, str.data.?[0..str.length]);

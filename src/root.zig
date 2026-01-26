@@ -70,6 +70,7 @@ const frag_temp = @import("modules/fragment_template.zig");
 const norm = @import("modules/normalize.zig");
 const text = @import("modules/text_content.zig");
 const sanitize = @import("modules/sanitizer.zig");
+const sanitize_css = @import("modules/sanitizer_css.zig");
 const parse = @import("modules/parsing.zig");
 const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
@@ -362,12 +363,18 @@ pub const applySanitization = parse.applySanitization;
 pub const sanitizePermissive = sanitize.sanitizePermissive;
 pub const isCustomElement = sanitize.isCustomElement;
 
+// CSS Sanitizer
+pub const CssSanitizer = sanitize_css.CssSanitizer;
+pub const CssSanitizerOptions = sanitize_css.CssSanitizerOptions;
+
 pub const AttrSpec = specs.AttrSpec;
 pub const ElementSpec = specs.ElementSpec;
 pub const FrameworkSpec = specs.FrameworkSpec;
 pub const DANGEROUS_ATTRIBUTES = specs.DANGEROUS_ATTRIBUTES;
 pub const isDangerousAttribute = specs.isDangerousAttribute;
 pub const DANGEROUS_JS_PATTERNS = specs.DANGEROUS_JS_PATTERNS;
+pub const DOM_CLOBBERING_NAMES = specs.DOM_CLOBBERING_NAMES;
+pub const isDomClobberingName = specs.isDomClobberingName;
 pub const FRAMEWORK_SPECS = specs.FRAMEWORK_SPECS;
 pub const validateUri = specs.validateUri;
 pub const validateStyle = specs.validateStyle;

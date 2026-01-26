@@ -532,13 +532,14 @@ pub const Runtime = struct {
         self: *const Runtime,
         normalize_func: ?*const fn (?*qjs.JSContext, [*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) [*c]u8,
         loader_func: ?*const fn (?*qjs.JSContext, [*c]const u8, ?*anyopaque) callconv(.c) ?*qjs.JSModuleDef,
+        opaque_ptr: ?*anyopaque,
     ) void {
         // We pass the Runtime's allocator as the 'opaque' user data
         qjs.JS_SetModuleLoaderFunc(
             self.ptr,
             normalize_func, //js_module_normalize,
             loader_func,
-            @constCast(&self.allocator),
+            opaque_ptr,
         );
     }
 };

@@ -108,6 +108,7 @@ pub const SanitizerMode = union(enum) {
                 .strict_uri_validation = false,
                 .allow_custom_elements = true,
                 .allow_framework_attrs = true,
+                .sanitize_dom_clobbering = false,
             },
             .strict => SanitizerOptions{
                 .skip_comments = true,
@@ -116,6 +117,7 @@ pub const SanitizerMode = union(enum) {
                 .strict_uri_validation = true,
                 .allow_custom_elements = false,
                 .allow_framework_attrs = false,
+                .sanitize_dom_clobbering = true,
             },
             .permissive => SanitizerOptions{
                 .skip_comments = true,
@@ -124,6 +126,7 @@ pub const SanitizerMode = union(enum) {
                 .strict_uri_validation = false,
                 .allow_custom_elements = true,
                 .allow_framework_attrs = true,
+                .sanitize_dom_clobbering = true,
             },
             .custom => |opts| opts,
         };
@@ -155,6 +158,9 @@ pub const SanitizerOptions = struct {
     allow_custom_elements: bool = false,
     allow_framework_attrs: bool = false,
     allow_embeds: bool = false,
+    /// Remove id/name attributes that shadow DOM properties (e.g., id="location")
+    /// Prevents DOM Clobbering attacks. Enabled by default like DOMPurify's SANITIZE_DOM.
+    sanitize_dom_clobbering: bool = true,
 };
 
 const AttributeAction = struct {
@@ -552,6 +558,15 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
             }
             // If styles are allowed, we fall through to the Spec check below
             // which will call z.validateStyle() automatically.
+        }
+
+        // DOM Clobbering Protection: remove id/name that shadow DOM properties
+        if (!should_remove and context.options.sanitize_dom_clobbering) {
+            if (std.mem.eql(u8, attr_pair.name, "id") or std.mem.eql(u8, attr_pair.name, "name")) {
+                if (z.isDomClobberingName(attr_pair.value)) {
+                    should_remove = true;
+                }
+            }
         }
 
         // Framework Attributes
@@ -1289,6 +1304,62 @@ test "permissive mode allows frameworks and custom elements" {
     try testing.expect(std.mem.indexOf(u8, result, "Button") != null);
 }
 
+test "DOM clobbering protection" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<img id="location" src="x.png">
+        \\<form id="document"><input name="cookie"></form>
+        \\<a id="createElement">Link</a>
+        \\<div id="safe-id">Safe</div>
+        \\<input name="safe-name">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    // Strict mode has DOM clobbering protection enabled
+    try sanitizeStrict(allocator, z.bodyNode(doc).?);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // Dangerous id/name values should be removed
+    try testing.expect(std.mem.indexOf(u8, result, "id=\"location\"") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "id=\"document\"") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "name=\"cookie\"") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "id=\"createElement\"") == null);
+
+    // Safe id/name values should remain
+    try testing.expect(std.mem.indexOf(u8, result, "id=\"safe-id\"") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "name=\"safe-name\"") != null);
+
+    // Elements themselves should remain (just attributes removed)
+    try testing.expect(std.mem.indexOf(u8, result, "<img") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "<form") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "Safe") != null);
+}
+
+test "DOM clobbering disabled in minimum mode" {
+    const allocator = testing.allocator;
+    const html =
+        \\<body>
+        \\<img id="location" src="x.png">
+        \\</body>
+    ;
+
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+
+    // Minimum mode has DOM clobbering protection disabled
+    try sanitizeWithMode(allocator, z.bodyNode(doc).?, .minimum);
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    // In minimum mode, the id="location" should remain (clobbering protection disabled)
+    try testing.expect(std.mem.indexOf(u8, result, "id=\"location\"") != null);
+}
+
 test "custom mode with specific options" {
     const allocator = testing.allocator;
     const html =
@@ -1352,59 +1423,61 @@ test "none mode does nothing" {
     try testing.expect(std.mem.indexOf(u8, result, "Comment") != null);
 }
 
-// TOTO
-// test "mode consistency across similar inputs" {
-//     const allocator = testing.allocator;
+// a standalone <scriptx is place in the <head>, unless placed in the <body>
+test "mode consistency across similar inputs" {
+    const allocator = testing.allocator;
 
-//     const test_cases = [_]struct {
-//         html: []const u8,
-//         mode: SanitizerMode,
-//         should_contain: []const []const u8,
-//         should_not_contain: []const []const u8,
-//     }{
-//         .{
-//             .html = "<script>alert(1)</script><p>Text</p>",
-//             .mode = .strict,
-//             .should_contain = &[_][]const u8{"<p>Text</p>"},
-//             .should_not_contain = &[_][]const u8{"<script>"},
-//         },
-//         .{
-//             .html = "<script>alert(1)</script><p>Text</p>",
-//             .mode = .minimum,
-//             .should_contain = &[_][]const u8{ "<script>", "<p>Text</p>" },
-//             .should_not_contain = &[_][]const u8{},
-//         },
-//         .{
-//             .html = "<custom-elem>Test</custom-elem>",
-//             .mode = .strict,
-//             .should_contain = &[_][]const u8{},
-//             .should_not_contain = &[_][]const u8{"custom-elem"},
-//         },
-//         .{
-//             .html = "<custom-elem>Test</custom-elem>",
-//             .mode = .permissive,
-//             .should_contain = &[_][]const u8{ "custom-elem", "Test" },
-//             .should_not_contain = &[_][]const u8{},
-//         },
-//     };
+    const test_cases = [_]struct {
+        html: []const u8,
+        mode: SanitizerMode,
+        should_contain: []const []const u8,
+        should_not_contain: []const []const u8,
+    }{
+        .{
+            // lexbor parses <script> into HEAD unless set into BODY
+            .html = "<script>alert(1)</script><body><p>First Text</p><script>alert(2);</script></body>",
+            .mode = .strict,
+            .should_contain = &[_][]const u8{"<p>First Text</p>"},
+            .should_not_contain = &[_][]const u8{"<script>"},
+        },
+        .{
+            .html = "<script>alert(1)</script><body><p>Second Text</p><script>alert(2);</script></body>",
+            .mode = .minimum,
+            .should_contain = &[_][]const u8{ "<script>", "<p>Second Text</p>" },
+            .should_not_contain = &[_][]const u8{},
+        },
+        .{
+            // lexbor parses into BODY
+            .html = "<custom-elem>Test</custom-elem>",
+            .mode = .strict,
+            .should_contain = &[_][]const u8{},
+            .should_not_contain = &[_][]const u8{"custom-elem"},
+        },
+        .{
+            .html = "<custom-elem>Test</custom-elem>",
+            .mode = .permissive,
+            .should_contain = &[_][]const u8{ "custom-elem", "Test" },
+            .should_not_contain = &[_][]const u8{},
+        },
+    };
 
-//     for (test_cases) |case| {
-//         const doc = try z.parseHTML(allocator, case.html);
-//         defer z.destroyDocument(doc);
+    for (test_cases) |case| {
+        const doc = try z.parseHTML(allocator, case.html);
 
-//         try sanitizeWithMode(allocator, z.bodyNode(doc).?, case.mode);
-//         const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
-//         defer allocator.free(result);
+        try sanitizeWithMode(allocator, z.bodyNode(doc).?, case.mode);
+        const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+        defer allocator.free(result);
 
-//         for (case.should_contain) |expected| {
-//             try testing.expect(std.mem.indexOf(u8, result, expected) != null);
-//         }
+        for (case.should_contain) |expected| {
+            try testing.expect(std.mem.indexOf(u8, result, expected) != null);
+        }
 
-//         for (case.should_not_contain) |not_expected| {
-//             try testing.expect(std.mem.indexOf(u8, result, not_expected) == null);
-//         }
-//     }
-// }
+        for (case.should_not_contain) |not_expected| {
+            try testing.expect(std.mem.indexOf(u8, result, not_expected) == null);
+        }
+        z.destroyDocument(doc);
+    }
+}
 
 test "iframe requires sandbox attribute" {
     const allocator = testing.allocator;
@@ -1469,7 +1542,7 @@ test "base tag restrictions" {
         \\<base href="https://example.com/">
         \\<base href="/relative/path">
         \\<base href="javascript:alert()">
-        \\<base href="data:text/html,<script>alert()</script>">
+        \\<base href="data:text/html,<script>alert()</scriptx>">
         \\<base href="//evil.com">
         \\<base href="../../../etc/passwd">
         \\</body>
