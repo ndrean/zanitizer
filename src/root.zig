@@ -362,6 +362,7 @@ pub const sanitizeStrict = sanitize.sanitizeStrict;
 pub const applySanitization = parse.applySanitization;
 pub const sanitizePermissive = sanitize.sanitizePermissive;
 pub const isCustomElement = sanitize.isCustomElement;
+pub const sanitizeWithCss = sanitize.sanitizeWithCss;
 
 // CSS Sanitizer
 pub const CssSanitizer = sanitize_css.CssSanitizer;
@@ -389,6 +390,14 @@ pub const SVG_DANGEROUS_ELEMENTS = specs.SVG_DANGEROUS_ELEMENTS;
 pub const isSvgElementAllowed = specs.isSvgElementAllowed;
 pub const isSvgElementDangerous = specs.isSvgElementDangerous;
 pub const validateSvgUri = specs.validateSvgUri;
+
+// MathML Security
+pub const MATHML_DANGEROUS_ELEMENTS = specs.MATHML_DANGEROUS_ELEMENTS;
+pub const MATHML_SAFE_ELEMENTS = specs.MATHML_SAFE_ELEMENTS;
+pub const MATHML_SAFE_ATTRIBUTES = specs.MATHML_SAFE_ATTRIBUTES;
+pub const isMathMLElementDangerous = specs.isMathMLElementDangerous;
+pub const isMathMLElementSafe = specs.isMathMLElementSafe;
+pub const isMathMLAttributeSafe = specs.isMathMLAttributeSafe;
 
 // ============================================================================================
 // CSS Styles integration functions

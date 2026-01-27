@@ -613,11 +613,7 @@ pub const CssSanitizer = struct {
                         // Sanitize declarations using the simple filter
                         // (simpleCssFilter is more reliable for stylesheet content)
                         const sanitized_decls = try self.simpleCssFilter(declarations);
-                        defer {
-                            if (sanitized_decls.len > 0) {
-                                self.allocator.free(sanitized_decls);
-                            }
-                        }
+                        defer self.allocator.free(sanitized_decls);
                         try result.appendSlice(self.allocator, sanitized_decls);
 
                         try result.appendSlice(self.allocator, " }\n");
@@ -719,11 +715,7 @@ pub const CssSanitizer = struct {
 
         // Recursively sanitize block content
         const sanitized_content = try self.sanitizeStylesheet(block_content);
-        defer {
-            if (sanitized_content.len > 0) {
-                self.allocator.free(sanitized_content);
-            }
-        }
+        defer self.allocator.free(sanitized_content);
         try result.appendSlice(self.allocator, sanitized_content);
 
         try result.appendSlice(self.allocator, "}\n");

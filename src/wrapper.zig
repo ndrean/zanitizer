@@ -1579,7 +1579,13 @@ pub const Context = packed struct {
         return qjs.JS_NewCFunctionMagic(self.ptr, func, name.ptr, length, cproto, magic);
     }
 
-    pub inline fn newCFunctionData(self: Context, func: qjs.JSCFunctionData, length: c_int, magic: c_int, data: []const Value) Value {
+    pub inline fn newCFunctionData(
+        self: Context,
+        func: qjs.JSCFunctionData,
+        length: c_int,
+        magic: c_int,
+        data: []const Value,
+    ) Value {
         return qjs.JS_NewCFunctionData(self.ptr, func, length, magic, @intCast(data.len), data.ptr);
     }
 

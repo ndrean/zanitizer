@@ -169,6 +169,9 @@ pub const SVG_ALLOWED_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     .{ "title", {} },
     .{ "desc", {} },
     .{ "metadata", {} },
+
+    // HTML embedding (sanitize children as HTML)
+    .{ "foreignObject", {} },
 });
 
 /// SVG elements that are dangerous and must be blocked
@@ -199,6 +202,123 @@ pub const SVG_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     .{ "switch", {} }, // Can be used for conditional content loading
     .{ "view", {} }, // Can trigger navigation
 });
+
+//=========================================================================================================
+// MATHML SECURITY: Element and Attribute Allowlists
+//=========================================================================================================
+
+/// MathML elements that are dangerous and MUST be removed entirely (blacklist)
+/// These can execute JavaScript or load external resources
+pub const MATHML_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
+    // Can execute JavaScript
+    .{ "maction", {} },        // Has actiontype and xlink:href attributes
+    .{ "annotation-xml", {} }, // Can contain HTML/SVG with scripts
+    .{ "annotation", {} },     // Can contain text that gets executed
+    .{ "semantics", {} },      // Wrapper for dangerous annotations
+
+    // Can load external resources or have style risks
+    .{ "mpadded", {} },     // Can have background images
+    .{ "mphantom", {} },    // Similar risks
+    .{ "maligngroup", {} }, // Style/layout risks
+    .{ "malignmark", {} },  // Style/layout risks
+});
+
+/// Safe MathML elements (allowlist) - purely for mathematical notation
+/// These are token and layout elements with no scripting capability
+pub const MATHML_SAFE_ELEMENTS = std.StaticStringMap(void).initComptime(.{
+    // The root element
+    .{ "math", {} },
+
+    // Basic token elements (text only)
+    .{ "mi", {} },    // identifier
+    .{ "mo", {} },    // operator
+    .{ "mn", {} },    // number
+    .{ "ms", {} },    // string literal
+    .{ "mtext", {} }, // text
+
+    // Basic layout (structure only)
+    .{ "mrow", {} },
+    .{ "mfrac", {} },
+    .{ "msqrt", {} },
+    .{ "mroot", {} },
+    .{ "mfenced", {} },
+
+    // Script style (structure)
+    .{ "msub", {} },
+    .{ "msup", {} },
+    .{ "msubsup", {} },
+    .{ "munder", {} },
+    .{ "mover", {} },
+    .{ "munderover", {} },
+
+    // Tables (structure)
+    .{ "mtable", {} },
+    .{ "mtr", {} },
+    .{ "mtd", {} },
+    .{ "mlabeledtr", {} },
+
+    // Other safe layout elements
+    .{ "mspace", {} },
+    .{ "menclose", {} },
+    .{ "merror", {} },
+    .{ "mstyle", {} },
+});
+
+/// Safe attributes for MathML elements
+/// Note: href, xlink:href, and other link attributes are NOT safe
+pub const MATHML_SAFE_ATTRIBUTES = std.StaticStringMap(void).initComptime(.{
+    // Structural attributes
+    .{ "dir", {} },
+    .{ "mathsize", {} },
+    .{ "mathvariant", {} },
+    .{ "mathcolor", {} },      // Validated separately for color values
+    .{ "mathbackground", {} }, // Validated separately for color values
+
+    // Positioning
+    .{ "align", {} },
+    .{ "rowalign", {} },
+    .{ "columnalign", {} },
+
+    // Safe presentation
+    .{ "width", {} },
+    .{ "height", {} },
+    .{ "depth", {} },
+    .{ "lspace", {} },
+    .{ "rspace", {} },
+
+    // Display attributes
+    .{ "display", {} },
+    .{ "displaystyle", {} },
+    .{ "scriptlevel", {} },
+
+    // Fence attributes
+    .{ "open", {} },
+    .{ "close", {} },
+    .{ "separators", {} },
+
+    // Table attributes
+    .{ "rowspan", {} },
+    .{ "columnspan", {} },
+    .{ "rowspacing", {} },
+    .{ "columnspacing", {} },
+    .{ "frame", {} },
+    .{ "framespacing", {} },
+});
+
+/// Check if a MathML element is dangerous
+pub fn isMathMLElementDangerous(tag_name: []const u8) bool {
+    return MATHML_DANGEROUS_ELEMENTS.has(tag_name);
+}
+
+/// Check if a MathML element is safe
+pub fn isMathMLElementSafe(tag_name: []const u8) bool {
+    return MATHML_SAFE_ELEMENTS.has(tag_name);
+}
+
+/// Check if a MathML attribute is safe
+pub fn isMathMLAttributeSafe(attr_name: []const u8) bool {
+    return MATHML_SAFE_ATTRIBUTES.has(attr_name);
+}
 
 /// Check if an SVG element is in the allowlist
 pub fn isSvgElementAllowed(tag_name: []const u8) bool {
@@ -427,48 +547,199 @@ pub fn startsWithIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 /// - Execute code via javascript: URLs
 /// - Load malicious SVG via data: URLs
 ///
-/// Allowed:
-/// - Fragment identifiers: #id (for <use href="#icon">)
-/// - Relative paths (no protocol)
-/// - Safe image data URIs (not SVG)
+/// Validate SVG URI references (for href, xlink:href attributes)
 ///
-/// Blocked:
-/// - External URLs (http://, https://) - prevents SSRF
-/// - javascript:, vbscript:, file:
-/// - data:image/svg (can contain scripts)
-/// - data:text/* (can contain scripts)
+/// SECURITY: Only fragment-only references (#id) are allowed.
+/// This is stricter than general URI validation because:
+/// - "evil.svg#payload" could load external SVG with malicious content
+/// - Even same-origin relative paths are dangerous in SVG context
+/// - Most SVG XSS CVEs in the last 5 years involved <use> with non-fragment URIs
+///
+/// Allowed: #icon, #symbol-name, #my-gradient
+/// Blocked: evil.svg#payload, ./icons.svg#icon, http://..., javascript:...
+///
+/// Note: We block <use> entirely (SVG_DANGEROUS_ELEMENTS), but this validator
+/// ensures defense-in-depth for any SVG element with href/xlink:href.
 pub fn validateSvgUri(value: []const u8) bool {
-    const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+    var buf: [4096]u8 = undefined;
+    const decoded = normalizeUri(&buf, value) catch value;
+    const trimmed = trimUnicodeWhitespace(decoded);
     if (trimmed.len == 0) return false;
 
-    // Always block dangerous protocols
-    if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
-    if (startsWithIgnoreCase(trimmed, "vbscript:")) return false;
-    if (startsWithIgnoreCase(trimmed, "file:")) return false;
+    // STRICT: Only allow fragment-only references (#id)
+    // This is the only safe pattern for SVG URI attributes.
+    // Relative paths like "icons.svg#foo" can still load external resources.
+    return trimmed[0] == '#';
+}
 
-    // Fragment identifiers are always safe (#icon, #symbol-name)
-    if (trimmed[0] == '#') return true;
+/// Normalize URI value by decoding HTML entities and trimming Unicode whitespace.
+/// This prevents bypasses like `&nbsp;javascript:` or `​javascript:` (zero-width space).
+/// Returns a slice into the provided buffer.
+fn normalizeUri(buf: []u8, value: []const u8) ![]const u8 {
+    var len: usize = 0;
 
-    // Block external URLs by default (http://, https://, //)
-    // These can be used for SSRF attacks
-    if (startsWithIgnoreCase(trimmed, "http:")) return false;
-    if (startsWithIgnoreCase(trimmed, "https:")) return false;
-    if (trimmed.len >= 2 and trimmed[0] == '/' and trimmed[1] == '/') return false;
+    var i: usize = 0;
+    while (i < value.len and len < buf.len) {
+        if (value[i] == '&') {
+            // Decode common HTML entities that could hide whitespace
+            if (std.mem.startsWith(u8, value[i..], "&nbsp;")) {
+                buf[len] = 0xA0; // Non-breaking space
+                len += 1;
+                i += 6;
+            } else if (std.mem.startsWith(u8, value[i..], "&#xA0;") or std.mem.startsWith(u8, value[i..], "&#160;")) {
+                buf[len] = 0xA0;
+                len += 1;
+                i += if (value[i + 2] == 'x') 6 else 6;
+            } else if (std.mem.startsWith(u8, value[i..], "&#x")) {
+                // Decode hex entity &#x1680; etc.
+                const end = std.mem.indexOfScalar(u8, value[i..], ';') orelse {
+                    buf[len] = value[i];
+                    len += 1;
+                    i += 1;
+                    continue;
+                };
+                const hex_str = value[i + 3 .. i + end];
+                if (std.fmt.parseInt(u21, hex_str, 16)) |codepoint| {
+                    // Encode as UTF-8
+                    var utf8_buf: [4]u8 = undefined;
+                    const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch {
+                        buf[len] = value[i];
+                        len += 1;
+                        i += 1;
+                        continue;
+                    };
+                    if (len + utf8_len <= buf.len) {
+                        @memcpy(buf[len..][0..utf8_len], utf8_buf[0..utf8_len]);
+                        len += utf8_len;
+                    }
+                    i += end + 1;
+                } else |_| {
+                    buf[len] = value[i];
+                    len += 1;
+                    i += 1;
+                }
+            } else if (std.mem.startsWith(u8, value[i..], "&#")) {
+                // Decode decimal entity &#8192; etc.
+                const end = std.mem.indexOfScalar(u8, value[i..], ';') orelse {
+                    buf[len] = value[i];
+                    len += 1;
+                    i += 1;
+                    continue;
+                };
+                const dec_str = value[i + 2 .. i + end];
+                if (std.fmt.parseInt(u21, dec_str, 10)) |codepoint| {
+                    var utf8_buf: [4]u8 = undefined;
+                    const utf8_len = std.unicode.utf8Encode(codepoint, &utf8_buf) catch {
+                        buf[len] = value[i];
+                        len += 1;
+                        i += 1;
+                        continue;
+                    };
+                    if (len + utf8_len <= buf.len) {
+                        @memcpy(buf[len..][0..utf8_len], utf8_buf[0..utf8_len]);
+                        len += utf8_len;
+                    }
+                    i += end + 1;
+                } else |_| {
+                    buf[len] = value[i];
+                    len += 1;
+                    i += 1;
+                }
+            } else {
+                buf[len] = value[i];
+                len += 1;
+                i += 1;
+            }
+        } else {
+            buf[len] = value[i];
+            len += 1;
+            i += 1;
+        }
+    }
 
-    // Block data: URLs in SVG context (too dangerous)
-    // Even data:image/png could be crafted maliciously in SVG
-    if (startsWithIgnoreCase(trimmed, "data:")) return false;
+    return buf[0..len];
+}
 
-    // Allow relative paths (no protocol)
-    // e.g., "icons/symbol.svg#icon-name", "./image.png"
-    return true;
+/// Check if a character is Unicode whitespace (not just ASCII)
+fn isUnicodeWhitespace(c: u8, view: []const u8, idx: usize) bool {
+    // ASCII whitespace
+    if (std.ascii.isWhitespace(c)) return true;
+
+    // Check for multi-byte Unicode whitespace
+    if (idx + 2 < view.len) {
+        const bytes = view[idx..@min(idx + 3, view.len)];
+        // U+00A0 non-breaking space (0xC2 0xA0)
+        if (bytes.len >= 2 and bytes[0] == 0xC2 and bytes[1] == 0xA0) return true;
+        // U+1680 Ogham space mark (0xE1 0x9A 0x80)
+        if (bytes.len >= 3 and bytes[0] == 0xE1 and bytes[1] == 0x9A and bytes[2] == 0x80) return true;
+        // U+180E Mongolian vowel separator (0xE1 0xA0 0x8E)
+        if (bytes.len >= 3 and bytes[0] == 0xE1 and bytes[1] == 0xA0 and bytes[2] == 0x8E) return true;
+        // U+2000-U+200B various spaces (0xE2 0x80 0x80-0x8B)
+        if (bytes.len >= 3 and bytes[0] == 0xE2 and bytes[1] == 0x80 and bytes[2] >= 0x80 and bytes[2] <= 0x8B) return true;
+        // U+205F medium mathematical space (0xE2 0x81 0x9F)
+        if (bytes.len >= 3 and bytes[0] == 0xE2 and bytes[1] == 0x81 and bytes[2] == 0x9F) return true;
+        // U+3000 ideographic space (0xE3 0x80 0x80)
+        if (bytes.len >= 3 and bytes[0] == 0xE3 and bytes[1] == 0x80 and bytes[2] == 0x80) return true;
+    }
+
+    return false;
+}
+
+/// Trim Unicode whitespace from both ends
+fn trimUnicodeWhitespace(value: []const u8) []const u8 {
+    var start: usize = 0;
+    var end: usize = value.len;
+
+    // Trim from start
+    while (start < end) {
+        if (isUnicodeWhitespace(value[start], value, start)) {
+            // Skip the whitespace character (could be multi-byte)
+            if (start + 1 < end and value[start] >= 0xC0) {
+                // Multi-byte UTF-8
+                if (value[start] < 0xE0) start += 2
+                else if (value[start] < 0xF0) start += 3
+                else start += 4;
+            } else {
+                start += 1;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // Trim from end
+    while (end > start) {
+        const idx = end - 1;
+        if (isUnicodeWhitespace(value[idx], value, idx)) {
+            end = idx;
+            // Also need to check if this is part of multi-byte sequence
+            while (end > start and (value[end - 1] & 0xC0) == 0x80) {
+                end -= 1;
+            }
+            if (end > start and (value[end - 1] & 0x80) != 0) {
+                end -= 1;
+            }
+        } else {
+            break;
+        }
+    }
+
+    return value[start..end];
 }
 
 /// Validates that a URI is safe (no javascript:, vbscript:, data: blocks)
 /// Validates that a URI is safe for HTML elements (img src, a href, etc.)
 /// Strategy: Allow known-good protocols, Block known-bad protocols.
+/// IMPORTANT: Decodes HTML entities and trims Unicode whitespace to prevent bypasses.
 pub fn validateUri(value: []const u8) bool {
-    const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+    // Use a stack buffer for normalization (no allocation)
+    var buf: [4096]u8 = undefined;
+
+    // Decode HTML entities that could hide dangerous protocols
+    const decoded = normalizeUri(&buf, value) catch value;
+
+    // Trim both ASCII and Unicode whitespace
+    const trimmed = trimUnicodeWhitespace(decoded);
 
     if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
     if (startsWithIgnoreCase(trimmed, "vbscript:")) return false;
@@ -1451,31 +1722,64 @@ test "framework event handlers are blocked (XSS prevention)" {
     try testing.expect(!isAttributeAllowedEnum(.form, "hx-on:htmx:after-request"));
 }
 
-test "SVG URI validation is stricter than HTML" {
-    // Fragment identifiers are always safe (for <use href="#icon">)
+test "SVG URI validation - fragment-only" {
+    // ONLY fragment identifiers are allowed (defense against CVEs involving <use>)
     try testing.expect(validateSvgUri("#icon"));
     try testing.expect(validateSvgUri("#my-symbol"));
+    try testing.expect(validateSvgUri("#gradient-1"));
 
-    // Relative paths are allowed
-    try testing.expect(validateSvgUri("icons.svg#arrow"));
-    try testing.expect(validateSvgUri("./sprites.svg#logo"));
+    // Relative paths are BLOCKED (can load external resources)
+    // This is stricter than before - "icons.svg#arrow" could load external SVG
+    try testing.expect(!validateSvgUri("icons.svg#arrow"));
+    try testing.expect(!validateSvgUri("./sprites.svg#logo"));
+    try testing.expect(!validateSvgUri("../images/icon.svg#star"));
 
-    // Block dangerous protocols
+    // All protocols are blocked (only # is allowed)
     try testing.expect(!validateSvgUri("javascript:alert(1)"));
     try testing.expect(!validateSvgUri("vbscript:evil"));
     try testing.expect(!validateSvgUri("file:///etc/passwd"));
-
-    // Block external URLs (SSRF prevention)
     try testing.expect(!validateSvgUri("http://evil.com/malware.svg"));
     try testing.expect(!validateSvgUri("https://attacker.com/payload.svg"));
     try testing.expect(!validateSvgUri("//evil.com/script.svg"));
-
-    // Block ALL data: URLs in SVG context
     try testing.expect(!validateSvgUri("data:image/png;base64,abc"));
     try testing.expect(!validateSvgUri("data:image/svg+xml,<svg>"));
-    try testing.expect(!validateSvgUri("data:text/html,<script>"));
+
+    // Empty and whitespace-only are blocked
+    try testing.expect(!validateSvgUri(""));
+    try testing.expect(!validateSvgUri("   "));
 
     // Compare with HTML validator - HTML is more permissive
     try testing.expect(validateUri("https://example.com/image.png")); // HTML allows https
-    try testing.expect(!validateSvgUri("https://example.com/image.png")); // SVG blocks it
+    try testing.expect(!validateSvgUri("https://example.com/image.png")); // SVG blocks ALL non-fragment
+}
+
+test "SVG element allowlist and blocklist" {
+    // Safe SVG elements should be allowed
+    try testing.expect(isSvgElementAllowed("svg"));
+    try testing.expect(isSvgElementAllowed("circle"));
+    try testing.expect(isSvgElementAllowed("rect"));
+    try testing.expect(isSvgElementAllowed("path"));
+    try testing.expect(isSvgElementAllowed("line"));
+    try testing.expect(isSvgElementAllowed("text"));
+    try testing.expect(isSvgElementAllowed("g"));
+    try testing.expect(isSvgElementAllowed("defs"));
+    try testing.expect(isSvgElementAllowed("linearGradient"));
+    try testing.expect(isSvgElementAllowed("filter"));
+    try testing.expect(isSvgElementAllowed("feGaussianBlur"));
+
+    // Dangerous SVG elements should be blocked
+    try testing.expect(isSvgElementDangerous("script"));
+    try testing.expect(isSvgElementDangerous("foreignObject"));
+    try testing.expect(isSvgElementDangerous("a"));
+    try testing.expect(isSvgElementDangerous("use"));
+    try testing.expect(isSvgElementDangerous("image"));
+    try testing.expect(isSvgElementDangerous("animate"));
+    try testing.expect(isSvgElementDangerous("animateMotion"));
+    try testing.expect(isSvgElementDangerous("animateTransform"));
+    try testing.expect(isSvgElementDangerous("set"));
+    try testing.expect(isSvgElementDangerous("feImage"));
+
+    // Unknown elements should not be in either list
+    try testing.expect(!isSvgElementAllowed("unknown-element"));
+    try testing.expect(!isSvgElementDangerous("unknown-element"));
 }

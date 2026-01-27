@@ -4,17 +4,14 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 const js_security = @import("js_security.zig");
 
-// const isSafePath = security.isSafePath;
-// const js_secure_module_normalize = security.js_secure_module_normalize;
-
-// Import your sub-systems
 const EventLoop = @import("event_loop.zig").EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge; // Assuming your DOM logic is here
+const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const async_bindings = @import("async_bindings_generated.zig");
 const JSWorker = @import("js_worker.zig");
 const FetchBridge = @import("js_fetch.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
+const WebDataBridge = @import("js_web_data.zig").WebDataBridge;
 
 const TIMEOUT_MS: i64 = 5000;
 
@@ -46,7 +43,7 @@ pub const ScriptEngine = struct {
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
     sandbox: js_security.Sandbox,
 
-    /// Initialize the entire JS Environment on the heap
+    /// Initialize JS Environment on the heap
     pub fn init(allocator: std.mem.Allocator, sandbox_root: []const u8) !*ScriptEngine {
         const self = try allocator.create(ScriptEngine);
         self.allocator = allocator;
@@ -104,17 +101,13 @@ pub const ScriptEngine = struct {
         try self.dom.installAPIs(); // console, etc.
         try JSWorker.registerWorkerClass(self.ctx);
         try FetchBridge.install(self.ctx);
+        try WebDataBridge.install(self.ctx);
 
         // Install other async bindings (readFile, etc.)
         // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
         // _ = try self.ctx.setPropertyStr(global, "readFile", readFile_fn);
 
-        // _ = self.ctx.eval(
-        //     "Object.freeze(globalThis);",
-        //     "<internal>",
-        //     z.qjs.JS_EVAL_TYPE_GLOBAL,
-        // );
-        try self.disableUnsafeFeatures();
+        // try self.disableUnsafeFeatures();
         return self;
     }
 
@@ -135,6 +128,14 @@ pub const ScriptEngine = struct {
             defer self.ctx.freeAtom(atom);
             if (!try self.ctx.deleteProperty(global_obj, atom, 0)) return error.FailedToDisableFeature;
         }
+        const glob = try self.ctx.eval(
+            "Object.freeze(globalThis);",
+            "<internal>",
+            zqjs.Context.EvalFlags{
+                .type = .global,
+            },
+        );
+        self.ctx.freeValue(glob);
     }
 
     pub fn deinit(self: *ScriptEngine) void {
@@ -371,7 +372,6 @@ pub const ScriptEngine = struct {
         // e.g. "js/libs/" + "../../secrets" -> "/secrets"
         const resolved = try std.fs.path.resolve(self.allocator, &.{ "/", base_dir, user_path });
         defer self.allocator.free(resolved);
-        z.print("CONT---", .{});
 
         // 2. Strip the fake root "/" to get a clean relative path
         // e.g. "/js/app.js" -> "js/app.js"
@@ -566,13 +566,6 @@ pub const ScriptEngine = struct {
             std.mem.startsWith(u8, url, "https:") or
             std.mem.startsWith(u8, url, "//");
     }
-
-    // // Helper to check LFI (Local File Inclusion)
-    // fn isPathSafe(allocator: std.mem.Allocator, full_path: []const u8) bool {
-    //     const cwd = std.fs.cwd().realpathAlloc(allocator, ".") catch return false;
-    //     defer allocator.free(cwd);
-    //     return std.mem.startsWith(u8, full_path, cwd);
-    // }
 };
 
 // ============================================================================
@@ -598,96 +591,3 @@ fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
         .url = try loop.allocator.dupe(u8, url_str),
     };
 }
-
-// ============================================================================
-
-// fn js_secure_module_normalize(
-//     ctx: ?*qjs.JSContext,
-//     module_base_name: [*c]const u8,
-//     module_name: [*c]const u8,
-//     opaque_ptr: ?*anyopaque,
-// ) callconv(.c) [*c]u8 {
-//     const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-//     const allocator = allocator_ptr.*;
-
-//     // 1. Safety Checks
-//     if (module_name == null) return null;
-//     const name_slice = std.mem.span(module_name);
-
-//     // 2. BLOCK REMOTE (SSRF Prevention)
-//     if (std.mem.startsWith(u8, name_slice, "http:") or
-//         std.mem.startsWith(u8, name_slice, "https:") or
-//         std.mem.startsWith(u8, name_slice, "//"))
-//     {
-//         _ = qjs.JS_ThrowReferenceError(ctx, "Security: Remote imports blocked '%s'", module_name);
-//         return null;
-//     }
-
-//     // 3. RESOLVE PATH (Fixes nested imports)
-//     var resolved_path: []u8 = undefined;
-
-//     // Logic: resolve(base_dir, requested_name)
-//     // Note: std.fs.path.resolve returns an ABSOLUTE LOGICAL path
-//     if (module_base_name) |base| {
-//         const base_slice = std.mem.span(base);
-//         // Ensure we have a valid directory from the base
-//         const base_dir = if (base_slice.len > 0) std.fs.path.dirname(base_slice) orelse "." else ".";
-//         resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch return null;
-//     } else {
-//         resolved_path = std.fs.path.resolve(allocator, &.{name_slice}) catch return null;
-//     }
-//     defer allocator.free(resolved_path);
-
-//     // 4. SANDBOX CHECK (LFI Prevention)
-//     var is_safe = false;
-
-//     if (std.fs.path.isAbsolute(resolved_path)) {
-//         // CASE A: Absolute Path (e.g. /home/user/project/js/math.js)
-//         // Must start with the CWD's absolute path.
-//         if (std.process.getCwdAlloc(allocator)) |cwd| {
-//             defer allocator.free(cwd);
-//             if (std.mem.startsWith(u8, resolved_path, cwd)) {
-//                 is_safe = true;
-//             }
-//         } else |_| {
-//             // If we can't determine CWD, fail closed.
-//             is_safe = false;
-//         }
-//     } else {
-//         // CASE B: Relative Path (e.g. js/math.js)
-//         // Must NOT start with ".." (which means escaping up).
-//         // Note: 'resolve' collapses inner "..", so checking the prefix is sufficient.
-//         if (!std.mem.startsWith(u8, resolved_path, "..")) {
-//             is_safe = true;
-//         }
-//     }
-
-//     if (!is_safe) {
-//         _ = qjs.JS_ThrowReferenceError(ctx, "Security: Path traversal detected '%s'", resolved_path.ptr);
-//         return null;
-//     }
-
-//     // 5. EXTENSION HANDLING
-//     var final_path = resolved_path;
-//     var final_path_owned: ?[]u8 = null;
-
-//     // Check if exact file exists
-//     const exact_exists = if (std.fs.cwd().access(final_path, .{})) |_| true else |_| false;
-
-//     if (!exact_exists) {
-//         // Try appending .js
-//         const with_ext = std.fmt.allocPrint(allocator, "{s}.js", .{final_path}) catch return null;
-//         if (std.fs.cwd().access(with_ext, .{}) == error.FileNotFound) {
-//             allocator.free(with_ext);
-//             // Both failed. Throw error so user knows WHY it failed.
-//             _ = qjs.JS_ThrowReferenceError(ctx, "Module not found: '%s' (looked in %s)", module_name, final_path.ptr);
-//             return null;
-//         }
-//         final_path = with_ext;
-//         final_path_owned = with_ext;
-//     }
-//     defer if (final_path_owned) |p| allocator.free(p);
-
-//     // 6. RETURN TO QUICKJS
-//     return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
-// }

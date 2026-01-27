@@ -138,6 +138,8 @@ pub const HtmlTag = enum {
     g,
     defs,
     use,
+    // MathML elements
+    math,
 
     pub fn toString(self: @This()) []const u8 {
         return switch (self) {
@@ -246,6 +248,8 @@ pub const HtmlTag = enum {
             .g => "g",
             .defs => "defs",
             .use => "use",
+            // MathML elements
+            .math => "math",
             .table => "table",
             .tbody => "tbody",
             .td => "td",
