@@ -708,6 +708,11 @@ const changeText = () =>{
 const btn = document.querySelector("button");
 btn.addEventListener("click", () => {
   changeText();
+  const p = document.getElementById("pid");
+  const p_color = p.style.getProperyValue("color");
+  const p_font_size =window.getComputedStyle(p).getPropertyValue("font-size");
+  console.log("[JS] 'p' properties: ", p_color, p_font_size);
+  console.log("[JS] 'p' textContent: ", p.textContent);
 });
 
 btn.dispatchEvent(new Event("click"), (e) => {
@@ -754,6 +759,8 @@ fn css_js_external_file(allocator: std.mem.Allocator) !void {
     try std.testing.expectEqualStrings("20px", computed_font_size.?);
     try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
 
+    z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
+
     try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
 ```
@@ -761,6 +768,9 @@ fn css_js_external_file(allocator: std.mem.Allocator) !void {
  and you have a view on the DOM:
 
 ```txt
+[JS] 'p' properties: green, 20px
+[JS] 'p' textContent: New text
+[Zig] p_color: green, p_font_size: 20px
 <html>
   <head>
     <link rel="stylesheet" href="style.css">

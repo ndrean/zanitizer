@@ -301,6 +301,11 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(window_obj, "navigator", nav_obj);
 
         // Attach to global
+
+        const gcs_fn = ctx.newCFunction(js_style.window_getComputedStyle, "getComputedStyle", 1);
+        try ctx.setPropertyStr(global, "getComputedStyle", gcs_fn);
+        // Also attach it to the window object proxy
+        try ctx.setPropertyStr(window_obj, "getComputedStyle", ctx.dupValue(gcs_fn));
         try ctx.setPropertyStr(global, "window", window_obj);
 
         // Standard global aliases

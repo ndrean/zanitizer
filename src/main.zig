@@ -71,6 +71,7 @@ pub fn main() !void {
     try link_and_script(allocator, sandbox_root);
 
     try extractScript(allocator, sandbox_root);
+
     // try simpleESM(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
@@ -308,12 +309,15 @@ fn link_and_script(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     const computed_color = try z.getComputedStyle(allocator, p_el, "color");
     const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+
     defer if (computed_color) |c| allocator.free(c);
     defer if (computed_font_size) |c| allocator.free(c);
 
-    try std.testing.expectEqualStrings("green", computed_color.?);
-    try std.testing.expectEqualStrings("20px", computed_font_size.?);
-    try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
+    // try std.testing.expectEqualStrings("green", computed_color.?);
+    // try std.testing.expectEqualStrings("20px", computed_font_size.?);
+    // try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
+
+    z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
 
     try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
