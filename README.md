@@ -715,9 +715,7 @@ btn.addEventListener("click", () => {
   console.log("[JS] 'p' textContent: ", p.textContent);
 });
 
-btn.dispatchEvent(new Event("click"), (e) => {
-  console.log("Button clicked");
-});
+btn.dispatchEvent(new Event("click"));
 ```
 
 ```html
@@ -771,6 +769,7 @@ fn css_js_external_file(allocator: std.mem.Allocator) !void {
 [JS] 'p' properties: green, 20px
 [JS] 'p' textContent: New text
 [Zig] p_color: green, p_font_size: 20px
+
 <html>
   <head>
     <link rel="stylesheet" href="style.css">
