@@ -690,16 +690,19 @@ fn js_framework_bench(allocator: std.mem.Allocator) !void {
 
 ### CSS and JS executed (using file sources)
 
+File: _/js/js-and-css/style.css_
+
 ```css
-/* js/js-and-css/style.css */
+
 #pid {
   color: green;
   font-size: 20px;
 }
 ```
 
+File: _/js/js-and-css/main.js_
+
 ```js
-// js/js-and-css/main.js
 const changeText = () =>{
   const p = document.getElementById("pid");
   p.textContent = "New text";
@@ -717,6 +720,8 @@ btn.addEventListener("click", () => {
 
 btn.dispatchEvent(new Event("click")  );
 ```
+
+File: _/js/js-and-css/index.html_
 
 ```html
 <!-- js/js-and-css/index.html -->
