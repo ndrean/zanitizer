@@ -33,9 +33,14 @@ What it does not have or is not:
 - Runtime limits (memory, stack size, interuptible) for DoS. It is 
 - sandboxed File loading with no symlink for LFI.
 - Load sanitized and sandboxed HTML, CSS and scripts
-  - The sanitirzer is 5 to 50 times faster than DOMPurify
-  - It is based on a declarative security policy (_html_specs_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
+  - The `Zanitizer` module is 5 to 50 times faster than DOMPurify
+  - It is based on a declarative security policy (_html_specs.zig_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
   - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
+
+It is performant:
+
+- 24kB of the DOMPurify HTML test is processed in 1ms and the H5SC is processed (in debug/test mode) in 1.3ms.
+- It runs the js-framework  vanilla JavaScript benchmark tests much faster than `jsdom`.
 
 This program can be used for:
 
