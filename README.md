@@ -710,12 +710,12 @@ btn.addEventListener("click", () => {
   changeText();
   const p = document.getElementById("pid");
   const p_color = p.style.getProperyValue("color");
-  const p_font_size =window.getComputedStyle(p).getPropertyValue("font-size");
+  const p_font_size = window.getComputedStyle(p).getPropertyValue("font-size");
   console.log("[JS] 'p' properties: ", p_color, p_font_size);
   console.log("[JS] 'p' textContent: ", p.textContent);
 });
 
-btn.dispatchEvent(new Event("click"));
+btn.dispatchEvent(new Event("click")  );
 ```
 
 ```html
@@ -737,33 +737,29 @@ btn.dispatchEvent(new Event("click"));
 The following `Zig` code runs successfully:
 
 ```zig
-fn css_js_external_file(allocator: std.mem.Allocator) !void {
-  const engine = try ScriptEngine.init(allocator);
-    defer engine.deinit();
-    const bridge = engine.dom;
-    try engine.loadHTML(html);
-    try engine.loadExternalStylesheets("js/js-and-css/");
-    try engine.executeScripts(allocator, "js/js-and-css");
-    try engine.run();
+fn css_js_external_file(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
+  const engine = try ScriptEngine.init(allocator, sandbox_root);
+  defer engine.deinit();
 
-    const p_el = z.getElementById(bridge.doc, "pid").?;
+  try engine.loadHTML(html);
+  try engine.loadExternalStylesheets("js/js-and-css/");
+  try engine.executeScripts(allocator, "js/js-and-css");
+  try engine.run();
 
-    const computed_color = try z.getComputedStyle(allocator, p_el, "color");
-    const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
-    defer if (computed_color) |c| allocator.free(c);
-    defer if (computed_font_size) |c| allocator.free(c);
+  const p_el = z.getElementById(bridge.doc, "pid").?;
+  const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+  const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+  defer if (computed_color) |c| allocator.free(c);
+  defer if (computed_font_size) |c| allocator.free(c);
 
-    try std.testing.expectEqualStrings("green", computed_color.?);
-    try std.testing.expectEqualStrings("20px", computed_font_size.?);
-    try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
 
-    z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
+  z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
 
-    try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
+  try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
 ```
 
- and you have a view on the DOM:
+In the terminal:
 
 ```txt
 [JS] 'p' properties: green, 20px
