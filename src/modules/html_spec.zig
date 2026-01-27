@@ -22,25 +22,43 @@ pub const FrameworkSpec = struct {
 };
 
 /// Blacklist of Attributes that are inherently dangerous and should always be blocked unless explicitly handled by framework logic.
-pub const DANGEROUS_ATTRIBUTES = [_][]const u8{
-    // Script execution
-    "onclick",  "onload",    "onerror",   "onmouseover", "onfocus",        "onblur",       "onchange",  "onsubmit",  "onkeydown",          "onkeyup", "onmouseenter", "onmouseleave",
-    // post
-    "onresize", "onmessage", "onstorage", "onunload",    "onbeforeunload", "onhashchange",
+/// Using StaticStringMap for O(1) lookup performance (used in hot sanitizer paths)
+pub const DANGEROUS_ATTRIBUTES = std.StaticStringMap(void).initComptime(.{
+    // Script execution (event handlers)
+    .{ "onclick", {} },
+    .{ "onload", {} },
+    .{ "onerror", {} },
+    .{ "onmouseover", {} },
+    .{ "onfocus", {} },
+    .{ "onblur", {} },
+    .{ "onchange", {} },
+    .{ "onsubmit", {} },
+    .{ "onkeydown", {} },
+    .{ "onkeyup", {} },
+    .{ "onmouseenter", {} },
+    .{ "onmouseleave", {} },
+    .{ "onresize", {} },
+    .{ "onmessage", {} },
+    .{ "onstorage", {} },
+    .{ "onunload", {} },
+    .{ "onbeforeunload", {} },
+    .{ "onhashchange", {} },
+
     // HTML injection vectors
-    "innerHTML", "outerHTML", "insertAdjacentHTML",
+    .{ "innerHTML", {} },
+    .{ "outerHTML", {} },
+    .{ "insertAdjacentHTML", {} },
 
     // Dangerous framework-specifics (if not using the framework safely)
-    "x-html",  "v-html",
-    "ng-bind-html",
+    .{ "x-html", {} },
+    .{ "v-html", {} },
+    .{ "ng-bind-html", {} },
 
     // Legacy / Obscure
-    "integrity", // Can be abused to load malicious resources
-    "formaction", // Can hijack form submissions
-    "background", // Legacy background attribute can execute script in IE
-    // "dynsrc", // IE legacy ??
-    // "lowsrc", // IE legacy??
-};
+    .{ "integrity", {} }, // Can be abused to load malicious resources
+    .{ "formaction", {} }, // Can hijack form submissions
+    .{ "background", {} }, // Legacy background attribute can execute script in IE
+});
 
 pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
     "import(",
@@ -169,9 +187,6 @@ pub const SVG_ALLOWED_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     .{ "title", {} },
     .{ "desc", {} },
     .{ "metadata", {} },
-
-    // HTML embedding (sanitize children as HTML)
-    .{ "foreignObject", {} },
 });
 
 /// SVG elements that are dangerous and must be blocked
@@ -394,11 +409,9 @@ pub fn isDomClobberingName(value: []const u8) bool {
 /// Check if an attribute is in the dangerous blacklist
 /// Includes explicit event handlers (onclick, etc.) and dangerous framework attributes
 pub fn isDangerousAttribute(attr: []const u8) bool {
-    // Check explicit blacklist
-    for (DANGEROUS_ATTRIBUTES) |dangerous| {
-        if (std.mem.eql(u8, attr, dangerous)) {
-            return true;
-        }
+    // Check explicit blacklist - O(1) lookup
+    if (DANGEROUS_ATTRIBUTES.has(attr)) {
+        return true;
     }
     // Also catch any on* event handlers not in the list
     if (std.mem.startsWith(u8, attr, "on") and attr.len > 2) {
@@ -1054,25 +1067,25 @@ pub const element_specs = [_]ElementSpec{
 
     // Media elements
     .{ .tag_enum = .video, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "src" },
+        .{ .name = "src", .validator = validateUri },
         .{ .name = "controls", .valid_values = &[_][]const u8{""} },
         .{ .name = "autoplay", .valid_values = &[_][]const u8{""} },
         .{ .name = "loop", .valid_values = &[_][]const u8{""} },
         .{ .name = "muted", .valid_values = &[_][]const u8{""} },
-        .{ .name = "poster" },
+        .{ .name = "poster", .validator = validateUri },
         .{ .name = "preload", .valid_values = &[_][]const u8{ "none", "metadata", "auto" } },
         .{ .name = "width" },
         .{ .name = "height" },
     } ++ common_attrs) },
     .{ .tag_enum = .audio, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "src" },
+        .{ .name = "src", .validator = validateUri },
         .{ .name = "controls", .valid_values = &[_][]const u8{""} },
         .{ .name = "autoplay", .valid_values = &[_][]const u8{""} },
         .{ .name = "loop", .valid_values = &[_][]const u8{""} },
         .{ .name = "muted", .valid_values = &[_][]const u8{""} },
         .{ .name = "preload", .valid_values = &[_][]const u8{ "none", "metadata", "auto" } },
     } ++ common_attrs) },
-    .{ .tag_enum = .source, .allowed_attrs = &([_]AttrSpec{ .{ .name = "src" }, .{ .name = "type" }, .{ .name = "media" }, .{ .name = "sizes" }, .{ .name = "srcset" }, .{ .name = "" } } ++ common_attrs), .void_element = true },
+    .{ .tag_enum = .source, .allowed_attrs = &([_]AttrSpec{ .{ .name = "src", .validator = validateUri }, .{ .name = "type" }, .{ .name = "media" }, .{ .name = "sizes" }, .{ .name = "srcset" }, .{ .name = "" } } ++ common_attrs), .void_element = true },
     .{ .tag_enum = .base, .allowed_attrs = &[_]AttrSpec{
         .{ .name = "href", .validator = validateUri },
         .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },

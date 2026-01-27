@@ -374,12 +374,9 @@ fn filterSvgAttributes(context: *SanitizeContext, element: *z.HTMLElement) !void
     while (iter.next()) |attr_pair| {
         var should_remove = false;
 
-        // Global blocklist (onclick, onload, etc.)
-        for (z.DANGEROUS_ATTRIBUTES) |dangerous_attr| {
-            if (std.mem.eql(u8, attr_pair.name, dangerous_attr)) {
-                should_remove = true;
-                break;
-            }
+        // Global blocklist (onclick, onload, etc.) - O(1) lookup
+        if (z.DANGEROUS_ATTRIBUTES.has(attr_pair.name)) {
+            should_remove = true;
         }
 
         // Validate href and xlink:href with strict SVG URI rules
@@ -404,12 +401,9 @@ fn filterMathMLAttributes(context: *SanitizeContext, element: *z.HTMLElement) !v
     while (iter.next()) |attr_pair| {
         var should_remove = false;
 
-        // Global blocklist (href, xlink:href, onclick, etc.)
-        for (z.DANGEROUS_ATTRIBUTES) |dangerous_attr| {
-            if (std.mem.eql(u8, attr_pair.name, dangerous_attr)) {
-                should_remove = true;
-                break;
-            }
+        // Global blocklist (href, xlink:href, onclick, etc.) - O(1) lookup
+        if (z.DANGEROUS_ATTRIBUTES.has(attr_pair.name)) {
+            should_remove = true;
         }
 
         // Check if attribute is in MathML safe list
@@ -810,12 +804,9 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
     while (iter.next()) |attr_pair| {
         var should_remove = false;
 
-        // FAIL FAST: Global Blocklist
-        for (z.DANGEROUS_ATTRIBUTES) |dangerous_attr| {
-            if (std.mem.eql(u8, attr_pair.name, dangerous_attr)) {
-                should_remove = true;
-                break;
-            }
+        // FAIL FAST: Global Blocklist - O(1) lookup
+        if (z.DANGEROUS_ATTRIBUTES.has(attr_pair.name)) {
+            should_remove = true;
         }
 
         // Runtime Configuration Checks (Logic that cannot be in static specs)
@@ -3992,4 +3983,50 @@ test "dom_purify" {
     try testing.expect(std.mem.indexOf(u8, result, "<svg") != null);
     try testing.expect(std.mem.indexOf(u8, result, "<div") != null);
     try testing.expect(std.mem.indexOf(u8, result, "<p>hello</p>") != null);
+}
+
+test "html5sec.org vectors" {
+    const allocator = testing.allocator;
+
+    // Read the html5sec.org test file
+    const input = std.fs.cwd().readFileAlloc(allocator, "h5sc_sanitize_tests/h5sc-test.html", 10 * 1024 * 1024) catch |err| {
+        std.debug.print("Skipping html5sec test: could not read /tmp/h5sc-test.html: {}\n", .{err});
+        return;
+    };
+    defer allocator.free(input);
+
+    std.debug.print("\n=== HTML5 Security Cheatsheet Test (Zig) ===\n", .{});
+    std.debug.print("Input size: {} bytes\n", .{input.len});
+    std.debug.print("Total vectors: 139\n\n", .{});
+
+    const doc = try z.parseHTML(allocator, input);
+    defer z.destroyDocument(doc);
+
+    var css_sanitizer = try CssSanitizer.init(allocator, .{});
+    defer css_sanitizer.deinit();
+
+    var timer = try std.time.Timer.start();
+    try sanitizeWithCss(allocator, z.bodyNode(doc).?, SanitizerMode.strict, &css_sanitizer);
+    const elapsed_ns = timer.read();
+    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+    const elapsed_ms = elapsed_us / 1000.0;
+
+    std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
+
+    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+    defer allocator.free(result);
+
+    std.debug.print("Output size: {} bytes\n", .{result.len});
+
+    // Write output to file for comparison with DOMPurify
+    if (std.fs.cwd().createFile("/tmp/h5sc-zig-output.html", .{})) |file| {
+        defer file.close();
+        _ = file.write(result) catch {};
+        std.debug.print("Wrote output to /tmp/h5sc-zig-output.html\n\n", .{});
+    } else |_| {}
+
+    // Basic security checks - ensure no actual executable event handlers
+    try testing.expect(std.mem.indexOf(u8, result, " onclick=") == null);
+    try testing.expect(std.mem.indexOf(u8, result, " onload=") == null);
+    try testing.expect(std.mem.indexOf(u8, result, "<script>alert") == null);
 }

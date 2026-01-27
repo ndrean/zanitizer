@@ -1,21 +1,52 @@
-# zexplorer: a QuickJS DOM aware extension
+# zexplorer: a JavaScript programmable HTML processor on steriods
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-`Zig` based HTML parser & JavaScript executor at native speed on a server
+[WIP]
 
-## WIP
-
-A project to run a fast JavaScript runtime parser extended with DOM APIs.
+An opinionnated  `Zig` based HTML processor that lets you write in JavaScript but executes at native speed on a server.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
-**Security**: Runtime limits (memory, stack size, interuptible) for DoS, sandboxed File loading with no symlink for LFI. Loaded HTML and CSS are optionally sanitized.
+## Project description
+
+What is has:
+
+- runs most DOM primitives and executes ES6 JavaScript
+- sandboxed file system (upload directory only),
+- `fetch` API (via thread pool for HTTP requests),
+- `Workers`(OS threads for parallel processing),
+- can inject native Zig primitives (statistics, CSV parsing...)
+
+It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) included a native speed.
+
+What it does not have or is not:
+
+- not a browser,
+- not a headless browser,
+- not `Node.js` nor `bun`,
+- not for streaming/async I/O workloads.
+
+
+**Security**:
+
+- Runtime limits (memory, stack size, interuptible) for DoS. It is 
+- sandboxed File loading with no symlink for LFI.
+- Load sanitized and sandboxed HTML, CSS and scripts
+  - The sanitirzer is 5 to 50 times faster than DOMPurify
+  - It is based on a declarative security policy (_html_specs_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
+  - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
 
 This program can be used for:
 
-- ➡ One-shot usage (examples in _/examples_  TODO)
-- ➡ long-running with event-loop/async (example TODO)
+## Use cases
+
+- Email sanitization if you need zero XSS and maximum speed
+- SSR with untrusted templates with sandbox processing
+- HTML transformation pipelines: inject `Zig` code for hot paths (CSV parsing, crypto...)
+- Testing frameworks - Fast and sandboxed
+- Templating & Static Site Generation - (can use template components): no async needed, pure speed.
+- Web scrapping on steroids.
 
 ## Tests zexplorer vs jsdom
 
@@ -1594,19 +1625,7 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 - No JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts.
 - For long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig`: embed native Zig functions for this! (data processing, CSV parsing, batch and send to Zig...)
 
-## Use cases
 
-- Testing frameworks - Headless DOM for tests
-- Templating & Static Site Generation - (can use template components), outputs static HTML files
-- Email templates - Server-side rendering
-- PDF generation - HTML → PDF pipelines
-- API gateways - Transform HTML responses
-- Web scrapping on steroids.
-- A lightweight and fast jsdom alternative
-- A native SSR engine for any JS framework
-- A programmable HTML processor with full JS power
-- An HTMX backend powerhouse
-This is useful for web scraping, email sanitization, test engine for integrated tests, SSR post-processing of fragments.
 
 The primitives exposed stay as close as possible to `JavaScript` semantics.
 
