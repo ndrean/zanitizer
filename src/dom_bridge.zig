@@ -727,6 +727,8 @@ fn js_get_childNodes(
     return array;
 }
 
+// In src/dom_bridge.zig
+
 fn js_consoleLog(
     ctx_ptr: ?*z.qjs.JSContext,
     _: z.qjs.JSValue,
@@ -736,7 +738,7 @@ fn js_consoleLog(
     const ctx = w.Context{ .ptr = ctx_ptr };
     var i: c_int = 0;
 
-    // 1. Get JSON.stringify function once
+    // Get JSON.stringify
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
     const json_obj = ctx.getPropertyStr(global, "JSON");
@@ -746,16 +748,22 @@ fn js_consoleLog(
 
     while (i < argc) : (i += 1) {
         if (i > 0) z.print(" ", .{});
-
         const val = argv[@intCast(i)];
 
-        // 2. Logic: If Object/Array, try JSON.stringify(val, null, 2)
         var printed = false;
-        if (ctx.isObject(val) and !ctx.isNull(val)) {
-            // Args: [value, null, 2] for pretty print
+
+        // [FIX] Check if it is an Error object FIRST
+        if (zqjs.Context.isError(val)) {
+            // Error.toString() gives "Error: message"
+            const str = ctx.toCString(val) catch "Error";
+            z.print("{s}", .{str});
+            ctx.freeCString(str);
+            printed = true;
+        }
+        // Then check if it is a generic Object to pretty-print
+        else if (ctx.isObject(val) and !ctx.isNull(val)) {
             const space = ctx.newInt32(2);
             var args = [_]z.qjs.JSValue{ val, w.NULL, space };
-
             const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
             ctx.freeValue(space);
 
@@ -766,13 +774,11 @@ fn js_consoleLog(
                 ctx.freeValue(json_str);
                 printed = true;
             } else {
-                // If circular reference or error, clear exception and fall back to toString
                 const err = ctx.getException();
                 ctx.freeValue(err);
             }
         }
 
-        // 3. Fallback: Standard toString()
         if (!printed) {
             const str = ctx.toCString(val) catch continue;
             z.print("{s}", .{str});
@@ -782,6 +788,61 @@ fn js_consoleLog(
     z.print("\n", .{});
     return w.UNDEFINED;
 }
+// fn js_consoleLog(
+//     ctx_ptr: ?*z.qjs.JSContext,
+//     _: z.qjs.JSValue,
+//     argc: c_int,
+//     argv: [*c]z.qjs.JSValue,
+// ) callconv(.c) zqjs.Value {
+//     const ctx = w.Context{ .ptr = ctx_ptr };
+//     var i: c_int = 0;
+
+//     // 1. Get JSON.stringify function once
+//     const global = ctx.getGlobalObject();
+//     defer ctx.freeValue(global);
+//     const json_obj = ctx.getPropertyStr(global, "JSON");
+//     defer ctx.freeValue(json_obj);
+//     const stringify_fn = ctx.getPropertyStr(json_obj, "stringify");
+//     defer ctx.freeValue(stringify_fn);
+
+//     while (i < argc) : (i += 1) {
+//         if (i > 0) z.print(" ", .{});
+
+//         const val = argv[@intCast(i)];
+
+//         // 2. Logic: If Object/Array, try JSON.stringify(val, null, 2)
+//         var printed = false;
+//         if (ctx.isObject(val) and !ctx.isNull(val)) {
+//             // Args: [value, null, 2] for pretty print
+//             const space = ctx.newInt32(2);
+//             var args = [_]z.qjs.JSValue{ val, w.NULL, space };
+
+//             const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
+//             ctx.freeValue(space);
+
+//             if (!ctx.isException(json_str)) {
+//                 const c_str = ctx.toCString(json_str) catch "???";
+//                 z.print("{s}", .{c_str});
+//                 ctx.freeCString(c_str);
+//                 ctx.freeValue(json_str);
+//                 printed = true;
+//             } else {
+//                 // If circular reference or error, clear exception and fall back to toString
+//                 const err = ctx.getException();
+//                 ctx.freeValue(err);
+//             }
+//         }
+
+//         // 3. Fallback: Standard toString()
+//         if (!printed) {
+//             const str = ctx.toCString(val) catch continue;
+//             z.print("{s}", .{str});
+//             ctx.freeCString(str);
+//         }
+//     }
+//     z.print("\n", .{});
+//     return w.UNDEFINED;
+// }
 // fn js_consoleLog(
 //     ctx_ptr: ?*z.qjs.JSContext,
 //     _: z.qjs.JSValue,

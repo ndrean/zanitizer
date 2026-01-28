@@ -856,8 +856,8 @@ pub const Context = packed struct {
         return qjs.JS_IsConstructor(self.ptr, val);
     }
 
-    pub inline fn isError(self: Context, val: Value) bool {
-        return qjs.JS_IsError(self.ptr, val);
+    pub inline fn isError(val: Value) bool {
+        return qjs.JS_IsError(val);
     }
 
     pub inline fn isBigInt(self: Context, val: Value) bool {

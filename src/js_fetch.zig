@@ -474,7 +474,7 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
         ctx.freeValue(headers_obj);
     };
 
-    // [FIX] Explicit Proxy Functions using standard newCFunction - Debug prints removed
+    //  Explicit Proxy Functions using standard newCFunction - Debug prints removed
     const text_fn = qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0);
     ctx.setPropertyStr(resp, "text", text_fn) catch {
         ctx.freeValue(text_fn);

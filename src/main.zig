@@ -12,7 +12,7 @@ const parseCSV = @import("csv_parser.zig");
 
 const AsyncTask = event_loop_mod.AsyncTask;
 const AsyncBridge = @import("async_bridge.zig");
-// const NativeBridge = @import("js_native_bridge.zig");
+const NativeBridge = @import("js_native_bridge.zig");
 const Pt = @import("js_Point.zig");
 const Pt2 = @import("Point2.zig");
 const JSWorker = @import("js_worker.zig");
@@ -47,6 +47,7 @@ pub fn setupSignalHandler() void {
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
 }
 
+/// The allocator CANNOT be an arena (QuickJS works with malloc, realloc, free)
 fn setupAllocator() std.mem.Allocator {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
     const c_alloc = std.heap.c_allocator;
@@ -66,24 +67,27 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
-
+    try uploadFile(allocator, sandbox_root);
+    // try async_Fetch_Blob(allocator, sandbox_root);
+    try nativeBridge(allocator, sandbox_root);
+    try returnNativeBridge(allocator, sandbox_root);
     // try mock_class(allocator, sandbox_root);
-    try urlObject(allocator, sandbox_root);
-    try inline_crud_css_js(allocator, sandbox_root);
-    try stylesheet_txt(allocator, sandbox_root);
-    try stylesheet_style_tag(allocator, sandbox_root);
+    // try urlObject(allocator, sandbox_root);
+    // try inline_crud_css_js(allocator, sandbox_root);
+    // try stylesheet_txt(allocator, sandbox_root);
+    // try stylesheet_style_tag(allocator, sandbox_root);
     try link_and_script(allocator, sandbox_root);
 
-    try extractScript(allocator, sandbox_root);
+    // try extractScript(allocator, sandbox_root);
 
-    try simpleESM(allocator, sandbox_root);
+    // try simpleESM(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
     // try js_framework_2_bench(allocator);
     // try js_framework_3_bench(allocator);
     // try bench(allocator);
 
-    try eventListeners(allocator, sandbox_root);
+    // try eventListeners(allocator, sandbox_root);
 
     // try transplante(allocator);
     // try fullCycle(allocator);
@@ -103,16 +107,14 @@ pub fn main() !void {
     // try promise_scope(allocator);
     // try async_task_sequence_AB(allocator);
     // try async_task_sequence_ABCDEFGH(allocator);
-    try execute_Simple_Script_In_HTML(allocator);
+    // try execute_Simple_Script_In_HTML(allocator);
     try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
     try async_Script_and_pass_to_Zig(allocator, sandbox_root);
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
     // try firstJSONPass(allocator);
     // try simplifiedJSONPass(allocator);
     // try JS_Proxy_And_Generators(allocator);
-    try async_Fetch_Blob(allocator, sandbox_root);
-    try async_Fetch_API_Demo(allocator, sandbox_root);
-    try uploadFile(allocator, sandbox_root);
+    // try async_Fetch_API_Demo(allocator, sandbox_root);
     // try async_CSV_JSON_Parser(allocator, sandbox_root);
     // try async_CSV_Tuple_Parser(allocator, sandbox_root);
 
@@ -2147,10 +2149,13 @@ fn uploadFile(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\formData.append("file", blob, "hello.txt");
         \\
         \\console.log("Sending POST...");
+        \\const headers = new Headers();
+        \\headers.append("Content-Type", "multipart/form-data");
         \\
         \\fetch('https://httpbin.org/post', {
         \\    method: 'POST',
-        \\    body: formData
+        \\    body: formData,
+        \\    headers: headers,
         \\})
         \\.then(res => res.json())
         \\.then(data => {
@@ -2488,14 +2493,15 @@ fn demoVirtualDOM_2(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 
 // ---------------------------------------------------------------------------
 /// Demo: Native Bridge - Passing data between QuickJS and Zig
-fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
+fn nativeBridge(gpa: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
 
-    const ctx = zqjs.Context.init(rt);
-    errdefer ctx.deinit();
-    ctx.setAllocator(&gpa);
+    var engine = try ScriptEngine.init(gpa, sbx);
+    defer engine.deinit();
 
-    // NativeBridge.installNativeBridge(ctx, &gpa);
+    const ctx = engine.ctx;
+    NativeBridge.installNativeBridge(ctx);
+
     // Test 1: Process regular array
     z.print("--- Test 1: Process Array (JS → Zig → JS) ---\n", .{});
     const test1 =
@@ -2505,7 +2511,7 @@ fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         \\console.log("Result from Zig:", result);
         \\result;
     ;
-    const result1 = try ctx.eval(test1, "<test1>", .{});
+    const result1 = try engine.eval(test1, "<test1>", .module);
     defer ctx.freeValue(result1);
 
     // Test 2: Transform array (return new array)
@@ -2517,7 +2523,7 @@ fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         \\console.log("Result from Zig:", output);
         \\output;
     ;
-    const result2 = try ctx.eval(test2, "<test2>", .{});
+    const result2 = try engine.eval(test2, "<test2>", .module);
     defer ctx.freeValue(result2);
 
     // Test 3: TypedArray (zero-copy performance)
@@ -2529,7 +2535,7 @@ fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         \\console.log("Result from Zig (zero-copy!):", result);
         \\result;
     ;
-    const result3 = try ctx.eval(test3, "<test3>", .{});
+    const result3 = try engine.eval(test3, "<test3>", .module);
     defer ctx.freeValue(result3);
 
     // Test 4: Process object
@@ -2541,7 +2547,7 @@ fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         \\console.log("Result from Zig:", result);
         \\result;
     ;
-    const result4 = try ctx.eval(test4, "<test4>", .{});
+    const result4 = try engine.eval(test4, "<test4>", .module);
     defer ctx.freeValue(result4);
 
     // Test 5: Process text
@@ -2553,13 +2559,85 @@ fn demoNativeBridge(gpa: std.mem.Allocator, rt: *zqjs.Runtime) !void {
         \\console.log("Cleaned by Zig:", clean);
         \\clean;
     ;
-    const result5 = try ctx.eval(test5, "<test5>", .{});
+    const result5 = try engine.eval(test5, "<test5>", .module);
     defer ctx.freeValue(result5);
+
+    z.print("\n--- Test 6: HttpBin ---\n", .{});
+    const test6 =
+        \\fetch('https://httpbin.org/get', {
+        \\    headers: { "Content-Type": "application/json" }
+        \\})
+        \\.then(res => res.json())
+        \\.then(data => {
+        \\    console.log("[JS] Passing to Zig...");
+        \\    // Native is the global object created by js_native_bridge
+        \\    Native.persisted_receiveHttpBin(data); 
+        \\})
+        \\.catch(err => console.log("Error:", err));
+    ;
+
+    const result6 = try engine.eval(test6, "test6", .module);
+    defer ctx.freeValue(result6);
+    try engine.run();
 
     z.print("\n✅ Native bridge working!\n", .{});
     z.print("  • JavaScript can call Zig functions\n", .{});
     z.print("  • Data flows: JS → Zig → JS\n", .{});
     z.print("  • Heavy computation runs at native speed\n\n", .{});
+}
+
+fn returnNativeBridge(gpa: std.mem.Allocator, sbx: []const u8) !void {
+    const js_httpbin = @import("js_httpbin.zig");
+    const HttpBinResponse = js_httpbin.HttpBinResponse;
+
+    z.print("\n=== Native Bridge Demo: JS ↔ Zig Data Transfer ------\n\n", .{});
+
+    var engine = try ScriptEngine.init(gpa, sbx);
+    defer engine.deinit();
+
+    const CaptureContext = js_httpbin.CaptureContext;
+    var captured_response: HttpBinResponse = undefined;
+    // HttpBinResponse{
+    //     .url = "(no data)",
+    //     .origin = "(no data)",
+    //     .headers = .{ .Host = "", .@"User-Agent" = "" },
+    // };
+
+    var response_arena = std.heap.ArenaAllocator.init(gpa);
+    defer response_arena.deinit();
+
+    var capture_ctx = CaptureContext{
+        .allocator = response_arena.allocator(),
+        .response = &captured_response,
+    };
+
+    engine.rc.payload = &capture_ctx;
+
+    const ctx = engine.ctx;
+    NativeBridge.installNativeBridge(ctx);
+
+    z.print("\n--- Test 11: HttpBin return ---\n", .{});
+    const js =
+        \\fetch('https://httpbin.org/get', {
+        \\    headers: { "Content-Type": "application/json" }
+        \\})
+        \\.then(res => res.json())
+        \\.then(data => {
+        \\    console.log("[JS] Passing to Zig...");
+        \\    // Native is the global object created by js_native_bridge
+        \\    Native.receiveHttpBin(data); 
+        \\})
+        \\.catch(err => console.log("Error:", err));
+    ;
+
+    const result = try engine.eval(js, "test", .module);
+    defer ctx.freeValue(result);
+    try engine.run();
+    z.print("[Zig] {s}\n", .{captured_response.url});
+
+    z.print("\n✅ Native bridge working!\n", .{});
+    z.print("  • JavaScript can call Zig functions\n", .{});
+    z.print("  • Data flows: JS → Zig → JS\n", .{});
 }
 
 // ---------------------------------------------------------------------------

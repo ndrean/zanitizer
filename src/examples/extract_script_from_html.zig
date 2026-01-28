@@ -1,32 +1,63 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const z = @import("root.zig");
+const z = @import("zexplorer");
 const zqjs = z.wrapper;
-const event_loop_mod = @import("event_loop.zig");
-const EventLoop = event_loop_mod.EventLoop;
-const DOMBridge = z.dom_bridge.DOMBridge;
-const RCtx = @import("runtime_context.zig").RuntimeContext;
-const utils = @import("utils.zig");
-const ScriptEngine = @import("script_engine.zig").ScriptEngine;
-const parseCSV = @import("csv_parser.zig");
+const ScriptEngine = z.ScriptEngine;
+const NativeBridge = z.native_bridge;
 
-const AsyncTask = event_loop_mod.AsyncTask;
-const AsyncBridge = @import("async_bridge.zig");
-// const NativeBridge = @import("js_native_bridge.zig");
-const Pt = @import("js_Point.zig");
-const Pt2 = @import("Point2.zig");
-const JSWorker = @import("js_worker.zig");
-const js_consoleLog = @import("utils.zig").js_consoleLog;
+pub var app_should_quit = std.atomic.Value(bool).init(false);
 
-fn extractScript(allocator: std.mem.Allocator) !void {
-    var engine = try ScriptEngine.init(allocator);
+fn handleSigInt(_: c_int) callconv(.c) void {
+    app_should_quit.store(true, .seq_cst);
+}
+
+// Setup function to call at start of main()
+pub fn setupSignalHandler() void {
+    if (builtin.os.tag == .windows) {
+        // Windows needs a different approach (SetConsoleCtrlHandler),
+        // but for now we focus on POSIX (Linux/macOS) as requested.
+        return;
+    }
+
+    const act = std.posix.Sigaction{
+        .handler = .{ .handler = handleSigInt },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+
+    // Catch Ctrl+C (SIGINT)
+    std.posix.sigaction(std.posix.SIG.INT, &act, null);
+    // Optional: Catch Termination request (SIGTERM)
+    std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+}
+
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    const gpa, const is_debug = gpa: {
+        break :gpa switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = debug_allocator.deinit();
+    };
+
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+    setupSignalHandler();
+
+    try extractScript(gpa, sandbox_root);
+}
+
+fn extractScript(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sandbox_root);
     defer engine.deinit();
 
-    z.print("\n=== Extract Script from HTML --------------------------------\n\n", .{});
+    z.print("\n=== Extract Script from HTML -------------------------\n\n", .{});
 
     const html =
-        \\<!DOCTYPE html>
-        \\<html>
         \\<body>
         \\  <h1>Test</h1>
         \\
@@ -40,39 +71,25 @@ fn extractScript(allocator: std.mem.Allocator) !void {
         \\
         \\  <div id="ignore"></div>
         \\
-        \\  <script src="jquery.js"></script>
-        \\
         \\  <script>
         \\      var b = a + 20; 
         \\      console.log("[JS] Result: ", b);
-        \\      console.log("[JS] Evaluate 'greet': ", greet('Zig'));
+        \\      console.log("[JS] Evaluate function 'greet('Zig')' : ", greet('Zig'));
+        \\      document.querySelector('#ignore').innerHTML = greet('Zig from JS');
         \\      b;
         \\  </script>
         \\</body>
-        \\</html>
     ;
     try engine.loadHTML(html);
-    const c_scripts = try engine.getC_Scripts();
-    defer {
-        for (c_scripts) |code| allocator.free(code);
-        allocator.free(c_scripts);
-    }
+    const doc = engine.dom.doc;
+    const div_elt = try z.querySelector(allocator, doc, "div#ignore");
+    try z.printDOM(allocator, doc, "Before execution");
 
-    // try engine.run(); <-- Not needed for this example as no event loop is used.
+    try engine.executeScripts(allocator, sandbox_root);
 
-    z.print("{}\n", .{c_scripts.len});
-    for (c_scripts) |code| {
-        const val = try engine.eval(code, "inline_script");
-        defer engine.ctx.freeValue(val);
-        const res = try engine.ctx.toInt32(val);
-        z.print("[Zig] Script result: {d}\n\n", .{res});
-    }
-}
+    // const div_elt = try z.querySelector(allocator, doc, "div#ignore");
+    const content = z.textContent_zc(z.elementToNode(div_elt.?));
+    z.print("[Zig] DIV content has been changed to: {s}\n", .{content});
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    try extractScript(allocator);
+    try z.printDOM(allocator, doc, "After execution");
 }

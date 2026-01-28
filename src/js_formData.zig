@@ -123,7 +123,7 @@ pub const FormDataBridge = struct {
             try rt.newClass(rc.classes.form_data, .{ .class_name = "FormData", .finalizer = js_FormData_finalizer });
         }
         const fd_proto = ctx.newObject();
-        // [FIX] DO NOT FREE fd_proto here. setClassProto TAKES OWNERSHIP.
+        // !!! DO NOT FREE fd_proto here. setClassProto TAKES OWNERSHIP.
 
         const fd_append = ctx.newCFunction(js_FormData_append, "append", 2);
         _ = try ctx.setPropertyStr(fd_proto, "append", fd_append);

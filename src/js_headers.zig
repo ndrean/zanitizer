@@ -305,10 +305,6 @@ pub const HeadersBridge = struct {
         const rt = ctx.getRuntime();
         const rc = RuntimeContext.get(ctx);
 
-        // if (registered_rt != rt.ptr) {
-        //     class_id = 0;
-        //     registered_rt = rt.ptr;
-        // }
         if (rc.classes.headers == 0) {
             rc.classes.headers = rt.newClassID();
             try rt.newClass(rc.classes.headers, .{

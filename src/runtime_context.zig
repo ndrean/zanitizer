@@ -15,6 +15,7 @@ pub const RuntimeContext = struct {
     global_document: ?*z.HTMLDocument = null,
     // Worker-specific data (null for main thread)
     worker_core: ?*anyopaque = null,
+    payload: ?*anyopaque = null, // generic pointer to pass in/out of callbacks
 
     // Central Registry of Class IDs for this Runtime
     // Zig struct -> Opaque pointer -> QuickJS Class ID

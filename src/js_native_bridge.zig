@@ -4,14 +4,20 @@ const std = @import("std");
 const z = @import("root.zig");
 const w = @import("wrapper.zig");
 const qjs = z.qjs;
+const js_marshal = @import("js_marshall.zig");
+const js_httpbin = @import("js_httpbin.zig");
+const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
 /// Retrieve the Zig allocator stored in the JSContext opaque pointer
 /// This is used by generated bindings and manual wrappers to get the allocator
 /// without requiring it as an explicit JavaScript argument
 pub fn getAllocator(ctx: ?*qjs.JSContext) std.mem.Allocator {
-    const opaque_ptr = qjs.JS_GetContextOpaque(ctx);
-    const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-    return allocator_ptr.*;
+    // const opaque_ptr = qjs.JS_GetContextOpaque(ctx);
+    // const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
+    // return allocator_ptr.*;
+    const w_ctx = w.Context{ .ptr = ctx };
+    const rc = RuntimeContext.get(w_ctx);
+    return rc.allocator;
 }
 
 /// Example 1: Process array of numbers in Zig (native speed)
@@ -294,70 +300,74 @@ fn processTextNative(allocator: std.mem.Allocator, text: []const u8) ![]u8 {
 
 /// Install all native processing functions
 /// The allocator pointer is stored in the JSContext opaque data for use by bridge functions
-pub fn installNativeBridge(ctx: w.Context, allocator: *std.mem.Allocator) void {
+pub fn installNativeBridge(ctx: w.Context) void {
     // const ctx: ?*qjs.JSContext = @ptrCast(@alignCast(ctx_opaque));
-    ctx.setAllocator(allocator);
+    // ctx.setAllocator(allocator);
 
     // Store the Zig allocator in the JSContext opaque pointer
-    qjs.JS_SetContextOpaque(ctx, allocator);
+    // qjs.JS_SetContextOpaque(ctx, allocator);
 
-    const global = qjs.JS_GetGlobalObject(ctx);
-    defer qjs.JS_FreeValue(ctx, global);
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
 
     // Create native object
-    const native_obj = qjs.JS_NewObject(ctx);
+    const native_obj = ctx.newObject();
 
     // Add functions
+    // const _ctx = w.Context{ .ptr = ctx_ptr };
     const process_array_fn = qjs.JS_NewCFunction2(
-        ctx,
+        ctx.ptr,
         js_processArray,
         "processArray",
         1,
         qjs.JS_CFUNC_generic,
         0,
     );
-    _ = qjs.JS_SetPropertyStr(ctx, native_obj, "processArray", process_array_fn);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, native_obj, "processArray", process_array_fn);
 
     const transform_array_fn = qjs.JS_NewCFunction2(
-        ctx,
+        ctx.ptr,
         js_transformArray,
         "transformArray",
         1,
         qjs.JS_CFUNC_generic,
         0,
     );
-    _ = qjs.JS_SetPropertyStr(ctx, native_obj, "transformArray", transform_array_fn);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, native_obj, "transformArray", transform_array_fn);
 
     const process_typed_array_fn = qjs.JS_NewCFunction2(
-        ctx,
+        ctx.ptr,
         js_processTypedArray,
         "processTypedArray",
         1,
         qjs.JS_CFUNC_generic,
         0,
     );
-    _ = qjs.JS_SetPropertyStr(ctx, native_obj, "processTypedArray", process_typed_array_fn);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, native_obj, "processTypedArray", process_typed_array_fn);
 
     const process_object_fn = qjs.JS_NewCFunction2(
-        ctx,
+        ctx.ptr,
         js_processObject,
         "processObject",
         1,
         qjs.JS_CFUNC_generic,
         0,
     );
-    _ = qjs.JS_SetPropertyStr(ctx, native_obj, "processObject", process_object_fn);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, native_obj, "processObject", process_object_fn);
 
     const process_text_fn = qjs.JS_NewCFunction2(
-        ctx,
+        ctx.ptr,
         js_processText,
         "processText",
         1,
         qjs.JS_CFUNC_generic,
         0,
     );
-    _ = qjs.JS_SetPropertyStr(ctx, native_obj, "processText", process_text_fn);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, native_obj, "processText", process_text_fn);
 
     // Install as global 'Native' object
-    _ = qjs.JS_SetPropertyStr(ctx, global, "Native", native_obj);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "Native", native_obj);
+
+    const receive_fn = qjs.JS_NewCFunction2(ctx.ptr, js_httpbin.js_receiveHttpBin, "receiveHttpBin", 1, qjs.JS_CFUNC_generic, 0);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, native_obj, "receiveHttpBin", receive_fn);
 }

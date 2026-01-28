@@ -24,6 +24,12 @@ pub const Mailbox = @import("mailbox.zig").Mailbox;
 pub const utils = @import("utils.zig");
 pub const events = @import("js_events.zig");
 
+// Exports for examples
+pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;
+pub const native_bridge = @import("js_native_bridge.zig");
+pub const js_httpbin = @import("js_httpbin.zig");
+pub const runtime_context = @import("runtime_context.zig");
+
 // Event handling functions: implemented in dom_bridge.zig
 pub const addEventListener = dom_bridge.addEventListener;
 pub const dispatchEvent = dom_bridge.dispatchEvent;
@@ -71,6 +77,7 @@ const norm = @import("modules/normalize.zig");
 const text = @import("modules/text_content.zig");
 const sanitize = @import("modules/sanitizer.zig");
 const sanitize_css = @import("modules/sanitizer_css.zig");
+const sanitizer_config = @import("sanitizer_config.zig");
 const parse = @import("modules/parsing.zig");
 const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
@@ -377,6 +384,11 @@ pub const sanitizePermissive = sanitize.sanitizePermissive;
 pub const isCustomElement = sanitize.isCustomElement;
 pub const sanitizeWithCss = sanitize.sanitizeWithCss;
 
+// Web API-compatible Sanitizer Configuration
+pub const SanitizerConfig = sanitizer_config.SanitizerConfig;
+pub const FrameworkConfig = sanitizer_config.FrameworkConfig;
+pub const Sanitizer = sanitizer_config.Sanitizer;
+
 // CSS Sanitizer
 pub const CssSanitizer = sanitize_css.CssSanitizer;
 pub const CssSanitizerOptions = sanitize_css.CssSanitizerOptions;
@@ -399,6 +411,7 @@ pub const FRAMEWORK_SPECS = specs.FRAMEWORK_SPECS;
 pub const validateUri = specs.validateUri;
 pub const validateStyle = specs.validateStyle;
 pub const isFrameworkAttribute = specs.isFrameworkAttribute;
+pub const isFrameworkEventHandler = specs.isFrameworkEventHandler;
 pub const getFrameworkSpec = specs.getFrameworkSpec;
 pub const isFrameworkAttributeSafe = specs.isFrameworkAttributeSafe;
 pub const isSafeMimeType = specs.isSafeMimeType;

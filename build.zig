@@ -78,6 +78,9 @@ pub fn build(b: *std.Build) void {
 
     // Link the module to the wrapper library: get C dependencies
     zexplorer_module.linkLibrary(zexplorer_lib);
+    zexplorer_module.linkLibrary(qjs_lib);
+    zexplorer_module.addIncludePath(quickjs_src_path);
+    zexplorer_module.addIncludePath(lexbor_src_path);
 
     // Link curl's C library to the module so it can find curl.h
     // The curl module depends on libcurl which needs to be linked
@@ -189,6 +192,84 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     run_unit_tests.skip_foreign_checks = true;
     lib_test.dependOn(&run_unit_tests.step);
+
+    // ==================== EXAMPLES ====================
+    // Run with: zig build example -Dname=<example_name>
+    // e.g.: zig build example -Dname=extract_script_from_html
+    // List available: zig build example
+
+    const example_step = b.step("example", "Run an example from src/examples/");
+
+    // Register examples as check targets for ZLS analysis
+    // ZLS discovers modules attached to build artifacts
+    const check_step = b.step("check", "Check examples compile (for ZLS)");
+    const example_files = [_][]const u8{
+        "src/examples/extract_script_from_html.zig",
+        "src/examples/return_data_from_JS_into_zig.zig",
+    };
+    for (example_files) |example_file| {
+        const check_exe = b.addExecutable(.{
+            .name = "check-example",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(example_file),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "curl", .module = curl_module },
+                    .{ .name = "zexplorer", .module = zexplorer_module },
+                },
+            }),
+        });
+        check_exe.addObjectFile(lexbor_static_lib_path);
+        check_exe.addIncludePath(lexbor_src_path);
+        check_exe.addIncludePath(quickjs_src_path);
+        check_exe.linkLibC();
+        check_exe.linkLibrary(zexplorer_lib);
+        check_exe.linkLibrary(qjs_lib);
+        check_step.dependOn(&check_exe.step);
+    }
+
+    // Get example name from args
+    const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
+
+    if (example_name) |name| {
+        // Build the specific example
+        // Examples use @import("zexplorer") - all needed types exported from root.zig
+        const example_path = b.fmt("src/examples/{s}.zig", .{name});
+
+        const example_exe = b.addExecutable(.{
+            .name = b.fmt("example-{s}", .{name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(example_path),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "curl", .module = curl_module },
+                    .{ .name = "zexplorer", .module = zexplorer_module },
+                },
+            }),
+        });
+
+        // Link all required libraries
+        example_exe.addObjectFile(lexbor_static_lib_path);
+        example_exe.addIncludePath(lexbor_src_path);
+        example_exe.addIncludePath(quickjs_src_path);
+        example_exe.linkLibC();
+        example_exe.linkLibrary(zexplorer_lib);
+        example_exe.linkLibrary(qjs_lib);
+
+        b.installArtifact(example_exe);
+
+        const run_example = b.addRunArtifact(example_exe);
+        run_example.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_example.addArgs(args);
+
+        example_step.dependOn(&run_example.step);
+    } else {
+        // No example specified - show available examples
+        const list_examples = b.addSystemCommand(&.{ "sh", "-c", "echo 'Available examples:' && ls -1 src/examples/*.zig 2>/dev/null | sed 's|src/examples/||;s|\\.zig$||' | sed 's/^/  /' || echo '  (none found)'" });
+        example_step.dependOn(&list_examples.step);
+    }
 
     // Documentation
     const docs_step = b.step("docs", "Build zexplorer library docs");

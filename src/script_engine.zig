@@ -451,7 +451,6 @@ pub const ScriptEngine = struct {
     }
 
     /// [host] Process all <script> tags in the document (Inline and Remote)
-    /// [host] Process all <script> tags in the document (Inline and Remote)
     pub fn executeScripts(self: *ScriptEngine, allocator: std.mem.Allocator, base_dir: []const u8) !void {
         const scripts = try z.querySelectorAll(
             self.allocator,

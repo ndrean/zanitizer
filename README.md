@@ -33,7 +33,7 @@ What it does not have or is not:
 - Runtime limits (memory, stack size, interruptible) for DoS.
 - sandboxed File loading with no symlink for LFI.
 - Load sanitized and sandboxed HTML, CSS and scripts
-  - The `Zanitizer` module is 5 to 50 times faster than DOMPurify
+  - The `Zanitizer` module is 5 to 50 times faster than DOMPurify integrated in the `Sanitizerconfig`.
   - It is based on a declarative security policy (_html_specs.zig_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
   - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
 
@@ -217,6 +217,14 @@ In the terminal:
   </body>
 </html>
 ```
+
+## Zig to JS intercomm and native function injection in JS
+
+TODO
+
+You can send p from Zig to JS and receive typed data from JS to Zig.
+
+You can use native Zig functions in JS
 
 ## Tests zexplorer vs jsdom
 

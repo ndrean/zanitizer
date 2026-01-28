@@ -4,9 +4,6 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
-// threadlocal var url_class_id: zqjs.ClassID = 0;
-// threadlocal var url_search_params_class_id: zqjs.ClassID = 0;
-
 // ============================================================================
 // URL Class
 // ============================================================================
