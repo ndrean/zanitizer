@@ -1,4 +1,13 @@
-//! FOR TESTS ONLY !!! String based HTML string comment or whitespace only text nodes cleaner
+//! FOR TESTS ONLY - String-based HTML normalization utilities
+//!
+//! ⚠️ WARNING: This is a simplified string-based approach for test utilities.
+//! For production HTML minification, use src/modules/normalize.zig instead:
+//!   - minifyDOM() - Remove whitespace-only text nodes (DOM-based)
+//!   - normalizeDOM() - Standard DOM normalize() (merges adjacent text nodes)
+//!
+//! This module provides:
+//!   - normalizeHtmlString() - Quick string cleanup for test assertions
+//!   - normalizeText() - Whitespace collapsing for text comparison
 const std = @import("std");
 const z = @import("../root.zig");
 const Err = z.Err;

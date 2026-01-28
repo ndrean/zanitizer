@@ -11,7 +11,7 @@ const async_bindings = @import("async_bindings_generated.zig");
 const JSWorker = @import("js_worker.zig");
 const FetchBridge = @import("js_fetch.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
-const WebDataBridge = @import("js_web_data.zig").WebDataBridge;
+const FormDataBridge = @import("js_formData.zig").FormDataBridge;
 
 const TIMEOUT_MS: i64 = 5000;
 
@@ -101,9 +101,9 @@ pub const ScriptEngine = struct {
         try self.dom.installAPIs(); // console, etc.
         try JSWorker.registerWorkerClass(self.ctx);
         try FetchBridge.install(self.ctx);
-        try WebDataBridge.install(self.ctx);
+        // try FormDataBridge.install(self.ctx);
 
-        // Install other async bindings (readFile, etc.)
+        // TODO Other async bindings (sandboxed readFile, etc.)
         // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
         // _ = try self.ctx.setPropertyStr(global, "readFile", readFile_fn);
 

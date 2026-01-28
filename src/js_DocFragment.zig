@@ -4,14 +4,11 @@ const qjs = z.qjs;
 const w = z.wrapper;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
-// 1. We don't define a struct, we use the Lexbor opaque type
 const Fragment = z.DocumentFragment;
-pub var class_id: z.qjs.JSClassID = 0;
 
-// 2. Finalizer (Crucial!)
 pub fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
-    // We need the class ID to unwrap securely
-    const ptr = qjs.JS_GetOpaque(val, class_id);
+    const obj_class_id = qjs.JS_GetClassID(val);
+    const ptr = qjs.JS_GetOpaque(val, obj_class_id);
     if (ptr) |p| {
         const frag: *Fragment = @ptrCast(@alignCast(p));
         // Call helper from fragment_template.zig
@@ -19,7 +16,7 @@ pub fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
     }
 }
 
-// 3. Constructor
+// Constructor
 pub fn constructor(
     ctx_ptr: ?*qjs.JSContext,
     new_target: qjs.JSValue,
@@ -37,10 +34,41 @@ pub fn constructor(
 
     // Create the JS Object
     const proto = ctx.getPropertyStr(new_target, "prototype");
-    const obj = ctx.newObjectProtoClass(proto, class_id);
+    const obj = ctx.newObjectProtoClass(proto, rc.classes.document_fragment);
     defer ctx.freeValue(proto);
 
     // Link C pointer to JS Object
     ctx.setOpaque(obj, fragment) catch return w.EXCEPTION;
     return obj;
 }
+
+pub const DocFragmentBridge = struct {
+    pub fn install(ctx: w.Context) !void {
+        const rc = RuntimeContext.get(ctx);
+        const rt = ctx.getRuntime();
+        if (rc.classes.document_fragment == 0)
+            rc.classes.document_fragment = rt.newClassID();
+
+        try rt.newClass(rc.classes.document_fragment, .{
+            .class_name = "DocumentFragment",
+            // [FIX] Use the finalizer you defined at the top of this file!
+            .finalizer = finalizer,
+        });
+
+        // Prototype (Inherits from Node)
+        const proto = ctx.newObject();
+        if (rc.classes.dom_node != 0) {
+            const node_proto = ctx.getClassProto(rc.classes.dom_node);
+            defer ctx.freeValue(node_proto);
+            try ctx.setPrototype(proto, node_proto);
+        }
+
+        const ctor = ctx.newCFunction2(constructor, "DocumentFragment", 0, z.qjs.JS_CFUNC_constructor, 0);
+        ctx.setConstructor(ctor, proto);
+        ctx.setClassProto(rc.classes.document_fragment, proto);
+
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
+        try ctx.setPropertyStr(global, "DocumentFragment", ctor);
+    }
+};

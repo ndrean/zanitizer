@@ -17,6 +17,8 @@ const Pt = @import("js_Point.zig");
 const Pt2 = @import("Point2.zig");
 const JSWorker = @import("js_worker.zig");
 const js_consoleLog = @import("utils.zig").js_consoleLog;
+const Reflect = @import("reflection.zig");
+const Mocks = @import("dom_mocks.zig");
 
 const native_os = builtin.os.tag;
 pub var app_should_quit = std.atomic.Value(bool).init(false);
@@ -65,6 +67,8 @@ pub fn main() !void {
 
     setupSignalHandler();
 
+    // try mock_class(allocator, sandbox_root);
+    try urlObject(allocator, sandbox_root);
     try inline_crud_css_js(allocator, sandbox_root);
     try stylesheet_txt(allocator, sandbox_root);
     try stylesheet_style_tag(allocator, sandbox_root);
@@ -72,14 +76,14 @@ pub fn main() !void {
 
     try extractScript(allocator, sandbox_root);
 
-    // try simpleESM(allocator, sandbox_root);
+    try simpleESM(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
     // try js_framework_2_bench(allocator);
     // try js_framework_3_bench(allocator);
     // try bench(allocator);
 
-    // try eventListeners(allocator);
+    try eventListeners(allocator, sandbox_root);
 
     // try transplante(allocator);
     // try fullCycle(allocator);
@@ -99,7 +103,7 @@ pub fn main() !void {
     // try promise_scope(allocator);
     // try async_task_sequence_AB(allocator);
     // try async_task_sequence_ABCDEFGH(allocator);
-    // try execute_Simple_Script_In_HTML(allocator);
+    try execute_Simple_Script_In_HTML(allocator);
     try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
     try async_Script_and_pass_to_Zig(allocator, sandbox_root);
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
@@ -108,11 +112,12 @@ pub fn main() !void {
     // try JS_Proxy_And_Generators(allocator);
     try async_Fetch_Blob(allocator, sandbox_root);
     try async_Fetch_API_Demo(allocator, sandbox_root);
-    try async_CSV_JSON_Parser(allocator, sandbox_root);
-    try async_CSV_Tuple_Parser(allocator, sandbox_root);
+    try uploadFile(allocator, sandbox_root);
+    // try async_CSV_JSON_Parser(allocator, sandbox_root);
+    // try async_CSV_Tuple_Parser(allocator, sandbox_root);
 
-    try demoWorker(allocator, sandbox_root);
-    try test_dom_purify(allocator, sandbox_root);
+    // try demoWorker(allocator, sandbox_root);
+    // try test_dom_purify(allocator, sandbox_root);
 
     // // lexb =====
 
@@ -125,6 +130,130 @@ pub fn main() !void {
     // try demoInsertAdjacentHTML(allocator);
     // try demoSetInnerHTML(allocator);
     // try demoSuspiciousAttributes(allocator);
+}
+
+// fn mock_class(allocator: std.mem.Allocator, sbx: []const u8) !void {
+//     const engine = try ScriptEngine.init(allocator, sbx);
+//     defer engine.deinit();
+
+//     // 2. Register the Hierarchy
+//     // The order matters slightly: Base classes first is safer for internal lookups,
+//     // though the registry handles lazy lookup if implemented carefully.
+//     const DomBinder = Reflect.reflect(.{ Mocks.Node, Mocks.HTMLElement, Mocks.Document });
+//     try DomBinder.install(engine.ctx);
+
+//     z.print("\n=== Testing Reflection Inheritance --------------------------\n", .{});
+
+//     const script =
+//         \\ // 1. Instantiate HTMLElement
+//         \\ const div = new HTMLElement("DIV");
+//         \\
+//         \\ console.log("Is HTMLElement?", div instanceof HTMLElement); // true
+//         \\ console.log("Is Node?", div instanceof Node);             // true (Inheritance works!)
+//         \\
+//         \\ // 2. Call Child Method
+//         \\ div.click();
+//         \\
+//         \\ // 3. Call Base Method (inherited from Node)
+//         \\ // Note: Our simple mock requires manual delegation in C-land usually,
+//         \\ // but since we mapped prototypes, JS looks up the chain.
+//         \\ // However, 'this' will be an HTMLElement*, but Node methods expect Node*.
+//         \\ // *See note below on Pointer Casting*
+//         \\ console.log("Node Name:", div.toString());
+//         \\
+//         \\ // 4. Document
+//         \\ const doc = new Document("http://localhost");
+//         \\ console.log("Doc URL:", doc.URL);
+//         \\ console.log("Doc NodeName:", doc.toString());
+//     ;
+
+//     _ = try engine.eval(script, "test.js", .global);
+//     try engine.run();
+//     // Reflect.deinit();
+//     // engine.deinit();
+// }
+
+fn urlObject(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const js =
+        \\console.log("=== URL Parsing & Getters ===");
+        \\const url = new URL("https://user:pass@example.com:8080/api/v1?key=value&foo=bar#section");
+        \\
+        \\console.log("Full URL:", url.toString());
+        \\console.log("  protocol:", url.protocol);
+        \\console.log("  username:", url.username);
+        \\console.log("  password:", url.password);
+        \\console.log("  hostname:", url.hostname);
+        \\console.log("  port:", url.port);
+        \\console.log("  pathname:", url.pathname);
+        \\console.log("  search:", url.search);
+        \\console.log("  hash:", url.hash);
+        \\
+        \\console.log("\n=== URL with Base (Relative Parsing) ===");
+        \\const base = new URL("https://example.org/foo/");
+        \\const relative = new URL("../bar?test=1", base);
+        \\console.log("Relative URL:", relative.toString());
+        \\console.log("  pathname:", relative.pathname);
+        \\console.log("  hostname:", relative.hostname);
+        \\
+        \\console.log("\n=== URLSearchParams - Construction & Basic Methods ===");
+        \\const params = new URLSearchParams("key=value&a=b&key=duplicate");
+        \\console.log("Initial:", params.toString());
+        \\console.log("  get('key'):", params.get("key"));  // Returns first value
+        \\console.log("  has('a'):", params.has("a"));
+        \\console.log("  has('missing'):", params.has("missing"));
+        \\
+        \\console.log("\n=== URLSearchParams - Append, Set, Delete ===");
+        \\params.append("new", "123");
+        \\console.log("After append('new', '123'):", params.toString());
+        \\
+        \\params.set("key", "updated");  // Replaces all 'key' values
+        \\console.log("After set('key', 'updated'):", params.toString());
+        \\
+        \\params.delete("a");
+        \\console.log("After delete('a'):", params.toString());
+        \\
+        \\console.log("\n=== URLSearchParams - Sort ===");
+        \\const unsorted = new URLSearchParams("z=last&a=first&m=middle");
+        \\console.log("Before sort:", unsorted.toString());
+        \\unsorted.sort();
+        \\console.log("After sort:", unsorted.toString());
+        \\
+        \\console.log("\n=== URLSearchParams - Strip Leading '?' ===");
+        \\const withQuestion = new URLSearchParams("?foo=bar&baz=qux");
+        \\console.log("From '?foo=bar&baz=qux':", withQuestion.toString());
+        \\
+        \\console.log("\n=== URL with Different Host Types ===");
+        \\const ipv4 = new URL("http://192.168.1.1:3000/test");
+        \\console.log("IPv4 hostname:", ipv4.hostname);
+        \\
+        \\const domain = new URL("https://subdomain.example.org/api");
+        \\console.log("Domain hostname:", domain.hostname);
+        \\
+        \\console.log("\n=== Headers API ===");
+        \\const headers = new Headers({
+        \\  "Content-Type": "application/json",
+        \\  "X-Custom-Header": "test-value"
+        \\});
+        \\console.log("  has('content-type'):", headers.has('content-type'));
+        \\console.log("  get('content-type'):", headers.get('content-type'));
+        \\console.log("  get('x-custom-header'):", headers.get('x-custom-header'));
+        \\
+        \\headers.set('Authorization', 'Bearer token123');
+        \\console.log("  After set Authorization:", headers.get('authorization'));
+        \\
+        \\headers.append('Cache-Control', 'no-cache');
+        \\console.log("  After append Cache-Control:", headers.get('cache-control'));
+        \\
+        \\headers.delete('x-custom-header');
+        \\console.log("  After delete x-custom-header:", headers.has('x-custom-header'));
+        \\
+        \\console.log("\n✅ All URL & URLSearchParams tests passed!");
+    ;
+    const val = try engine.eval(js, "url-test.js", .global);
+    defer engine.ctx.freeValue(val);
 }
 
 fn inline_crud_css_js(allocator: std.mem.Allocator, sbx: []const u8) !void {
@@ -564,8 +693,8 @@ fn eventListener(allocator: std.mem.Allocator) !void {
     try z.prettyPrint(allocator, body_node.?);
 }
 
-fn eventListeners(allocator: std.mem.Allocator) !void {
-    var engine = try ScriptEngine.init(allocator);
+fn eventListeners(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== Async Event listeners --------------------------------\n\n", .{});
@@ -602,7 +731,7 @@ fn eventListeners(allocator: std.mem.Allocator) !void {
     ;
 
     // Run the Script: executed parts: dispatch -> handler -> sync update)
-    const val = try engine.eval(script, "event_test");
+    const val = try engine.eval(script, "event_test", .module);
     defer engine.ctx.freeValue(val);
 
     // Check Synchronous Update
@@ -615,7 +744,7 @@ fn eventListeners(allocator: std.mem.Allocator) !void {
     }
 
     // Run Event Loop
-    try engine.loop.run(.Script);
+    try engine.run();
 
     // Check Asynchronous Update
     {
@@ -1848,7 +1977,6 @@ fn async_CSV_JSON_Parser(allocator: std.mem.Allocator, sbx: []const u8) !void {
         workerParseProducts // The Worker
     );
 
-    // 2. Register it
     try engine.registerFunction("parseProducts", js_fn, 1);
 
     try engine.disableUnsafeFeatures();
@@ -1942,14 +2070,16 @@ fn async_Fetch_Blob(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const script =
         \\fetch('https://dummyjson.com/image/150')
         \\.then((response) => response.blob()) 
-        \\.then((blob) => {
-        \\  console.log('Fetched image blob:', blob);
+        \\.then(async (blob) => {
+        \\  const blob_txt = await blob.text();
+        \\  const size = blob.size;
+        \\  console.log('Fetched image blob:', size, blob_txt);
         \\})
         \\.catch(error => {
         \\  console.log('🔴 Fetch error:', error);
         \\});
     ;
-    const res = try engine.eval(script, "<fetch>", .global);
+    const res = try engine.eval(script, "<fetch>", .module);
     engine.ctx.freeValue(res);
     try engine.run();
 }
@@ -2000,6 +2130,36 @@ fn async_Fetch_API_Demo(allocator: std.mem.Allocator, sbx: []const u8) !void {
     ;
 
     const res = try engine.eval(script, "<fetch>", .global);
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+
+fn uploadFile(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== Upload file with FormData ----------------------------------------\n\n", .{});
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const script =
+        \\const formData = new FormData();
+        \\
+        \\// Create a filetext blob and append it (simulating a file)
+        \\const blob = new Blob(["Hello form data!"], { type: "text/plain" });
+        \\formData.append("file", blob, "hello.txt");
+        \\
+        \\console.log("Sending POST...");
+        \\
+        \\fetch('https://httpbin.org/post', {
+        \\    method: 'POST',
+        \\    body: formData
+        \\})
+        \\.then(res => res.json())
+        \\.then(data => {
+        \\    // httpbin returns the data it received
+        \\    console.log("🟢 Server received:", data);
+        \\})
+        \\.catch(err => console.log("🔴 Error:", err));
+    ;
+    const res = try engine.eval(script, "<fetch>", .module);
     engine.ctx.freeValue(res);
     try engine.run();
 }

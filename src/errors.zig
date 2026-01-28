@@ -59,4 +59,9 @@ pub const LexborError = error{
     SetTitleError,
     DocumentRootNotFound,
     DomException,
+    // URL parsing errors
+    OutOfMemory,
+    InvalidURL,
+    InvalidValue,
+    InitializationFailed,
 };

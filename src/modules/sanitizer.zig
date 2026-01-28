@@ -3990,7 +3990,7 @@ test "html5sec.org vectors" {
 
     // Read the html5sec.org test file
     const input = std.fs.cwd().readFileAlloc(allocator, "h5sc_sanitize_tests/h5sc-test.html", 10 * 1024 * 1024) catch |err| {
-        std.debug.print("Skipping html5sec test: could not read /tmp/h5sc-test.html: {}\n", .{err});
+        std.debug.print("Skipping html5sec test: could not read h5sc-test.html: {}\n", .{err});
         return;
     };
     defer allocator.free(input);

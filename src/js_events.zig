@@ -5,12 +5,18 @@ const qjs = @import("root.zig").qjs;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
 // IMPORTS TO AVOID CYCLE (Don't import root.zig)
-// const Type = @import("modules/node_types.zig");
-// const DomNode = Type.lxb_dom_node_t; // Use opaque definition directly
+
 const DomNode = @import("root.zig").DomNode;
 
-// We need DOMBridge for wrapping, but importing it at top-level causes cycle.
-// We will import it inside functions.
+// --- FINALIZER ---
+fn Finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
+    const obj_class_id = qjs.JS_GetClassID(val);
+    const ptr = qjs.JS_GetOpaque(val, obj_class_id);
+    if (ptr) |p| {
+        const ev_struct: *DomEvent = @ptrCast(@alignCast(p));
+        ev_struct.deinit();
+    }
+}
 
 pub const EventPhase = enum(u16) {
     NONE = 0,
@@ -149,3 +155,35 @@ pub fn preventDefault(ev: *DomEvent) void {
         ev.default_prevented = true;
     }
 }
+
+pub const EventBridge = struct {
+    pub fn install(ctx: w.Context) !void {
+        const rc = RuntimeContext.get(ctx);
+        const rt = ctx.getRuntime();
+
+        // 1. Register Class
+        if (rc.classes.event == 0) {
+            rc.classes.event = rt.newClassID();
+        }
+
+        try rt.newClass(rc.classes.event, .{
+            .class_name = "Event",
+            .finalizer = Finalizer, // Point to the function above
+        });
+
+        // 2. Prototype
+        const proto = ctx.newObject();
+        const bindings = @import("bindings_generated.zig");
+        bindings.installEventBindings(ctx.ptr, proto);
+        ctx.setClassProto(rc.classes.event, proto);
+
+        // 3. Constructor
+        const ctor = ctx.newCFunction2(constructor, "Event", 1, qjs.JS_CFUNC_constructor, 0);
+        ctx.setConstructor(ctor, proto);
+
+        // 4. Global
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
+        try ctx.setPropertyStr(global, "Event", ctor);
+    }
+};

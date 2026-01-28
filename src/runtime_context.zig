@@ -29,13 +29,16 @@ pub const RuntimeContext = struct {
         owned_document: zqjs.ClassID = 0,
         event: zqjs.ClassID = 0,
         css_style_decl: zqjs.ClassID = 0,
-        blob: zqjs.ClassID = 0, // [NEW]
+        blob: zqjs.ClassID = 0,
         form_data: zqjs.ClassID = 0,
+        url: zqjs.ClassID = 0,
+        url_search_params: zqjs.ClassID = 0,
+        headers: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,
 
-    /// Install this struct into the JS Context
+    /// Install struct into JS Context
     /// Static Factory: Allocates, Initializes, and Installs the Context state.
     pub fn create(
         allocator: std.mem.Allocator,

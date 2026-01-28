@@ -4,11 +4,15 @@ const zqjs = z.wrapper;
 const w = @import("wrapper.zig");
 const bindings = @import("bindings_generated.zig");
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DocFragment = @import("js_DocFragment.zig");
-const DOMParserClass = @import("js_DOMParser.zig");
+const js_DocFragment = @import("js_DocFragment.zig");
+const js_DOMParser = @import("js_DomParser.zig");
 const CssSelectorEngine = z.CssSelectorEngine;
 const js_style = @import("js_CSSStyleDeclaration.zig");
-const events = @import("events.zig");
+pub const js_url = @import("js_url.zig");
+const js_headers = @import("js_headers.zig");
+const js_events = @import("js_events.zig");
+const js_blob = @import("js_blob.zig");
+const js_formData = @import("js_formData.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -34,15 +38,6 @@ pub const DOMBridge = struct {
         }
     }
 
-    fn eventFinalizer(_: ?*z.qjs.JSRuntime, val: z.qjs.JSValue) callconv(.c) void {
-        const class_id = z.qjs.JS_GetClassID(val);
-        const ptr = z.qjs.JS_GetOpaque(val, class_id); // Get ptr regardless of class ID
-        if (ptr) |p| {
-            const ev_struct: *events.DomEvent = @ptrCast(@alignCast(p));
-            ev_struct.deinit();
-        }
-    }
-
     fn styleFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
 
     // (Register Class & Create internal Doc)
@@ -50,6 +45,7 @@ pub const DOMBridge = struct {
         const rc = RuntimeContext.get(ctx);
         var rt = ctx.getRuntime();
 
+        // infrastructure classes (Node, HTLMElement, CSSStyleDeclaration, Document)
         if (rc.classes.dom_node == 0) {
             // --- NODE --------------------------
             rc.classes.dom_node = rt.newClassID();
@@ -155,10 +151,9 @@ pub const DOMBridge = struct {
                 .finalizer = documentFinalizer,
             });
             const owned_doc_proto = ctx.getClassProto(rc.classes.document);
-            // defer ctx.freeValue(owned_doc_proto); // [FIX] Added defer here because getClassProto returns +1 ref
             ctx.setClassProto(rc.classes.owned_document, owned_doc_proto);
 
-            // --- CSSStyleDeclaration ----------------
+            // --- CSSStyleDeclaration (no data, ,just a "view")
             rc.classes.css_style_decl = rt.newClassID();
             try rt.newClass(rc.classes.css_style_decl, .{
                 .class_name = "CSSStyleDeclaration",
@@ -182,18 +177,22 @@ pub const DOMBridge = struct {
             }
 
             ctx.setClassProto(rc.classes.css_style_decl, style_proto);
-
-            try initEventClass(rt, ctx);
-            try initDocumentFragmentClass(rt, ctx);
-            try initDomParserClass(rt, ctx);
         }
 
-        // const doc = try z.createDocument();
+        // Web APIs classes
+        try js_DocFragment.DocFragmentBridge.install(ctx);
+        try js_DOMParser.DOMParserBridge.install(ctx);
+        try js_headers.HeadersBridge.install(ctx);
+        try js_blob.BlobBridge.install(ctx);
+        try js_formData.FormDataBridge.install(ctx);
+        try js_url.URLBridge.install(ctx);
+        try js_events.EventBridge.install(ctx);
+
         const doc = try z.createDocument();
-        errdefer z.destroyDocument(doc); // Clean up if later steps fail
+        errdefer z.destroyDocument(doc);
 
         try z.initDocumentCSS(doc, true);
-        try z.insertHTML(doc, "<html><body></body></html>");
+        try z.insertHTML(doc, "<html><head></head><body></body></html>");
         const parser = try z.createCssStyleParser();
         errdefer z.destroyCssStyleParser(parser);
         const stylesheet = try z.createStylesheet();
@@ -432,72 +431,6 @@ pub const DOMBridge = struct {
     }
 };
 
-pub fn initEventClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
-    const rc = RuntimeContext.get(ctx);
-    rc.classes.event = rt.newClassID();
-    try rt.newClass(rc.classes.event, .{
-        .class_name = "Event",
-        .finalizer = DOMBridge.eventFinalizer,
-    });
-    const event_proto = ctx.newObject();
-    bindings.installEventBindings(ctx.ptr, event_proto);
-    ctx.setClassProto(rc.classes.event, event_proto);
-
-    const evt_ctor = ctx.newCFunction2(events.constructor, "Event", 1, z.qjs.JS_CFUNC_constructor, 0);
-    ctx.setConstructor(evt_ctor, event_proto);
-    // Attach to global object
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    try ctx.setPropertyStr(global, "Event", evt_ctor);
-}
-
-pub fn initDomParserClass(rt: zqjs.Runtime, ctx: w.Context) !void {
-    DOMParserClass.class_id = rt.newClassID();
-    const rc = RuntimeContext.get(ctx);
-    rc.classes.dom_parser = DOMParserClass.class_id;
-
-    const class_def = zqjs.Runtime.ClassDef{
-        .class_name = "DOMParser",
-        .finalizer = DOMParserClass.finalizer,
-    };
-    rt.newClass(DOMParserClass.class_id, class_def) catch return;
-
-    const proto = ctx.newObject();
-    bindings.installDOMParserBindings(ctx.ptr, proto);
-    const ctor = ctx.newCFunction2(DOMParserClass.constructor, "DOMParser", 0, z.qjs.JS_CFUNC_constructor, 0);
-    ctx.setConstructor(ctor, proto);
-    ctx.setClassProto(DOMParserClass.class_id, proto);
-
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    try ctx.setPropertyStr(global, "DOMParser", ctor);
-}
-
-pub fn initDocumentFragmentClass(rt: zqjs.Runtime, ctx: zqjs.Context) !void {
-    DocFragment.class_id = rt.newClassID();
-    const rc = RuntimeContext.get(ctx);
-    rc.classes.document_fragment = DocFragment.class_id;
-
-    const class_def = zqjs.Runtime.ClassDef{
-        .class_name = "DocumentFragment",
-        .finalizer = null,
-    };
-    rt.newClass(DocFragment.class_id, class_def) catch return;
-
-    const proto = ctx.newObject();
-    const node_proto = ctx.getClassProto(rc.classes.dom_node);
-    defer ctx.freeValue(node_proto); // [KEEP]
-    ctx.setPrototype(proto, node_proto) catch return;
-
-    const ctor = ctx.newCFunction2(DocFragment.constructor, "DocumentFragment", 0, z.qjs.JS_CFUNC_constructor, 0);
-    ctx.setConstructor(ctor, proto);
-    ctx.setClassProto(DocFragment.class_id, proto);
-
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    try ctx.setPropertyStr(global, "DocumentFragment", ctor);
-}
-
 const Listener = struct {
     callback: z.qjs.JSValue,
 };
@@ -566,7 +499,7 @@ pub fn dispatchEvent(
 ) !bool {
     const rc = RuntimeContext.get(ctx);
     var js_event = event_arg;
-    var ev_struct: *events.DomEvent = undefined;
+    var ev_struct: *js_events.DomEvent = undefined;
     var created_locally = false;
 
     // PATH A: dispatchEvent("click")
@@ -574,7 +507,7 @@ pub fn dispatchEvent(
         const type_str = try ctx.toZString(event_arg);
         defer ctx.freeZString(type_str);
 
-        ev_struct = try events.DomEvent.init(
+        ev_struct = try js_events.DomEvent.init(
             rc.allocator,
             type_str,
             true,
@@ -802,15 +735,70 @@ fn js_consoleLog(
 ) callconv(.c) zqjs.Value {
     const ctx = w.Context{ .ptr = ctx_ptr };
     var i: c_int = 0;
+
+    // 1. Get JSON.stringify function once
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    const json_obj = ctx.getPropertyStr(global, "JSON");
+    defer ctx.freeValue(json_obj);
+    const stringify_fn = ctx.getPropertyStr(json_obj, "stringify");
+    defer ctx.freeValue(stringify_fn);
+
     while (i < argc) : (i += 1) {
         if (i > 0) z.print(" ", .{});
-        const str = ctx.toCString(argv[@intCast(i)]) catch continue;
-        z.print("{s}", .{str});
-        ctx.freeCString(str);
+
+        const val = argv[@intCast(i)];
+
+        // 2. Logic: If Object/Array, try JSON.stringify(val, null, 2)
+        var printed = false;
+        if (ctx.isObject(val) and !ctx.isNull(val)) {
+            // Args: [value, null, 2] for pretty print
+            const space = ctx.newInt32(2);
+            var args = [_]z.qjs.JSValue{ val, w.NULL, space };
+
+            const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
+            ctx.freeValue(space);
+
+            if (!ctx.isException(json_str)) {
+                const c_str = ctx.toCString(json_str) catch "???";
+                z.print("{s}", .{c_str});
+                ctx.freeCString(c_str);
+                ctx.freeValue(json_str);
+                printed = true;
+            } else {
+                // If circular reference or error, clear exception and fall back to toString
+                const err = ctx.getException();
+                ctx.freeValue(err);
+            }
+        }
+
+        // 3. Fallback: Standard toString()
+        if (!printed) {
+            const str = ctx.toCString(val) catch continue;
+            z.print("{s}", .{str});
+            ctx.freeCString(str);
+        }
     }
     z.print("\n", .{});
     return w.UNDEFINED;
 }
+// fn js_consoleLog(
+//     ctx_ptr: ?*z.qjs.JSContext,
+//     _: z.qjs.JSValue,
+//     argc: c_int,
+//     argv: [*c]z.qjs.JSValue,
+// ) callconv(.c) zqjs.Value {
+//     const ctx = w.Context{ .ptr = ctx_ptr };
+//     var i: c_int = 0;
+//     while (i < argc) : (i += 1) {
+//         if (i > 0) z.print(" ", .{});
+//         const str = ctx.toCString(argv[@intCast(i)]) catch continue;
+//         z.print("{s}", .{str});
+//         ctx.freeCString(str);
+//     }
+//     z.print("\n", .{});
+//     return w.UNDEFINED;
+// }
 
 // Dummy implementation to stop JS from crashing
 fn js_preventDefault(

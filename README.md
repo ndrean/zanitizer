@@ -1,22 +1,23 @@
-# zexplorer: a JavaScript programmable HTML processor on steriods
+# zexplorer: a JavaScript programmable HTML processor on steroids
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 [WIP]
 
-An opinionnated  `Zig` based HTML processor that lets you write in JavaScript but executes at native speed on a server.
+An opinionated  `Zig` based HTML processor that lets you write JavaScript and executes at native speed on a server.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
 ## Project description
 
-What is has:
+What it has:
 
 - runs most DOM primitives and executes ES6 JavaScript
 - sandboxed file system (upload directory only),
 - `fetch` API (via thread pool for HTTP requests),
 - `Workers`(OS threads for parallel processing),
-- can inject native Zig primitives (statistics, CSV parsing...)
+- can inject native Zig primitives (statistics, CSV parsing...),
+- integrated Web API classes: `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`.
 
 It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) included a native speed.
 
@@ -27,10 +28,9 @@ What it does not have or is not:
 - not `Node.js` nor `bun`,
 - not for streaming/async I/O workloads.
 
-
 **Security**:
 
-- Runtime limits (memory, stack size, interuptible) for DoS. It is 
+- Runtime limits (memory, stack size, interruptible) for DoS.
 - sandboxed File loading with no symlink for LFI.
 - Load sanitized and sandboxed HTML, CSS and scripts
   - The `Zanitizer` module is 5 to 50 times faster than DOMPurify
@@ -51,7 +51,172 @@ This program can be used for:
 - HTML transformation pipelines: inject `Zig` code for hot paths (CSV parsing, crypto...)
 - Testing frameworks - Fast and sandboxed
 - Templating & Static Site Generation - (can use template components): no async needed, pure speed.
-- Web scrapping on steroids.
+- Web scraping on steroids.
+
+## Examples
+
+### Upload a file
+
+Create a filetext blob and append it (simulating a file) and upload to the test endpoint `httpbin` (it returns the data it received).
+
+```zig
+fn uploadFile(allocator: std.mem.Allocator, sbx: []const u8) !void {
+
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const script =
+        \\const formData = new FormData();
+        \\
+        \\const blob = new Blob(["Hello form data!"], { type: "text/plain" });
+        \\formData.append("file", blob, "hello.txt");
+        \\
+        \\console.log("Sending POST...");
+        \\
+        \\fetch('https://httpbin.org/post', {
+        \\    method: 'POST',
+        \\    body: formData
+        \\})
+        \\.then(res => res.json())
+        \\.then(data => {
+        \\    console.log("🟢 Server received:", data);
+        \\})
+        \\.catch(err => console.log("🔴 Error:", err));
+    ;
+    const res = try engine.eval(script, "<fetch>", .module);
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+```
+
+The output in the terminal is:
+
+```txt
+🟢 Server received: {
+  "args": {},
+  "data": "",
+  "files": {
+    "file": "Hello form data!"
+  },
+  "form": {},
+  "headers": {
+    "Accept": "*/*",
+    "Content-Length": "205",
+    "Content-Type": "multipart/form-data; boundary=----ZigQuickJSBoundary1769609637330069000",
+    "Host": "httpbin.org",
+    "User-Agent": "zig-curl/0.3.2",
+    "X-Amzn-Trace-Id": "Root=1-697a19a5-3c4d5687799f935028ffcfeb"
+  },
+  "json": null,
+  "origin": "90.93.234.63",
+  "url": "https://httpbin.org/post"
+}
+```
+
+### CSS and JS executed (using file sources)
+
+File: _/js/js-and-css/style.css_
+
+```css
+
+#pid {
+  color: green;
+  font-size: 20px;
+}
+```
+
+File: _/js/js-and-css/main.js_
+
+```js
+const changeText = () =>{
+  const p = document.getElementById("pid");
+  p.textContent = "New text";
+}
+
+const btn = document.querySelector("button");
+btn.addEventListener("click", () => {
+  changeText();
+  const p = document.getElementById("pid");
+  const p_color = p.style.getProperyValue("color");
+  const p_font_size = window.getComputedStyle(p).getPropertyValue("font-size");
+  console.log("[JS] 'p' properties: ", p_color, p_font_size);
+  console.log("[JS] 'p' textContent: ", p.textContent);
+});
+
+btn.dispatchEvent(new Event("click")  );
+```
+
+File: _/js/js-and-css/index.html_
+
+```html
+<!-- js/js-and-css/index.html -->
+<html>
+  <head>
+    <link rel="stylesheet" href="style.css">
+  </head>
+ <body>
+  <p id="pid">Some text</p>
+  <form>
+    <button type="button">Change text</button>
+  </form>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
+```
+
+The following `Zig` code runs successfully:
+
+```zig
+fn css_js_external_file(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
+  const engine = try ScriptEngine.init(allocator, sandbox_root);
+  defer engine.deinit();
+
+  try engine.loadHTML(html);
+  try engine.loadExternalStylesheets("js/js-and-css/");
+  try engine.executeScripts(allocator, "js/js-and-css");
+  try engine.run();
+
+  const p_el = z.getElementById(bridge.doc, "pid").?;
+  const computed_color = try z.getComputedStyle(allocator, p_el, "color");
+  const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
+  defer if (computed_color) |c| allocator.free(c);
+  defer if (computed_font_size) |c| allocator.free(c);
+
+
+  z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
+
+  try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
+}
+```
+
+In the terminal:
+
+```txt
+[JS] 'p' properties: green, 20px
+[JS] 'p' textContent: New text
+[Zig] p_color: green, p_font_size: 20px
+
+<html>
+  <head>
+    <link rel="stylesheet" href="style.css">
+    <title>
+      "link-stylesheet and Script with 'external' file"
+    </title>
+  </head>
+  <body>
+    <p id="pid">
+      "New text"
+    </p>
+    <form>
+      <button type="button">
+        "Change text"
+      </button>
+    </form>
+    <script type="module" src="main.js">
+    </script>
+  </body>
+</html>
+```
 
 ## Tests zexplorer vs jsdom
 
@@ -724,110 +889,6 @@ fn js_framework_bench(allocator: std.mem.Allocator) !void {
 
 ---
 
-### CSS and JS executed (using file sources)
-
-File: _/js/js-and-css/style.css_
-
-```css
-
-#pid {
-  color: green;
-  font-size: 20px;
-}
-```
-
-File: _/js/js-and-css/main.js_
-
-```js
-const changeText = () =>{
-  const p = document.getElementById("pid");
-  p.textContent = "New text";
-}
-
-const btn = document.querySelector("button");
-btn.addEventListener("click", () => {
-  changeText();
-  const p = document.getElementById("pid");
-  const p_color = p.style.getProperyValue("color");
-  const p_font_size = window.getComputedStyle(p).getPropertyValue("font-size");
-  console.log("[JS] 'p' properties: ", p_color, p_font_size);
-  console.log("[JS] 'p' textContent: ", p.textContent);
-});
-
-btn.dispatchEvent(new Event("click")  );
-```
-
-File: _/js/js-and-css/index.html_
-
-```html
-<!-- js/js-and-css/index.html -->
-<html>
-  <head>
-    <link rel="stylesheet" href="style.css">
-  </head>
- <body>
-  <p id="pid">Some text</p>
-  <form>
-    <button type="button">Change text</button>
-  </form>
-  <script type="module" src="main.js"></script>
-</body>
-</html>
-```
-
-The following `Zig` code runs successfully:
-
-```zig
-fn css_js_external_file(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
-  const engine = try ScriptEngine.init(allocator, sandbox_root);
-  defer engine.deinit();
-
-  try engine.loadHTML(html);
-  try engine.loadExternalStylesheets("js/js-and-css/");
-  try engine.executeScripts(allocator, "js/js-and-css");
-  try engine.run();
-
-  const p_el = z.getElementById(bridge.doc, "pid").?;
-  const computed_color = try z.getComputedStyle(allocator, p_el, "color");
-  const computed_font_size = try z.getComputedStyle(allocator, p_el, "font-size");
-  defer if (computed_color) |c| allocator.free(c);
-  defer if (computed_font_size) |c| allocator.free(c);
-
-
-  z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
-
-  try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
-}
-```
-
-In the terminal:
-
-```txt
-[JS] 'p' properties: green, 20px
-[JS] 'p' textContent: New text
-[Zig] p_color: green, p_font_size: 20px
-
-<html>
-  <head>
-    <link rel="stylesheet" href="style.css">
-    <title>
-      "link-stylesheet and Script with 'external' file"
-    </title>
-  </head>
-  <body>
-    <p id="pid">
-      "New text"
-    </p>
-    <form>
-      <button type="button">
-        "Change text"
-      </button>
-    </form>
-    <script type="module" src="main.js">
-    </script>
-  </body>
-</html>
-```
 
 ### Using Templates
 
@@ -1608,6 +1669,12 @@ fn js_framework_3_bench(allocator: std.mem.Allocator) !void {
 | Create 10k           | 20 ms     | 3212 ms |
 | Append 1k            | 8 ms      | 715     |
 | Clear                | 7 ms      | 3134 ms |
+
+---
+
+## Tests Zaniter vs DOMPurify
+
+TODO
 
 ---
 

@@ -22,7 +22,7 @@ pub const dom_bridge = @import("dom_bridge.zig");
 // Mailbox for inter-thread communication (Worker pattern)
 pub const Mailbox = @import("mailbox.zig").Mailbox;
 pub const utils = @import("utils.zig");
-pub const events = @import("events.zig");
+pub const events = @import("js_events.zig");
 
 // Event handling functions: implemented in dom_bridge.zig
 pub const addEventListener = dom_bridge.addEventListener;
@@ -75,6 +75,7 @@ const parse = @import("modules/parsing.zig");
 const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
 const styles = @import("modules/styles.zig");
+const url_mod = @import("modules/url.zig");
 
 // ================================================================================
 
@@ -87,6 +88,11 @@ pub const Err = @import("errors.zig").LexborError;
 pub const _CONTINUE: c_int = 0;
 pub const _STOP: c_int = 1;
 pub const _OK: usize = 0;
+
+// Lexbor status type and codes
+pub const lxb_status_t = c_uint;
+pub const LXB_STATUS_OK: lxb_status_t = 0x0000;
+pub const LXB_STATUS_ERROR_MEMORY_ALLOCATION: lxb_status_t = 0x0001;
 
 // from lexbor source: /tag/const.h
 pub const LXB_TAG_TEMPLATE: u32 = 179; // From lexbor source
@@ -103,6 +109,13 @@ pub const LXB_DOM_NODE_TYPE_UNKNOWN = 0;
 
 pub const LXB_CSS_RULE_STYLE: c_uint = 4;
 pub const LXB_CSS_RULE_DECLARATION: c_uint = 7;
+
+// Lexbor types
+pub const lxb_char_t = u8;
+pub const lexbor_str_t = extern struct {
+    data: [*c]lxb_char_t,
+    length: usize,
+};
 
 //=================================================================================
 // Opaque lexbor structs
@@ -368,6 +381,12 @@ pub const sanitizeWithCss = sanitize.sanitizeWithCss;
 pub const CssSanitizer = sanitize_css.CssSanitizer;
 pub const CssSanitizerOptions = sanitize_css.CssSanitizerOptions;
 
+// URL parsing and manipulation
+pub const URLParser = url_mod.URLParser;
+pub const URL = url_mod.URL;
+pub const URLSearchParams = url_mod.URLSearchParams;
+
+// HTML Security
 pub const AttrSpec = specs.AttrSpec;
 pub const ElementSpec = specs.ElementSpec;
 pub const FrameworkSpec = specs.FrameworkSpec;
@@ -399,7 +418,7 @@ pub const isMathMLElementDangerous = specs.isMathMLElementDangerous;
 pub const isMathMLElementSafe = specs.isMathMLElementSafe;
 pub const isMathMLAttributeSafe = specs.isMathMLAttributeSafe;
 
-// ============================================================================================
+// ==================================================================================
 // CSS Styles integration functions
 
 pub const initDocumentCSS = styles.initDocumentCSS;
@@ -417,13 +436,10 @@ pub const parseElementStyle = styles.parseElementStyle;
 pub const removeInlineStyleProperty = styles.removeInlineStyleProperty;
 pub const loadStyleTags = styles.loadStyleTags;
 
-// ============================================================================================
-
-//============================================================================================
+//============================================================================
 // CSS selectors
 
 pub const CssSelectorEngine = css.CssSelectorEngine;
-// pub const createCssEngine = css.createCssEngine;
 
 pub const querySelectorAll = css.querySelectorAll;
 pub const querySelector = css.querySelector;
@@ -431,7 +447,7 @@ pub const filter = css.filter;
 pub const matches = css.matches;
 pub const closest = css.closest;
 
-//============================================================================================
+//=======================================================================
 // Class & ClassList
 
 pub const hasClass = classes.hasClass;
@@ -443,7 +459,7 @@ pub const classListAsString = classes.classListAsString;
 pub const ClassList = classes.ClassList;
 pub const classList = classes.classList;
 
-//============================================================================================
+//=======================================================================
 // Attributes
 
 pub const AttributePair = attrs.AttributePair;
@@ -465,7 +481,7 @@ pub const getElementId = attrs.getElementId;
 pub const getElementId_zc = attrs.getElementId_zc;
 pub const hasElementId = attrs.hasElementId;
 
-//==========================================================================================
+//==============================================================================
 // Single Element Search functions - Simple Walk
 
 pub const contains = search.contains;

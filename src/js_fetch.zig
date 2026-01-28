@@ -6,7 +6,7 @@ const curl = @import("curl");
 const js_security = @import("js_security.zig");
 const EventLoop = @import("event_loop.zig").EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_web_data = @import("js_Web_Data.zig");
+const js_formData = @import("js_formData.zig");
 
 const FetchTask = struct {
     allocator: std.mem.Allocator,
@@ -208,8 +208,8 @@ fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs
                 defer ctx.freeCString(c_str);
                 body_data = allocator.dupe(u8, std.mem.span(c_str)) catch return ctx.throwOutOfMemory();
             } else if (qjs.JS_GetOpaque(b_prop, rc.classes.form_data)) |fd_ptr| {
-                const fd: *js_web_data.FormData = @ptrCast(@alignCast(fd_ptr));
-                const result = js_web_data.serializeFormData(allocator, fd) catch return ctx.throwOutOfMemory();
+                const fd: *js_formData.FormData = @ptrCast(@alignCast(fd_ptr));
+                const result = js_formData.serializeFormData(allocator, fd) catch return ctx.throwOutOfMemory();
                 body_data = result.body;
                 const ct_val = std.fmt.allocPrint(allocator, "Content-Type: multipart/form-data; boundary={s}", .{result.boundary}) catch return ctx.throwOutOfMemory();
                 allocator.free(result.boundary);
@@ -427,18 +427,27 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
     defer ctx.freeValue(resp);
 
     const status_val = ctx.newInt64(res.status);
-    ctx.setPropertyStr(resp, "status", status_val) catch {};
+    ctx.setPropertyStr(resp, "status", status_val) catch {
+        ctx.freeValue(status_val);
+    };
 
     const ok_val = ctx.newBool(res.ok);
-    ctx.setPropertyStr(resp, "ok", ok_val) catch {};
+    ctx.setPropertyStr(resp, "ok", ok_val) catch {
+        ctx.freeValue(ok_val);
+    };
 
     const url_val = ctx.newString(res.url);
-    ctx.setPropertyStr(resp, "url", url_val) catch {};
+    ctx.setPropertyStr(resp, "url", url_val) catch {
+        ctx.freeValue(url_val);
+    };
 
     const ab = ctx.newArrayBufferCopy(res.body);
-    ctx.setPropertyStr(resp, "_body", ab) catch {};
+    ctx.setPropertyStr(resp, "_body", ab) catch {
+        ctx.freeValue(ab);
+    };
 
-    const headers_obj = ctx.newObject();
+    // Build headers init object
+    const headers_init = ctx.newObject();
     for (res.headers) |line| {
         if (std.mem.indexOfScalar(u8, line, ':')) |idx| {
             const key = std.mem.trim(u8, line[0..idx], " \t\r\n");
@@ -447,16 +456,41 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
             const val_js = ctx.newString(val);
             const atom = ctx.newAtom(key);
             defer ctx.freeAtom(atom);
-            _ = qjs.JS_SetProperty(ctx.ptr, headers_obj, atom, val_js);
+            _ = qjs.JS_SetProperty(ctx.ptr, headers_init, atom, val_js);
         }
     }
-    ctx.setPropertyStr(resp, "headers", headers_obj) catch {};
+
+    // Create Headers instance
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    const headers_ctor = ctx.getPropertyStr(global, "Headers");
+    defer ctx.freeValue(headers_ctor);
+
+    var args = [_]qjs.JSValue{headers_init};
+    const headers_obj = qjs.JS_CallConstructor(ctx.ptr, headers_ctor, 1, &args);
+    ctx.freeValue(headers_init);
+
+    ctx.setPropertyStr(resp, "headers", headers_obj) catch {
+        ctx.freeValue(headers_obj);
+    };
 
     // [FIX] Explicit Proxy Functions using standard newCFunction - Debug prints removed
-    ctx.setPropertyStr(resp, "text", qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0)) catch {};
-    ctx.setPropertyStr(resp, "json", qjs.JS_NewCFunction(ctx.ptr, js_json_proxy, "json", 0)) catch {};
-    ctx.setPropertyStr(resp, "blob", qjs.JS_NewCFunction(ctx.ptr, js_blob_proxy, "blob", 0)) catch {};
-    ctx.setPropertyStr(resp, "arrayBuffer", qjs.JS_NewCFunction(ctx.ptr, js_arrayBuffer_proxy, "arrayBuffer", 0)) catch {};
+    const text_fn = qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0);
+    ctx.setPropertyStr(resp, "text", text_fn) catch {
+        ctx.freeValue(text_fn);
+    };
+    const json_fn = qjs.JS_NewCFunction(ctx.ptr, js_json_proxy, "json", 0);
+    ctx.setPropertyStr(resp, "json", json_fn) catch {
+        ctx.freeValue(json_fn);
+    };
+    const blob_fn = qjs.JS_NewCFunction(ctx.ptr, js_blob_proxy, "blob", 0);
+    ctx.setPropertyStr(resp, "blob", blob_fn) catch {
+        ctx.freeValue(blob_fn);
+    };
+    const ab_fn = qjs.JS_NewCFunction(ctx.ptr, js_arrayBuffer_proxy, "arrayBuffer", 0);
+    ctx.setPropertyStr(resp, "arrayBuffer", ab_fn) catch {
+        ctx.freeValue(ab_fn);
+    };
 
     _ = ctx.call(real_resolve, zqjs.UNDEFINED, &.{resp});
 }
