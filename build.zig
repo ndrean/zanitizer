@@ -38,13 +38,6 @@ pub fn build(b: *std.Build) void {
         .flags = qjs_flags,
     });
 
-    // const quickjs_dep = b.dependency("quickjs", .{ .target = target, .optimize = optimize });
-
-    // const mailbox = b.dependency("mailbox", .{
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-
     const dep_curl = b.dependency("curl", .{ .target = target, .optimize = optimize });
     const curl_module = dep_curl.module("curl");
 

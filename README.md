@@ -53,36 +53,44 @@ This program can be used for:
 - Templating & Static Site Generation - (can use template components): no async needed, pure speed.
 - Web scraping on steroids.
 
-## Examples
+## A few examples
+
+The folder _src/examples_  (will!) contains all the test cases.
+
+Run the file name with:  `zig build example -Dname=extract_script_from_html`
+
+**TODO**: migrate from _main.zig_ to /examples
 
 ### Upload a file
 
-Create a filetext blob and append it (simulating a file) and upload to the test endpoint `httpbin` (it returns the data it received).
+Create a filetext blob and append it to a formData object and upload to the test endpoint `httpbin` (it returns the data it received).
+
+```js
+const formData = new FormData();
+const blob = new Blob(["Hello form data!"], { type: "text/plain" });
+formData.append("file", blob, "hello.txt");
+
+console.log("Sending POST...");
+
+fetch('https://httpbin.org/post', {
+    method: 'POST',
+   body: formData
+})
+.then(res => res.json())
+.then(data => {
+    console.log("🟢 Server received:", data);
+})
+.catch(err => console.log("🔴 Error:", err));
+```
 
 ```zig
 fn uploadFile(allocator: std.mem.Allocator, sbx: []const u8) !void {
-
     var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    const script =
-        \\const formData = new FormData();
-        \\
-        \\const blob = new Blob(["Hello form data!"], { type: "text/plain" });
-        \\formData.append("file", blob, "hello.txt");
-        \\
-        \\console.log("Sending POST...");
-        \\
-        \\fetch('https://httpbin.org/post', {
-        \\    method: 'POST',
-        \\    body: formData
-        \\})
-        \\.then(res => res.json())
-        \\.then(data => {
-        \\    console.log("🟢 Server received:", data);
-        \\})
-        \\.catch(err => console.log("🔴 Error:", err));
-    ;
+    cosnt script = readFile("js/test_send_post.js");
+    defer allocator.free(script);
+
     const res = try engine.eval(script, "<fetch>", .module);
     engine.ctx.freeValue(res);
     try engine.run();

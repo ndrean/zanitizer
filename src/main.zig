@@ -47,17 +47,6 @@ pub fn setupSignalHandler() void {
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
 }
 
-/// The allocator CANNOT be an arena (QuickJS works with malloc, realloc, free)
-fn setupAllocator() std.mem.Allocator {
-    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-    const c_alloc = std.heap.c_allocator;
-    defer _ = debug_allocator.deinit();
-    return switch (builtin.mode) {
-        .Debug, .ReleaseSafe => debug_allocator.allocator(),
-        .ReleaseFast, .ReleaseSmall => c_alloc,
-    };
-}
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
