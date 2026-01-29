@@ -1,4 +1,4 @@
-const BindingSpec = @import("gen_bindings.zig").BindingSpec;
+const BindingSpec = @import("template_gen.zig").BindingSpec;
 
 pub const bindings = [_]BindingSpec{
 
@@ -329,6 +329,14 @@ pub const bindings = [_]BindingSpec{
         .getter = "z.className",
         .setter = "",
         .prop_type = .string_zc,
+        .prop_this = .this_element,
+    },
+    .{
+        .name = "classList",
+        .kind = .property,
+        .getter = "", // Generator handles it
+        .setter = "", // Read-only property (the list itself is read-only, content is mutable)
+        .prop_type = .dom_token_list, // <--- Triggers our new template
         .prop_this = .this_element,
     },
     // .{

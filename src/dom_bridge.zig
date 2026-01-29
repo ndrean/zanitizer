@@ -8,11 +8,13 @@ const js_DocFragment = @import("js_DocFragment.zig");
 const js_DOMParser = @import("js_DomParser.zig");
 const CssSelectorEngine = z.CssSelectorEngine;
 const js_style = @import("js_CSSStyleDeclaration.zig");
+const js_classList = @import("js_classList.zig");
 pub const js_url = @import("js_url.zig");
 const js_headers = @import("js_headers.zig");
 const js_events = @import("js_events.zig");
 const js_blob = @import("js_blob.zig");
 const js_formData = @import("js_formData.zig");
+const js_polyfills = @import("js_polyfills.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -55,7 +57,7 @@ pub const DOMBridge = struct {
             });
 
             const node_proto = ctx.newObject();
-            // [FIX] NO DEFER HERE! setClassProto takes ownership.
+            // !!NO DEFER HERE! setClassProto takes ownership.
 
             bindings.installNodeBindings(ctx.ptr, node_proto);
             {
@@ -84,17 +86,15 @@ pub const DOMBridge = struct {
             bindings.installElementBindings(ctx.ptr, el_proto);
 
             {
-                // 1. Create Atom
                 const atom = z.qjs.JS_NewAtom(ctx.ptr, "style");
                 defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
 
-                // 2. Create Getter (Generic, 0 args)
+                // Getter (Generic, 0 args)
                 const get_fn_val = ctx.newCFunction(js_style.get_element_style, "get_style", 0);
 
                 const set_fn_val = ctx.newCFunction(js_style.set_element_style, "set_style", 1);
 
-                // 4. Define Property (Configurable + Enumerable)
-                // This matches your textContent example 1:1.
+                // define Property (Configurable + Enumerable)
                 _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, el_proto, // The prototype object
                     atom, // "style"
                     get_fn_val, // Getter function
@@ -187,6 +187,8 @@ pub const DOMBridge = struct {
         try js_formData.FormDataBridge.install(ctx);
         try js_url.URLBridge.install(ctx);
         try js_events.EventBridge.install(ctx);
+        try js_classList.install(ctx);
+        try js_polyfills.install(ctx);
 
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);
@@ -259,7 +261,6 @@ pub const DOMBridge = struct {
         // B. Install Global APIs
         try self.createDocumentAPI(global, rc.classes.dom_node);
         try self.createWindowAPI(global);
-        try self.createConsoleAPI(global);
 
         // Host Communication API Helper (sendToHost)
         const fn_val = ctx.newCFunction(js_reportResult, "sendToHost", 1);
@@ -310,19 +311,6 @@ pub const DOMBridge = struct {
         // Standard global aliases
         try ctx.setPropertyStr(global, "globalThis", ctx.dupValue(global));
         try ctx.setPropertyStr(global, "self", ctx.dupValue(global));
-    }
-
-    fn createConsoleAPI(self: *DOMBridge, global: w.Value) !void {
-        const ctx = self.ctx;
-        const console = ctx.newObject();
-
-        const log_fn = ctx.newCFunction(js_consoleLog, "log", 1);
-        try ctx.setPropertyStr(console, "log", log_fn);
-
-        const error_fn = ctx.newCFunction(js_consoleLog, "error", 1);
-        try ctx.setPropertyStr(console, "error", error_fn);
-
-        try ctx.setPropertyStr(global, "console", console);
     }
 
     pub fn applyStylesToElement(self: *DOMBridge, el: *z.HTMLElement) !void {
@@ -726,140 +714,6 @@ fn js_get_childNodes(
 
     return array;
 }
-
-// In src/dom_bridge.zig
-
-fn js_consoleLog(
-    ctx_ptr: ?*z.qjs.JSContext,
-    _: z.qjs.JSValue,
-    argc: c_int,
-    argv: [*c]z.qjs.JSValue,
-) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
-    var i: c_int = 0;
-
-    // Get JSON.stringify
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    const json_obj = ctx.getPropertyStr(global, "JSON");
-    defer ctx.freeValue(json_obj);
-    const stringify_fn = ctx.getPropertyStr(json_obj, "stringify");
-    defer ctx.freeValue(stringify_fn);
-
-    while (i < argc) : (i += 1) {
-        if (i > 0) z.print(" ", .{});
-        const val = argv[@intCast(i)];
-
-        var printed = false;
-
-        // [FIX] Check if it is an Error object FIRST
-        if (zqjs.Context.isError(val)) {
-            // Error.toString() gives "Error: message"
-            const str = ctx.toCString(val) catch "Error";
-            z.print("{s}", .{str});
-            ctx.freeCString(str);
-            printed = true;
-        }
-        // Then check if it is a generic Object to pretty-print
-        else if (ctx.isObject(val) and !ctx.isNull(val)) {
-            const space = ctx.newInt32(2);
-            var args = [_]z.qjs.JSValue{ val, w.NULL, space };
-            const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
-            ctx.freeValue(space);
-
-            if (!ctx.isException(json_str)) {
-                const c_str = ctx.toCString(json_str) catch "???";
-                z.print("{s}", .{c_str});
-                ctx.freeCString(c_str);
-                ctx.freeValue(json_str);
-                printed = true;
-            } else {
-                const err = ctx.getException();
-                ctx.freeValue(err);
-            }
-        }
-
-        if (!printed) {
-            const str = ctx.toCString(val) catch continue;
-            z.print("{s}", .{str});
-            ctx.freeCString(str);
-        }
-    }
-    z.print("\n", .{});
-    return w.UNDEFINED;
-}
-// fn js_consoleLog(
-//     ctx_ptr: ?*z.qjs.JSContext,
-//     _: z.qjs.JSValue,
-//     argc: c_int,
-//     argv: [*c]z.qjs.JSValue,
-// ) callconv(.c) zqjs.Value {
-//     const ctx = w.Context{ .ptr = ctx_ptr };
-//     var i: c_int = 0;
-
-//     // 1. Get JSON.stringify function once
-//     const global = ctx.getGlobalObject();
-//     defer ctx.freeValue(global);
-//     const json_obj = ctx.getPropertyStr(global, "JSON");
-//     defer ctx.freeValue(json_obj);
-//     const stringify_fn = ctx.getPropertyStr(json_obj, "stringify");
-//     defer ctx.freeValue(stringify_fn);
-
-//     while (i < argc) : (i += 1) {
-//         if (i > 0) z.print(" ", .{});
-
-//         const val = argv[@intCast(i)];
-
-//         // 2. Logic: If Object/Array, try JSON.stringify(val, null, 2)
-//         var printed = false;
-//         if (ctx.isObject(val) and !ctx.isNull(val)) {
-//             // Args: [value, null, 2] for pretty print
-//             const space = ctx.newInt32(2);
-//             var args = [_]z.qjs.JSValue{ val, w.NULL, space };
-
-//             const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
-//             ctx.freeValue(space);
-
-//             if (!ctx.isException(json_str)) {
-//                 const c_str = ctx.toCString(json_str) catch "???";
-//                 z.print("{s}", .{c_str});
-//                 ctx.freeCString(c_str);
-//                 ctx.freeValue(json_str);
-//                 printed = true;
-//             } else {
-//                 // If circular reference or error, clear exception and fall back to toString
-//                 const err = ctx.getException();
-//                 ctx.freeValue(err);
-//             }
-//         }
-
-//         // 3. Fallback: Standard toString()
-//         if (!printed) {
-//             const str = ctx.toCString(val) catch continue;
-//             z.print("{s}", .{str});
-//             ctx.freeCString(str);
-//         }
-//     }
-//     z.print("\n", .{});
-//     return w.UNDEFINED;
-// }
-// fn js_consoleLog(
-//     ctx_ptr: ?*z.qjs.JSContext,
-//     _: z.qjs.JSValue,
-//     argc: c_int,
-//     argv: [*c]z.qjs.JSValue,
-// ) callconv(.c) zqjs.Value {
-//     const ctx = w.Context{ .ptr = ctx_ptr };
-//     var i: c_int = 0;
-//     while (i < argc) : (i += 1) {
-//         if (i > 0) z.print(" ", .{});
-//         const str = ctx.toCString(argv[@intCast(i)]) catch continue;
-//         z.print("{s}", .{str});
-//         ctx.freeCString(str);
-//     }
-//     z.print("\n", .{});
-//     return w.UNDEFINED;
-// }
 
 // Dummy implementation to stop JS from crashing
 fn js_preventDefault(

@@ -38,7 +38,10 @@ pub fn build(b: *std.Build) void {
         .flags = qjs_flags,
     });
 
-    const dep_curl = b.dependency("curl", .{ .target = target, .optimize = optimize });
+    const dep_curl = b.dependency(
+        "curl",
+        .{ .target = target, .optimize = optimize },
+    );
     const curl_module = dep_curl.module("curl");
 
     const zexplorer_lib = b.addLibrary(.{
@@ -56,7 +59,6 @@ pub fn build(b: *std.Build) void {
         .flags = c_flags,
     });
     zexplorer_lib.addIncludePath(lexbor_src_path);
-    // zexplorer_lib.addObjectFile(lexbor_static_lib_path);
     zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibC();
 
@@ -199,6 +201,7 @@ pub fn build(b: *std.Build) void {
     const example_files = [_][]const u8{
         "src/examples/extract_script_from_html.zig",
         "src/examples/return_data_from_JS_into_zig.zig",
+        "src/examples/classlist_demo.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

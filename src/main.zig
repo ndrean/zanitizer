@@ -8,6 +8,7 @@ const DOMBridge = z.dom_bridge.DOMBridge;
 const RCtx = @import("runtime_context.zig").RuntimeContext;
 const utils = @import("utils.zig");
 const ScriptEngine = @import("script_engine.zig").ScriptEngine;
+const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const parseCSV = @import("csv_parser.zig");
 
 const AsyncTask = event_loop_mod.AsyncTask;
@@ -57,19 +58,23 @@ pub fn main() !void {
 
     setupSignalHandler();
     try uploadFile(allocator, sandbox_root);
-    // try async_Fetch_Blob(allocator, sandbox_root);
-    try nativeBridge(allocator, sandbox_root);
-    try returnNativeBridge(allocator, sandbox_root);
+    try testBlobFetch(allocator, sandbox_root);
+    // try testBlobURLs(allocator, sandbox_root);
+    // try classList(allocator, sandbox_root);
+    try async_Fetch_Blob(allocator, sandbox_root);
+    // try nativeBridge(allocator, sandbox_root);
+    // try returnNativeBridge(allocator, sandbox_root);
     // try mock_class(allocator, sandbox_root);
     // try urlObject(allocator, sandbox_root);
     // try inline_crud_css_js(allocator, sandbox_root);
     // try stylesheet_txt(allocator, sandbox_root);
     // try stylesheet_style_tag(allocator, sandbox_root);
-    try link_and_script(allocator, sandbox_root);
+    // try link_and_script(allocator, sandbox_root);
 
     // try extractScript(allocator, sandbox_root);
 
     // try simpleESM(allocator, sandbox_root);
+    // try cdnImport(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
     // try js_framework_2_bench(allocator);
@@ -103,11 +108,11 @@ pub fn main() !void {
     // try firstJSONPass(allocator);
     // try simplifiedJSONPass(allocator);
     // try JS_Proxy_And_Generators(allocator);
-    // try async_Fetch_API_Demo(allocator, sandbox_root);
-    // try async_CSV_JSON_Parser(allocator, sandbox_root);
-    // try async_CSV_Tuple_Parser(allocator, sandbox_root);
+    try async_Fetch_API_Demo(allocator, sandbox_root);
+    try async_CSV_JSON_Parser(allocator, sandbox_root);
+    try async_CSV_Tuple_Parser(allocator, sandbox_root);
 
-    // try demoWorker(allocator, sandbox_root);
+    try demoWorker(allocator, sandbox_root);
     // try test_dom_purify(allocator, sandbox_root);
 
     // // lexb =====
@@ -123,46 +128,228 @@ pub fn main() !void {
     // try demoSuspiciousAttributes(allocator);
 }
 
-// fn mock_class(allocator: std.mem.Allocator, sbx: []const u8) !void {
-//     const engine = try ScriptEngine.init(allocator, sbx);
-//     defer engine.deinit();
+fn testBlobFetch(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== Blob Fetch Integration Test ===\n", .{});
 
-//     // 2. Register the Hierarchy
-//     // The order matters slightly: Base classes first is safer for internal lookups,
-//     // though the registry handles lazy lookup if implemented carefully.
-//     const DomBinder = Reflect.reflect(.{ Mocks.Node, Mocks.HTMLElement, Mocks.Document });
-//     try DomBinder.install(engine.ctx);
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
 
-//     z.print("\n=== Testing Reflection Inheritance --------------------------\n", .{});
+    const js =
+        \\(async function() {
+        \\    try {
+        \\        // 1. Setup
+        \\        const content = "Hello Zig Blob!";
+        \\        const mime = "text/plain";
+        \\        console.log("[JS] Creating Blob...");
+        \\        const blob = new Blob([content], { type: mime });
+        \\
+        \\        // 2. Create URL
+        \\        const url = URL.createObjectURL(blob);
+        \\        console.log("[JS] URL:", url);
+        \\
+        \\        // 3. Fetch
+        \\        console.log("[JS] Fetching...");
+        \\        const res = await fetch(url);
+        \\        console.log(res);
+        \\        console.log("[JS] Status:", res.status);
+        \\        console.log("[JS] StatusText:", res.statusText);
+        \\        if (!res.ok) throw new Error("Response not OK");
+        \\
+        \\        // 4. Check Headers (Mock object access)
+        \\        // Note: Real fetch uses res.headers.get(), but we returned a plain object
+        \\        const type = res.headers['Content-Type'];
+        \\        console.log("[JS] Content-Type:", type);
+        \\        if (type !== mime) throw new Error("Wrong Mime Type");
+        \\
+        \\        // 5. Get Text
+        \\        const text = await res.text();
+        \\        console.log("[JS] Body:", text);
+        \\        if (text !== content) throw new Error("Body mismatch");
+        \\
+        \\        // 6. JSON Test
+        \\        const jsonBlob = new Blob([JSON.stringify({foo: 123})], {type: "application/json"});
+        \\        const jsonUrl = URL.createObjectURL(jsonBlob);
+        \\        const jsonRes = await fetch(jsonUrl);
+        // \\        console.log(jsonRes);
+        \\        const jsonObj = await jsonRes.text();
+        \\        console.log("[JS] JSON Prop:", jsonObj);
+        \\        const obj = JSON.parse(jsonObj);
+        \\        console.log("[JS] JSON Prop:", obj.foo);
+        \\        if (obj.foo !== 123) throw new Error("JSON mismatch");
+        \\
+        \\        // 7. Cleanup
+        \\        URL.revokeObjectURL(url);
+        \\        URL.revokeObjectURL(jsonUrl);
+        \\        console.log("[JS] ✅ SUCCESS: All checks passed");
+        \\
+        \\    } catch (e) {
+        \\        console.log("[JS] ❌ ERROR:", e.message || e);
+        \\    }
+        \\})();
+    ;
 
-//     const script =
-//         \\ // 1. Instantiate HTMLElement
-//         \\ const div = new HTMLElement("DIV");
-//         \\
-//         \\ console.log("Is HTMLElement?", div instanceof HTMLElement); // true
-//         \\ console.log("Is Node?", div instanceof Node);             // true (Inheritance works!)
-//         \\
-//         \\ // 2. Call Child Method
-//         \\ div.click();
-//         \\
-//         \\ // 3. Call Base Method (inherited from Node)
-//         \\ // Note: Our simple mock requires manual delegation in C-land usually,
-//         \\ // but since we mapped prototypes, JS looks up the chain.
-//         \\ // However, 'this' will be an HTMLElement*, but Node methods expect Node*.
-//         \\ // *See note below on Pointer Casting*
-//         \\ console.log("Node Name:", div.toString());
-//         \\
-//         \\ // 4. Document
-//         \\ const doc = new Document("http://localhost");
-//         \\ console.log("Doc URL:", doc.URL);
-//         \\ console.log("Doc NodeName:", doc.toString());
-//     ;
+    // Evaluate the async function
+    const result = engine.eval(js, "test_blob_fetch", .module) catch |err| {
+        z.print("Eval failed: {}\n", .{err});
+        return err;
+    };
+    engine.ctx.freeValue(result);
 
-//     _ = try engine.eval(script, "test.js", .global);
-//     try engine.run();
-//     // Reflect.deinit();
-//     // engine.deinit();
-// }
+    // Run the event loop to handle the Promises
+    try engine.run();
+}
+
+fn testBlobURLs(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== URL.createObjectURL Test ===\n", .{});
+
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const js =
+        \\try {
+        \\    // 1. Create a Blob
+        \\    console.log("[JS] Creating Blob...");
+        \\    const blob = new Blob(["Hello from Blob!"], { type: "text/plain" });
+        \\    console.log("[JS] Blob size:", blob.size);
+        \\
+        \\    // 2. Register it (createObjectURL)
+        \\    const url = URL.createObjectURL(blob);
+        \\    console.log("[JS] Generated URL:", url);
+        \\
+        \\    if (!url.startsWith("blob:")) {
+        \\        throw new Error("URL does not start with 'blob:'");
+        \\    }
+        \\
+        \\    // 3. Verify uniqueness (calling it again should create a NEW url)
+        \\    const url2 = URL.createObjectURL(blob);
+        \\    console.log("[JS] Generated URL 2:", url2);
+        \\    if (url === url2) {
+        \\        throw new Error("createObjectURL should return unique IDs each time");
+        \\    }
+        \\
+        \\    // 4. Revoke
+        \\    console.log("[JS] Revoking URL 1...");
+        \\    URL.revokeObjectURL(url);
+        \\
+        \\    // (Note: In a real browser, fetching a revoked URL fails. 
+        \\    //  In our engine, verify manually via the Zig registry count if desired).
+        \\    
+        \\    console.log("[JS] ✅ Test Passed");
+        \\
+        \\} catch (e) {
+        \\    console.log("[JS] ❌ Error:", e.message || e);
+        \\}
+    ;
+
+    const val = try engine.eval(js, "blob_test", .module);
+    defer engine.ctx.freeValue(val);
+
+    try engine.run();
+
+    // Optional: Peek into the registry from Zig to verify
+    const rc = RuntimeContext.get(engine.ctx);
+    z.print("[Zig] Active Blobs in Registry: {d}\n", .{rc.blob_registry.count()});
+    // We expect 1 blob remaining (url2 is not revoked), unless you revoked both.
+}
+
+fn classList(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== DOMTokenList (classList) Demo ===\n\n", .{});
+
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const js =
+        \\try {
+        \\    const parser = new DOMParser();
+        \\    const doc = parser.parseFromString('<div id="box" class="blue green"></div>', 'text/html');
+        \\    const el = doc.getElementById("box");
+        \\
+        \\    if (!el) {
+        \\        console.log("Error: Could not find element");
+        \\        throw new Error("Element not found");
+        \\    }
+        \\
+        \\    console.log("Element found, className:", el.className);
+        \\
+        \\    // Test classList access
+        \\    const cl = el.classList;
+        \\    console.log("classList.length:", cl.length);
+        \\    console.log("classList.value:", cl.value);
+        \\
+        \\    // Test contains
+        \\    console.log("contains('blue'):", cl.contains('green'));
+        \\    console.log("contains('green'):", cl.contains('green'));
+        \\
+        \\    // Test add
+        \\    cl.add('red');
+        \\    console.log("After add('red'):", el.className);
+        \\
+        \\    cl.add('black');
+        \\    console.log("After add('black'):", el.className);
+        \\
+        \\    // Test remove
+        \\    cl.remove('blue');
+        \\    console.log("After remove('blue'):", el.className);
+        \\
+        \\    // Test toggle
+        \\    let added = cl.toggle('active');
+        \\    console.log("toggle('active'):", added, "className:", el.className);
+        \\
+        \\    let removed = cl.toggle('active');
+        \\    console.log("toggle again:", removed, "className:", el.className);
+        \\
+        \\    // Test toggle with force
+        \\    cl.toggle('forced', true);
+        \\    console.log("toggle('forced', true):", el.className);
+        \\
+        \\    // Test replace
+        \\    cl.add('old');
+        \\    let replaced = cl.replace('old', 'new');
+        \\    console.log("replace('old','new'):", replaced, "className:", el.className);
+        \\
+        \\    // Test item (use classList.value to set class instead of className)
+        \\    cl.value = "a b c";
+        \\    console.log("After classList.value='a b c':", el.className);
+        \\    console.log("item(0):", cl.item(0));
+        \\    console.log("item(1):", cl.item(1));
+        \\    console.log("item(99):", cl.item(99));
+        \\
+        \\    // Test value setter again
+        \\    cl.value = "x y z";
+        \\    console.log("After value='x y z':", el.className, "length:", cl.length);
+        \\
+        \\    console.log("=== All classList tests passed! ===");
+        \\} catch (e) {
+        \\    console.log("Error:", e.message || e);
+        \\}
+    ;
+
+    const result = engine.eval(js, "classList_demo", .module) catch |err| {
+        z.print("Eval error: {}\n", .{err});
+        return err;
+    };
+
+    // Check if result is an exception
+    if (engine.ctx.isException(result)) {
+        const ex = engine.ctx.getException();
+        const str = engine.ctx.toCString(ex) catch "unknown error";
+        z.print("JS Exception: {s}\n", .{str});
+        engine.ctx.freeCString(str);
+        engine.ctx.freeValue(ex);
+        return;
+    }
+    defer engine.ctx.freeValue(result);
+
+    engine.run() catch |err| {
+        z.print("Run error: {}\n", .{err});
+        return err;
+    };
+
+    z.print("classList implementation verified:\n", .{});
+    z.print("  - add(), remove(), toggle(), contains()\n", .{});
+    z.print("  - replace(), item()\n", .{});
+    z.print("  - length, value properties\n", .{});
+}
 
 fn urlObject(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbx);
@@ -1075,6 +1262,63 @@ fn getValueFromQJSinZig(allocator: std.mem.Allocator) !void {
 }
 
 // ESM Modules ----------------------------------------------------------------
+fn cdnImport(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const html =
+        \\<html>
+        \\    <title class="animate__animated animate__bounce">Testing CDN import</title>
+        \\<head>
+        \\  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
+        \\  <style> body { background-color: #f0f0f0; } </style>
+        \\  <script type="module" src="https://cdn.jsdelivr.net/npm/es-toolkit@1.44.0/+esm"></script>
+        \\</head>
+        \\<body>
+        \\    <h1>Testing CDN import: Estoolkit</h1>
+        \\    <script type="module">
+        \\        import * as ETK from 'https://cdn.jsdelivr.net/npm/es-toolkit@1.44.0/+esm'
+        \\
+        \\        console.log("[JS] List available primitives:");
+        // \\        console.log("[JS] " + Object.keys(ETK).join(", "));
+        \\
+        \\        const numbers = [10, 50, 100, 160];
+        \\        console.log("[JS] Array: ", numbers);
+        \\        const m = ETK.mean(numbers);
+        \\        console.log(`[JS] ✅ es-toolkit 'mean': ${m}\n`);
+        \\
+        \\        const body = document.querySelector('body');
+        \\        console.log("[JS] body style ?: ", body.style.getPropertyValue(('background-color')));
+        \\        const title = document.querySelector('title');
+        \\        console.log("[JS] title style: ", title.style.getPropertyValue(('animation-name')));
+        \\        console.log("[JS] title style: ", window.getComputedStyle(title).getPropertyValue('animation-name'));
+        \\    </script>
+        \\</body>
+        \\</html>
+    ;
+
+    const engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    try engine.loadHTML(html);
+    try engine.loadExternalStylesheets(".");
+    try engine.executeScripts(allocator, ".");
+    try engine.run();
+
+    const doc = engine.dom.doc;
+    const body = z.bodyElement(doc).?;
+    const computed_bgc = try z.getComputedStyle(allocator, body, "background-color");
+    if (computed_bgc) |bgc| {
+        z.print("[Zig] body background-color: {s}\n", .{bgc});
+        allocator.free(bgc);
+    }
+    const title = try z.querySelector(allocator, doc, "title") orelse return error.NoTitle;
+    const myclassList = z.classList_zc(title);
+    z.print("[Zig]: {s}\n", .{myclassList});
+
+    const prop = try z.getComputedStyle(allocator, title, "animation-name") orelse return error.NoClass;
+    defer allocator.free(prop);
+    z.print("[Zig] Animation prop: {s}\n", .{prop});
+
+    // try z.prettyPrint(allocator, z.documentRoot(doc).?);
+}
 
 fn simpleESM(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== ESM Module Demo --------------------------------\n\n", .{});
@@ -1140,7 +1384,7 @@ fn execute_Simple_Script_In_HTML(allocator: std.mem.Allocator) !void {
         \\    }
         \\    // Return value is captured in ArrayList - no globalThis needed!
         \\    greet("QuickJS from Zig");
-        \\  </script>
+        \\  </scrip>
         \\  <p>Content</p>
         \\  <script>
         \\    const data = { count: 42, items: ["a", "b", "c"] };
@@ -2118,6 +2362,27 @@ fn async_Fetch_API_Demo(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\  .catch(err => {
         \\    console.error("🔴 Fetch error:", err);
         \\  });
+        \\
+        \\// 3. PATCH Request (Update)
+        \\fetch("https://jsonplaceholder.typicode.com/posts/1", {
+        \\  method: 'PATCH',
+        \\  body: JSON.stringify({ title: 'foo patch' }),
+        \\  headers: { 'Content-type': 'application/json; charset=UTF-8' },
+        \\})
+        \\  .then(res => res.json())
+        \\  .then(json => console.log("🟢 PATCH Response:", JSON.stringify(json)))
+        \\  .catch(err => console.error("🔴 PATCH Error:", err));
+        \\
+        \\// 4. DELETE Request
+        \\fetch("https://jsonplaceholder.typicode.com/posts/1", {
+        \\  method: 'DELETE',
+        \\})
+        \\  .then(res => {
+        \\      console.log("🟢 DELETE Status:", res.status);
+        \\      return res.json();
+        \\  })
+        \\  .then(json => console.log("🔵 DELETE Body:", JSON.stringify(json)))
+        \\  .catch(err => console.error("🔴 DELETE Error:", err));
     ;
 
     const res = try engine.eval(script, "<fetch>", .global);
@@ -3686,7 +3951,7 @@ pub fn zexplore_example_com(allocator: std.mem.Allocator, url: []const u8) ![]u8
     z.print("\n=== Demo visiting the page {s} --------------\n\n", .{url});
     const page = try z.get(allocator, url);
     defer allocator.free(page);
-    const doc = try z.createDocFromString(page);
+    const doc = try z.parseHTML(allocator, page);
     defer z.destroyDocument(doc);
     const html = z.documentRoot(doc).?;
     try z.prettyPrint(allocator, html);

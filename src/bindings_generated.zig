@@ -571,6 +571,18 @@ pub fn js_get_className(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     const result = z.className(el);
     return ctx.newString(result);
 }
+// Property Getter for classList -> DOMTokenList
+pub fn js_get_classList(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
+    // Create the proxy object attached to the same pointer
+    const obj = ctx.newObjectClass(rc.classes.dom_token_list);
+    _ = qjs.JS_SetOpaque(obj, ptr);
+    return obj;
+}
 // Boolean Getter for disabled
 pub fn js_get_disabled(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     _ = argc; _ = argv;
@@ -11083,6 +11095,13 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "className");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_className, "get_className", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "classList");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_classList, "get_classList", 0, qjs.JS_CFUNC_generic, 0);
         const set_fn = w.UNDEFINED;
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);

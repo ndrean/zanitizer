@@ -69,40 +69,17 @@ fn createPromiseRejected(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &funcs);
     if (qjs.JS_IsException(promise)) return promise;
 
-    // 1. Create the Error Object and set it as pending exception
-    _ = ctx.throwTypeError(msg);
-
-    // 2. "Catch" it: Retrieve the object and clear the pending state
-    const err_obj = ctx.getException();
-
-    // 3. Reject the promise with the actual Error Object
-    var args = [1]qjs.JSValue{err_obj};
+    const err_val = ctx.throwTypeError(msg);
+    // [FIX] Must be var
+    var args = [1]qjs.JSValue{err_val};
     const ret = qjs.JS_Call(ctx.ptr, funcs[1], zqjs.UNDEFINED, 1, &args);
 
-    // 4. Cleanup
     qjs.JS_FreeValue(ctx.ptr, ret);
-    qjs.JS_FreeValue(ctx.ptr, err_obj); // Free our handle (reject has its own copy if needed)
+    qjs.JS_FreeValue(ctx.ptr, err_val);
     qjs.JS_FreeValue(ctx.ptr, funcs[0]);
     qjs.JS_FreeValue(ctx.ptr, funcs[1]);
-
     return promise;
 }
-// fn createPromiseRejected(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
-//     var funcs: [2]qjs.JSValue = undefined;
-//     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &funcs);
-//     if (qjs.JS_IsException(promise)) return promise;
-
-//     const err_val = ctx.throwTypeError(msg);
-//     // [FIX] Must be var
-//     var args = [1]qjs.JSValue{err_val};
-//     const ret = qjs.JS_Call(ctx.ptr, funcs[1], zqjs.UNDEFINED, 1, &args);
-
-//     qjs.JS_FreeValue(ctx.ptr, ret);
-//     qjs.JS_FreeValue(ctx.ptr, err_val);
-//     qjs.JS_FreeValue(ctx.ptr, funcs[0]);
-//     qjs.JS_FreeValue(ctx.ptr, funcs[1]);
-//     return promise;
-// }
 
 // ============================================================================
 // BLOB FETCH LOGIC (The New Fixes)
@@ -135,10 +112,10 @@ fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
     if (qjs.JS_GetOpaque(blob_val, rc.classes.blob)) |ptr| {
         const blob: *js_blob.BlobObject = @ptrCast(@alignCast(ptr));
 
-        // Parse directly from slice
+        // [FIX] Parse directly from slice
         const json_val = ctx.parseJSON(blob.data, "<blob>");
 
-        // Clear exception if parsing fails
+        // [FIX] Clear exception if parsing fails
         if (ctx.isException(json_val)) {
             const ex = ctx.getException();
             ctx.freeValue(ex);
@@ -367,24 +344,13 @@ fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocat
     const url_z = arena.dupeZ(u8, task.url) catch return;
     easy.setUrl(url_z) catch return;
 
-    // --- UPDATED METHOD HANDLING ---
     if (std.mem.eql(u8, task.method, "POST")) {
         easy.setMethod(.POST) catch return;
         if (task.body) |b| easy.setPostFields(b) catch return;
     } else if (std.mem.eql(u8, task.method, "PUT")) {
         easy.setMethod(.PUT) catch return;
         if (task.body) |b| easy.setPostFields(b) catch return;
-    } else if (std.mem.eql(u8, task.method, "PATCH")) {
-        // Assuming your curl wrapper maps .PATCH.
-        // If not, use: easy.setCustomRequest("PATCH") catch return;
-        easy.setMethod(.PATCH) catch return;
-        if (task.body) |b| easy.setPostFields(b) catch return;
-    } else if (std.mem.eql(u8, task.method, "DELETE")) {
-        easy.setMethod(.DELETE) catch return;
-    } else if (std.mem.eql(u8, task.method, "HEAD")) {
-        easy.setMethod(.HEAD) catch return;
     } else {
-        // Default to GET
         easy.setMethod(.GET) catch return;
     }
 
@@ -400,13 +366,13 @@ fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocat
 
     var writer = std.Io.Writer.Allocating.init(arena);
     defer writer.deinit();
+
     easy.setWriter(&writer.writer) catch return;
 
     const ret = easy.perform() catch return;
     res.status = ret.status_code;
     res.ok = (ret.status_code >= 200 and ret.status_code < 300);
     res.body = writer.toOwnedSlice() catch return;
-
     if (curl.hasParseHeaderSupport()) {
         var header_list: std.ArrayListUnmanaged([]const u8) = .empty;
         var iter = ret.iterateHeaders(.{}) catch return;
@@ -417,55 +383,6 @@ fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocat
         res.headers = header_list.items;
     }
 }
-
-// fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocator) void {
-//     const ca_bundle = curl.allocCABundle(arena) catch return;
-//     defer ca_bundle.deinit();
-//     var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch return;
-//     defer easy.deinit();
-
-//     const url_z = arena.dupeZ(u8, task.url) catch return;
-//     easy.setUrl(url_z) catch return;
-
-//     if (std.mem.eql(u8, task.method, "POST")) {
-//         easy.setMethod(.POST) catch return;
-//         if (task.body) |b| easy.setPostFields(b) catch return;
-//     } else if (std.mem.eql(u8, task.method, "PUT")) {
-//         easy.setMethod(.PUT) catch return;
-//         if (task.body) |b| easy.setPostFields(b) catch return;
-//     } else {
-//         easy.setMethod(.GET) catch return;
-//     }
-
-//     var headers = curl.Easy.Headers{};
-//     defer headers.deinit();
-//     if (task.headers.len > 0) {
-//         for (task.headers) |h| {
-//             const h_z = arena.dupeZ(u8, h) catch return;
-//             headers.add(h_z) catch return;
-//         }
-//         easy.setHeaders(headers) catch return;
-//     }
-
-//     var writer = std.Io.Writer.Allocating.init(arena);
-//     defer writer.deinit();
-
-//     easy.setWriter(&writer.writer) catch return;
-
-//     const ret = easy.perform() catch return;
-//     res.status = ret.status_code;
-//     res.ok = (ret.status_code >= 200 and ret.status_code < 300);
-//     res.body = writer.toOwnedSlice() catch return;
-//     if (curl.hasParseHeaderSupport()) {
-//         var header_list: std.ArrayListUnmanaged([]const u8) = .empty;
-//         var iter = ret.iterateHeaders(.{}) catch return;
-//         while (iter.next() catch return) |h| {
-//             const line = std.fmt.allocPrint(arena, "{s}: {s}", .{ h.name, h.get() }) catch return;
-//             header_list.append(arena, line) catch return;
-//         }
-//         res.headers = header_list.items;
-//     }
-// }
 
 fn destroyFetchTask(allocator: std.mem.Allocator, task: FetchTask) void {
     allocator.free(task.url);

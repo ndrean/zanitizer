@@ -421,9 +421,73 @@ fn js_URLSearchParams_toString(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c
     return ctx.newString(str);
 }
 
-// ============================================================================
-// Installation
-// ============================================================================
+// === ObjectURL ============================================
+
+pub fn js_createObjectURL(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx); //  access state
+
+    if (argc < 1) return ctx.throwTypeError("Blob expected");
+    const blob_val = argv[0];
+
+    //  isBlob? (check ClassID)
+    if (ctx.getOpaque2(blob_val, rc.classes.blob) == null) {
+        return ctx.throwTypeError("Argument provided is not a Blob");
+    }
+
+    // 2. Generate UUID
+    // (Simple random implementation, replace with std.rand or uuid lib if available)
+    var bytes: [16]u8 = undefined;
+    std.crypto.random.bytes(&bytes);
+    const uuid = bytes;
+
+    const blob_url = std.fmt.allocPrint(rc.allocator, "blob:{x}", .{uuid}) catch return zqjs.EXCEPTION;
+    // no defer free(blob_url) because the registry will own it now.
+
+    // Store in Registry
+    // !! Duplicate value to keep Blob alive in GC while URL exists
+    const blob_dup = ctx.dupValue(blob_val);
+
+    rc.blob_registry.put(blob_url, blob_dup) catch {
+        rc.allocator.free(blob_url);
+        ctx.freeValue(blob_dup);
+        return ctx.throwError();
+    };
+
+    return ctx.newString(blob_url);
+}
+
+/// static URL.revokeObjectURL(url)
+pub fn js_revokeObjectURL(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    if (argc < 1) return zqjs.UNDEFINED;
+
+    const url_str = ctx.toZString(argv[0]) catch return zqjs.UNDEFINED;
+    defer ctx.freeZString(url_str);
+
+    // Remove from registry
+    if (rc.blob_registry.fetchRemove(url_str)) |entry| {
+        // Free key  = string  allocated in createObjectURL
+        rc.allocator.free(entry.key);
+        // Free JS reference (allowing Blob to be GC'd)
+        ctx.freeValue(entry.value);
+    }
+
+    return zqjs.UNDEFINED;
+}
+// === Installation ====================================
 
 pub const URLBridge = struct {
     pub fn install(ctx: zqjs.Context) !void {
@@ -502,6 +566,12 @@ pub const URLBridge = struct {
         try ctx.setPropertyStr(url_ctor, "prototype", ctx.dupValue(url_proto));
         try ctx.setPropertyStr(url_proto, "constructor", ctx.dupValue(url_ctor));
         ctx.setClassProto(rc.classes.url, url_proto);
+
+        const create_fn = ctx.newCFunction(js_createObjectURL, "createObjectURL", 1);
+        try ctx.setPropertyStr(url_ctor, "createObjectURL", create_fn);
+
+        const revoke_fn = ctx.newCFunction(js_revokeObjectURL, "revokeObjectURL", 1);
+        try ctx.setPropertyStr(url_ctor, "revokeObjectURL", revoke_fn);
 
         const global = ctx.getGlobalObject();
         defer ctx.freeValue(global);

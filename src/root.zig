@@ -469,6 +469,13 @@ pub const className = classes.classList_zc;
 pub const classListAsString = classes.classListAsString;
 // pub const classListAsString_zc = classes.classListAsString_zc;
 
+// Lightweight class manipulation (no HashMap)
+pub const addClass = classes.addClass;
+pub const removeClass = classes.removeClass;
+pub const toggleClass = classes.toggleClass;
+pub const toggleClassForce = classes.toggleClassForce;
+
+// Full ClassList (HashMap-based, for batch operations)
 pub const ClassList = classes.ClassList;
 pub const classList = classes.classList;
 

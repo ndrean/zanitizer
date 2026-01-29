@@ -104,6 +104,134 @@ test "classListAsString" {
 }
 
 // ===================================================================
+// Lightweight class manipulation (no HashMap, minimal allocations)
+// ===================================================================
+
+/// [classList] Add a class without building full ClassList (O(n) scan + 1 allocation)
+pub fn addClass(allocator: std.mem.Allocator, element: *z.HTMLElement, class_name: []const u8) !void {
+    // Validate: empty or contains whitespace = invalid token
+    if (class_name.len == 0 or std.mem.indexOfAny(u8, class_name, " \t\n\r") != null) return;
+
+    // Already has class? Skip
+    if (hasClass(element, class_name)) return;
+
+    // Get current class string (zero-copy from lexbor)
+    const current = classList_zc(element);
+
+    if (current.len == 0) {
+        // No existing classes, just set directly
+        try z.setAttribute(element, "class", class_name);
+    } else {
+        // Append: "current new_class"
+        const new_str = try std.fmt.allocPrint(allocator, "{s} {s}", .{ current, class_name });
+        defer allocator.free(new_str);
+        try z.setAttribute(element, "class", new_str);
+    }
+}
+
+/// [classList] Remove a class without building full ClassList (O(n) rebuild)
+pub fn removeClass(allocator: std.mem.Allocator, element: *z.HTMLElement, class_name: []const u8) !void {
+    const current = classList_zc(element);
+    if (current.len == 0) return;
+
+    // Check if class exists first (avoid allocation if not needed)
+    if (!hasClass(element, class_name)) return;
+
+    // Build new string excluding the class
+    var result: std.ArrayList(u8) = .empty;
+    defer result.deinit(allocator);
+
+    var iter = std.mem.splitScalar(u8, current, ' ');
+    var first = true;
+    while (iter.next()) |token| {
+        const trimmed = std.mem.trim(u8, token, " \t\n\r");
+        if (trimmed.len == 0) continue;
+        if (std.mem.eql(u8, trimmed, class_name)) continue; // Skip the one to remove
+
+        if (!first) try result.append(allocator, ' ');
+        first = false;
+        try result.appendSlice(allocator, trimmed);
+    }
+
+    try z.setAttribute(element, "class", result.items);
+}
+
+/// [classList] Toggle a class without building full ClassList
+/// Returns true if class was added, false if removed
+pub fn toggleClass(allocator: std.mem.Allocator, element: *z.HTMLElement, class_name: []const u8) !bool {
+    if (hasClass(element, class_name)) {
+        try removeClass(allocator, element, class_name);
+        return false;
+    } else {
+        try addClass(allocator, element, class_name);
+        return true;
+    }
+}
+
+/// [classList] Toggle with force parameter
+/// force=true: add if not present, force=false: remove if present
+pub fn toggleClassForce(allocator: std.mem.Allocator, element: *z.HTMLElement, class_name: []const u8, force: bool) !bool {
+    if (force) {
+        try addClass(allocator, element, class_name);
+        return true;
+    } else {
+        try removeClass(allocator, element, class_name);
+        return false;
+    }
+}
+
+test "addClass lightweight" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p id=\"1\" class=\"foo\"></p><p id=\"2\"></p>");
+    defer z.destroyDocument(doc);
+
+    const el1 = z.getElementById(doc, "1").?;
+    try addClass(allocator, el1, "bar");
+    try testing.expectEqualStrings("foo bar", classList_zc(el1));
+
+    // Adding duplicate should be no-op
+    try addClass(allocator, el1, "foo");
+    try testing.expectEqualStrings("foo bar", classList_zc(el1));
+
+    // Adding to empty class
+    const el2 = z.getElementById(doc, "2").?;
+    try addClass(allocator, el2, "first");
+    try testing.expectEqualStrings("first", classList_zc(el2));
+}
+
+test "removeClass lightweight" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p id=\"1\" class=\"foo bar baz\"></p>");
+    defer z.destroyDocument(doc);
+
+    const el = z.getElementById(doc, "1").?;
+    try removeClass(allocator, el, "bar");
+    try testing.expectEqualStrings("foo baz", classList_zc(el));
+
+    // Removing non-existent should be no-op
+    try removeClass(allocator, el, "nothere");
+    try testing.expectEqualStrings("foo baz", classList_zc(el));
+}
+
+test "toggleClass lightweight" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p id=\"1\" class=\"foo\"></p>");
+    defer z.destroyDocument(doc);
+
+    const el = z.getElementById(doc, "1").?;
+
+    // Toggle on (add)
+    const added = try toggleClass(allocator, el, "bar");
+    try testing.expect(added == true);
+    try testing.expect(hasClass(el, "bar"));
+
+    // Toggle off (remove)
+    const removed = try toggleClass(allocator, el, "bar");
+    try testing.expect(removed == false);
+    try testing.expect(!hasClass(el, "bar"));
+}
+
+// ===================================================================
 
 /// [classList] DOMTTokenList Browser-like for clasees.
 ///

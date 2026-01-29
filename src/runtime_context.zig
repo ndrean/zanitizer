@@ -16,6 +16,7 @@ pub const RuntimeContext = struct {
     // Worker-specific data (null for main thread)
     worker_core: ?*anyopaque = null,
     payload: ?*anyopaque = null, // generic pointer to pass in/out of callbacks
+    blob_registry: std.StringHashMap(z.qjs.JSValue), // "blob:uuid" (owned string) -> Blob Object (JSValue)
 
     // Central Registry of Class IDs for this Runtime
     // Zig struct -> Opaque pointer -> QuickJS Class ID
@@ -30,6 +31,7 @@ pub const RuntimeContext = struct {
         owned_document: zqjs.ClassID = 0,
         event: zqjs.ClassID = 0,
         css_style_decl: zqjs.ClassID = 0,
+        dom_token_list: zqjs.ClassID = 0,
         blob: zqjs.ClassID = 0,
         form_data: zqjs.ClassID = 0,
         url: zqjs.ClassID = 0,
@@ -57,6 +59,7 @@ pub const RuntimeContext = struct {
             .classes = .{},
             .sandbox = sandbox,
             .sandbox_root = sandbox_root,
+            .blob_registry = std.StringHashMap(z.qjs.JSValue).init(allocator),
         };
 
         // Install into QuickJS immediately
@@ -65,9 +68,32 @@ pub const RuntimeContext = struct {
         return self;
     }
 
+    pub fn cleanUp(self: *RuntimeContext, ctx: zqjs.Context) void {
+        var it = self.blob_registry.iterator();
+        while (it.next()) |entry| {
+            // Free the key string (Zig allocator)
+            self.allocator.free(entry.key_ptr.*);
+
+            //  Free the Blob Value (QuickJS refcount decrement)
+            // !!! It brings the refcount to 0 so GC can collect it.
+            ctx.freeValue(entry.value_ptr.*);
+        }
+        // empty the map
+        self.blob_registry.clearAndFree();
+    }
+
     /// Cleanup function
     pub fn destroy(self: *RuntimeContext) void {
+        var it = self.blob_registry.iterator();
+        while (it.next()) |entry| {
+            // Free the "blob:..." string keys we allocated
+            self.allocator.free(entry.key_ptr.*);
+            // Note: We don't JS_FreeValue the values here because
+            // the Runtime is usually destroyed before the RuntimeContext.
+        }
+        self.blob_registry.deinit();
         self.allocator.destroy(self);
+        z.print("RT destroyed --------\n", .{});
     }
 
     /// Retrieve this struct from the JS Context

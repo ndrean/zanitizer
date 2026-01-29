@@ -153,159 +153,29 @@ pub const Sandbox = struct {
     }
 };
 
+// Helper to detect URLs
+fn isRemote(path: []const u8) bool {
+    return std.mem.startsWith(u8, path, "http:") or std.mem.startsWith(u8, path, "https:");
+}
+
 /// [Normalizer] Resolves import paths logically WITHOUT touching the filesystem.
 /// Prevents '..' from escaping the sandbox root.
-// pub fn js_secure_module_normalize(
-//     ctx: ?*qjs.JSContext,
-//     module_base_name: [*c]const u8,
-//     module_name: [*c]const u8,
-//     opaque_ptr: ?*anyopaque,
-// ) callconv(.c) [*c]u8 {
-//     const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
-//     const allocator = allocator_ptr.*;
-
-//     if (module_name == null) return null;
-//     const name_slice = std.mem.span(module_name);
-
-//     // 1. Resolve to Absolute Path
-//     // We use CWD logic here to handle ".." correctly at the logical level
-//     var resolved_path: []u8 = undefined;
-//     if (module_base_name) |base| {
-//         const base_slice = std.mem.span(base);
-//         // If base is empty (entry point), use "."
-//         const base_dir = if (base_slice.len > 0) std.fs.path.dirname(base_slice) orelse "." else ".";
-//         resolved_path = std.fs.path.resolve(allocator, &.{ base_dir, name_slice }) catch return null;
-//     } else {
-//         resolved_path = std.fs.path.resolve(allocator, &.{name_slice}) catch return null;
-//     }
-//     defer allocator.free(resolved_path);
-
-//     // 2. LOGICAL CHECK (isSafePath)
-//     // Ensures the path is actually inside the project root
-//     if (!isSafePath(allocator, resolved_path)) {
-//         _ = qjs.JS_ThrowReferenceError(ctx, "Security: Path traversal detected");
-//         return null;
-//     }
-
-//     // 3. CONVERT TO RELATIVE (The Fix)
-//     // The walker needs "js/vendor/lib.js", not "/Users/nevendrean/.../js/vendor/lib.js"
-//     const cwd = std.process.getCwdAlloc(allocator) catch return null;
-//     defer allocator.free(cwd);
-
-//     // We know it starts with CWD because isSafePath passed.
-//     // We strip CWD + 1 character (the separator)
-//     // Note: handle edge case where resolved_path == cwd (importing root)
-//     var relative_slice: []const u8 = "";
-//     if (resolved_path.len > cwd.len) {
-//         relative_slice = resolved_path[cwd.len + 1 ..];
-//     } else {
-//         relative_slice = "index.js"; // Fallback if they try to import the root folder?
-//     }
-
-//     // 4. Extension Handling (on the relative path)
-//     var final_path = relative_slice;
-//     var final_path_owned: ?[]u8 = null;
-
-//     // Check relative to CWD (which is our sandbox root)
-//     const exact_exists = if (std.fs.cwd().access(final_path, .{})) |_| true else |_| false;
-
-//     if (!exact_exists) {
-//         const with_ext = std.fmt.allocPrint(allocator, "{s}.js", .{final_path}) catch return null;
-//         if (std.fs.cwd().access(with_ext, .{}) == error.FileNotFound) {
-//             allocator.free(with_ext);
-//             _ = qjs.JS_ThrowReferenceError(ctx, "Module not found: '%s'", module_name);
-//             return null;
-//         }
-//         final_path = with_ext;
-//         final_path_owned = with_ext;
-//     }
-//     defer if (final_path_owned) |p| allocator.free(p);
-
-//     return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
-// }
-// pub fn js_secure_module_normalize(
-//     ctx: ?*qjs.JSContext,
-//     module_base_name: [*c]const u8,
-//     module_name: [*c]const u8,
-//     opaque_ptr: ?*anyopaque,
-// ) callconv(.c) [*c]u8 {
-//     const sandbox: *Sandbox = @ptrCast(@alignCast(opaque_ptr));
-//     if (module_name == null) return null;
-
-//     const requested = std.mem.span(module_name);
-
-//     // 1. Block Schemes & Absolute Paths immediately
-//     if (std.mem.startsWith(u8, requested, "/") or
-//         std.mem.indexOfScalar(u8, requested, ':') != null)
-//     {
-//         _ = qjs.JS_ThrowReferenceError(ctx, "Security: Absolute paths and schemes are blocked");
-//         return null;
-//     }
-
-//     // 2. Determine Base Directory
-//     // If importing from "js/app.js", base is "js"
-//     var base_dir: []const u8 = "";
-//     if (module_base_name) |base_c| {
-//         const base_full = std.mem.span(base_c);
-//         if (std.fs.path.dirname(base_full)) |d| {
-//             base_dir = d;
-//         }
-//     }
-
-//     // 3. Logically Join Paths (In-Memory Only)
-//     // We assume the sandbox root is "/" for the sake of resolution logic
-//     const resolved = std.fs.path.resolve(sandbox.allocator, &.{ "/", base_dir, requested }) catch {
-//         _ = qjs.JS_ThrowInternalError(ctx, "Path resolution failed");
-//         return null;
-//     };
-//     defer sandbox.allocator.free(resolved);
-
-//     // 4. Sandbox Escape Check
-//     // std.fs.path.resolve with "/" as root will collapse ".."
-//     // If the result is just "/", it means they tried to access root (allowed).
-//     // If it starts with "/" but resolves to something valid, we strip the leading "/" to make it relative to our Dir FD.
-
-//     // However, if the user tried `../../etc/passwd`, 'resolve' (keyed to /) would theoretically clamp it to /etc/passwd
-//     // effectively ignoring the escape.
-//     // CHECK: Does resolve allow escaping root if root is provided?
-//     // Zig's resolve handles ".." logically. "/" + "../../" becomes "/".
-//     // So `js/` + `../../secrets` becomes `/secrets`. This is INSIDE the sandbox root, but outside the `js` folder.
-//     // This is technically valid "Sandbox" behavior (access anything in the sandbox).
-
-//     // We strip the leading "/" to make it a relative path for openAt
-//     const rel_path = if (std.mem.startsWith(u8, resolved, "/")) resolved[1..] else resolved;
-
-//     if (rel_path.len == 0) {
-//         // Attempted to import the root directory itself?
-//         _ = qjs.JS_ThrowReferenceError(ctx, "Cannot import root directory");
-//         return null;
-//     }
-
-//     // 5. Extension Handling (Strict or Lenient)
-//     // User requested "fail if not correct", but standard JS imports (no ext) require us to guess.
-//     // We construct the path. The Loader will fail if it doesn't exist.
-//     const final_path = if (std.mem.endsWith(u8, rel_path, ".js") or std.mem.endsWith(u8, rel_path, ".json"))
-//         sandbox.allocator.dupe(u8, rel_path) catch return null
-//     else
-//         std.fmt.allocPrint(sandbox.allocator, "{s}.js", .{rel_path}) catch return null;
-
-//     // The Loader owns this string now? No, QuickJS expects us to return a malloc'd string (or using js_malloc).
-//     // But your previous code used js_strndup, which copies it into JS memory.
-//     defer sandbox.allocator.free(final_path);
-
-//     return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
-// }
 pub fn js_secure_module_normalize(
     ctx: ?*qjs.JSContext,
     module_base_name: [*c]const u8,
     module_name: [*c]const u8,
     opaque_ptr: ?*anyopaque,
 ) callconv(.c) [*c]u8 {
+    z.print("[Zig] SECURE RESOLVER\n", .{});
     const sandbox: *Sandbox = @ptrCast(@alignCast(opaque_ptr));
     const allocator = sandbox.allocator;
 
     if (module_name == null) return null;
     const name_slice = std.mem.span(module_name);
+
+    if (isRemote(name_slice)) {
+        return z.qjs.js_strdup(ctx, module_name);
+    }
 
     // 1. Block basic nonsense
     if (std.mem.startsWith(u8, name_slice, "http") or std.mem.startsWith(u8, name_slice, "//")) {
@@ -363,55 +233,88 @@ pub fn js_secure_module_normalize(
     defer if (final_path_owned) |p| allocator.free(p);
     return qjs.js_strndup(ctx, final_path.ptr, final_path.len);
 }
+
 /// [Loader] Opens file using Directory File Descriptor (Kernel Enforcement)
 pub fn js_secure_module_loader(
     ctx: ?*qjs.JSContext,
     module_name: [*c]const u8,
     opaque_ptr: ?*anyopaque,
 ) callconv(.c) ?*qjs.JSModuleDef {
+    z.print("[Zig] SECURE  LOADER \n", .{});
     const sandbox: *Sandbox = @ptrCast(@alignCast(opaque_ptr));
+    const allocator = sandbox.allocator;
     const name = std.mem.span(module_name);
 
-    // 1. Kernel-Level Security Check (The "Paranoid" Walk)
-    const file = openFileNoSymlinkEscape(sandbox, name) catch |err| {
-        // Helpful debugging in dev, vague security error in prod?
-        // For now, let's be explicit about the error type for your sanity
-        if (err == error.FileNotFound) {
-            _ = qjs.JS_ThrowReferenceError(ctx, "Module not found: %s", module_name);
-        } else if (err == error.AccessDenied or err == error.SymLinkLoop) {
-            _ = qjs.JS_ThrowReferenceError(ctx, "Security: Access denied (Symlink or Permission)");
-        } else {
-            _ = qjs.JS_ThrowReferenceError(ctx, "Failed to load module");
-        }
-        return null;
-    };
-    defer file.close();
+    if (isRemote(name)) {
+        var allocating = std.Io.Writer.Allocating.init(allocator);
+        defer allocating.deinit();
 
-    // 2. Read Content (Standard)
-    const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
-    const source = file.readToEndAllocOptions(
-        sandbox.allocator,
-        MAX_SIZE,
-        null,
-        std.mem.Alignment.fromByteUnits(1),
-        0,
-    ) catch {
-        _ = qjs.JS_ThrowInternalError(ctx, "Module too large or read failed");
-        return null;
-    };
-    defer sandbox.allocator.free(source);
+        var client: std.http.Client = .{
+            .allocator = allocator,
+        };
+        defer client.deinit();
 
-    // 3. Compile & Return (Standard)
-    const func_val = qjs.JS_Eval(
-        ctx,
-        source.ptr,
-        source.len,
-        module_name,
-        qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
-    );
+        const response = client.fetch(.{
+            .method = .GET,
+            .location = .{ .url = name },
+            .response_writer = &allocating.writer,
+        }) catch return null;
 
-    if (qjs.JS_IsException(func_val)) return null;
-    return @ptrCast(qjs.JS_VALUE_GET_PTR(func_val));
+        std.debug.assert(response.status == .ok);
+        const code = allocating.toOwnedSlice() catch return null;
+        defer allocator.free(code);
+        std.debug.assert(code.len > 0);
+        const func_val = qjs.JS_Eval(
+            ctx,
+            code.ptr,
+            code.len,
+            module_name,
+            qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
+        );
+
+        if (qjs.JS_IsException(func_val)) return null;
+        return @ptrCast(qjs.JS_VALUE_GET_PTR(func_val));
+    } else {
+
+        // 1. Kernel-Level Security Check
+        const file = openFileNoSymlinkEscape(sandbox, name) catch |err| {
+            if (err == error.FileNotFound) {
+                _ = qjs.JS_ThrowReferenceError(ctx, "Module not found: %s", module_name);
+            } else if (err == error.AccessDenied or err == error.SymLinkLoop) {
+                _ = qjs.JS_ThrowReferenceError(ctx, "Security: Access denied (Symlink or Permission)");
+            } else {
+                _ = qjs.JS_ThrowReferenceError(ctx, "Failed to load module");
+            }
+            return null;
+        };
+        defer file.close();
+
+        // 2. Read Content (Standard)
+        const MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
+        const source = file.readToEndAllocOptions(
+            sandbox.allocator,
+            MAX_SIZE,
+            null,
+            std.mem.Alignment.fromByteUnits(1),
+            0,
+        ) catch {
+            _ = qjs.JS_ThrowInternalError(ctx, "Module too large or read failed");
+            return null;
+        };
+        defer sandbox.allocator.free(source);
+
+        // 3. Compile & Return (Standard)
+        const func_val = qjs.JS_Eval(
+            ctx,
+            source.ptr,
+            source.len,
+            module_name,
+            qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
+        );
+
+        if (qjs.JS_IsException(func_val)) return null;
+        return @ptrCast(qjs.JS_VALUE_GET_PTR(func_val));
+    }
 }
 
 /// [security] Hybrid Path Validator

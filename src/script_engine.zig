@@ -12,6 +12,7 @@ const JSWorker = @import("js_worker.zig");
 const FetchBridge = @import("js_fetch.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
 const FormDataBridge = @import("js_formData.zig").FormDataBridge;
+const js_console = @import("js_console.zig");
 
 const TIMEOUT_MS: i64 = 5000;
 
@@ -97,11 +98,14 @@ pub const ScriptEngine = struct {
 
         // (timers)
         try self.loop.install(self.ctx);
+        try js_console.install(self.ctx);
+        // try AsyncBridge.install(self.ctx);
+
         // install DOM APIs
         try self.dom.installAPIs(); // console, etc.
         try JSWorker.registerWorkerClass(self.ctx);
         try FetchBridge.install(self.ctx);
-        // try FormDataBridge.install(self.ctx);
+        try FormDataBridge.install(self.ctx);
 
         // TODO Other async bindings (sandboxed readFile, etc.)
         // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
@@ -139,6 +143,7 @@ pub const ScriptEngine = struct {
     }
 
     pub fn deinit(self: *ScriptEngine) void {
+        self.rc.cleanUp(self.ctx);
         self.sandbox.deinit();
         self.dom.deinit();
         if (self.rc.last_result) |val| {
@@ -474,21 +479,34 @@ pub const ScriptEngine = struct {
 
             // CASE A: External Script (<script src="...">)
             if (z.getAttribute_zc(script, "src")) |src| {
-                // resolve Path relative to Sandbox
-                const rel_path = self.resolvePathInSandbox(base_dir, src) catch |err| {
-                    z.print("Security: Blocked script path '{s}' (Error: {any})\n", .{ src, err });
-                    continue;
-                };
+                if (isRemote(src)) {
+                    if (isRemote(src)) {
+                        z.print("[Engine] Fetching remote script: {s}\n", .{src});
+                        const remote_code = self.get(src) catch |err| {
+                            z.print("Failed to fetch script '{s}': {}\n", .{ src, err });
+                            continue;
+                        };
+                        code_owned = remote_code;
+                        code = remote_code;
+                        filename = src;
+                    }
+                } else {
+                    // resolve Path relative to Sandbox
+                    const rel_path = self.resolvePathInSandbox(base_dir, src) catch |err| {
+                        z.print("Security: Blocked script path '{s}' (Error: {any})\n", .{ src, err });
+                        continue;
+                    };
 
-                filename_owned = rel_path;
-                filename = rel_path;
+                    filename_owned = rel_path;
+                    filename = rel_path;
 
-                const file_content = self.sandbox.dir.readFileAlloc(self.allocator, filename, 5 * 1024 * 1024) catch |err| {
-                    z.print("Failed to load script '{s}' from sandbox: {any}\n", .{ filename, err });
-                    continue;
-                };
-                code_owned = file_content;
-                code = file_content;
+                    const file_content = self.sandbox.dir.readFileAlloc(self.allocator, filename, 5 * 1024 * 1024) catch |err| {
+                        z.print("Failed to load script '{s}' from sandbox: {any}\n", .{ filename, err });
+                        continue;
+                    };
+                    code_owned = file_content;
+                    code = file_content;
+                }
             }
             // CASE B: Inline Script
             else {
@@ -530,33 +548,75 @@ pub const ScriptEngine = struct {
 
         for (links) |link_el| {
             var path_owned: ?[]u8 = null;
-            var css_owned: ?[]u8 = null;
+            // var css_owned: ?[]u8 = null;
+            var css_owned: ?[:0]u8 = null;
 
             defer {
-                if (path_owned) |ptr| self.allocator.free(ptr);
-                if (css_owned) |ptr| self.allocator.free(ptr);
+                if (path_owned) |ptr| {
+                    if (ptr.len > 0) self.allocator.free(ptr);
+                }
+                if (css_owned) |ptr| {
+                    if (ptr.len > 0) self.allocator.free(ptr);
+                }
             }
 
             const rel = z.getAttribute_zc(link_el, "rel") orelse continue;
             if (!std.mem.eql(u8, rel, "stylesheet")) continue;
 
             const href = z.getAttribute_zc(link_el, "href") orelse continue;
+            if (isRemote(href)) {
+                z.print("[Engine] Fetching remote CSS: {s}\n", .{href});
+                const remote_css = self.get(href) catch |err| {
+                    z.print("Failed to fetch CSS '{s}': {}\n", .{ href, err });
+                    continue;
+                };
 
-            // Resolve & Secure Check
-            const rel_path = self.resolvePathInSandbox(base_dir, href) catch |err| {
-                z.print("Security: Blocked CSS path '{s}' (Error: {any})\n", .{ href, err });
-                continue;
-            };
-            path_owned = rel_path;
+                std.debug.assert(remote_css.len > 0);
+                const safe_css = try self.allocator.dupeZ(u8, remote_css);
+                self.allocator.free(remote_css);
+                css_owned = safe_css;
+                try self.loadCSS(safe_css);
+            } else {
 
-            const css_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
-                z.print("Failed to load CSS '{s}': {any}\n", .{ rel_path, err });
-                continue;
-            };
-            css_owned = css_content;
+                // Resolve & Secure Check
+                const rel_path = self.resolvePathInSandbox(base_dir, href) catch |err| {
+                    z.print("Security: Blocked CSS path '{s}' (Error: {any})\n", .{ href, err });
+                    continue;
+                };
+                path_owned = rel_path;
 
-            try self.loadCSS(css_content);
+                const css_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                    z.print("Failed to load CSS '{s}': {any}\n", .{ rel_path, err });
+                    continue;
+                };
+                // css_owned = css_content;
+                // try self.loadCSS(css_content);
+                const safe_css = try self.allocator.dupeZ(u8, css_content);
+                self.allocator.free(css_content);
+                css_owned = safe_css;
+                try self.loadCSS(safe_css);
+            }
         }
+    }
+
+    /// Helper to fetch remote resources synchronously (for script/css loading)
+    pub fn get(self: *ScriptEngine, url: []const u8) ![]u8 {
+        var allocating = std.Io.Writer.Allocating.init(self.allocator);
+        defer allocating.deinit();
+
+        var client: std.http.Client = .{
+            .allocator = self.allocator,
+        };
+        defer client.deinit();
+
+        const response = try client.fetch(.{
+            .method = .GET,
+            .location = .{ .url = url },
+            .response_writer = &allocating.writer,
+        });
+
+        std.debug.assert(response.status == .ok);
+        return allocating.toOwnedSlice();
     }
 
     // Helper to check for remote URLs

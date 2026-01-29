@@ -51,6 +51,7 @@ pub const ArgType = union(enum) {
     node,
     document,
     document_root,
+    this_dom_token_list,
 
     string,
     int32,
@@ -67,6 +68,7 @@ const ReturnType = union(enum) {
     optional_node,
     document,
     owned_document,
+    dom_token_list,
 
     string,
     string_zc,
@@ -434,6 +436,22 @@ const T = struct {
         \\        return ctx.throwTypeError("Native Zig Error");
         \\    }};
         \\    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;
+        \\}}
+        \\
+    ;
+
+    const ELEMENT_PROP_DOM_TOKEN_LIST_GETTER =
+        \\// Property Getter for {s} -> DOMTokenList
+        \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+        \\    if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
+        \\    // Create the proxy object attached to the same pointer
+        \\    const obj = ctx.newObjectClass(rc.classes.dom_token_list);
+        \\    _ = qjs.JS_SetOpaque(obj, ptr);
+        \\    return obj;
         \\}}
         \\
     ;
@@ -855,6 +873,7 @@ const Pattern = enum {
     element_method_opt_string,
     element_method_alloc_void,
     element_method_alloc_string,
+    element_prop_dom_token_list,
     doc_method_element,
     doc_method_node,
     doc_method_opt_element,
@@ -902,6 +921,7 @@ fn classifyBinding(b: anytype) Pattern {
                 .string_zc => .element_prop_string_zc,
                 .optional_node => .element_prop_opt_node,
                 .optional_element => .element_prop_opt_element,
+                .dom_token_list => .element_prop_dom_token_list,
                 else => .unknown,
             },
             else => .unknown,
@@ -1155,6 +1175,9 @@ fn generateBinding(writer: anytype, b: anytype) !void {
             const extra_extract = extractExtraArgsElement(b.args);
             try writer.print(T.ELEMENT_METHOD_VOID_ERROR, .{ b.zig_func_name, name, argc_check, extra_extract, b.zig_func_name, extra_args });
         },
+        .element_prop_dom_token_list => {
+            try writer.print(T.ELEMENT_PROP_DOM_TOKEN_LIST_GETTER, .{ name, name });
+        },
         .element_method_opt_string => {
             try writer.print(T.ELEMENT_METHOD_OPT_STRING, .{ b.zig_func_name, name, b.zig_func_name });
         },
@@ -1347,17 +1370,17 @@ fn extractExtraArgsElement(args: anytype) []const u8 {
         if (arg == .string) count += 1;
     }
     if (count == 2) {
-        return
-            \\const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
-            \\    defer ctx.freeZString(arg1);
-            \\    const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
-            \\    defer ctx.freeZString(arg2);
+        return 
+        \\const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+        \\    defer ctx.freeZString(arg1);
+        \\    const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
+        \\    defer ctx.freeZString(arg2);
         ;
     }
     if (count == 1) {
-        return
-            \\const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
-            \\    defer ctx.freeZString(arg1);
+        return 
+        \\const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+        \\    defer ctx.freeZString(arg1);
         ;
     }
     return "";
