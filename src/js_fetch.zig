@@ -9,6 +9,7 @@ const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_formData = @import("js_formData.zig");
 const js_blob = @import("js_blob.zig");
 const js_file = @import("js_file.zig");
+const CurlMulti = @import("curl_multi.zig").CurlMulti;
 
 // ============================================================================
 // STRUCTS
@@ -551,7 +552,7 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
 // ============================================================================
 // MAIN FETCH
 
-fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     if (argc < 1) return ctx.throwTypeError("fetch requires a URL");
 
@@ -657,13 +658,36 @@ fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs
 
     const resolve = resolvers[0];
     const reject = resolvers[1];
-    loop.spawnWorker(fetchWorkerWrapper, FetchWorkerArgs{ .loop = loop, .task = task, .ctx = ctx, .resolve = resolve, .reject = reject }) catch {
+
+    // Use curl multi for non-blocking HTTP (no threads needed)
+    const curl_multi = loop.getCurlMulti() catch {
         destroyFetchTask(allocator, task);
         ctx.freeValue(resolve);
         ctx.freeValue(reject);
         ctx.freeValue(promise);
-        return ctx.throwInternalError("Failed to spawn worker");
+        return ctx.throwInternalError("Failed to initialize curl multi");
     };
+
+    curl_multi.submitRequest(
+        ctx,
+        task.url,
+        task.method,
+        task.body,
+        task.headers,
+        resolve,
+        reject,
+    ) catch {
+        destroyFetchTask(allocator, task);
+        ctx.freeValue(resolve);
+        ctx.freeValue(reject);
+        ctx.freeValue(promise);
+        return ctx.throwInternalError("Failed to submit HTTP request");
+    };
+
+    // Cleanup task data (curl multi makes copies)
+    destroyFetchTask(allocator, task);
+    ctx.freeValue(resolve);
+    ctx.freeValue(reject);
 
     return promise;
 }

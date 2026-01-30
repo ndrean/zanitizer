@@ -1,7 +1,5 @@
-// This matches what you already demonstrated works
 let start = performance.now();
 
-// Create elements like in your demo
 const btn = document.createElement("button");
 const form = document.createElement("form");
 form.appendChild(btn);
@@ -11,7 +9,7 @@ const mylist = document.createElement("ul");
 
 for (let i = 1; i < 30_000; i++) {
   const item = document.createElement("li");
-  item.textContent = "Item " + i * 10; // Using textContent instead of setContentAsText
+  item.textContent = "Item " + i * 10;
   item.setAttribute("id", i.toString());
   mylist.appendChild(item);
 }
@@ -25,7 +23,7 @@ console.log(
     time: time,
     elementCount: document.querySelectorAll("*").length,
     success: true,
-  })
+  }),
 );
 
 start = performance.now();
@@ -49,5 +47,5 @@ console.log(
     clicks: clickCount,
     // finalText: btn.textContent(),
     success: clickCount === 30000,
-  })
+  }),
 );

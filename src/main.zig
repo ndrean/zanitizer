@@ -55,31 +55,32 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
-    // try test_FileReaderSync(allocator, sandbox_root);
-    // try test_FormData_Upload(allocator, sandbox_root);
-    // try uploadFile(allocator, sandbox_root);
-    // try testBlobFetch(allocator, sandbox_root);
+    try timersAndEncoding(allocator, sandbox_root);
+    try test_FileReaderSync(allocator, sandbox_root);
+    try test_FormData_Upload(allocator, sandbox_root);
+    try uploadFile(allocator, sandbox_root);
+    try testBlobFetch(allocator, sandbox_root);
     // try testBlobURLs(allocator, sandbox_root);
     // // try classList(allocator, sandbox_root);
-    // try async_Fetch_Blob(allocator, sandbox_root);
-    // try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
+    try async_Fetch_Blob(allocator, sandbox_root);
+    try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
     // try async_Script_and_pass_to_Zig(allocator, sandbox_root);
-    // try async_Fetch_API_Demo(allocator, sandbox_root);
-    // try async_CSV_JSON_Parser(allocator, sandbox_root);
-    // try async_CSV_Tuple_Parser(allocator, sandbox_root);
-    // try nativeBridge(allocator, sandbox_root);
-    // try returnNativeBridge(allocator, sandbox_root);
+    try async_Fetch_API_Demo(allocator, sandbox_root);
+    try async_CSV_JSON_Parser(allocator, sandbox_root);
+    try async_CSV_Tuple_Parser(allocator, sandbox_root);
+    try nativeBridge(allocator, sandbox_root);
+    try returnNativeBridge(allocator, sandbox_root);
     // try mock_class(allocator, sandbox_root);
-    // try urlObject(allocator, sandbox_root);
-    // try inline_crud_css_js(allocator, sandbox_root);
-    // try stylesheet_txt(allocator, sandbox_root);
-    // try stylesheet_style_tag(allocator, sandbox_root);
-    // try link_and_script(allocator, sandbox_root);
+    try urlObject(allocator, sandbox_root);
+    try inline_crud_css_js(allocator, sandbox_root);
+    try stylesheet_txt(allocator, sandbox_root);
+    try stylesheet_style_tag(allocator, sandbox_root);
+    try link_and_script(allocator, sandbox_root);
 
-    // try extractScript(allocator, sandbox_root);
+    try extractScript(allocator, sandbox_root);
 
-    // try simpleESM(allocator, sandbox_root);
-    // try cdnImport(allocator, sandbox_root);
+    try simpleESM(allocator, sandbox_root);
+    try cdnImport(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
     // try js_framework_2_bench(allocator);
@@ -126,6 +127,67 @@ pub fn main() !void {
     // try demoInsertAdjacentHTML(allocator);
     // try demoSetInnerHTML(allocator);
     // try demoSuspiciousAttributes(allocator);
+}
+
+fn timersAndEncoding(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    z.print("\n=== Timers & Encoding Test -------------------------------------\n\n", .{});
+
+    const script =
+        \\(async function() {
+        \\  try {
+        \\    // --- 1. TextEncoder/Decoder ---
+        \\    console.log("[JS] Testing Encoding...");
+        \\    const encoder = new TextEncoder();
+        \\    const decoder = new TextDecoder("utf-8");
+        \\    
+        \\    const raw = encoder.encode("Hello 🌍");
+        \\    console.log(`[JS] Encoded size: ${raw.length} (expected 10)`);
+        \\    
+        \\    const decoded = decoder.decode(raw);
+        \\    console.log(`[JS] Decoded: "${decoded}"`);
+        \\    
+        \\    if (decoded !== "Hello 🌍") throw new Error("Encoding mismatch");
+        \\
+        \\    // --- 2. SetTimeout ---
+        \\    console.log("[JS] Starting Timers...");
+        \\    const start = Date.now();
+        \\    
+        \\    await new Promise(resolve => {
+        \\        setTimeout(() => {
+        \\            const diff = Date.now() - start;
+        \\            console.log(`[JS] Timeout fired after ${diff}ms`);
+        \\            resolve();
+        \\        }, 500);
+        \\    });
+        \\
+        \\    // --- 3. SetInterval ---
+        \\    let count = 0;
+        \\    await new Promise(resolve => {
+        \\        const id = setInterval(() => {
+        \\            count++;
+        \\            console.log(`[JS] Interval Tick ${count}`);
+        \\            if (count >= 3) {
+        \\                clearInterval(id);
+        \\                resolve();
+        \\            }
+        \\        }, 100);
+        \\    });
+        \\
+        \\    console.log("[JS] ✅ All Timers & Encoding tests passed!");
+        \\
+        \\  } catch (err) {
+        \\      console.error("[JS] 🔴 Error:", err);
+        \\  }
+        \\})();
+    ;
+
+    const res = try engine.eval(script, "test_timers.js", .module);
+    engine.ctx.freeValue(res);
+
+    try engine.run();
 }
 
 fn test_FileReaderSync(allocator: std.mem.Allocator, sbx: []const u8) !void {

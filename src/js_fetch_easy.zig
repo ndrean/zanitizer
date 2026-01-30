@@ -1,3 +1,5 @@
+//! Threaded fetch(). Usedd in Worker().
+
 const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
@@ -8,6 +10,7 @@ const EventLoop = @import("event_loop.zig").EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_formData = @import("js_formData.zig");
 const js_blob = @import("js_blob.zig");
+const js_file = @import("js_file.zig");
 
 // ============================================================================
 // STRUCTS
@@ -45,16 +48,14 @@ const FetchWorkerArgs = struct {
     reject: zqjs.Value,
 };
 
-// ============================================================================
-// PROMISE HELPERS (FIXED: Var Args & Exception Safety)
-// ============================================================================
+// ==============================================================
+// PROMISE HELPERS
 
 fn createPromiseResolved(ctx: zqjs.Context, val: zqjs.Value) zqjs.Value {
     var funcs: [2]qjs.JSValue = undefined;
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &funcs);
     if (qjs.JS_IsException(promise)) return promise;
 
-    // [FIX] Must be var for JS_Call
     var args = [1]qjs.JSValue{val};
     const ret = qjs.JS_Call(ctx.ptr, funcs[0], zqjs.UNDEFINED, 1, &args);
     qjs.JS_FreeValue(ctx.ptr, ret);
@@ -69,21 +70,26 @@ fn createPromiseRejected(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &funcs);
     if (qjs.JS_IsException(promise)) return promise;
 
-    const err_val = ctx.throwTypeError(msg);
-    // [FIX] Must be var
-    var args = [1]qjs.JSValue{err_val};
+    // pending exception
+    _ = ctx.throwTypeError(msg);
+
+    // Retrieve the object and clear the pending state
+    const err_obj = ctx.getException();
+
+    // Reject the promise with the actual Error Object
+    var args = [1]qjs.JSValue{err_obj};
     const ret = qjs.JS_Call(ctx.ptr, funcs[1], zqjs.UNDEFINED, 1, &args);
 
     qjs.JS_FreeValue(ctx.ptr, ret);
-    qjs.JS_FreeValue(ctx.ptr, err_val);
+    qjs.JS_FreeValue(ctx.ptr, err_obj); // Free our handle (reject has its own copy if needed)
     qjs.JS_FreeValue(ctx.ptr, funcs[0]);
     qjs.JS_FreeValue(ctx.ptr, funcs[1]);
+
     return promise;
 }
 
-// ============================================================================
-// BLOB FETCH LOGIC (The New Fixes)
-// ============================================================================
+// ==========================================================
+// BLOB FETCH
 
 fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -92,14 +98,26 @@ fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
     defer ctx.freeValue(blob_val);
 
-    if (qjs.JS_GetOpaque(blob_val, rc.classes.blob)) |ptr| {
-        const blob: *js_blob.BlobObject = @ptrCast(@alignCast(ptr));
-        const str = qjs.JS_NewStringLen(ctx.ptr, blob.data.ptr, blob.data.len);
+    var blob_ptr: ?*js_blob.BlobObject = null;
+
+    // Try as standard Blob
+    if (ctx.getOpaque(blob_val, rc.classes.blob)) |ptr| {
+        blob_ptr = @ptrCast(@alignCast(ptr));
+    }
+    // Try as File (which embeds Blob)
+    else if (ctx.getOpaque(blob_val, rc.classes.file)) |ptr| {
+        const file: *js_file.FileObject = @ptrCast(@alignCast(ptr));
+        blob_ptr = &file.blob; // Safe field access
+    }
+
+    if (blob_ptr) |blob| {
+        const str = ctx.newString(blob.data);
         const prom = createPromiseResolved(ctx, str);
-        qjs.JS_FreeValue(ctx.ptr, str);
+        ctx.freeValue(str);
         return prom;
     }
-    return createPromiseRejected(ctx, "Failed to read Blob data");
+
+    return createPromiseRejected(ctx, "Failed to read Blob/File data");
 }
 
 fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
@@ -109,16 +127,23 @@ fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
     defer ctx.freeValue(blob_val);
 
-    if (qjs.JS_GetOpaque(blob_val, rc.classes.blob)) |ptr| {
-        const blob: *js_blob.BlobObject = @ptrCast(@alignCast(ptr));
+    var blob_ptr: ?*js_blob.BlobObject = null;
 
-        // [FIX] Parse directly from slice
+    // Try as standard Blob
+    if (ctx.getOpaque(blob_val, rc.classes.blob)) |ptr| {
+        blob_ptr = @ptrCast(@alignCast(ptr));
+    }
+    // Try as File
+    else if (ctx.getOpaque(blob_val, rc.classes.file)) |ptr| {
+        const file: *js_file.FileObject = @ptrCast(@alignCast(ptr));
+        blob_ptr = &file.blob;
+    }
+
+    if (blob_ptr) |blob| {
         const json_val = ctx.parseJSON(blob.data, "<blob>");
-
-        // [FIX] Clear exception if parsing fails
         if (ctx.isException(json_val)) {
             const ex = ctx.getException();
-            ctx.freeValue(ex);
+            ctx.freeValue(ex); // Clear VM exception state
             return createPromiseRejected(ctx, "Invalid JSON in Blob");
         }
 
@@ -126,7 +151,8 @@ fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
         ctx.freeValue(json_val);
         return prom;
     }
-    return createPromiseRejected(ctx, "Failed to read Blob data");
+
+    return createPromiseRejected(ctx, "Failed to read Blob/File data");
 }
 
 fn js_blob_response_blob(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
@@ -143,19 +169,26 @@ fn fetchBlob(ctx: zqjs.Context, url: []const u8) zqjs.Value {
         return createPromiseRejected(ctx, "NetworkError: Blob URL not found");
     };
 
-    const blob_ptr = qjs.JS_GetOpaque(blob_js, rc.classes.blob);
-    if (blob_ptr == null) return createPromiseRejected(ctx, "Invalid Blob in registry");
-    const blob: *js_blob.BlobObject = @ptrCast(@alignCast(blob_ptr));
+    var blob_struct_ptr: ?*js_blob.BlobObject = null;
+    // Try a file
+    if (ctx.getOpaque(blob_js, rc.classes.blob)) |ptr| {
+        blob_struct_ptr = @ptrCast(@alignCast(ptr));
+        // Try a Blb
+    } else if (ctx.getOpaque(blob_js, rc.classes.file)) |ptr| {
+        const file: *js_file.FileObject = @ptrCast(@alignCast(ptr));
+        blob_struct_ptr = &file.blob;
+    }
+
+    if (blob_struct_ptr == null) return createPromiseRejected(ctx, "Invalid Blob in registry");
+
+    const blob = blob_struct_ptr.?;
 
     const resp = ctx.newObject();
 
-    // [FIX] Use ctx.newBool(true)
     ctx.setPropertyStr(resp, "ok", ctx.newBool(true)) catch {};
-    ctx.setPropertyStr(resp, "status", ctx.newUint32(200)) catch {}; // Assuming newUint32 exists, or newInt32
     ctx.setPropertyStr(resp, "statusText", ctx.newString("OK")) catch {};
     ctx.setPropertyStr(resp, "url", ctx.newString(url)) catch {};
     ctx.setPropertyStr(resp, "type", ctx.newString("basic")) catch {};
-
     ctx.setPropertyStr(resp, "_blob", ctx.dupValue(blob_js)) catch {};
 
     const headers = ctx.newObject();
@@ -163,19 +196,34 @@ fn fetchBlob(ctx: zqjs.Context, url: []const u8) zqjs.Value {
         ctx.setPropertyStr(headers, "Content-Type", ctx.newString(blob.mime_type)) catch {};
     }
     ctx.setPropertyStr(resp, "headers", headers) catch {};
-
-    ctx.setPropertyStr(resp, "text", ctx.newCFunction(js_blob_response_text, "text", 0)) catch {};
-    ctx.setPropertyStr(resp, "json", ctx.newCFunction(js_blob_response_json, "json", 0)) catch {};
-    ctx.setPropertyStr(resp, "blob", ctx.newCFunction(js_blob_response_blob, "blob", 0)) catch {};
+    ctx.setPropertyStr(
+        resp,
+        "text",
+        ctx.newCFunction(js_blob_response_text, "text", 0),
+    ) catch {};
+    ctx.setPropertyStr(
+        resp,
+        "json",
+        ctx.newCFunction(js_blob_response_json, "json", 0),
+    ) catch {};
+    ctx.setPropertyStr(
+        resp,
+        "blob",
+        ctx.newCFunction(js_blob_response_blob, "blob", 0),
+    ) catch {};
+    ctx.setPropertyStr(
+        resp,
+        "arrayBuffer",
+        ctx.newCFunction(js_blob_response_blob, "arrayBuffer", 0),
+    ) catch {};
 
     const prom = createPromiseResolved(ctx, resp);
     ctx.freeValue(resp);
     return prom;
 }
 
-// ============================================================================
-// NETWORK RESPONSE PROXIES (Your existing code)
-// ============================================================================
+// ===========================================================
+// NETWORK RESPONSE PROXIES: .text(), .json(), .blob(), .arrayBuffer()
 
 fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -270,13 +318,17 @@ fn js_json_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.J
 fn js_blob_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     return js_async_wrapper(ctx, this, js_res_blob);
 }
-fn js_arrayBuffer_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+fn js_arrayBuffer_proxy(
+    ctx: ?*qjs.JSContext,
+    this: qjs.JSValue,
+    _: c_int,
+    _: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
     return js_async_wrapper(ctx, this, js_res_arrayBuffer);
 }
 
-// ============================================================================
-// WORKER / IO LOGIC (Preserving your working code)
-// ============================================================================
+// ===========================================================
+// WORKER / IO LOGIC
 
 fn fetchWorkerWrapper(args: FetchWorkerArgs) void {
     const loop = args.loop;
@@ -344,13 +396,24 @@ fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocat
     const url_z = arena.dupeZ(u8, task.url) catch return;
     easy.setUrl(url_z) catch return;
 
+    // --- UPDATED METHOD HANDLING ---
     if (std.mem.eql(u8, task.method, "POST")) {
         easy.setMethod(.POST) catch return;
         if (task.body) |b| easy.setPostFields(b) catch return;
     } else if (std.mem.eql(u8, task.method, "PUT")) {
         easy.setMethod(.PUT) catch return;
         if (task.body) |b| easy.setPostFields(b) catch return;
+    } else if (std.mem.eql(u8, task.method, "PATCH")) {
+        // Assuming your curl wrapper maps .PATCH.
+        // If not, use: easy.setCustomRequest("PATCH") catch return;
+        easy.setMethod(.PATCH) catch return;
+        if (task.body) |b| easy.setPostFields(b) catch return;
+    } else if (std.mem.eql(u8, task.method, "DELETE")) {
+        easy.setMethod(.DELETE) catch return;
+    } else if (std.mem.eql(u8, task.method, "HEAD")) {
+        easy.setMethod(.HEAD) catch return;
     } else {
+        // Default to GET
         easy.setMethod(.GET) catch return;
     }
 
@@ -366,13 +429,13 @@ fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocat
 
     var writer = std.Io.Writer.Allocating.init(arena);
     defer writer.deinit();
-
     easy.setWriter(&writer.writer) catch return;
 
     const ret = easy.perform() catch return;
     res.status = ret.status_code;
     res.ok = (ret.status_code >= 200 and ret.status_code < 300);
     res.body = writer.toOwnedSlice() catch return;
+
     if (curl.hasParseHeaderSupport()) {
         var header_list: std.ArrayListUnmanaged([]const u8) = .empty;
         var iter = ret.iterateHeaders(.{}) catch return;
@@ -481,18 +544,8 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
     _ = ctx.call(real_resolve, zqjs.UNDEFINED, &.{resp});
 }
 
-// ============================================================================
-// MAIN FETCH
-// ============================================================================
-
-pub const FetchBridge = struct {
-    pub fn install(ctx: zqjs.Context) !void {
-        const global = ctx.getGlobalObject();
-        defer ctx.freeValue(global);
-        const fetch_fn = ctx.newCFunction(js_fetch, "fetch", 2);
-        try ctx.setPropertyStr(global, "fetch", fetch_fn);
-    }
-};
+// ===========================================================
+// JS_FETCH (Threaded)
 
 fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -505,12 +558,11 @@ fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs
     const url_str = ctx.toZString(argv[0]) catch return ctx.throwOutOfMemory();
     defer ctx.freeZString(url_str);
 
-    // 1. BLOB INTERCEPTION (The Fix)
+    // BLOB INTERCEPTION
     if (std.mem.startsWith(u8, url_str, "blob:")) {
         return fetchBlob(ctx, url_str);
     }
 
-    // 2. NETWORK TASK SETUP (Your existing code)
     var method_str: []const u8 = "GET";
     var body_data: ?[]u8 = null;
     var headers_list: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -611,3 +663,12 @@ fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs
 
     return promise;
 }
+
+pub const FetchBridge = struct {
+    pub fn install(ctx: zqjs.Context) !void {
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
+        const fetch_fn = ctx.newCFunction(js_fetch, "fetch", 2);
+        try ctx.setPropertyStr(global, "fetch", fetch_fn);
+    }
+};

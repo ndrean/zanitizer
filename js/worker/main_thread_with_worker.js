@@ -4,7 +4,7 @@ const w = new Worker("js/worker/worker_task.js", { type: "module" });
 
 w.onerror = (e) => {
   console.log(`[Main] 💥 WORKER ERROR CAUGHT: "${e.message}"`);
-  // We return true to say "we handled it, don't crash the browser/runtime"
+  // return true fixes the browser/runtime carsh
   return true;
 };
 
@@ -37,10 +37,15 @@ setTimeout(() => {
 }, 3000);
 
 setTimeout(() => {
-  console.log("\n[Main] 🏁 Test Complete. Terminating.");
+  console.log("\n[Main] 👉 Step 5: Checking vitality...");
+  w.postMessage({ cmd: "fetch_test" });
 }, 4000);
+
+setTimeout(() => {
+  console.log("\n[Main] 🏁 Test Complete. Terminating.");
+}, 7000);
 
 setTimeout(() => {
   console.log("[Main] 👋 Bye!");
   w.terminate();
-}, 5000);
+}, 8100);

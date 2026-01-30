@@ -9,6 +9,11 @@ const Mailbox = z.Mailbox;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_security = @import("js_security.zig");
 const workers = @import("workers.zig");
+const js_fetch_easy = @import("js_fetch_easy.zig");
+// const js_fetch = @import("js_fetch.zig");
+const js_blob = @import("js_blob.zig");
+const js_formData = @import("js_formData.zig");
+const js_headers = @import("js_headers.zig");
 
 // -------------------------------------------------------------------------
 
@@ -210,43 +215,13 @@ const WorkerThread = struct {
         var running = true;
         while (running) {
             // _ = rt.executePendingJob() catch {};
-            // _ = loop.processAsyncTasks();
+            const did_async_work = loop.processAsyncTasks();
             var err_ctx_ptr: ?*qjs.JSContext = null;
             const ret = qjs.JS_ExecutePendingJob(rt.ptr, &err_ctx_ptr);
             if (ret < 0) {
                 // if (rt.executePendingJob() catch null) |err_ctx| {
                 const err_ctx = zqjs.Context{ .ptr = err_ctx_ptr };
                 handleException(err_ctx, loop, core);
-
-                // // A. Extract the Exception
-                // const exception_val = err_ctx.getException();
-                // var handled = false;
-
-                // // B. Check for local 'onerror' (Worker-side)
-                // // We use the handler stored in the EventLoop by js_set_onerror
-                // if (!ctx.isUndefined(loop.on_error_handler)) {
-                //     const event = err_ctx.newObject();
-                //     defer err_ctx.freeValue(event);
-
-                //     const ret = err_ctx.call(loop.on_error_handler, zqjs.UNDEFINED, &[_]zqjs.Value{event});
-                //     const err_bool = err_ctx.toBool(ret) catch false;
-                //     if (err_bool) handled = true;
-
-                //     err_ctx.freeValue(ret);
-                //     err_ctx.freeValue(event);
-                // }
-
-                // // If NOT handled locally, send to Main Thread
-                // if (!handled) {
-                //     std.debug.print("[Run] NOT HANDLED--\n", .{});
-                //     const msg_str = err_ctx.toCString(exception_val) catch "Unknown Error";
-                //     defer err_ctx.freeCString(msg_str);
-
-                //     // This triggers 'w.onerror' in the Main Thread
-                //     sendError(core, std.mem.span(msg_str)) catch {};
-                // }
-
-                // err_ctx.freeValue(exception_val);
             }
             // const wait_ms: i64 = loop.processTimers() catch 100;
             const wait_ms: i64 = loop.processTimers() catch |err| blk: {
@@ -259,7 +234,8 @@ const WorkerThread = struct {
                 // Return 0 wait time to immediately drain any resulting microtasks
                 break :blk 0;
             };
-            const timeout_ns = @as(u64, @intCast(@max(wait_ms, 0))) * std.time.ns_per_ms;
+            const effective_wait = if (did_async_work) 0 else wait_ms;
+            const timeout_ns = @as(u64, @intCast(@max(effective_wait, 0))) * std.time.ns_per_ms;
 
             if (core.inbox.receive(timeout_ns)) |msg| {
                 defer core.allocator.free(msg.data);
@@ -292,7 +268,10 @@ fn installWorkerGlobals(ctx: zqjs.Context, core: *WorkerCore, loop: *EventLoop) 
     try installFn(ctx, js_close, global, "close", "close", 0);
     try installFn(ctx, js_importScripts, global, "importScripts", "importScripts", 1);
 
-    // try installFn(ctx, workers.js_fetch, global, "fetch", "fetch", 2);
+    // try installFn(ctx, js_fetch.js_fetch, global, "fetch", "fetch", 1);
+    try js_fetch_easy.FetchBridge.install(ctx);
+    try js_blob.BlobBridge.install(ctx);
+    try js_formData.FormDataBridge.install(ctx);
 
     // onmessage
     try ctx.setPropertyStr(global, "onmessage", zqjs.NULL);
@@ -362,7 +341,7 @@ fn sendError(core: *WorkerCore, error_msg: []const u8) !void {
 
 fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
     const named_fn = ctx.newCFunction(func, name, len);
-    _ = try ctx.setPropertyStr(obj, prop, named_fn);
+    try ctx.setPropertyStr(obj, prop, named_fn);
 }
 
 fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {

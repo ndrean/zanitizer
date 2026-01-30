@@ -14,7 +14,7 @@ What it has:
 
 - runs most DOM primitives and executes ES6 JavaScript
 - sandboxed file system (upload directory only),
-- `fetch` API (via thread pool for HTTP requests),
+- `fetch` API (via Curl Multi HTTP requests),
 - `Workers`(OS threads for parallel processing),
 - DOM/CSS native sanitizer (based on H5SC testing suite),
 - can inject native Zig primitives (statistics, CSV parsing...),
@@ -1705,7 +1705,7 @@ TODO
 - **CCSOM**: _inline_ CSS-inJS and _StyleSheet_ support. [WIP] The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`). Currently,  functional accessors: `Element.getPropertyValue()` and `Element.setProperty()` and `getComputedStyles()`.
 - Class `DOMParser`, `DocumentFragment` (and 'template' support), `console.log` support, access to `document` and `owned_document`. [WIP] port Zig struct into JS Class. CSS selectors.
 - **DOM Sanitizer**. Handles templates. To become closer to `DOMPurify`, [TODO] Missing full support of SVG sanitization and only basic CSS sanitization.
-- `fetch` API (WIP).
+- `fetch` API (via libCurl Multi).
 - Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
 - **Security: RCE**. WIP.
 

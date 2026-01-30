@@ -10,6 +10,7 @@ const AsyncBindings = @import("async_bindings_generated.zig");
 const JSWorker = @import("js_worker.zig").JSWorker;
 const js_timers = @import("js_timers.zig");
 const js_console = @import("js_console.zig");
+const CurlMulti = @import("curl_multi.zig").CurlMulti;
 
 pub const RunMode = enum {
     Script,
@@ -60,6 +61,8 @@ pub const EventLoop = struct {
     worker_class_id: zqjs.ClassID = 0,
     worker_core: ?*anyopaque = null,
     on_error_handler: qjs.JSValue = zqjs.UNDEFINED,
+    /// Curl Multi handle for non-blocking HTTP requests
+    curl_multi: ?*CurlMulti = null,
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
         const self = try allocator.create(EventLoop);
@@ -119,8 +122,25 @@ pub const EventLoop = struct {
             self.task_queue.deinit(self.allocator);
             self.workers.deinit(self.allocator);
         }
+        // Clean up curl multi handle
+        if (self.curl_multi) |cm| cm.deinit();
         self.rt.freeValue(self.on_error_handler);
         self.allocator.destroy(self);
+    }
+
+    /// Initialize curl multi handle for non-blocking HTTP
+    pub fn initCurlMulti(self: *EventLoop) !void {
+        if (self.curl_multi == null) {
+            self.curl_multi = try CurlMulti.init(self.allocator);
+        }
+    }
+
+    /// Get the curl multi handle, initializing if needed
+    pub fn getCurlMulti(self: *EventLoop) !*CurlMulti {
+        if (self.curl_multi == null) {
+            try self.initCurlMulti();
+        }
+        return self.curl_multi.?;
     }
 
     pub fn registerWorker(self: *EventLoop, worker: *JSWorker) !void {
@@ -295,9 +315,11 @@ pub const EventLoop = struct {
                 const has_timers = (self.timers.items.len > 0);
                 // [CRITICAL] Check isJobPending to avoid quitting if a Promise just queued another Promise
                 const has_jobs = self.rt.isJobPending();
+                // Check for pending curl multi requests
+                const has_curl_pending = if (self.curl_multi) |cm| cm.pendingCount() > 0 else false;
 
                 // if the last timer in the system created a Promise, the loop would see timers.len == 0 and exit immediately, killing the pending Promise before it could run
-                if (!has_timers and queue_empty and self.active_tasks == 0 and !has_workers and !has_jobs) {
+                if (!has_timers and queue_empty and self.active_tasks == 0 and !has_workers and !has_jobs and !has_curl_pending) {
                     break;
                 }
             }
@@ -309,8 +331,15 @@ pub const EventLoop = struct {
             const did_async_work = self.processAsyncTasks();
             self.pollWorkers() catch {};
 
+            // 4.5. Poll curl multi for completed HTTP requests (non-blocking)
+            var curl_did_work = false;
+            if (self.curl_multi) |cm| {
+                const result = cm.poll(0) catch .{ .running = 0, .completed = 0 };
+                curl_did_work = result.completed > 0;
+            }
+
             // 5. Sleep (Avoid CPU Spin)
-            if (!did_async_work and next_timeout > 0) {
+            if (!did_async_work and !curl_did_work and next_timeout > 0) {
                 // If we have pending jobs now (rare, but possible if pollWorkers queued one),
                 // don't sleep!
                 if (self.rt.isJobPending()) continue;

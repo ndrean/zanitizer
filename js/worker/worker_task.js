@@ -42,25 +42,28 @@ onmessage = (e) => {
       }, 50);
       break;
 
-    // case "fetch_test":
-    //   console.log("[Worker] 🌍 Fetching data from httpbin...");
+    case "fetch_test":
+      (async () => {
+        console.log("[Worker] 🌍 Fetching data from httpbin...");
+        try {
+          const res = await fetch("https://httpbin.org/json");
+          const data = await res.json();
 
-    //   try {
-    //     // Native fetch (returns a Promise that resolves to the body string/bytes)
-    //     const result = await fetch("https://httpbin.org/json");
+          console.log(
+            `[Worker] ✅ Received data. Author: ${data.slideshow.author}`,
+          );
 
-    //     // Since your current C-binding returns the raw body string:
-    //     console.log(`[Worker] 📦 Bytes received: ${result.length}`);
-
-    //     postMessage("Fetch Success: " + result.substring(0, 50) + "...");
-    //   } catch (err) {
-    //     console.log(`[Worker] ❌ Network Error: ${err}`);
-    //     throw err; // Will be caught by your new async error handler!
-    //   }
-    //   break;
+          const jsonStr = JSON.stringify(data).substring(0, 50);
+          postMessage("Success: " + jsonStr + "...");
+        } catch (err) {
+          console.log(`[Worker] ❌ Fetch error: ${err}`);
+          throw err; // Bubbles to unhandled rejection (if not caught locally)
+        }
+      })();
+      break;
 
     case "throw_handled":
-      // TEST 3: Local Suppression
+      // TEST: Local Suppression
       // Expected: Caught by local 'onerror' -> Returns true -> Main Thread hears NOTHING
 
       //Define local trap
