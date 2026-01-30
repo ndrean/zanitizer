@@ -8,6 +8,8 @@ const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 // We use manual bindings for Timers below instead.
 const AsyncBindings = @import("async_bindings_generated.zig");
 const JSWorker = @import("js_worker.zig").JSWorker;
+const js_timers = @import("js_timers.zig");
+const js_console = @import("js_console.zig");
 
 pub const RunMode = enum {
     Script,
@@ -57,6 +59,7 @@ pub const EventLoop = struct {
     workers: std.ArrayList(*JSWorker) = .{},
     worker_class_id: zqjs.ClassID = 0,
     worker_core: ?*anyopaque = null,
+    on_error_handler: qjs.JSValue = zqjs.UNDEFINED,
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
         const self = try allocator.create(EventLoop);
@@ -116,6 +119,7 @@ pub const EventLoop = struct {
             self.task_queue.deinit(self.allocator);
             self.workers.deinit(self.allocator);
         }
+        self.rt.freeValue(self.on_error_handler);
         self.allocator.destroy(self);
     }
 
@@ -151,20 +155,8 @@ pub const EventLoop = struct {
         try ctx.setOpaque(loop_ref, self);
         _ = try ctx.setPropertyStr(global, "__native_event_loop__", loop_ref);
 
-        // Install Console Object
-        const console_obj = ctx.newObject();
-        const log_fn = ctx.newCFunction(utils.js_consoleLog, "log", 1);
-        _ = try ctx.setPropertyStr(console_obj, "log", log_fn);
-
-        const error_fn = ctx.newCFunction(utils.js_consoleLog, "error", 1);
-        _ = try ctx.setPropertyStr(console_obj, "error", error_fn);
-        _ = try ctx.setPropertyStr(global, "console", console_obj);
-
-        // Install Manual Timers
-        try utils.installFn(ctx, js_setTimeout, global, "setTimeout", "setTimeout", 2);
-        try utils.installFn(ctx, js_setInterval, global, "setInterval", "setInterval", 2);
-        try utils.installFn(ctx, js_clearTimer, global, "clearTimeout", "clearTimeout", 1);
-        try installFn(ctx, js_clearTimer, global, "clearInterval", "clearInterval", 1);
+        try js_timers.install(ctx);
+        try js_console.install(ctx);
 
         try AsyncBindings.installAllBindings(ctx, global);
     }
@@ -359,8 +351,13 @@ pub const EventLoop = struct {
 
                 // Cleanup
                 ctx.freeValue(global);
-                if (ctx.isException(ret)) _ = ctx.checkAndPrintException();
-                ctx.freeValue(ret);
+                if (ctx.isException(ret)) {
+                    ctx.freeValue(ret);
+                    ctx.freeValue(callback);
+                    _ = self.timers.swapRemove(i);
+                    return error.JSException;
+                    // _ = ctx.checkAndPrintException();
+                }
 
                 // Update/Remove Timer
                 if (is_interval and !self.timers.items[i].is_cancelled) {
@@ -391,54 +388,6 @@ pub const EventLoop = struct {
         self.mutex.unlock();
     }
 };
-
-// --- Timer C Functions ---
-
-pub fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
-    const named_fn = ctx.newCFunction(func, name, len);
-    _ = try ctx.setPropertyStr(obj, prop, named_fn);
-}
-
-pub fn js_setTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 2) return ctx.throwTypeError("setTimeout requires 2 arguments");
-
-    const rc = RuntimeContext.get(ctx);
-    const loop = rc.loop;
-
-    var delay: i64 = 0;
-    _ = qjs.JS_ToInt64(ctx_ptr, &delay, argv[1]);
-    const id = loop.addTimer(ctx, argv[0], delay, false) catch return ctx.throwOutOfMemory();
-    return ctx.newInt32(id);
-}
-
-pub fn js_setInterval(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 2) return ctx.throwTypeError("setInterval requires 2 arguments");
-
-    // [FIX] Use RuntimeContext
-    const rc = RuntimeContext.get(ctx);
-    const loop = rc.loop;
-
-    var delay: i64 = 0;
-    _ = qjs.JS_ToInt64(ctx_ptr, &delay, argv[1]);
-    const id = loop.addTimer(ctx, argv[0], delay, true) catch return ctx.throwOutOfMemory();
-    return ctx.newInt32(id);
-}
-
-pub fn js_clearTimer(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 1) return zqjs.UNDEFINED;
-
-    // [FIX] Use RuntimeContext
-    const rc = RuntimeContext.get(ctx);
-    const loop = rc.loop;
-
-    var id: i32 = 0;
-    _ = qjs.JS_ToInt32(ctx_ptr, &id, argv[0]);
-    loop.cancelTimer(id);
-    return zqjs.UNDEFINED;
-}
 
 fn js_reportResult(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     const ctx = z.wrapper.Context{ .ptr = ctx_ptr };

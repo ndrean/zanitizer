@@ -6,7 +6,6 @@ const event_loop_mod = @import("event_loop.zig");
 const EventLoop = event_loop_mod.EventLoop;
 const DOMBridge = z.dom_bridge.DOMBridge;
 const RCtx = @import("runtime_context.zig").RuntimeContext;
-const utils = @import("utils.zig");
 const ScriptEngine = @import("script_engine.zig").ScriptEngine;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const parseCSV = @import("csv_parser.zig");
@@ -17,7 +16,6 @@ const NativeBridge = @import("js_native_bridge.zig");
 const Pt = @import("js_Point.zig");
 const Pt2 = @import("Point2.zig");
 const JSWorker = @import("js_worker.zig");
-const js_consoleLog = @import("utils.zig").js_consoleLog;
 const Reflect = @import("reflection.zig");
 const Mocks = @import("dom_mocks.zig");
 
@@ -57,12 +55,12 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
-    try test_FileReaderSync(allocator, sandbox_root);
-    try test_FormData_Upload(allocator, sandbox_root);
-    try uploadFile(allocator, sandbox_root);
-    try testBlobFetch(allocator, sandbox_root);
-    try testBlobURLs(allocator, sandbox_root);
-    // try classList(allocator, sandbox_root);
+    // try test_FileReaderSync(allocator, sandbox_root);
+    // try test_FormData_Upload(allocator, sandbox_root);
+    // try uploadFile(allocator, sandbox_root);
+    // try testBlobFetch(allocator, sandbox_root);
+    // try testBlobURLs(allocator, sandbox_root);
+    // // try classList(allocator, sandbox_root);
     // try async_Fetch_Blob(allocator, sandbox_root);
     // try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
     // try async_Script_and_pass_to_Zig(allocator, sandbox_root);
@@ -114,7 +112,7 @@ pub fn main() !void {
     // try simplifiedJSONPass(allocator);
     // try JS_Proxy_And_Generators(allocator);
 
-    // try demoWorker(allocator, sandbox_root);
+    try demoWorker(allocator, sandbox_root);
     // try test_dom_purify(allocator, sandbox_root);
 
     // // lexb =====
@@ -1344,22 +1342,15 @@ fn demoWorker(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    z.print("\n=== Worker Thread Demo -------------------------\n\n", .{});
+    z.print("\n=== Worker Thread Demo ------------------------\n\n", .{});
 
-    // We must register the Worker class in the Main Engine
-    // try JSWorker.registerWorkerClass(engine.ctx);
-
-    const source = try std.fs.cwd().readFileAlloc(allocator, "js/main_with_worker.js", 1024 * 1024);
+    const source = try std.fs.cwd().readFileAlloc(allocator, "js/worker/main_thread_with_worker.js", 1024 * 1024);
     defer allocator.free(source);
 
-    const c_source = try allocator.dupeZ(u8, source);
-    defer allocator.free(c_source);
-
-    const val = try engine.evalModule(c_source, "main_with_worker.js");
+    const val = try engine.evalModule(source, "main_with_worker.js");
 
     engine.ctx.freeValue(val);
 
-    // Run Main Loop (Handles Worker messages)
     try engine.run();
 }
 

@@ -202,6 +202,7 @@ pub fn build(b: *std.Build) void {
         "src/examples/extract_script_from_html.zig",
         "src/examples/return_data_from_JS_into_zig.zig",
         "src/examples/classlist_demo.zig",
+        "src/examples/text_encoding_demo.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

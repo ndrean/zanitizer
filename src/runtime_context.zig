@@ -41,6 +41,8 @@ pub const RuntimeContext = struct {
         url: zqjs.ClassID = 0,
         url_search_params: zqjs.ClassID = 0,
         headers: zqjs.ClassID = 0,
+        text_encoder: zqjs.ClassID = 0,
+        text_decoder: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

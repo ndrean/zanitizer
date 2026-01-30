@@ -153,3 +153,58 @@ lxb_html_template_element_t *lexbor_node_to_template_wrapper(lxb_dom_node_t *nod
 
   return NULL;
 }
+
+// ============================================================================
+// Encoding API Wrappers
+// ============================================================================
+// These allow Zig to use opaque pointers instead of mirroring struct layouts
+
+#include <lexbor/encoding/encoding.h>
+
+// Allocate and initialize a decode context
+lxb_encoding_decode_t *lexbor_encoding_decode_create(const lxb_encoding_data_t *encoding_data)
+{
+  lxb_encoding_decode_t *decode = malloc(sizeof(lxb_encoding_decode_t));
+  if (decode == NULL)
+    return NULL;
+
+  lxb_status_t status = lxb_encoding_decode_init_single(decode, encoding_data);
+  if (status != LXB_STATUS_OK)
+  {
+    free(decode);
+    return NULL;
+  }
+
+  return decode;
+}
+
+// Free a decode context
+void lexbor_encoding_decode_destroy(lxb_encoding_decode_t *decode)
+{
+  if (decode != NULL)
+    free(decode);
+}
+
+// Allocate and initialize an encode context
+lxb_encoding_encode_t *lexbor_encoding_encode_create(const lxb_encoding_data_t *encoding_data)
+{
+  lxb_encoding_encode_t *encode = malloc(sizeof(lxb_encoding_encode_t));
+  if (encode == NULL)
+    return NULL;
+
+  lxb_status_t status = lxb_encoding_encode_init_single(encode, encoding_data);
+  if (status != LXB_STATUS_OK)
+  {
+    free(encode);
+    return NULL;
+  }
+
+  return encode;
+}
+
+// Free an encode context
+void lexbor_encoding_encode_destroy(lxb_encoding_encode_t *encode)
+{
+  if (encode != NULL)
+    free(encode);
+}

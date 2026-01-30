@@ -18,7 +18,7 @@ What it has:
 - `Workers`(OS threads for parallel processing),
 - DOM/CSS native sanitizer (based on H5SC testing suite),
 - can inject native Zig primitives (statistics, CSV parsing...),
-- integrated Web API classes: `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `Fetch`.
+- integrated Web API classes: `Worker`, `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `Fetch`.
 
 It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) included a native speed.
 

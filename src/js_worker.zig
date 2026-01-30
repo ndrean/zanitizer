@@ -8,6 +8,7 @@ const EventLoop = @import("event_loop.zig").EventLoop;
 const Mailbox = z.Mailbox;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_security = @import("js_security.zig");
+const workers = @import("workers.zig");
 
 // -------------------------------------------------------------------------
 
@@ -42,6 +43,7 @@ const WorkerCore = struct {
             .script_path = try allocator.dupeZ(u8, script_path),
             .sandbox_root = try allocator.dupeZ(u8, sandbox_root),
         };
+
         std.debug.print("[Core] Initialized count: 1\n", .{});
         return self;
     }
@@ -56,7 +58,22 @@ const WorkerCore = struct {
         std.debug.print("[Core] Release. Prev count: {}\n", .{prev});
         if (prev == 1) {
             std.debug.print("[Core] RefCount 0. Destroying resources.\n", .{});
+            while (true) {
+                if (self.inbox.receive(0)) |msg| {
+                    self.allocator.free(msg.data);
+                } else |_| {
+                    // Likely error.Timeout (queue empty) or error.MailboxClosed
+                    break;
+                }
+            }
             self.inbox.deinit();
+            while (true) {
+                if (self.outbox.receive(0)) |msg| {
+                    self.allocator.free(msg.data);
+                } else |_| {
+                    break;
+                }
+            }
             self.outbox.deinit();
             self.allocator.free(self.script_path);
             self.allocator.free(self.sandbox_root);
@@ -73,6 +90,42 @@ const WorkerCore = struct {
         self.inbox.send(.{ .tag = .Terminate, .data = empty }) catch {};
     }
 };
+
+fn handleException(ctx: zqjs.Context, loop: *EventLoop, core: *WorkerCore) void {
+    std.debug.print("[handleException] Called\n", .{});
+    const exception_val = ctx.getException();
+    // defer ctx.freeValue(exception_val); // Always free the exception object
+
+    var handled = false;
+
+    // 1. Check for local 'onerror' (Worker-side)
+    if (!ctx.isUndefined(loop.on_error_handler)) {
+        const event = ctx.newObject();
+        const msg_cstr = ctx.toCString(exception_val) catch "Unknown Error"; // Convert exception to string
+        std.debug.print("[handleException] {s}\n", .{msg_cstr});
+        defer ctx.freeCString(msg_cstr);
+        const msg_zstr: []const u8 = std.mem.span(msg_cstr);
+        const msg_val = ctx.newString(msg_zstr);
+
+        ctx.setPropertyStr(event, "message", msg_val) catch {};
+        const ret = ctx.call(loop.on_error_handler, zqjs.UNDEFINED, &[_]zqjs.Value{event});
+        // std.Io.Writer.flush(w: *Writer)
+        const err_bool = ctx.toBool(ret) catch false;
+        if (err_bool) handled = true;
+        ctx.freeValue(ret);
+        ctx.freeValue(event);
+    }
+
+    // 2. If NOT handled locally, send to Main Thread
+    if (!handled) {
+        const msg_str = ctx.toCString(exception_val) catch "Unknown Error";
+        defer ctx.freeCString(msg_str);
+
+        // This triggers 'w.onerror' in the Main Thread
+        sendError(core, std.mem.span(msg_str)) catch {};
+    }
+    ctx.freeValue(exception_val);
+}
 
 const WorkerThread = struct {
     pub fn run(core: *WorkerCore) void {
@@ -130,8 +183,6 @@ const WorkerThread = struct {
         };
         defer allocator.free(script);
 
-        std.testing.expectEqualStrings("js/worker_task.js", core.script_path) catch {};
-
         const flags = qjs.JS_EVAL_TYPE_MODULE;
         const result_val = qjs.JS_Eval(
             ctx.ptr,
@@ -140,7 +191,6 @@ const WorkerThread = struct {
             core.script_path.ptr,
             @intCast(flags),
         );
-        // z.print("{s}\n", .{script}); // <-- Debug print of script content
 
         if (ctx.isException(result_val)) {
             _ = ctx.checkAndPrintException();
@@ -148,7 +198,7 @@ const WorkerThread = struct {
             return;
         }
 
-        // CRITICAL: Execute pending jobs to resolve module imports BEFORE freeing
+        // !! Execute pending jobs to resolve module imports BEFORE freeing
         std.debug.print("[Thread] Resolving module imports...\n", .{});
         while (rt.executePendingJob() catch null) |_| {}
 
@@ -159,16 +209,63 @@ const WorkerThread = struct {
 
         var running = true;
         while (running) {
-            _ = rt.executePendingJob() catch {};
-            _ = loop.processAsyncTasks();
+            // _ = rt.executePendingJob() catch {};
+            // _ = loop.processAsyncTasks();
+            var err_ctx_ptr: ?*qjs.JSContext = null;
+            const ret = qjs.JS_ExecutePendingJob(rt.ptr, &err_ctx_ptr);
+            if (ret < 0) {
+                // if (rt.executePendingJob() catch null) |err_ctx| {
+                const err_ctx = zqjs.Context{ .ptr = err_ctx_ptr };
+                handleException(err_ctx, loop, core);
 
-            const wait_ms: i64 = loop.processTimers() catch 100;
+                // // A. Extract the Exception
+                // const exception_val = err_ctx.getException();
+                // var handled = false;
+
+                // // B. Check for local 'onerror' (Worker-side)
+                // // We use the handler stored in the EventLoop by js_set_onerror
+                // if (!ctx.isUndefined(loop.on_error_handler)) {
+                //     const event = err_ctx.newObject();
+                //     defer err_ctx.freeValue(event);
+
+                //     const ret = err_ctx.call(loop.on_error_handler, zqjs.UNDEFINED, &[_]zqjs.Value{event});
+                //     const err_bool = err_ctx.toBool(ret) catch false;
+                //     if (err_bool) handled = true;
+
+                //     err_ctx.freeValue(ret);
+                //     err_ctx.freeValue(event);
+                // }
+
+                // // If NOT handled locally, send to Main Thread
+                // if (!handled) {
+                //     std.debug.print("[Run] NOT HANDLED--\n", .{});
+                //     const msg_str = err_ctx.toCString(exception_val) catch "Unknown Error";
+                //     defer err_ctx.freeCString(msg_str);
+
+                //     // This triggers 'w.onerror' in the Main Thread
+                //     sendError(core, std.mem.span(msg_str)) catch {};
+                // }
+
+                // err_ctx.freeValue(exception_val);
+            }
+            // const wait_ms: i64 = loop.processTimers() catch 100;
+            const wait_ms: i64 = loop.processTimers() catch |err| blk: {
+                if (err == error.JSException) {
+                    // Now the Timer error goes to the Main Thread!
+                    handleException(ctx, loop, core);
+                } else {
+                    std.debug.print("[Thread] Timer error: {}\n", .{err});
+                }
+                // Return 0 wait time to immediately drain any resulting microtasks
+                break :blk 0;
+            };
             const timeout_ns = @as(u64, @intCast(@max(wait_ms, 0))) * std.time.ns_per_ms;
 
             if (core.inbox.receive(timeout_ns)) |msg| {
                 defer core.allocator.free(msg.data);
+                std.debug.print("[core.inbox.receive] {any}\n", .{msg.tag});
                 switch (msg.tag) {
-                    .PostMessage => fireMessageEvent(ctx, msg.data) catch {},
+                    .PostMessage => fireMessageEvent(ctx, msg.data, loop, core) catch {},
                     .Terminate => {
                         std.debug.print("[Thread] Received TERMINATE signal.\n", .{});
                         running = false;
@@ -188,18 +285,44 @@ fn installWorkerGlobals(ctx: zqjs.Context, core: *WorkerCore, loop: *EventLoop) 
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
 
-    // TODO: Workers can't spawn workers (no Worker class needed inside worker thread)
     try registerWorkerClass(ctx);
     loop.worker_core = @ptrCast(core);
 
     try installFn(ctx, js_postMessage, global, "postMessage", "postMessage", 1);
     try installFn(ctx, js_close, global, "close", "close", 0);
     try installFn(ctx, js_importScripts, global, "importScripts", "importScripts", 1);
-    _ = try ctx.setPropertyStr(global, "onmessage", zqjs.NULL);
-    _ = try ctx.setPropertyStr(global, "onerror", zqjs.NULL);
+
+    // try installFn(ctx, workers.js_fetch, global, "fetch", "fetch", 2);
+
+    // onmessage
+    try ctx.setPropertyStr(global, "onmessage", zqjs.NULL);
+
+    // on error
+    const atom = qjs.JS_NewAtom(ctx.ptr, "onerror");
+    defer qjs.JS_FreeAtom(ctx.ptr, atom);
+    const getter = ctx.newCFunction(js_get_onerror, "get onerror", 0);
+    const setter = ctx.newCFunction(js_set_onerror, "set onerror", 1);
+
+    if (qjs.JS_IsException(getter) or qjs.JS_IsException(setter)) {
+        ctx.freeValue(getter);
+        ctx.freeValue(setter);
+        // Discard the exception value, return Zig error
+        _ = ctx.throwInternalError("Failed to create onerror accessors");
+        return error.OutOfMemory;
+    }
+
+    const flags = qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE;
+    // !! JS_DefinePropertyGetSet takes ownership of getter/setter JSValues
+    const ret = qjs.JS_DefinePropertyGetSet(ctx.ptr, global, atom, getter, setter, @intCast(flags));
+
+    if (ret < 0) {
+        _ = ctx.throwInternalError("Failed to define onerror property");
+        return error.InitializationFailed;
+    }
 }
 
-fn fireMessageEvent(ctx: zqjs.Context, data: []const u8) !void {
+fn fireMessageEvent(ctx: zqjs.Context, data: []const u8, loop: *EventLoop, core: *WorkerCore) !void {
+    std.debug.print("[Thread] fireMessageEvent called\n", .{});
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
 
@@ -215,12 +338,19 @@ fn fireMessageEvent(ctx: zqjs.Context, data: []const u8) !void {
     if (ctx.isException(data_val)) return;
 
     // event.data
-    _ = try ctx.setPropertyStr(event_obj, "data", data_val);
+    try ctx.setPropertyStr(event_obj, "data", data_val);
     const result = ctx.call(
         onmessage,
         global,
         &[_]zqjs.Value{event_obj},
     );
+    // const loop = EventLoop.getFromContext(ctx) orelse return error.NotFound;
+    // const core_ptr = loop.worker_core orelse return error.NotFound;
+    // const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
+
+    if (ctx.isException(result)) {
+        handleException(ctx, loop, core);
+    }
     defer ctx.freeValue(result);
 }
 
@@ -248,6 +378,7 @@ pub const JSWorker = struct {
     ctx: zqjs.Context,
     self_ref: zqjs.Value,
     loop: ?*EventLoop,
+    local_thread: std.Thread,
 
     pub fn create(
         allocator: std.mem.Allocator,
@@ -266,12 +397,6 @@ pub const JSWorker = struct {
         errdefer core.release();
 
         const self = try allocator.create(JSWorker);
-        self.* = .{
-            .core = core,
-            .ctx = ctx,
-            .self_ref = obj,
-            .loop = loop,
-        };
 
         core.retain();
         const thread = try std.Thread.spawn(
@@ -279,7 +404,14 @@ pub const JSWorker = struct {
             WorkerThread.run,
             .{core},
         );
-        thread.detach();
+        // thread.detach();
+        self.* = .{
+            .core = core,
+            .ctx = ctx,
+            .self_ref = obj,
+            .loop = loop,
+            .local_thread = thread,
+        };
 
         return self;
     }
@@ -358,6 +490,8 @@ pub const JSWorker = struct {
 
     pub fn destroy(self: *JSWorker) void {
         std.debug.print("[JSWorker] Destroy (Finalizer)\n", .{});
+        self.core.signalTerminate();
+        self.local_thread.join();
         const alloc = self.core.allocator;
         self.core.release();
         alloc.destroy(self);
@@ -520,6 +654,39 @@ pub fn js_Worker_terminate(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int
     return zqjs.UNDEFINED;
 }
 
+fn js_set_onerror(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue, // this ignored
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    if (argc < 1) return zqjs.UNDEFINED;
+    const loop = EventLoop.getFromContext(ctx) orelse return zqjs.UNDEFINED;
+
+    // Release old handler if it exists => decr counter
+    ctx.freeValue(loop.on_error_handler);
+
+    // !! Retain the new function (Dup adds a ref count). 'val' is borrowed
+    loop.on_error_handler = ctx.dupValue(argv[0]);
+
+    return zqjs.UNDEFINED;
+}
+
+// Getter
+fn js_get_onerror(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    _: c_int,
+    _: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    // Get the loop instance (assuming you have a helper for this)
+    const loop = EventLoop.getFromContext(ctx) orelse return zqjs.UNDEFINED;
+
+    return ctx.dupValue(loop.on_error_handler);
+}
+
 fn workerGCMark(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue, mark_func: ?*const qjs.JS_MarkFunc) callconv(.c) void {
     _ = rt_ptr;
     _ = val;
@@ -562,8 +729,8 @@ pub fn registerWorkerClass(ctx: zqjs.Context) !void {
     defer ctx.freeValue(global);
 
     const ctor = ctx.newCFunctionConstructor(js_Worker_constructor, "Worker", 1);
-    _ = try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
-    _ = try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor));
+    try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
+    try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor));
     // ctx.setClassProto(loop.worker_class_id, proto);
-    _ = try ctx.setPropertyStr(global, "Worker", ctor);
+    try ctx.setPropertyStr(global, "Worker", ctor);
 }

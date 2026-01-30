@@ -21,7 +21,6 @@ pub const dom_bridge = @import("dom_bridge.zig");
 // pub const dom_class_id = &dom_bridge.dom_class_id;
 // Mailbox for inter-thread communication (Worker pattern)
 pub const Mailbox = @import("mailbox.zig").Mailbox;
-pub const utils = @import("utils.zig");
 pub const events = @import("js_events.zig");
 
 // Exports for examples
@@ -83,6 +82,7 @@ const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
 const styles = @import("modules/styles.zig");
 const url_mod = @import("modules/url.zig");
+const encoding = @import("modules/encoding.zig");
 
 // ================================================================================
 
@@ -478,6 +478,29 @@ pub const toggleClassForce = classes.toggleClassForce;
 // Full ClassList (HashMap-based, for batch operations)
 pub const ClassList = classes.ClassList;
 pub const classList = classes.classList;
+
+//=======================================================================
+// Text Encoding (lexbor wrappers)
+
+pub const Encoding = encoding.Encoding;
+pub const EncodingData = encoding.EncodingData;
+pub const DecodeContext = encoding.DecodeContext;
+pub const EncodeContext = encoding.EncodeContext;
+pub const DecodeError = encoding.DecodeError;
+
+pub const getEncodingData = encoding.getEncodingData;
+pub const getEncodingDataByName = encoding.getEncodingDataByName;
+pub const createDecodeContext = encoding.createDecodeContext;
+pub const destroyDecodeContext = encoding.destroyDecodeContext;
+pub const createEncodeContext = encoding.createEncodeContext;
+pub const destroyEncodeContext = encoding.destroyEncodeContext;
+pub const decodeUtf8Single = encoding.decodeUtf8Single;
+pub const decodeToUtf8 = encoding.decodeToUtf8;
+
+// Encoding constants
+pub const LXB_ENCODING_DECODE_ERROR = encoding.LXB_ENCODING_DECODE_ERROR;
+pub const LXB_ENCODING_DECODE_CONTINUE = encoding.LXB_ENCODING_DECODE_CONTINUE;
+pub const LXB_ENCODING_REPLACEMENT_CODEPOINT = encoding.LXB_ENCODING_REPLACEMENT_CODEPOINT;
 
 //=======================================================================
 // Attributes
