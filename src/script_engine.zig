@@ -13,7 +13,6 @@ const FetchBridge = @import("js_fetch.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
 const FormDataBridge = @import("js_formData.zig").FormDataBridge;
 const js_console = @import("js_console.zig");
-
 const TIMEOUT_MS: i64 = 5000;
 
 /// avoid infinte loops like `white (true) {}` by setting a deadline

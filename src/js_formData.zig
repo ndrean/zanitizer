@@ -5,6 +5,7 @@ const qjs = z.qjs;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const BlobObject = @import("js_blob.zig").BlobObject;
 const js_blob = @import("js_blob.zig");
+const js_file = @import("js_file.zig");
 
 const FormDataEntry = struct {
     name: []u8,
@@ -16,7 +17,7 @@ const FormDataEntry = struct {
 pub const FormData = struct {
     parent_allocator: std.mem.Allocator,
     arena: std.heap.ArenaAllocator,
-    entries: std.ArrayListUnmanaged(FormDataEntry),
+    entries: std.ArrayListUnmanaged(FormDataEntry), // can get duplicates...
 
     pub fn init(allocator: std.mem.Allocator) *FormData {
         const self = allocator.create(FormData) catch @panic("OOM");
@@ -63,16 +64,45 @@ fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, 
     defer ctx.freeZString(name_str);
     const name_owned = arena.dupe(u8, name_str) catch return ctx.throwOutOfMemory();
 
-    const blob_ptr = qjs.JS_GetOpaque(argv[1], rc.classes.blob);
+    const val_js = argv[1];
 
-    if (blob_ptr) |bp| {
-        const blob: *BlobObject = @ptrCast(@alignCast(bp));
+    // Check if File
+    if (qjs.JS_GetOpaque(val_js, rc.classes.file)) |p| {
+        const file: *js_file.FileObject = @ptrCast(@alignCast(p));
+        const blob = &file.blob;
+
+        var filename: ?[]u8 = null;
+        if (argc > 2) {
+            // Explicit filename override
+            const f_str = ctx.toZString(argv[2]) catch return ctx.throwOutOfMemory();
+            defer ctx.freeZString(f_str);
+            filename = arena.dupe(u8, f_str) catch return ctx.throwOutOfMemory();
+        } else {
+            // Default to File.name
+            filename = arena.dupe(u8, file.name) catch return ctx.throwOutOfMemory();
+        }
+
+        const data_copy = arena.dupe(u8, blob.data) catch return ctx.throwOutOfMemory();
+        const mime_copy = arena.dupe(u8, blob.mime_type) catch return ctx.throwOutOfMemory();
+
+        fd.entries.append(arena, .{
+            .name = name_owned,
+            .value = data_copy,
+            .filename = filename,
+            .mime_type = mime_copy,
+        }) catch return ctx.throwOutOfMemory();
+    }
+    // Check if Blob
+    else if (ctx.getOpaque(val_js, rc.classes.blob)) |p| {
+        const blob: *BlobObject = @ptrCast(@alignCast(p));
+
         var filename: ?[]u8 = null;
         if (argc > 2) {
             const f_str = ctx.toZString(argv[2]) catch return ctx.throwOutOfMemory();
             defer ctx.freeZString(f_str);
             filename = arena.dupe(u8, f_str) catch return ctx.throwOutOfMemory();
         } else {
+            // Blob default
             filename = arena.dupe(u8, "blob") catch return ctx.throwOutOfMemory();
         }
 
@@ -85,7 +115,8 @@ fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, 
             .filename = filename,
             .mime_type = mime_copy,
         }) catch return ctx.throwOutOfMemory();
-    } else {
+    } // Default String
+    else {
         const val_str = ctx.toZString(argv[1]) catch return ctx.throwOutOfMemory();
         defer ctx.freeZString(val_str);
         const val_owned = arena.dupe(u8, val_str) catch return ctx.throwOutOfMemory();

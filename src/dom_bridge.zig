@@ -13,8 +13,11 @@ pub const js_url = @import("js_url.zig");
 const js_headers = @import("js_headers.zig");
 const js_events = @import("js_events.zig");
 const js_blob = @import("js_blob.zig");
+const js_file = @import("js_File.zig");
 const js_formData = @import("js_formData.zig");
 const js_polyfills = @import("js_polyfills.zig");
+const js_filelist = @import("js_filelist.zig");
+const js_file_reader_sync = @import("js_file_reader_sync.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -189,6 +192,9 @@ pub const DOMBridge = struct {
         try js_events.EventBridge.install(ctx);
         try js_classList.install(ctx);
         try js_polyfills.install(ctx);
+        try js_file.install(ctx);
+        try js_filelist.install(ctx);
+        try js_file_reader_sync.install(ctx);
 
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);

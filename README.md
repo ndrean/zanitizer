@@ -16,15 +16,17 @@ What it has:
 - sandboxed file system (upload directory only),
 - `fetch` API (via thread pool for HTTP requests),
 - `Workers`(OS threads for parallel processing),
+- DOM/CSS native sanitizer (based on H5SC testing suite),
 - can inject native Zig primitives (statistics, CSV parsing...),
-- integrated Web API classes: `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`.
+- integrated Web API classes: `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `Fetch`.
 
 It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) included a native speed.
 
-What it does not have or is not:
+What it does not have (yet): async I/O
 
-- not a browser,
-- not a headless browser,
+This is not:
+
+- a headless browser,
 - not `Node.js` nor `bun`,
 - not for streaming/async I/O workloads.
 

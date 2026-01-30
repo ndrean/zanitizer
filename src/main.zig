@@ -57,11 +57,18 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
+    try test_FileReaderSync(allocator, sandbox_root);
+    try test_FormData_Upload(allocator, sandbox_root);
     try uploadFile(allocator, sandbox_root);
     try testBlobFetch(allocator, sandbox_root);
-    // try testBlobURLs(allocator, sandbox_root);
+    try testBlobURLs(allocator, sandbox_root);
     // try classList(allocator, sandbox_root);
-    try async_Fetch_Blob(allocator, sandbox_root);
+    // try async_Fetch_Blob(allocator, sandbox_root);
+    // try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
+    // try async_Script_and_pass_to_Zig(allocator, sandbox_root);
+    // try async_Fetch_API_Demo(allocator, sandbox_root);
+    // try async_CSV_JSON_Parser(allocator, sandbox_root);
+    // try async_CSV_Tuple_Parser(allocator, sandbox_root);
     // try nativeBridge(allocator, sandbox_root);
     // try returnNativeBridge(allocator, sandbox_root);
     // try mock_class(allocator, sandbox_root);
@@ -102,17 +109,12 @@ pub fn main() !void {
     // try async_task_sequence_AB(allocator);
     // try async_task_sequence_ABCDEFGH(allocator);
     // try execute_Simple_Script_In_HTML(allocator);
-    try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
-    try async_Script_and_pass_to_Zig(allocator, sandbox_root);
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
     // try firstJSONPass(allocator);
     // try simplifiedJSONPass(allocator);
     // try JS_Proxy_And_Generators(allocator);
-    try async_Fetch_API_Demo(allocator, sandbox_root);
-    try async_CSV_JSON_Parser(allocator, sandbox_root);
-    try async_CSV_Tuple_Parser(allocator, sandbox_root);
 
-    try demoWorker(allocator, sandbox_root);
+    // try demoWorker(allocator, sandbox_root);
     // try test_dom_purify(allocator, sandbox_root);
 
     // // lexb =====
@@ -126,6 +128,189 @@ pub fn main() !void {
     // try demoInsertAdjacentHTML(allocator);
     // try demoSetInnerHTML(allocator);
     // try demoSuspiciousAttributes(allocator);
+}
+
+fn test_FileReaderSync(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    z.print("\n=== FileReaderSync Demo ----------------------------------------\n\n", .{});
+
+    const script =
+        \\try {
+        \\    console.log("[JS] Creating virtual File...");
+        \\    // 1. Create a File (e.g. simulating user input)
+        \\    const content = "Hello Zig + QuickJS!";
+        \\    const file = new File([content], "hello.txt", { type: "text/plain" });
+        \\    
+        \\    console.log(`[JS] File created: ${file.name} (${file.size} bytes)`);
+        \\
+        \\    // 2. Instantiate Reader
+        \\    const reader = new FileReaderSync();
+        \\
+        \\    // 3. Read as Text
+        \\    console.log("[JS] Reading as Text...");
+        \\    const text = reader.readAsText(file);
+        \\    console.log(`[JS] Result: "${text}"`);
+        \\    
+        \\    if (text !== content) throw new Error("Text mismatch!");
+        \\
+        \\    // 4. Read as Data URL
+        \\    console.log("[JS] Reading as DataURL...");
+        \\    const dataUrl = reader.readAsDataURL(file);
+        \\    console.log(`[JS] Result: ${dataUrl}`);
+        \\    
+        \\    // Verify base64 (Hello Zig + QuickJS! -> SGVsbG8gWmlnICsgUXVpY2tKUyE=)
+        \\    if (!dataUrl.includes("SGVsbG8gWmlnICsgUXVpY2tKUyE=")) {
+        \\        throw new Error("Base64 mismatch!");
+        \\    }
+        \\
+        \\    // 5. Read as Array Buffer
+        \\    console.log("[JS] Reading as ArrayBuffer...");
+        \\    const buffer = reader.readAsArrayBuffer(file);
+        \\    if (!(buffer instanceof ArrayBuffer)) throw new Error("Result is not an ArrayBuffer");
+        \\    if (buffer.byteLength !== content.length) throw new Error("Buffer size mismatch");
+        \\
+        \\    const u8 = new Uint8Array(buffer);
+        \\    console.log(`[JS] Byte Length: ${u8.length}`);
+        \\    console.log(`[JS] Raw Bytes:   [${u8.join(", ")}]`);
+        \\
+        \\    let reconstructed = "";
+        \\    for(let i=0; i<u8.length; i++) {
+        \\        reconstructed += String.fromCharCode(u8[i]);
+        \\    }
+        \\    console.log(`[JS] Decoded:     "${reconstructed}"`);
+        \\
+        \\    if (reconstructed === content) {
+        \\        console.log("[JS] ✅ ArrayBuffer content verified!");
+        \\    } else {
+        \\        throw new Error("Buffer content did not match string");
+        \\    }
+        \\    console.log("[JS] ✅ FileReaderSync test passed!");
+        \\
+        \\} catch (err) {
+        \\    console.error("[JS] 🔴 Error:", err);
+        \\}
+    ;
+
+    const res = try engine.eval(script, "test_reader.js", .module);
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+
+fn test_file_list(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const html =
+        \\<html>
+        \\  <body>
+        \\    <form>
+        \\     <input id="myfiles" multiple type="file" />
+        \\    </form>
+        \\    <p id="result"></p>
+        \\    <script>
+        \\      const form = document.querySelector('form');
+        \\      const input = document.getElementById('myfiles');
+        \\      const result = document.getElementById('result');
+        \\
+        \\      const file1 = new File(["first file"], "first.txt", { type: "text/plain});
+        \\      const file2 = new File(["second file"], "second.txt", { type: "text/plain});
+        \\
+        \\      input.files = [file1, file2];
+        \\
+        \\
+        \\      form.addEventListener('submit', (e) => {
+        \\        e.preventDefault();
+        \\        const files = input.files;
+        \\      });
+        \\    </script>
+        \\  </body>
+        \\  </body>
+        \\</html>
+    ;
+
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+    try engine.loadHTML(html);
+    try engine.run();
+}
+
+fn test_FormData_Upload(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    z.print("\n=== FormData Integration Test (Strings, Blobs, Files) ------------------\n\n", .{});
+
+    const script =
+        \\(async function() {
+        \\  try {
+        \\    const fd = new FormData();
+        \\
+        \\    // 1. Simple String
+        \\    console.log("[JS] Appending String...");
+        \\    fd.append("username", "ziggy");
+        \\
+        \\    // 2. Blob (default filename 'blob')
+        \\    console.log("[JS] Appending Blob...");
+        \\    const blob = new Blob(["some blob data"], { type: "text/plain" });
+        \\    fd.append("blob_field", blob);
+        \\    console.log("[JS] Blob size :", blob.size);
+        \\
+        \\    // 3. Blob with Explicit Filename
+        \\    console.log("[JS] Appending Blob with explicit name...");
+        \\    fd.append("renamed_blob", blob, "custom_name.txt");
+        \\
+        \\    // 4. File Object (Automatic filename)
+        \\    console.log("[JS] Appending File...");
+        \\    const file = new File(["my file content"], "my_document.txt", { type: "text/markdown" });
+        \\    fd.append("file_field", file);
+        \\     console.log("[JS] File size: ", file.size);
+        \\
+        \\    // 5. Multi-File (Same key, different files)
+        \\    console.log("[JS] Appending Multi-files...");
+        \\    fd.append("gallery", new File(["img1"], "img1.png", { type: "image/png" }));
+        \\    fd.append("gallery", new File(["img2"], "img2.png", { type: "image/png" }));
+        \\
+        \\    console.log("[JS] 🚀 Sending POST to httpbin.org...");
+        \\    
+        \\    const res = await fetch("https://httpbin.org/post", {
+        \\      method: "POST",
+        \\      body: fd
+        \\    });
+        \\
+        \\    console.log(`[JS] Status: ${res.status}`);
+        \\
+        \\    console.log("File is Blob?", file instanceof Blob);
+        \\    console.log("Blob proto:", Object.getPrototypeOf(File.prototype) === Blob.prototype);
+        \\    
+        \\    if (!res.ok) {
+        \\        throw new Error("Server rejected request");
+        \\    }
+        \\
+        \\    const data = await res.json();
+        \\    
+        \\    // --- Verification ---
+        \\    console.log("\n[JS] 🟢 Server Echo Response:");
+        \\    
+        \\    // Check Strings
+        \\    console.log(`   username: ${data.form.username}`);
+        \\    
+        \\    // Check Files
+        \\    // httpbin puts files in 'files'. Keys are the field names.
+        \\    console.log(`   blob_field: ${data.files.blob_field} (expected: 'some blob data')`);
+        \\    console.log(`   file_field: ${data.files.file_field} (expected: 'my file content')`);
+        \\    
+        \\    // Note: httpbin might handle duplicate keys (gallery) by returning an array or just the last one 
+        \\    // depending on implementation, but the upload format generated by Zig is what matters.
+        \\    console.log(`   gallery:`, data.files.gallery);
+        \\
+        \\  } catch (e) {
+        \\    console.error("[JS] 🔴 Error:", e);
+        \\  }
+        \\})();
+    ;
+
+    const res = try engine.eval(script, "test_upload.js", .module);
+    engine.ctx.freeValue(res);
+    try engine.run();
 }
 
 fn testBlobFetch(allocator: std.mem.Allocator, sbx: []const u8) !void {

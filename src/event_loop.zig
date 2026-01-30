@@ -9,8 +9,6 @@ const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const AsyncBindings = @import("async_bindings_generated.zig");
 const JSWorker = @import("js_worker.zig").JSWorker;
 
-// threadlocal var event_loop_class_id: zqjs.ClassID = 0;
-
 pub const RunMode = enum {
     Script,
     Server,

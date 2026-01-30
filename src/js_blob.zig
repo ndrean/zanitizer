@@ -1,3 +1,9 @@
+//! new Blob()
+//!
+//! ✅ blob.text(), blob.arrayBuffer(), blob.size(); blob.json()
+//!
+//! ⚠️ Missing blob.slice(), blob.bytes(), blob.stream()
+
 const std = @import("std");
 const z = @import("root.zig");
 const qjs = z.qjs;
