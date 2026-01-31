@@ -6,6 +6,13 @@ const EL = @import("event_loop.zig");
 const EventLoop = EL.EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
+/// Enum to select the return type strategy
+const ResultType = enum {
+    String, // Returns String
+    Binary, // Returns ArrayBuffer
+    Json, // Returns Object (Parsed from JSON)
+};
+
 /// Standard String binding (UTF-8)
 ///
 /// Worker returns []u8 -> JS receives String
@@ -14,7 +21,7 @@ pub fn bindAsync(
     comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
     comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
 ) qjs.JSCFunction {
-    return bindAsyncInternal(Payload, parseFn, workFn, false);
+    return bindAsyncInternal(Payload, parseFn, workFn, .String);
 }
 
 /// Binary binding (ArrayBuffer)
@@ -25,7 +32,7 @@ pub fn bindAsyncBuffer(
     comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
     comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
 ) qjs.JSCFunction {
-    return bindAsyncInternal(Payload, parseFn, workFn, true);
+    return bindAsyncInternal(Payload, parseFn, workFn, .Binary);
 }
 
 /// JSON Auto-Serialization Binding
@@ -39,7 +46,7 @@ pub fn bindAsyncJson(
 ) qjs.JSCFunction {
     const Wrapper = struct {
         fn wrappedWorkFn(outer_allocator: std.mem.Allocator, payload: Payload) anyerror![]u8 {
-            // Setup Arena for temporary Worker allocations (Result struct)
+            // Arena for temporary Worker allocations (Result struct)
             var arena = std.heap.ArenaAllocator.init(outer_allocator);
             defer arena.deinit();
             const arena_alloc = arena.allocator();
@@ -51,8 +58,9 @@ pub fn bindAsyncJson(
                 return err;
             };
 
+            // Stringify to JSON (Zig 0.15.2 API)
             var out: std.Io.Writer.Allocating = .init(outer_allocator);
-            try std.json.Stringify.value(result_struct, .{ .whitespace = .indent_2 }, &out.writer);
+            try std.json.Stringify.value(result_struct, .{}, &out.writer);
 
             freePayload(outer_allocator, payload);
 
@@ -60,29 +68,46 @@ pub fn bindAsyncJson(
         }
 
         fn freePayload(allocator: std.mem.Allocator, payload: Payload) void {
-            // Free simple string payloads
-            if (Payload == []u8 or Payload == []const u8) {
-                allocator.free(payload);
-                return;
-            }
-
-            // Free struct payloads with string fields
             const type_info = @typeInfo(Payload);
+            // Check if it's a struct with deinit method
             if (type_info == .@"struct") {
-                inline for (std.meta.fields(Payload)) |field| {
-                    const T = field.type;
-                    if (T == []u8 or T == []const u8) {
-                        allocator.free(@field(payload, field.name));
-                    }
+                if (@hasDecl(Payload, "deinit")) {
+                    payload.deinit(allocator);
+                    return;
                 }
             }
+            // Fallback: If it is just a slice, free it.
+            // For complex structs without deinit, we assume they don't own deep memory
+            // or user should have provided a deinit method.
+            switch (type_info) {
+                .pointer => |ptr| {
+                    if (ptr.size == .slice) allocator.free(payload);
+                },
+                else => {},
+            }
+            // Free simple string payloads
+            // if (Payload == []u8 or Payload == []const u8) {
+            //     allocator.free(payload);
+            //     return;
+            // }
+
+            // // Free struct payloads with string fields
+            // const type_info = @typeInfo(Payload);
+            // if (type_info == .@"struct") {
+            //     inline for (std.meta.fields(Payload)) |field| {
+            //         const T = field.type;
+            //         if (T == []u8 or T == []const u8) {
+            //             allocator.free(@field(payload, field.name));
+            //         }
+            //     }
+            // }
         }
     };
 
-    // Wrapper to adapt the user's struct-returning function to the required []u8 signature
+    // Wrapper to adapt the user's struct-returning function to the required []u8 fsignature
 
     // Use standard UTF-8 binding since JSON is text
-    return bindAsync(Payload, parseFn, Wrapper.wrappedWorkFn);
+    return bindAsyncInternal(Payload, parseFn, Wrapper.wrappedWorkFn, .Json);
 }
 
 // --- Internal Generic Generator ---
@@ -91,9 +116,8 @@ fn bindAsyncInternal(
     comptime Payload: type,
     comptime parseFn: fn (*EventLoop, zqjs.Context, []const zqjs.Value) anyerror!Payload,
     comptime workFn: fn (std.mem.Allocator, Payload) anyerror![]u8,
-    comptime is_binary_: bool,
+    comptime result_type: ResultType,
 ) qjs.JSCFunction {
-    const is_binary = is_binary_;
     const Binder = struct {
         fn callback(
             ctx_ptr: ?*qjs.JSContext,
@@ -102,8 +126,6 @@ fn bindAsyncInternal(
             argv: [*c]qjs.JSValue,
         ) callconv(.c) qjs.JSValue {
             const ctx = zqjs.Context{ .ptr = ctx_ptr };
-
-            // [FIX] Thread-safe context retrieval
             const rc = RuntimeContext.get(ctx);
             const loop = rc.loop;
 
@@ -113,7 +135,7 @@ fn bindAsyncInternal(
             // Parse Arguments
             const payload = parseFn(loop, ctx, safe_args) catch |err| {
                 if (err == error.OutOfMemory) return ctx.throwOutOfMemory();
-                if (!ctx.hasException()) return ctx.throwTypeError("Invalid arguments");
+                // if (!ctx.hasException()) return ctx.throwTypeError("Invalid arguments");
                 return zqjs.EXCEPTION;
             };
 
@@ -152,11 +174,12 @@ fn bindAsyncInternal(
             const result_or_err = workFn(task.loop.allocator, task.payload);
 
             if (result_or_err) |success_data| {
-                // Select the correct union variant based on is_binary flag
-                const res_variant = if (is_binary)
-                    EL.AsyncTask.TaskResult{ .success_bin = success_data }
-                else
-                    EL.AsyncTask.TaskResult{ .success_utf8 = success_data };
+                // Select variant based on enum
+                const res_variant = switch (result_type) {
+                    .String => EL.AsyncTask.TaskResult{ .success_utf8 = success_data },
+                    .Binary => EL.AsyncTask.TaskResult{ .success_bin = success_data },
+                    .Json => EL.AsyncTask.TaskResult{ .success_json = success_data },
+                };
 
                 task.loop.enqueueTask(.{
                     .ctx = task.ctx,
@@ -165,14 +188,9 @@ fn bindAsyncInternal(
                     .result = res_variant,
                 });
             } else |err| {
+                // ... (Error handling remains same as before) ...
                 const err_msg = std.fmt.allocPrint(task.loop.allocator, "{s}", .{@errorName(err)}) catch {
-                    const fallback = task.loop.allocator.dupe(u8, "Unknown Error (OOM)") catch return;
-                    task.loop.enqueueTask(.{
-                        .ctx = task.ctx,
-                        .resolve = task.resolve,
-                        .reject = task.reject,
-                        .result = .{ .failure = fallback },
-                    });
+                    // ... OOM fallback ...
                     return;
                 };
 

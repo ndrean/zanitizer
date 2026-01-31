@@ -4,6 +4,7 @@ const qjs = z.qjs;
 const w = z.wrapper;
 const js_blob = @import("js_blob.zig");
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const js_security = @import("js_security.zig");
 
 // We embed BlobObject as the first field.
 // This allows unsafe casting from *FileObject to *BlobObject if needed,
@@ -12,6 +13,10 @@ pub const FileObject = struct {
     blob: js_blob.BlobObject,
     name: []u8,
     last_modified: i64,
+    /// Original file path for disk streaming (null for in-memory Files)
+    path: ?[]u8 = null,
+    /// Actual file size on disk (for disk-backed files where blob.data is empty)
+    disk_size: ?u64 = null,
 };
 
 fn js_file_constructor(
@@ -56,6 +61,8 @@ fn js_file_constructor(
     // Initialize the internal structures
     file_obj.blob.parent_allocator = rc.allocator;
     file_obj.blob.arena = std.heap.ArenaAllocator.init(rc.allocator);
+    file_obj.path = null; // Must explicitly initialize - create() doesn't apply defaults
+    file_obj.disk_size = null;
     const arena_alloc = file_obj.blob.arena.allocator();
 
     // 3. Process 'bits' using the ARENA ALLOCATOR
@@ -177,8 +184,162 @@ fn js_file_get_size(
     if (ptr == null) return w.UNDEFINED;
 
     const file: *FileObject = @ptrCast(@alignCast(ptr));
-    // Access the embedded blob data length
-    return ctx.newInt64(@intCast(file.blob.data.len));
+    // For disk-backed files, use stored disk_size; otherwise use blob.data.len
+    const size: u64 = file.disk_size orelse file.blob.data.len;
+    return ctx.newInt64(@intCast(size));
+}
+
+fn js_file_get_type(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    _: c_int,
+    _: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file);
+    if (ptr == null) return ctx.newString("");
+
+    const file: *FileObject = @ptrCast(@alignCast(ptr));
+    return ctx.newString(file.blob.mime_type);
+}
+
+/// File.fromPath(path) - Create a File backed by a disk path (for zero-copy uploads)
+/// The file is NOT loaded into memory - curl streams directly from disk
+fn js_file_fromPath(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    if (argc < 1) return ctx.throwTypeError("File.fromPath requires a path argument");
+
+    const path_str = ctx.toZString(argv[0]) catch return z.jsException;
+    defer ctx.freeZString(path_str);
+
+    // Validate path is within sandbox and get file handle for metadata
+    const file = js_security.openFileNoSymlinkEscape(rc.sandbox, path_str) catch |err| {
+        return switch (err) {
+            error.FileNotFound => ctx.throwTypeError("File not found"),
+            error.AccessDenied, error.SymLinkLoop => ctx.throwTypeError("Access denied (symlink escape attempt)"),
+            else => ctx.throwInternalError("Failed to access file"),
+        };
+    };
+    defer file.close();
+
+    // Get file metadata
+    const stat = file.stat() catch {
+        return ctx.throwInternalError("Failed to get file metadata");
+    };
+
+    // Extract filename from path
+    const filename = std.fs.path.basename(path_str);
+
+    // Guess MIME type from extension
+    const mime_type = guessMimeType(filename);
+
+    // Create FileObject
+    const file_obj = rc.allocator.create(FileObject) catch return ctx.throwOutOfMemory();
+
+    file_obj.blob.parent_allocator = rc.allocator;
+    file_obj.blob.arena = std.heap.ArenaAllocator.init(rc.allocator);
+    const arena_alloc = file_obj.blob.arena.allocator();
+
+    // Store path (data stays empty - curl will stream from disk)
+    file_obj.blob.data = &.{}; // Empty - will use path instead
+    file_obj.blob.mime_type = arena_alloc.dupe(u8, mime_type) catch {
+        file_obj.blob.arena.deinit();
+        rc.allocator.destroy(file_obj);
+        return ctx.throwOutOfMemory();
+    };
+
+    file_obj.name = arena_alloc.dupe(u8, filename) catch {
+        file_obj.blob.arena.deinit();
+        rc.allocator.destroy(file_obj);
+        return ctx.throwOutOfMemory();
+    };
+
+    // Store the full path for curl to stream from
+    file_obj.path = arena_alloc.dupe(u8, path_str) catch {
+        file_obj.blob.arena.deinit();
+        rc.allocator.destroy(file_obj);
+        return ctx.throwOutOfMemory();
+    };
+
+    // Convert mtime (nanoseconds since epoch) to milliseconds
+    file_obj.last_modified = @intCast(@divFloor(stat.mtime, std.time.ns_per_ms));
+
+    // Store actual file size for disk-backed files
+    file_obj.disk_size = stat.size;
+
+    // Wrap in JS Object
+    const obj = qjs.JS_NewObjectClass(ctx.ptr, rc.classes.file);
+    if (qjs.JS_IsException(obj)) {
+        file_obj.blob.arena.deinit();
+        rc.allocator.destroy(file_obj);
+        return obj;
+    }
+
+    _ = qjs.JS_SetOpaque(obj, file_obj);
+    return obj;
+}
+
+/// MIME type lookup using compile-time StaticStringMap (O(1) lookup)
+const mime_map = std.StaticStringMap([]const u8).initComptime(.{
+    // Text
+    .{ ".txt", "text/plain" },
+    .{ ".html", "text/html" },
+    .{ ".htm", "text/html" },
+    .{ ".css", "text/css" },
+    .{ ".csv", "text/csv" },
+    // Application
+    .{ ".js", "application/javascript" },
+    .{ ".mjs", "application/javascript" },
+    .{ ".json", "application/json" },
+    .{ ".xml", "application/xml" },
+    .{ ".pdf", "application/pdf" },
+    .{ ".zip", "application/zip" },
+    .{ ".gz", "application/gzip" },
+    .{ ".gzip", "application/gzip" },
+    .{ ".tar", "application/x-tar" },
+    .{ ".wasm", "application/wasm" },
+    // Images
+    .{ ".png", "image/png" },
+    .{ ".jpg", "image/jpeg" },
+    .{ ".jpeg", "image/jpeg" },
+    .{ ".gif", "image/gif" },
+    .{ ".svg", "image/svg+xml" },
+    .{ ".webp", "image/webp" },
+    .{ ".ico", "image/x-icon" },
+    .{ ".bmp", "image/bmp" },
+    .{ ".avif", "image/avif" },
+    // Audio
+    .{ ".mp3", "audio/mpeg" },
+    .{ ".wav", "audio/wav" },
+    .{ ".ogg", "audio/ogg" },
+    .{ ".flac", "audio/flac" },
+    .{ ".aac", "audio/aac" },
+    // Video
+    .{ ".mp4", "video/mp4" },
+    .{ ".webm", "video/webm" },
+    .{ ".avi", "video/x-msvideo" },
+    .{ ".mov", "video/quicktime" },
+    .{ ".mkv", "video/x-matroska" },
+    // Fonts
+    .{ ".woff", "font/woff" },
+    .{ ".woff2", "font/woff2" },
+    .{ ".ttf", "font/ttf" },
+    .{ ".otf", "font/otf" },
+});
+
+/// Guess MIME type from filename extension (O(1) compile-time lookup)
+fn guessMimeType(filename: []const u8) []const u8 {
+    const ext = std.fs.path.extension(filename);
+    return mime_map.get(ext) orelse "application/octet-stream";
 }
 
 // Finalizer
@@ -250,7 +411,18 @@ pub fn install(ctx: w.Context) !void {
         _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, size_atom, get_size, w.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
     }
 
+    {
+        const type_atom = ctx.newAtom("type");
+        defer ctx.freeAtom(type_atom);
+        const get_type = ctx.newCFunction(js_file_get_type, "get type", 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, type_atom, get_type, w.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+    }
+
     const ctor = ctx.newCFunction2(js_file_constructor, "File", 2, qjs.JS_CFUNC_constructor, 0);
+
+    // Add static method: File.fromPath(path)
+    const from_path_fn = ctx.newCFunction(js_file_fromPath, "fromPath", 1);
+    try ctx.setPropertyStr(ctor, "fromPath", from_path_fn);
 
     _ = ctx.setConstructor(ctor, proto);
     _ = qjs.JS_SetClassProto(ctx.ptr, rc.classes.file, proto);

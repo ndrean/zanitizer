@@ -15,6 +15,7 @@ const curl = @import("curl");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
+const js_readable_stream = @import("js_readable_stream.zig");
 
 // Access raw libcurl C API for constants
 const c = curl.libcurl;
@@ -53,6 +54,42 @@ fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 fn js_res_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     return ctx.getPropertyStr(this, "_body");
+}
+
+/// response.body getter - returns ReadableStream
+fn js_res_body(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+
+    // Check if we already created a stream (cached in _stream)
+    const cached = ctx.getPropertyStr(this, "_stream");
+    if (!ctx.isUndefined(cached)) {
+        return cached;
+    }
+    ctx.freeValue(cached);
+
+    // Get the ArrayBuffer data
+    const body_val = ctx.getPropertyStr(this, "_body");
+    defer ctx.freeValue(body_val);
+
+    if (ctx.isUndefined(body_val)) {
+        return zqjs.NULL;
+    }
+
+    var len: usize = 0;
+    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &len, body_val);
+    if (ptr == null) {
+        return zqjs.NULL;
+    }
+
+    // Create ReadableStream from the buffer
+    const stream = js_readable_stream.createStreamFromBuffer(ctx, ptr[0..len]) catch {
+        return ctx.throwOutOfMemory();
+    };
+
+    // Cache it on the response
+    ctx.setPropertyStr(this, "_stream", ctx.dupValue(stream)) catch {};
+
+    return stream;
 }
 
 fn js_async_wrapper(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, workFn: fn (?*qjs.JSContext, qjs.JSValue, c_int, [*c]qjs.JSValue) callconv(.c) qjs.JSValue) qjs.JSValue {
@@ -110,6 +147,17 @@ fn writeCallback(
     return total_size;
 }
 
+/// Entry for multipart form data submission
+pub const MultipartEntry = struct {
+    name: []const u8,
+    /// In-memory data (for Blobs created from strings/arrays)
+    data: ?[]const u8 = null,
+    /// File path for disk streaming (zero-copy for large files)
+    file_path: ?[]const u8 = null,
+    filename: ?[]const u8 = null,
+    mime_type: ?[]const u8 = null,
+};
+
 /// Represents a pending HTTP request with its promise resolvers
 pub const PendingRequest = struct {
     /// The curl Easy handle for this request
@@ -126,6 +174,8 @@ pub const PendingRequest = struct {
     url: []const u8,
     /// Custom headers list (must be kept alive during request)
     headers: ?curl.Easy.Headers,
+    /// Multipart handle (must be kept alive during request)
+    multipart: ?curl.Easy.MultiPart,
     /// Arena for this request's allocations
     arena: std.heap.ArenaAllocator,
 
@@ -134,6 +184,7 @@ pub const PendingRequest = struct {
         self.easy.deinit();
         self.write_buffer.list.deinit(allocator);
         if (self.headers) |*h| h.deinit();
+        if (self.multipart) |mp| mp.deinit();
         self.arena.deinit();
         // Free the JS values
         self.ctx.freeValue(self.resolve);
@@ -246,6 +297,7 @@ pub const CurlMulti = struct {
             .write_buffer = .{ .list = .empty, .allocator = self.allocator },
             .url = try arena.dupe(u8, url),
             .headers = curl_headers,
+            .multipart = null,
             .arena = req.arena,
         };
 
@@ -342,6 +394,14 @@ pub const CurlMulti = struct {
                 ctx.freeValue(ab_fn);
             };
 
+            // Add body getter (returns ReadableStream)
+            {
+                const atom = qjs.JS_NewAtom(ctx.ptr, "body");
+                const get = qjs.JS_NewCFunction2(ctx.ptr, js_res_body, "get_body", 0, qjs.JS_CFUNC_generic, 0);
+                _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, resp, atom, get, zqjs.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+                qjs.JS_FreeAtom(ctx.ptr, atom);
+            }
+
             const ret = ctx.call(req.resolve, zqjs.UNDEFINED, &.{resp});
             ctx.freeValue(ret);
             ctx.freeValue(resp);
@@ -354,5 +414,105 @@ pub const CurlMulti = struct {
     /// Get count of pending requests
     pub fn pendingCount(self: *CurlMulti) usize {
         return self.pending.count();
+    }
+
+    /// Submit a multipart/form-data request using curl's native MIME API
+    /// This is more efficient than manual serialization for large files
+    pub fn submitMultipartRequest(
+        self: *CurlMulti,
+        ctx: zqjs.Context,
+        url: []const u8,
+        entries: []const MultipartEntry,
+        headers: []const []const u8,
+        resolve: zqjs.Value,
+        reject: zqjs.Value,
+    ) !void {
+        const req = try self.allocator.create(PendingRequest);
+        errdefer self.allocator.destroy(req);
+
+        req.arena = std.heap.ArenaAllocator.init(self.allocator);
+        const arena = req.arena.allocator();
+        errdefer req.arena.deinit();
+
+        // Allocate CA bundle for SSL/TLS
+        const ca_bundle = curl.allocCABundle(arena) catch return error.CABundleAlloc;
+
+        // Create Easy handle with CA bundle
+        var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch return error.EasyInit;
+        errdefer easy.deinit();
+
+        // Set URL
+        const url_z = try arena.dupeZ(u8, url);
+        try easy.setUrl(url_z);
+
+        // Method is always POST for multipart
+        try easy.setMethod(.POST);
+
+        // Build multipart using curl's MIME API
+        var multipart = try easy.createMultiPart();
+        errdefer multipart.deinit();
+
+        for (entries) |entry| {
+            const name_z = try arena.dupeZ(u8, entry.name);
+
+            // Choose data source: file path (zero-copy streaming) or in-memory data
+            if (entry.file_path) |path| {
+                // Stream directly from disk - no memory copy for large files!
+                const path_z = try arena.dupeZ(u8, path);
+                try multipart.addPart(name_z, .{ .file = path_z });
+            } else if (entry.data) |data| {
+                // In-memory data (curl copies internally)
+                try multipart.addPart(name_z, .{ .data = data });
+            }
+
+            // TODO: curl MIME API in zig-curl doesn't expose filename/mime_type setters yet
+            // For now, the data is sent but without custom filename/mime-type headers
+            // A future enhancement would be to call curl_mime_filename() and curl_mime_type()
+            _ = entry.filename;
+            _ = entry.mime_type;
+        }
+
+        // Set the multipart as the request body
+        try easy.setMultiPart(multipart);
+
+        // Set additional headers (but NOT Content-Type - curl handles that for multipart)
+        var curl_headers: ?curl.Easy.Headers = null;
+        if (headers.len > 0) {
+            curl_headers = curl.Easy.Headers{};
+            for (headers) |h| {
+                // Skip Content-Type header for multipart requests
+                if (std.ascii.startsWithIgnoreCase(h, "content-type:")) continue;
+                const h_z = try arena.dupeZ(u8, h);
+                try curl_headers.?.add(h_z);
+            }
+            if (curl_headers) |ch| {
+                if (ch.headers != null) {
+                    try easy.setHeaders(ch);
+                }
+            }
+        }
+
+        // Store complete request struct
+        req.* = .{
+            .easy = easy,
+            .ctx = ctx,
+            .resolve = ctx.dupValue(resolve),
+            .reject = ctx.dupValue(reject),
+            .write_buffer = .{ .list = .empty, .allocator = self.allocator },
+            .url = try arena.dupe(u8, url),
+            .headers = curl_headers,
+            .multipart = multipart,
+            .arena = req.arena,
+        };
+
+        // Set write callback to capture response body
+        try easy.setWritedata(&req.write_buffer);
+        try easy.setWritefunction(writeCallback);
+
+        // Add to multi handle
+        try self.multi.addHandle(easy);
+
+        // Track by handle pointer
+        try self.pending.put(@ptrCast(easy.handle), req);
     }
 };

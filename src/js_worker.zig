@@ -14,6 +14,7 @@ const js_fetch_easy = @import("js_fetch_easy.zig");
 const js_blob = @import("js_blob.zig");
 const js_formData = @import("js_formData.zig");
 const js_headers = @import("js_headers.zig");
+const js_fs = @import("js_fs.zig");
 
 // -------------------------------------------------------------------------
 
@@ -272,6 +273,7 @@ fn installWorkerGlobals(ctx: zqjs.Context, core: *WorkerCore, loop: *EventLoop) 
     try js_fetch_easy.FetchBridge.install(ctx);
     try js_blob.BlobBridge.install(ctx);
     try js_formData.FormDataBridge.install(ctx);
+    try js_fs.FSBridge.install(ctx);
 
     // onmessage
     try ctx.setPropertyStr(global, "onmessage", zqjs.NULL);

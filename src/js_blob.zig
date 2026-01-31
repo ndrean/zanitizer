@@ -204,6 +204,15 @@ pub fn js_Blob_get_size(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _
     return ctx.newInt64(@intCast(self.data.len));
 }
 
+pub fn js_Blob_get_type(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
+    if (ptr == null) return ctx.newString("");
+    const self: *BlobObject = @ptrCast(@alignCast(ptr));
+    return ctx.newString(self.mime_type);
+}
+
 // ============================================================================
 // Installation
 // ============================================================================
@@ -228,10 +237,18 @@ pub const BlobBridge = struct {
         try ctx.setPropertyStr(proto, "arrayBuffer", ctx.newCFunction(js_Blob_arrayBuffer, "arrayBuffer", 0));
 
         // 2. Getters
-        const size_atom = qjs.JS_NewAtom(ctx.ptr, "size");
-        defer qjs.JS_FreeAtom(ctx.ptr, size_atom);
-        const get_size = ctx.newCFunction(js_Blob_get_size, "get_size", 0);
-        _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, size_atom, get_size, zqjs.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        {
+            const size_atom = qjs.JS_NewAtom(ctx.ptr, "size");
+            defer qjs.JS_FreeAtom(ctx.ptr, size_atom);
+            const get_size = ctx.newCFunction(js_Blob_get_size, "get_size", 0);
+            _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, size_atom, get_size, zqjs.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        }
+        {
+            const type_atom = qjs.JS_NewAtom(ctx.ptr, "type");
+            defer qjs.JS_FreeAtom(ctx.ptr, type_atom);
+            const get_type = ctx.newCFunction(js_Blob_get_type, "get_type", 0);
+            _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, type_atom, get_type, zqjs.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        }
 
         // 3. Symbol.toStringTag -> "Blob"
         {

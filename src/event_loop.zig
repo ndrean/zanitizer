@@ -37,6 +37,7 @@ pub const AsyncTask = struct {
         success_utf8: []u8,
         success_bin: []u8,
         failure: []u8,
+        success_json: []u8,
         custom: struct {
             data: *anyopaque,
             callback: *const fn (ctx: zqjs.Context, data: *anyopaque) void,
@@ -63,6 +64,8 @@ pub const EventLoop = struct {
     on_error_handler: qjs.JSValue = zqjs.UNDEFINED,
     /// Curl Multi handle for non-blocking HTTP requests
     curl_multi: ?*CurlMulti = null,
+    /// Arena for temporary allocations during task processing (reset per cycle)
+    task_arena: std.heap.ArenaAllocator,
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
         const self = try allocator.create(EventLoop);
@@ -72,6 +75,7 @@ pub const EventLoop = struct {
             .timers = .{},
             .task_queue = .{},
             .thread_pool = undefined,
+            .task_arena = std.heap.ArenaAllocator.init(allocator),
         };
         try self.thread_pool.init(.{ .allocator = allocator });
         return self;
@@ -113,6 +117,7 @@ pub const EventLoop = struct {
                 switch (task.result) {
                     .success_utf8 => |data| self.allocator.free(data),
                     .success_bin => |data| self.allocator.free(data),
+                    .success_json => |data| self.allocator.free(data),
                     .failure => |msg| self.allocator.free(msg),
                     .custom => |payload| {
                         payload.destroy(self.allocator, payload.data);
@@ -124,6 +129,7 @@ pub const EventLoop = struct {
         }
         // Clean up curl multi handle
         if (self.curl_multi) |cm| cm.deinit();
+        self.task_arena.deinit();
         self.rt.freeValue(self.on_error_handler);
         self.allocator.destroy(self);
     }
@@ -162,7 +168,6 @@ pub const EventLoop = struct {
 
     pub fn install(self: *EventLoop, ctx: zqjs.Context) !void {
         const rc = RuntimeContext.get(ctx);
-        // var class_id = rc.classes.event_loop;
         if (rc.classes.event_loop == 0) {
             rc.classes.event_loop = self.rt.newClassID();
             try self.rt.newClass(rc.classes.event_loop, .{ .class_name = "EventLoop", .finalizer = null });
@@ -216,6 +221,7 @@ pub const EventLoop = struct {
             switch (task.result) {
                 .success_utf8 => |data| self.allocator.free(data),
                 .success_bin => |data| self.allocator.free(data),
+                .success_json => |data| self.allocator.free(data),
                 .failure => |msg| self.allocator.free(msg),
                 .custom => |payload| {
                     payload.destroy(self.allocator, payload.data);
@@ -241,6 +247,10 @@ pub const EventLoop = struct {
         if (self.active_tasks >= count) self.active_tasks -= count else self.active_tasks = 0;
         self.mutex.unlock();
 
+        // Use arena for temporary allocations - reset at end of cycle
+        const arena = self.task_arena.allocator();
+        defer _ = self.task_arena.reset(.retain_capacity);
+
         for (tasks) |task| {
             defer task.ctx.freeValue(task.resolve);
             defer task.ctx.freeValue(task.reject);
@@ -248,6 +258,29 @@ pub const EventLoop = struct {
                 .custom => |payload| {
                     // execute the function pointer stored in the task
                     payload.callback(task.ctx, payload.data);
+                },
+                .success_json => |data| {
+                    defer self.allocator.free(data);
+
+                    // QuickJS may read past buffer - add null terminator (arena allocated)
+                    const data_z = arena.dupeZ(u8, data) catch {
+                        _ = task.ctx.call(task.reject, zqjs.UNDEFINED, &.{zqjs.UNDEFINED});
+                        continue;
+                    };
+                    // No defer free needed - arena reset handles it
+
+                    // Parse the JSON string into a native JS Object
+                    const js_val = task.ctx.parseJSON(data_z, "<async_json>");
+
+                    if (task.ctx.isException(js_val)) {
+                        const err = task.ctx.getException();
+                        _ = task.ctx.call(task.reject, zqjs.UNDEFINED, &.{err});
+                        task.ctx.freeValue(err);
+                    } else {
+                        const ret = task.ctx.call(task.resolve, zqjs.UNDEFINED, &.{js_val});
+                        task.ctx.freeValue(ret);
+                    }
+                    task.ctx.freeValue(js_val);
                 },
                 .success_utf8 => |data| {
                     defer self.allocator.free(data);

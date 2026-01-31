@@ -9,7 +9,10 @@ const js_file = @import("js_file.zig");
 
 const FormDataEntry = struct {
     name: []u8,
+    /// In-memory data (for Blobs/strings)
     value: []u8,
+    /// File path for disk streaming (zero-copy uploads)
+    file_path: ?[]u8 = null,
     filename: ?[]u8 = null,
     mime_type: ?[]u8 = null,
 };
@@ -82,17 +85,31 @@ fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, 
             filename = arena.dupe(u8, file.name) catch return ctx.throwOutOfMemory();
         }
 
-        const data_copy = arena.dupe(u8, blob.data) catch return ctx.throwOutOfMemory();
         const mime_copy = arena.dupe(u8, blob.mime_type) catch return ctx.throwOutOfMemory();
 
-        fd.entries.append(arena, .{
-            .name = name_owned,
-            .value = data_copy,
-            .filename = filename,
-            .mime_type = mime_copy,
-        }) catch return ctx.throwOutOfMemory();
+        // If file has a path, use disk streaming (zero-copy for large files)
+        if (file.path) |path| {
+            const path_copy = arena.dupe(u8, path) catch return ctx.throwOutOfMemory();
+            fd.entries.append(arena, .{
+                .name = name_owned,
+                .value = &.{}, // empty - will use file_path instead
+                .file_path = path_copy,
+                .filename = filename,
+                .mime_type = mime_copy,
+            }) catch return ctx.throwOutOfMemory();
+        } else {
+            // In-memory File (created from Blob/array) - copy data
+            const data_copy = arena.dupe(u8, blob.data) catch return ctx.throwOutOfMemory();
+            fd.entries.append(arena, .{
+                .name = name_owned,
+                .value = data_copy,
+                .file_path = null,
+                .filename = filename,
+                .mime_type = mime_copy,
+            }) catch return ctx.throwOutOfMemory();
+        }
     }
-    // Check if Blob
+    // Check if Blob (always in-memory, no file path)
     else if (ctx.getOpaque(val_js, rc.classes.blob)) |p| {
         const blob: *BlobObject = @ptrCast(@alignCast(p));
 
@@ -112,6 +129,7 @@ fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, 
         fd.entries.append(arena, .{
             .name = name_owned,
             .value = data_copy,
+            .file_path = null,
             .filename = filename,
             .mime_type = mime_copy,
         }) catch return ctx.throwOutOfMemory();
@@ -124,6 +142,7 @@ fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, 
         fd.entries.append(arena, .{
             .name = name_owned,
             .value = val_owned,
+            .file_path = null,
             .filename = null,
             .mime_type = null,
         }) catch return ctx.throwOutOfMemory();

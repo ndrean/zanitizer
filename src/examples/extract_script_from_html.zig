@@ -14,8 +14,8 @@ fn handleSigInt(_: c_int) callconv(.c) void {
 // Setup function to call at start of main()
 pub fn setupSignalHandler() void {
     if (builtin.os.tag == .windows) {
-        // Windows needs a different approach (SetConsoleCtrlHandler),
-        // but for now we focus on POSIX (Linux/macOS) as requested.
+        // !! Windows needs a different approach (SetConsoleCtrlHandler),
+        // but we focus on POSIX (Linux/macOS)
         return;
     }
 

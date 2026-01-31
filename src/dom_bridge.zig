@@ -19,6 +19,8 @@ const js_polyfills = @import("js_polyfills.zig");
 const js_filelist = @import("js_filelist.zig");
 const js_file_reader_sync = @import("js_file_reader_sync.zig");
 const js_text_encoding = @import("js_text_encoding.zig");
+const js_readable_stream = @import("js_readable_stream.zig");
+const js_writable_stream = @import("js_writable_stream.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -197,6 +199,8 @@ pub const DOMBridge = struct {
         try js_filelist.install(ctx);
         try js_file_reader_sync.install(ctx);
         try js_text_encoding.install(ctx);
+        try js_readable_stream.install(ctx);
+        try js_writable_stream.install(ctx);
 
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);

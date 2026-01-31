@@ -9,7 +9,9 @@ const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_formData = @import("js_formData.zig");
 const js_blob = @import("js_blob.zig");
 const js_file = @import("js_file.zig");
-const CurlMulti = @import("curl_multi.zig").CurlMulti;
+const curl_multi_mod = @import("curl_multi.zig");
+const CurlMulti = curl_multi_mod.CurlMulti;
+const MultipartEntry = curl_multi_mod.MultipartEntry;
 
 // ============================================================================
 // STRUCTS
@@ -571,6 +573,7 @@ pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c
     var method_str: []const u8 = "GET";
     var body_data: ?[]u8 = null;
     var headers_list: std.ArrayListUnmanaged([]const u8) = .empty;
+    var form_data_ptr: ?*js_formData.FormData = null;
 
     errdefer {
         for (headers_list.items) |h| allocator.free(h);
@@ -600,12 +603,8 @@ pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c
                 defer ctx.freeCString(c_str);
                 body_data = allocator.dupe(u8, std.mem.span(c_str)) catch return ctx.throwOutOfMemory();
             } else if (qjs.JS_GetOpaque(b_prop, rc.classes.form_data)) |fd_ptr| {
-                const fd: *js_formData.FormData = @ptrCast(@alignCast(fd_ptr));
-                const result = js_formData.serializeFormData(allocator, fd) catch return ctx.throwOutOfMemory();
-                body_data = result.body;
-                const ct_val = std.fmt.allocPrint(allocator, "Content-Type: multipart/form-data; boundary={s}", .{result.boundary}) catch return ctx.throwOutOfMemory();
-                allocator.free(result.boundary);
-                headers_list.append(allocator, ct_val) catch return ctx.throwOutOfMemory();
+                // Store FormData pointer for multipart submission (no manual serialization)
+                form_data_ptr = @ptrCast(@alignCast(fd_ptr));
             }
         }
 
@@ -668,21 +667,59 @@ pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c
         return ctx.throwInternalError("Failed to initialize curl multi");
     };
 
-    curl_multi.submitRequest(
-        ctx,
-        task.url,
-        task.method,
-        task.body,
-        task.headers,
-        resolve,
-        reject,
-    ) catch {
-        destroyFetchTask(allocator, task);
-        ctx.freeValue(resolve);
-        ctx.freeValue(reject);
-        ctx.freeValue(promise);
-        return ctx.throwInternalError("Failed to submit HTTP request");
-    };
+    // Use multipart API for FormData, regular request otherwise
+    if (form_data_ptr) |fd| {
+        // Build multipart entries from FormData
+        var entries: std.ArrayListUnmanaged(MultipartEntry) = .empty;
+        defer entries.deinit(allocator);
+
+        for (fd.entries.items) |entry| {
+            entries.append(allocator, .{
+                .name = entry.name,
+                .data = if (entry.value.len > 0) entry.value else null,
+                .file_path = entry.file_path,
+                .filename = entry.filename,
+                .mime_type = entry.mime_type,
+            }) catch {
+                destroyFetchTask(allocator, task);
+                ctx.freeValue(resolve);
+                ctx.freeValue(reject);
+                ctx.freeValue(promise);
+                return ctx.throwOutOfMemory();
+            };
+        }
+
+        curl_multi.submitMultipartRequest(
+            ctx,
+            task.url,
+            entries.items,
+            task.headers,
+            resolve,
+            reject,
+        ) catch {
+            destroyFetchTask(allocator, task);
+            ctx.freeValue(resolve);
+            ctx.freeValue(reject);
+            ctx.freeValue(promise);
+            return ctx.throwInternalError("Failed to submit multipart request");
+        };
+    } else {
+        curl_multi.submitRequest(
+            ctx,
+            task.url,
+            task.method,
+            task.body,
+            task.headers,
+            resolve,
+            reject,
+        ) catch {
+            destroyFetchTask(allocator, task);
+            ctx.freeValue(resolve);
+            ctx.freeValue(reject);
+            ctx.freeValue(promise);
+            return ctx.throwInternalError("Failed to submit HTTP request");
+        };
+    }
 
     // Cleanup task data (curl multi makes copies)
     destroyFetchTask(allocator, task);

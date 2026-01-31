@@ -60,11 +60,11 @@ pub fn main() !void {
     try test_FormData_Upload(allocator, sandbox_root);
     try uploadFile(allocator, sandbox_root);
     try testBlobFetch(allocator, sandbox_root);
-    // try testBlobURLs(allocator, sandbox_root);
-    // // try classList(allocator, sandbox_root);
+    try testBlobURLs(allocator, sandbox_root);
+    try classList(allocator, sandbox_root);
     try async_Fetch_Blob(allocator, sandbox_root);
     try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
-    // try async_Script_and_pass_to_Zig(allocator, sandbox_root);
+    try async_Script_and_pass_to_Zig(allocator, sandbox_root);
     try async_Fetch_API_Demo(allocator, sandbox_root);
     try async_CSV_JSON_Parser(allocator, sandbox_root);
     try async_CSV_Tuple_Parser(allocator, sandbox_root);
@@ -87,7 +87,7 @@ pub fn main() !void {
     // try js_framework_3_bench(allocator);
     // try bench(allocator);
 
-    // try eventListeners(allocator, sandbox_root);
+    try eventListeners(allocator, sandbox_root);
 
     // try transplante(allocator);
     // try fullCycle(allocator);
@@ -114,7 +114,7 @@ pub fn main() !void {
     // try JS_Proxy_And_Generators(allocator);
 
     try demoWorker(allocator, sandbox_root);
-    // try test_dom_purify(allocator, sandbox_root);
+    try test_dom_purify(allocator, sandbox_root);
 
     // // lexb =====
 

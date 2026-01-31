@@ -43,6 +43,10 @@ pub const RuntimeContext = struct {
         headers: zqjs.ClassID = 0,
         text_encoder: zqjs.ClassID = 0,
         text_decoder: zqjs.ClassID = 0,
+        readable_stream: zqjs.ClassID = 0,
+        readable_stream_reader: zqjs.ClassID = 0,
+        writable_stream: zqjs.ClassID = 0,
+        writable_stream_writer: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

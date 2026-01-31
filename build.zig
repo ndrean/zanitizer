@@ -203,6 +203,12 @@ pub fn build(b: *std.Build) void {
         "src/examples/return_data_from_JS_into_zig.zig",
         "src/examples/classlist_demo.zig",
         "src/examples/text_encoding_demo.zig",
+        "src/examples/readable_stream_demo.zig",
+        "src/examples/formdata_upload_demo.zig",
+        "src/examples/disk_streaming_upload_demo.zig",
+        "src/examples/fs_demo.zig",
+        "src/examples/writable_stream_demo.zig",
+        "src/examples/streaming_demo.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{
