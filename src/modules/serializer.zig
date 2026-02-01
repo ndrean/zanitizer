@@ -159,6 +159,13 @@ pub fn setOuterHTML(allocator: std.mem.Allocator, element: *z.HTMLElement, html:
     z.destroyNode(fragment);
 }
 
+/// [serializer] Set outerHTML wrapper for JS bindings (uses page allocator)
+///
+/// [JS] `element.outerHTML = html` setter
+pub fn setOuterHTMLSimple(element: *z.HTMLElement, html: []const u8) !void {
+    return setOuterHTML(std.heap.page_allocator, element, html);
+}
+
 // ===================================================================================
 
 /// Context used by the "styler" callback

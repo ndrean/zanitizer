@@ -18,6 +18,7 @@ const Pt2 = @import("Point2.zig");
 const JSWorker = @import("js_worker.zig");
 const Reflect = @import("reflection.zig");
 const Mocks = @import("dom_mocks.zig");
+const Native = @import("js_native_bridge.zig");
 
 const native_os = builtin.os.tag;
 pub var app_should_quit = std.atomic.Value(bool).init(false);
@@ -55,6 +56,7 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
+    // try js_framework_2_bench(allocator, sandbox_root);
     try timersAndEncoding(allocator, sandbox_root);
     try test_FileReaderSync(allocator, sandbox_root);
     try test_FormData_Upload(allocator, sandbox_root);
@@ -63,11 +65,12 @@ pub fn main() !void {
     try testBlobURLs(allocator, sandbox_root);
     try classList(allocator, sandbox_root);
     try async_Fetch_Blob(allocator, sandbox_root);
+    try test_FileReader(allocator, sandbox_root);
     try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
     try async_Script_and_pass_to_Zig(allocator, sandbox_root);
     try async_Fetch_API_Demo(allocator, sandbox_root);
-    try async_CSV_JSON_Parser(allocator, sandbox_root);
-    try async_CSV_Tuple_Parser(allocator, sandbox_root);
+    // try async_CSV_JSON_Parser(allocator, sandbox_root);
+    // try async_CSV_Tuple_Parser(allocator, sandbox_root);
     try nativeBridge(allocator, sandbox_root);
     try returnNativeBridge(allocator, sandbox_root);
     // try mock_class(allocator, sandbox_root);
@@ -83,17 +86,16 @@ pub fn main() !void {
     try cdnImport(allocator, sandbox_root);
     // try importModule(allocator);
     // try js_framework_1_bench(allocator);
-    // try js_framework_2_bench(allocator);
     // try js_framework_3_bench(allocator);
     // try bench(allocator);
 
     try eventListeners(allocator, sandbox_root);
 
-    // try transplante(allocator);
+    try textContentSetter(allocator, sandbox_root);
     // try fullCycle(allocator);
     // // try customPointClass(allocator);
     // // try demoPoint2Class(allocator);
-    // try domParser(allocator);
+    try domParser(allocator, sandbox_root);
     // try buildDOM(allocator);
 
     // try eventListener(allocator);
@@ -104,9 +106,9 @@ pub fn main() !void {
     // try getValueFromQJSinZig(allocator);
 
     // try test_event_loop(allocator);
-    // try promise_scope(allocator);
+    try promise_scope(allocator, sandbox_root);
     // try async_task_sequence_AB(allocator);
-    // try async_task_sequence_ABCDEFGH(allocator);
+    try async_task_sequence_ABCDEFGH(allocator, sandbox_root);
     // try execute_Simple_Script_In_HTML(allocator);
     // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
     // try firstJSONPass(allocator);
@@ -118,14 +120,14 @@ pub fn main() !void {
 
     // // lexb =====
 
-    // try simpleParsingsMethods(allocator);
+    try simpleParsingsMethods(allocator, sandbox_root);
     // try demoNormalizer(allocator);
-    // try demoTemplate(allocator);
-    // try demoParserReUse(allocator);
-    // try demoStreamParser(allocator);
-    // try demoInsertAdjacentElement(allocator);
-    // try demoInsertAdjacentHTML(allocator);
-    // try demoSetInnerHTML(allocator);
+    try demoTemplate(allocator);
+    try demoParserReUse(allocator);
+    try demoStreamParser(allocator);
+    try demoInsertAdjacentElement(allocator);
+    try demoInsertAdjacentHTML(allocator);
+    try demoSetInnerHTML(allocator);
     // try demoSuspiciousAttributes(allocator);
 }
 
@@ -874,49 +876,8 @@ fn link_and_script(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
 
-fn js_framework_1_bench(allocator: std.mem.Allocator) !void {
-    var engine = try ScriptEngine.init(allocator);
-    defer engine.deinit();
-
-    z.print("\n=== JS-framework-1 --------------------------------\n\n", .{});
-
-    const start = std.time.nanoTimestamp();
-
-    const html_file = try std.fs.cwd().openFile("js/js-fram-1/index.html", .{});
-    defer html_file.close();
-    const html = try html_file.readToEndAlloc(allocator, 1024 * 10);
-    defer allocator.free(html);
-
-    try engine.loadHTML(html);
-
-    const code_file = try std.fs.cwd().openFile("js/js-fram-1/js-vanilla-bench1.js", .{});
-    defer code_file.close();
-    const code = try code_file.readToEndAlloc(allocator, 1024 * 10);
-    defer allocator.free(code);
-    const c_code = try allocator.dupeZ(u8, code);
-    defer allocator.free(c_code);
-
-    const val = try engine.eval(c_code, "bench_script", .global);
-    engine.ctx.freeValue(val);
-
-    // const clicker_js = @embedFile("../js/js-fram/clicker.js");
-    // The click script <-- needs to be in "/src" to work
-    const clicker_file = try std.fs.cwd().openFile("js/js-fram-1/clicker.js", .{});
-    defer clicker_file.close();
-    const clicker_js = try clicker_file.readToEndAlloc(allocator, 1024 * 10);
-    defer allocator.free(clicker_js);
-    const clicker_c_code = try allocator.dupeZ(u8, clicker_js);
-    defer allocator.free(clicker_c_code);
-    const clicker = try engine.eval(clicker_c_code, "clicker.js", .global);
-    engine.ctx.freeValue(clicker);
-
-    const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000);
-    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n\n", .{ms});
-}
-
-fn js_framework_2_bench(allocator: std.mem.Allocator) !void {
-    var engine = try ScriptEngine.init(allocator);
+fn js_framework_2_bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== JS-framework-2 --------------------------------\n\n", .{});
@@ -1056,7 +1017,7 @@ fn extractScript(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\
         \\  <div id="ignore"></div>
         \\
-        \\  <script src="jquery.js"></script>
+        \\  <script src=""></script>
         \\
         \\  <script>
         \\      var b = a + 20; 
@@ -1179,11 +1140,11 @@ fn eventListeners(allocator: std.mem.Allocator, sbx: []const u8) !void {
     }
 }
 
-fn transplante(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn textContentSetter(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    z.print("\n=== Transplante Demo -------------------------\n\n", .{});
+    z.print("\n=== textContent Setter Demo -------------------------\n\n", .{});
 
     try engine.loadHTML(
         \\<!DOCTYPE html>
@@ -1193,16 +1154,22 @@ fn transplante(allocator: std.mem.Allocator) !void {
     );
     const script =
         \\ const el = document.getElementById("target");
-        \\ console.log("Found element:", el.tagName);
+        \\ console.log("[JS] Found element:", el.tagName);
         \\ el.textContent = "Updated by JS!";
-        \\ el.textContent; // Return this string to Zig
+        \\ globalThis.result = el.textContent; // Return this string to Zig
     ;
 
-    const val = try engine.eval(script, "test_script");
+    const val = try engine.evalModule(script, "test_script");
     defer engine.ctx.freeValue(val);
 
+    const glob = engine.ctx.getGlobalObject();
+    defer engine.ctx.freeValue(glob);
+
+    const res = engine.ctx.getPropertyStr(glob, "result");
+    defer engine.ctx.freeValue(res);
+
     // 3. Verify Result
-    const result_str = try engine.ctx.toZString(val);
+    const result_str = try engine.ctx.toZString(res);
     defer engine.ctx.freeZString(result_str);
 
     std.debug.print("Result: {s}\n", .{result_str});
@@ -1277,8 +1244,8 @@ fn transplante(allocator: std.mem.Allocator) !void {
 //     // try std.testing.expect(buttons.len == 1);
 // }
 
-fn domParser(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn domParser(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     z.print("\n=== DOM Parser -------------------------\n\n", .{});
@@ -1289,22 +1256,31 @@ fn domParser(allocator: std.mem.Allocator) !void {
         \\ const parserDivContent = pDoc.getElementById("content").textContent;
         \\ console.log("Parsed div content:", parserDivContent);
         \\ console.log("Document body innerHTML:", pDoc.body.innerHTML);
-        \\ pDoc.body.innerHTML;
+        \\ globalThis.result = pDoc.body.innerHTML;
     ;
 
-    const val = try engine.eval(script, "script", .global);
+    const val = try engine.evalModule(script, "script");
     defer engine.ctx.freeValue(val);
-    const html = try engine.ctx.toZString(val);
+    try engine.run();
+
+    std.debug.assert(engine.ctx.isPromise(val));
+
+    const glob = engine.ctx.getGlobalObject();
+    defer engine.ctx.freeValue(glob);
+    const res = engine.ctx.getPropertyStr(glob, "result");
+    defer engine.ctx.freeValue(res);
+    const html = try engine.ctx.toZString(res);
     defer engine.ctx.freeZString(html);
     z.print("{s}\n", .{html});
     const expected =
         \\<div id="content">DOMParser worked</div>
     ;
     try std.testing.expectEqualStrings(expected, html);
+    z.print("\n[Zig] 🟢 As expected!\n\n", .{});
 }
 
-fn buildDOM(allocator: std.mem.Allocator) !void {
-    const engine = try ScriptEngine.init(allocator);
+fn buildDOM(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     const script =
@@ -1700,7 +1676,7 @@ fn execute_Simple_Script_In_HTML(allocator: std.mem.Allocator) !void {
 }
 
 // EVENT LOOP =================================================================
-fn promise_scope(allocator: std.mem.Allocator) !void {
+fn promise_scope(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const promise_test =
         \\// Create a Promise
         \\const promise = new Promise((resolve, reject) => {
@@ -1708,10 +1684,10 @@ fn promise_scope(allocator: std.mem.Allocator) !void {
         \\  return resolve("Promise resolved!");
         \\});
         \\
-        \\let result = "pending";
+        \\let result = "Promise pending";
         \\sendToHost(result);
         \\promise.then(value => {
-        \\  console.log("[JS] Promise before:", value);
+        \\  console.log("[JS] Promise before:", result);
         \\  result = value;
         \\}).then(() => {
         \\  console.log("[JS] Promise final:", result);
@@ -1722,7 +1698,7 @@ fn promise_scope(allocator: std.mem.Allocator) !void {
 
     z.print("\n=== Promise & scope & returned value --------------------------\n\n", .{});
 
-    const engine = try ScriptEngine.init(allocator);
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
     const val2 = try engine.ctx.eval(promise_test, "<promise>", .{});
     defer engine.ctx.freeValue(val2);
@@ -1737,7 +1713,7 @@ fn promise_scope(allocator: std.mem.Allocator) !void {
     defer engine.ctx.freeZString(res2_str);
 
     try std.testing.expectEqualStrings(res2_str, "Promise resolved!");
-    z.print("[Zig] Promise Result: {s}\n\n", .{res2_str});
+    z.print("[Zig] 🟢 Promise Result: {s}\n\n", .{res2_str});
 }
 
 fn async_task_sequence_AB(allocator: std.mem.Allocator) !void {
@@ -1776,7 +1752,7 @@ fn async_task_sequence_AB(allocator: std.mem.Allocator) !void {
     z.print("[Zig] ✅expects 'AB', found: {s}\n", .{txt});
 }
 
-fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator) !void {
+fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const src =
         \\const runner2 = () => {
         \\    let str = '';
@@ -1799,13 +1775,14 @@ fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator) !void {
         \\    });
         \\};
         \\runner2().then(res => {
-        \\  console.log("[JS] " + res);
+        \\  console.log("[JS] Result: " + res);
+        \\  globalThis.testResult = res;
         \\  return res;
         \\});
     ;
 
     z.print("\n=== Async Task Sequence 2 -----------------------------------------\n\n", .{});
-    const engine = try ScriptEngine.init(allocator);
+    const engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
     const val = try engine.eval(src, "test.js", .global);
@@ -1814,12 +1791,16 @@ fn async_task_sequence_ABCDEFGH(allocator: std.mem.Allocator) !void {
 
     std.debug.assert(engine.ctx.isPromise(val));
 
-    const p_res = engine.ctx.promiseResult(val);
-    defer engine.ctx.freeValue(p_res);
-    const txt = try engine.ctx.toZString(p_res);
+    const prom = engine.ctx.promiseResult(val);
+    defer engine.ctx.freeValue(prom);
+    // const glob = engine.ctx.getGlobalObject();
+    // defer engine.ctx.freeValue(glob);
+    // const result = engine.ctx.getPropertyStr(glob, "testResult");
+    // defer engine.ctx.freeValue(result);
+    const txt = try engine.ctx.toZString(prom);
     defer engine.ctx.freeZString(txt);
 
-    try std.testing.expectEqualStrings(txt, "ABCDEFGH");
+    try std.testing.expectEqualStrings("ABCDEFGH", txt);
 
     z.print("[Zig] ✅ expects 'ABCDEFGH', found: {s}\n", .{txt});
 }
@@ -2553,6 +2534,42 @@ fn async_Fetch_Blob(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\});
     ;
     const res = try engine.eval(script, "<fetch>", .module);
+    engine.ctx.freeValue(res);
+    try engine.run();
+}
+
+fn test_FileReader(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== FileReader Polyfill Test  ----------------------------------------\n\n", .{});
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const script =
+        \\(async function() {
+        \\  const blob = new Blob(["Hello, FileReader!"], { type: "text/plain" });
+        \\  console.log("Created blob:", blob.size, "bytes");
+        \\
+        \\  // Test readAsText
+        \\  const reader1 = new FileReader();
+        \\  reader1.onload = (e) => console.log("readAsText:", e.target.result);
+        \\  reader1.readAsText(blob);
+        \\  await new Promise(r => setTimeout(r, 10));
+        \\
+        \\  // Test readAsArrayBuffer
+        \\  const reader2 = new FileReader();
+        \\  reader2.onload = (e) => console.log("readAsArrayBuffer:", e.target.result.byteLength, "bytes");
+        \\  reader2.readAsArrayBuffer(blob);
+        \\  await new Promise(r => setTimeout(r, 10));
+        \\
+        \\  // Test readAsDataURL
+        \\  const reader3 = new FileReader();
+        \\  reader3.onload = (e) => console.log("readAsDataURL:", e.target.result.substring(0, 40) + "...");
+        \\  reader3.readAsDataURL(blob);
+        \\  await new Promise(r => setTimeout(r, 10));
+        \\
+        \\  console.log("FileReader tests passed!");
+        \\})();
+    ;
+    const res = try engine.eval(script, "<filereader>", .module);
     engine.ctx.freeValue(res);
     try engine.run();
 }
@@ -3658,7 +3675,7 @@ fn demoZigToAsyncJS(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !void {
 
 /// use `parseFromString` or `createDocFromString` to create a document with a BODY element populated by the input string
 /// ==========================================================
-fn simpleParsingsMethods(gpa: std.mem.Allocator) !void {
+fn simpleParsingsMethods(gpa: std.mem.Allocator, _: []const u8) !void {
     const html = "<div></div>";
     {
         const doc = try z.createDocument();

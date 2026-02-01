@@ -62,6 +62,7 @@ pub const EventLoop = struct {
     worker_class_id: zqjs.ClassID = 0,
     worker_core: ?*anyopaque = null,
     on_error_handler: qjs.JSValue = zqjs.UNDEFINED,
+    pending_background_jobs: std.atomic.Value(usize) = .init(0),
     /// Curl Multi handle for non-blocking HTTP requests
     curl_multi: ?*CurlMulti = null,
     /// Arena for temporary allocations during task processing (reset per cycle)
@@ -344,6 +345,8 @@ pub const EventLoop = struct {
                 _ = self.active_tasks; // Access check
                 self.mutex.unlock();
 
+                const has_bg_jobs = self.pending_background_jobs.load(.monotonic) > 0;
+
                 const has_workers = (self.workers.items.len > 0);
                 const has_timers = (self.timers.items.len > 0);
                 // [CRITICAL] Check isJobPending to avoid quitting if a Promise just queued another Promise
@@ -352,7 +355,14 @@ pub const EventLoop = struct {
                 const has_curl_pending = if (self.curl_multi) |cm| cm.pendingCount() > 0 else false;
 
                 // if the last timer in the system created a Promise, the loop would see timers.len == 0 and exit immediately, killing the pending Promise before it could run
-                if (!has_timers and queue_empty and self.active_tasks == 0 and !has_workers and !has_jobs and !has_curl_pending) {
+                if (!has_timers and
+                    queue_empty and
+                    self.active_tasks == 0 and
+                    !has_workers and
+                    !has_jobs and
+                    !has_curl_pending and
+                    !has_bg_jobs)
+                {
                     break;
                 }
             }
@@ -391,7 +401,6 @@ pub const EventLoop = struct {
 
         // We iterate, but we will BREAK/RETURN after the first execution
         while (i < self.timers.items.len) {
-            // ... [Keep cancellation check logic same as source: 98] ...
             if (self.timers.items[i].is_cancelled) {
                 self.timers.items[i].ctx.freeValue(self.timers.items[i].callback);
                 _ = self.timers.swapRemove(i);
@@ -414,12 +423,17 @@ pub const EventLoop = struct {
                 // Cleanup
                 ctx.freeValue(global);
                 if (ctx.isException(ret)) {
-                    ctx.freeValue(ret);
-                    ctx.freeValue(callback);
-                    _ = self.timers.swapRemove(i);
-                    return error.JSException;
-                    // _ = ctx.checkAndPrintException();
+                    const ex = ctx.getException();
+                    const ex_str = ctx.toCString(ex) catch null;
+                    if (ex_str) |s| {
+                        std.debug.print("❌ Timer Error: {s}\n", .{s});
+                        ctx.freeCString(s);
+                    }
+                    ctx.freeValue(ex);
+                    // ctx.freeValue(callback);
+                    // _ = self.timers.swapRemove(i);
                 }
+                ctx.freeValue(ret);
 
                 // Update/Remove Timer
                 if (is_interval and !self.timers.items[i].is_cancelled) {
@@ -430,8 +444,7 @@ pub const EventLoop = struct {
                     _ = self.timers.swapRemove(i);
                 }
 
-                // [CRITICAL FIX] Return 0 immediately!
-                // This forces the Event Loop to go back to 'run()',
+                // Return 0 immediately! Forces the EL to go back to 'run()',
                 // allowing 'executePendingJob' (Microtasks) to run BEFORE the next timer.
                 return 0;
             } else {
@@ -445,6 +458,7 @@ pub const EventLoop = struct {
     pub fn spawnWorker(self: *EventLoop, comptime worker_fn: anytype, task_data: anytype) !void {
         std.debug.print("[EvtLoop] Spawning worker task\n", .{});
         try self.thread_pool.spawn(worker_fn, .{task_data});
+        _ = self.pending_background_jobs.fetchAdd(1, .monotonic);
         self.mutex.lock();
         self.active_tasks += 1;
         self.mutex.unlock();

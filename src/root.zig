@@ -182,6 +182,7 @@ pub const setInnerHTML = parse.setInnerHTML;
 pub const setHTML = parse.setHTML;
 pub const getHTML = serialize.getHTML;
 pub const setOuterHTML = serialize.setOuterHTML;
+pub const setOuterHTMLSimple = serialize.setOuterHTMLSimple;
 
 // Parser engine for fragment & template processing
 pub const DOMParser = parse.DOMParser;
@@ -191,6 +192,7 @@ pub const createElementWithAttrs = lxb.createElementWithAttrs;
 pub const createTextNode = lxb.createTextNode;
 
 pub const removeNode = lxb.removeNode;
+pub const removeChild = lxb.removeChild;
 pub const destroyNode = lxb.destroyNode;
 // pub const destroyElement = lxb.destroyElement;
 
@@ -218,6 +220,7 @@ pub const tagName = lxb.tagName; // Allocated
 pub const tagName_zc = lxb.tagName_zc; // Zero-copy
 pub const qualifiedName = lxb.qualifiedName; // Allocated
 pub const qualifiedName_zc = lxb.qualifiedName_zc; // Zero-copy
+pub const namespaceURI_zc = lxb.namespaceURI; // Zero-copy
 
 pub const isNodeEmpty = lxb.isNodeEmpty;
 pub const isVoid = lxb.isVoid;
@@ -260,6 +263,7 @@ pub const getElementSpecByEnum = specs.getElementSpecByEnum;
 pub const commentToNode = lxb.commentToNode;
 pub const nodeToComment = lxb.nodeToComment;
 pub const createComment = lxb.createComment;
+pub const createCommentNode = lxb.createCommentNode;
 // pub const destroyComment = lxb.destroyComment;
 
 pub const commentContent = text.commentContent;
@@ -307,7 +311,9 @@ pub const lastElementChild = lxb.lastElementChild;
 pub const parentElement = lxb.parentElement;
 
 pub const insertBefore = lxb.insertBefore;
+pub const jsInsertBefore = lxb.jsInsertBefore;
 pub const insertAfter = lxb.insertAfter;
+pub const replaceChild = lxb.replaceChild;
 pub const replaceAll = lxb.replaceAll;
 
 pub const InsertPosition = lxb.InsertPosition;
@@ -335,6 +341,7 @@ pub const FragmentContext = frag_temp.FragmentContext;
 // fragments
 pub const fragmentToNode = frag_temp.fragmentToNode;
 pub const createDocumentFragment = frag_temp.createDocumentFragment;
+pub const createDocumentFragmentNode = frag_temp.createDocumentFragmentNode;
 pub const destroyDocumentFragment = frag_temp.destroyDocumentFragment;
 pub const appendFragment = frag_temp.appendFragment;
 // templates
@@ -524,10 +531,23 @@ pub const getElementId = attrs.getElementId;
 pub const getElementId_zc = attrs.getElementId_zc;
 pub const hasElementId = attrs.hasElementId;
 
+// Dataset (data-* attributes with camelCase conversion)
+pub const kebabToCamelCase = attrs.kebabToCamelCase;
+pub const camelToKebabCase = attrs.camelToKebabCase;
+pub const getDataAttribute = attrs.getDataAttribute;
+pub const setDataAttribute = attrs.setDataAttribute;
+pub const removeDataAttribute = attrs.removeDataAttribute;
+pub const hasDataAttribute = attrs.hasDataAttribute;
+pub const DataAttributeEntry = attrs.DataAttributeEntry;
+pub const getDataAttributes = attrs.getDataAttributes;
+pub const freeDataAttributes = attrs.freeDataAttributes;
+
 //==============================================================================
 // Single Element Search functions - Simple Walk
 
 pub const contains = search.contains;
+pub const DocumentPosition = search.DocumentPosition;
+pub const compareDocumentPosition = search.compareDocumentPosition;
 pub const getElementById = search.getElementById;
 pub const getElementByTag = search.getElementByTag;
 pub const getElementByClass = search.getElementByClass;

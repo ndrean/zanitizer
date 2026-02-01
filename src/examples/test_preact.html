@@ -1,0 +1,20 @@
+<html>
+  <body>
+    <h1>Testing CDN import: Preact</h1>
+    <div id="root"></div>
+    <script type="module">
+      import { h, render } from "preact";
+
+      console.log("[JS] Preact loaded:", typeof render);
+      const rootElement = document.getElementById("root");
+
+      try {
+        render(h("p", null, "Hello from Preact!"), rootElement);
+        console.log("[JS] Preact render success!");
+        console.log("[JS] innerHTML:", rootElement.innerHTML);
+      } catch (e) {
+        console.log("[JS] Preact Error:", e.message);
+      }
+    </script>
+  </body>
+</html>

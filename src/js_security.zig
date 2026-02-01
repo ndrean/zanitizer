@@ -3,6 +3,8 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const posix = std.posix;
+const curl = @import("curl");
+const ImportMap = @import("js_import_map.zig").ImportMap;
 
 // pub fn openFileNoSymlinkEscape(sandbox: *Sandbox, rel_path: []const u8) !std.fs.File {
 //     var it = std.mem.splitScalar(u8, rel_path, '/');
@@ -131,24 +133,48 @@ pub fn openFileNoSymlinkEscape(sandbox: *Sandbox, rel_path: []const u8) !std.fs.
     // We slice the buffer with :0 to create a null-terminated sentinel slice
     const fd = try posix.openat(current_dir.fd, name_buf[0..filename.len :0], flags_struct, 0);
 
+    // [SECURITY] Hardlink escape detection
+    // A hardlink to a file outside the sandbox would have a different device ID
+    const file_stat = try posix.fstat(fd);
+    const sandbox_stat = try posix.fstat(sandbox.dir.fd);
+    if (file_stat.dev != sandbox_stat.dev) {
+        posix.close(fd);
+        return error.AccessDenied; // Cross-device hardlink attempt
+    }
+
     return std.fs.File{ .handle = fd };
 }
 
 pub const Sandbox = struct {
     allocator: std.mem.Allocator,
     dir: std.fs.Dir,
+    import_map: ImportMap,
 
+    /// Initialize sandbox without import map (pass-through mode)
     pub fn init(allocator: std.mem.Allocator, root_path: []const u8) !Sandbox {
+        return initWithImportMap(allocator, root_path, null);
+    }
+
+    /// Initialize sandbox with optional import map JSON config
+    /// Pass null or empty string for pass-through mode (no import map)
+    pub fn initWithImportMap(allocator: std.mem.Allocator, root_path: []const u8, import_map_json: ?[]const u8) !Sandbox {
         // Open the directory ONCE.
         // .iterate=false is safer if you don't need directory listings.
-        const dir = try std.fs.openDirAbsolute(root_path, .{ .iterate = false });
+        var dir = try std.fs.openDirAbsolute(root_path, .{ .iterate = false });
+        errdefer dir.close();
+
+        var import_map = try ImportMap.fromJson(allocator, import_map_json);
+        errdefer import_map.deinit();
+
         return Sandbox{
             .allocator = allocator,
             .dir = dir,
+            .import_map = import_map,
         };
     }
 
     pub fn deinit(self: *Sandbox) void {
+        self.import_map.deinit();
         self.dir.close();
     }
 };
@@ -158,8 +184,45 @@ fn isRemote(path: []const u8) bool {
     return std.mem.startsWith(u8, path, "http:") or std.mem.startsWith(u8, path, "https:");
 }
 
+/// Resolve a relative URL against a base URL
+/// e.g., base="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/+esm", rel="npm/react@18.2.0/+esm"
+/// returns "https://cdn.jsdelivr.net/npm/react@18.2.0/+esm"
+fn resolveRemoteUrl(allocator: std.mem.Allocator, base_url: []const u8, relative: []const u8) ![]u8 {
+    // Find the scheme (https://)
+    const scheme_end = std.mem.indexOf(u8, base_url, "://") orelse return error.InvalidUrl;
+    const after_scheme = base_url[scheme_end + 3 ..];
+
+    // Find the host end (first / after scheme)
+    const host_end = std.mem.indexOf(u8, after_scheme, "/") orelse after_scheme.len;
+    const origin = base_url[0 .. scheme_end + 3 + host_end]; // e.g., "https://cdn.jsdelivr.net"
+
+    if (std.mem.startsWith(u8, relative, "/")) {
+        // Absolute path from origin: /npm/... -> https://cdn.jsdelivr.net/npm/...
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ origin, relative });
+    } else if (std.mem.startsWith(u8, relative, "../") or std.mem.startsWith(u8, relative, "./")) {
+        // Relative path: resolve against base path
+        const base_path = after_scheme[host_end..]; // e.g., /npm/react-dom@18.2.0/+esm
+        const base_dir = std.fs.path.dirname(base_path) orelse "/";
+
+        // Use path resolution with fake root
+        const resolved = try std.fs.path.resolve(allocator, &.{ "/", base_dir, relative });
+        defer allocator.free(resolved);
+
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ origin, resolved });
+    } else {
+        // Bare relative path (no leading /): resolve against base directory
+        // e.g., "npm/react@18.2.0/+esm" relative to "/npm/react-dom@18.2.0/+esm"
+        // -> "/npm/react@18.2.0/+esm" (replace last segment)
+        const base_path = after_scheme[host_end..];
+        const base_dir = std.fs.path.dirname(base_path) orelse "/";
+
+        return std.fmt.allocPrint(allocator, "{s}{s}/{s}", .{ origin, base_dir, relative });
+    }
+}
+
 /// [Normalizer] Resolves import paths logically WITHOUT touching the filesystem.
 /// Prevents '..' from escaping the sandbox root.
+/// Supports import maps for bare specifier resolution.
 pub fn js_secure_module_normalize(
     ctx: ?*qjs.JSContext,
     module_base_name: [*c]const u8,
@@ -173,13 +236,36 @@ pub fn js_secure_module_normalize(
     if (module_name == null) return null;
     const name_slice = std.mem.span(module_name);
 
+    // [IMPORT MAP] Check if this is a bare specifier with a mapping
+    if (sandbox.import_map.resolve(name_slice)) |mapped_url| {
+        z.print("[Zig] Import map: {s} -> {s}\n", .{ name_slice, mapped_url });
+        return qjs.js_strndup(ctx, mapped_url.ptr, mapped_url.len);
+    }
+
     if (isRemote(name_slice)) {
         return z.qjs.js_strdup(ctx, module_name);
     }
 
-    // 1. Block basic nonsense
-    if (std.mem.startsWith(u8, name_slice, "http") or std.mem.startsWith(u8, name_slice, "//")) {
-        _ = qjs.JS_ThrowReferenceError(ctx, "Remote imports blocked");
+    // [URL RESOLUTION] Handle relative imports within remote modules
+    // When base is remote (e.g., https://cdn.jsdelivr.net/npm/react-dom@18.2.0/+esm)
+    // and import is relative (e.g., npm/react@18.2.0/+esm or ../react/+esm)
+    // resolve it as a URL relative to the base
+    if (module_base_name) |base| {
+        const base_span = std.mem.span(base);
+        if (isRemote(base_span)) {
+            // Parse base URL to get origin + path
+            const resolved_url = resolveRemoteUrl(allocator, base_span, name_slice) catch {
+                _ = qjs.JS_ThrowReferenceError(ctx, "Failed to resolve relative URL");
+                return null;
+            };
+            defer allocator.free(resolved_url);
+            return qjs.js_strndup(ctx, resolved_url.ptr, resolved_url.len);
+        }
+    }
+
+    // 1. Block basic nonsense (protocol-relative URLs)
+    if (std.mem.startsWith(u8, name_slice, "//")) {
+        _ = qjs.JS_ThrowReferenceError(ctx, "Protocol-relative imports blocked");
         return null;
     }
 
@@ -246,33 +332,120 @@ pub fn js_secure_module_loader(
     const name = std.mem.span(module_name);
 
     if (isRemote(name)) {
-        var allocating = std.Io.Writer.Allocating.init(allocator);
-        defer allocating.deinit();
+        // [SECURITY] Enforce HTTPS-only for remote imports
+        if (!std.mem.startsWith(u8, name, "https://")) {
+            _ = qjs.JS_ThrowReferenceError(ctx, "Security: Remote imports must use HTTPS");
+            return null;
+        }
 
-        var client: std.http.Client = .{
-            .allocator = allocator,
+        // Allocate CA bundle for TLS certificate validation
+        var ca_bundle = curl.allocCABundle(allocator) catch {
+            _ = qjs.JS_ThrowInternalError(ctx, "Failed to allocate CA bundle");
+            return null;
         };
-        defer client.deinit();
+        defer ca_bundle.deinit();
 
-        const response = client.fetch(.{
-            .method = .GET,
-            .location = .{ .url = name },
-            .response_writer = &allocating.writer,
-        }) catch return null;
+        // Create curl Easy handle with TLS validation
+        var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch {
+            _ = qjs.JS_ThrowInternalError(ctx, "Failed to initialize HTTP client");
+            return null;
+        };
+        defer easy.deinit();
 
-        std.debug.assert(response.status == .ok);
-        const code = allocating.toOwnedSlice() catch return null;
-        defer allocator.free(code);
-        std.debug.assert(code.len > 0);
+        // Set URL
+        const url_z = allocator.dupeZ(u8, name) catch {
+            _ = qjs.JS_ThrowInternalError(ctx, "Out of memory");
+            return null;
+        };
+        defer allocator.free(url_z);
+        easy.setUrl(url_z) catch {
+            _ = qjs.JS_ThrowInternalError(ctx, "Failed to set URL");
+            return null;
+        };
+
+        // GET method (default)
+        easy.setMethod(.GET) catch {};
+
+        // Setup write callback to collect response
+        const WriteCtx = struct {
+            list: std.ArrayList(u8),
+            alloc: std.mem.Allocator,
+        };
+        var write_ctx = WriteCtx{ .list = .empty, .alloc = allocator };
+        defer write_ctx.list.deinit(allocator);
+
+        easy.setWritedata(&write_ctx) catch {};
+        easy.setWritefunction(struct {
+            fn callback(
+                ptr: [*c]c_char,
+                size: c_uint,
+                nmemb: c_uint,
+                user_data: *anyopaque,
+            ) callconv(.c) c_uint {
+                const total = size * nmemb;
+                const wctx: *WriteCtx = @ptrCast(@alignCast(user_data));
+                const data: [*]const u8 = @ptrCast(ptr);
+                wctx.list.appendSlice(wctx.alloc, data[0..total]) catch return 0;
+                return total;
+            }
+        }.callback) catch {};
+
+        // Perform synchronous fetch
+        const response = easy.perform() catch {
+            _ = qjs.JS_ThrowReferenceError(ctx, "Network request failed for: %s", module_name);
+            return null;
+        };
+
+        // Check HTTP status
+        const status = response.status_code;
+        if (status < 200 or status >= 300) {
+            _ = qjs.JS_ThrowReferenceError(ctx, "HTTP %d for: %s", @as(c_int, @intCast(status)), module_name);
+            return null;
+        }
+
+        const code_len = write_ctx.list.items.len;
+        if (code_len == 0) {
+            _ = qjs.JS_ThrowReferenceError(ctx, "Empty response from: %s", module_name);
+            return null;
+        }
+
+        // [SECURITY] Size limit for remote modules
+        const MAX_REMOTE_SIZE = 5 * 1024 * 1024; // 5MB
+        if (code_len > MAX_REMOTE_SIZE) {
+            _ = qjs.JS_ThrowInternalError(ctx, "Remote module too large");
+            return null;
+        }
+
+        // [SECURITY] Verify SRI hash if configured
+        if (!sandbox.import_map.verifyIntegrity(name, write_ctx.list.items)) {
+            _ = qjs.JS_ThrowReferenceError(ctx, "Integrity check failed for: %s", module_name);
+            return null;
+        }
+
+        // Ensure null termination for QuickJS (prevents buffer overrun issues)
+        write_ctx.list.append(allocator, 0) catch {
+            _ = qjs.JS_ThrowInternalError(ctx, "Out of memory");
+            return null;
+        };
+
         const func_val = qjs.JS_Eval(
             ctx,
-            code.ptr,
-            code.len,
+            write_ctx.list.items.ptr,
+            code_len, // Original length (without null terminator)
             module_name,
             qjs.JS_EVAL_TYPE_MODULE | qjs.JS_EVAL_FLAG_COMPILE_ONLY,
         );
 
-        if (qjs.JS_IsException(func_val)) return null;
+        if (qjs.JS_IsException(func_val)) {
+            // Get and print the exception for debugging
+            const exception = qjs.JS_GetException(ctx);
+            defer qjs.JS_FreeValue(ctx, exception);
+
+            // Print exception details
+            const w_ctx = zqjs.Context{ .ptr = ctx };
+            _ = w_ctx.checkAndPrintException();
+            return null;
+        }
         return @ptrCast(qjs.JS_VALUE_GET_PTR(func_val));
     } else {
 
@@ -319,7 +492,7 @@ pub fn js_secure_module_loader(
 
 /// [security] Hybrid Path Validator
 /// Ensures a resolved path does not logically escape the CWD.
-/// - Absolute paths must start with the CWD.
+/// - Absolute paths must start with the CWD followed by '/' or be exactly CWD.
 /// - Relative paths must not start with ".." (upward traversal).
 pub fn isSafePath(allocator: std.mem.Allocator, resolved_path: []const u8) bool {
     // 1. Absolute Path Check (Standard LFI protection)
@@ -327,8 +500,14 @@ pub fn isSafePath(allocator: std.mem.Allocator, resolved_path: []const u8) bool 
         // We get CWD every time to ensure we aren't using a stale cached path
         const cwd = std.process.getCwdAlloc(allocator) catch return false;
         defer allocator.free(cwd);
-        // Must live inside CWD
-        return std.mem.startsWith(u8, resolved_path, cwd);
+
+        // [FIX] Ensure exact prefix match with separator
+        // Without this, "/home/user/sandbox_evil" would pass check for "/home/user/sandbox"
+        if (!std.mem.startsWith(u8, resolved_path, cwd)) return false;
+
+        // Must be exactly cwd OR cwd followed by '/'
+        if (resolved_path.len == cwd.len) return true;
+        return resolved_path[cwd.len] == '/';
     }
 
     // 2. Relative Path Check (For systems returning relative paths from resolve)

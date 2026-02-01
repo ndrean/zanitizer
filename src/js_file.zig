@@ -30,89 +30,142 @@ fn js_file_constructor(
 
     if (argc < 2) return ctx.throwTypeError("File constructor requires at least 2 arguments: (bits, name)");
 
-    // 1. Parse Name & Args (Temporary copies, we will dupe into Arena later)
+    // 1. Parse Name
     const name_str = ctx.toZString(argv[1]) catch return z.jsException;
     defer ctx.freeZString(name_str);
 
+    // 2. Prepare Variables for Options
+    // We hold the raw C-String pointers here so we can defer their cleanup at function scope
+    var type_cstr: ?[*c]const u8 = null;
+    defer if (type_cstr) |s| ctx.freeCString(s);
+
+    var path_cstr: ?[*c]const u8 = null;
+    defer if (path_cstr) |s| ctx.freeCString(s);
+
     var mime_type: []const u8 = "";
     var last_modified: i64 = std.time.milliTimestamp();
+    var file_path: ?[]const u8 = null;
 
+    // 3. Parse Options
     if (argc > 2 and ctx.isObject(argv[2])) {
         const opts = argv[2];
+
+        // 'type'
         const type_prop = ctx.getPropertyStr(opts, "type");
         defer ctx.freeValue(type_prop);
         if (!ctx.isUndefined(type_prop)) {
             if (ctx.toCString(type_prop)) |s| {
-                mime_type = std.mem.span(s); // Uses wrapper buffer, must copy or use immediately
-                defer ctx.freeCString(s);
+                type_cstr = s; // Store pointer to free later
+                mime_type = std.mem.span(s);
             } else |_| {}
         }
 
+        // 'lastModified'
         const lm_prop = ctx.getPropertyStr(opts, "lastModified");
         defer ctx.freeValue(lm_prop);
         if (!ctx.isUndefined(lm_prop)) {
             _ = qjs.JS_ToInt64(ctx.ptr, &last_modified, lm_prop);
         }
-    }
 
-    // 2. Create the Object & Arena FIRST
-    const file_obj = rc.allocator.create(FileObject) catch return ctx.throwOutOfMemory();
-
-    // Initialize the internal structures
-    file_obj.blob.parent_allocator = rc.allocator;
-    file_obj.blob.arena = std.heap.ArenaAllocator.init(rc.allocator);
-    file_obj.path = null; // Must explicitly initialize - create() doesn't apply defaults
-    file_obj.disk_size = null;
-    const arena_alloc = file_obj.blob.arena.allocator();
-
-    // 3. Process 'bits' using the ARENA ALLOCATOR
-    // This ensures 'data' belongs to the arena, making cleanup trivial.
-    var buffer: std.ArrayListUnmanaged(u8) = .empty;
-    // No errdefer deinit needed for buffer itself if we destroy the arena on error.
-
-    const bits = argv[0];
-    if (ctx.isArray(bits)) {
-        const len_val = ctx.getPropertyStr(bits, "length");
-        var len: u32 = 0;
-        _ = qjs.JS_ToUint32(ctx.ptr, &len, len_val);
-        ctx.freeValue(len_val);
-
-        var i: u32 = 0;
-        while (i < len) : (i += 1) {
-            const val = qjs.JS_GetPropertyUint32(ctx.ptr, bits, i);
-            defer qjs.JS_FreeValue(ctx.ptr, val);
-
-            if (ctx.isString(val)) {
-                if (ctx.toCString(val)) |s| {
-                    buffer.appendSlice(arena_alloc, std.mem.span(s)) catch {
-                        // On error, clean up the whole object
-                        file_obj.blob.arena.deinit();
-                        rc.allocator.destroy(file_obj);
-                        return ctx.throwOutOfMemory();
-                    };
-                    ctx.freeCString(s);
-                } else |_| {}
-            } else {
-                var ab_len: usize = 0;
-                const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &ab_len, val);
-                if (ptr != null) {
-                    buffer.appendSlice(arena_alloc, ptr[0..ab_len]) catch {
-                        file_obj.blob.arena.deinit();
-                        rc.allocator.destroy(file_obj);
-                        return ctx.throwOutOfMemory();
-                    };
-                }
-            }
+        // 'path' (Custom Extension for Zero-Copy I/O)
+        const path_prop = ctx.getPropertyStr(opts, "path");
+        defer ctx.freeValue(path_prop);
+        if (!ctx.isUndefined(path_prop)) {
+            if (ctx.toCString(path_prop)) |s| {
+                path_cstr = s; // Store pointer to free later
+                file_path = std.mem.span(s);
+            } else |_| {}
         }
     }
 
-    // 4. Finalize Fields (All allocated in Arena)
-    file_obj.blob.data = buffer.toOwnedSlice(arena_alloc) catch {
-        file_obj.blob.arena.deinit();
-        rc.allocator.destroy(file_obj);
-        return ctx.throwOutOfMemory();
-    };
+    // 4. Create Object & Arena
+    const file_obj = rc.allocator.create(FileObject) catch return ctx.throwOutOfMemory();
+    file_obj.blob.parent_allocator = rc.allocator;
+    file_obj.blob.arena = std.heap.ArenaAllocator.init(rc.allocator);
+    const arena_alloc = file_obj.blob.arena.allocator();
 
+    // Initialize defaults
+    file_obj.path = null;
+    file_obj.disk_size = null;
+
+    // 5. Handle Data Source (Disk Path vs Memory Bits)
+    if (file_path) |path| {
+        // --- CASE A: Disk-Backed File (Zero Copy) ---
+
+        // Verify file exists & get stats (Security Check)
+        const file = js_security.openFileNoSymlinkEscape(rc.sandbox, path) catch {
+            file_obj.blob.arena.deinit();
+            rc.allocator.destroy(file_obj);
+            return ctx.throwTypeError("File not found or access denied:");
+        };
+        defer file.close();
+
+        const stat = file.stat() catch {
+            file_obj.blob.arena.deinit();
+            rc.allocator.destroy(file_obj);
+            return ctx.throwInternalError("Failed to stat file");
+        };
+
+        // Copy path to Arena
+        file_obj.path = arena_alloc.dupe(u8, path) catch {
+            file_obj.blob.arena.deinit();
+            rc.allocator.destroy(file_obj);
+            return ctx.throwOutOfMemory();
+        };
+
+        // Set metadata
+        file_obj.disk_size = stat.size;
+        file_obj.blob.data = &.{}; // Empty memory buffer for Zero-Copy
+
+    } else {
+        // --- CASE B: In-Memory File (Standard Behavior) ---
+
+        var buffer: std.ArrayListUnmanaged(u8) = .empty;
+        const bits = argv[0];
+
+        if (ctx.isArray(bits)) {
+            const len_val = ctx.getPropertyStr(bits, "length");
+            var len: u32 = 0;
+            _ = qjs.JS_ToUint32(ctx.ptr, &len, len_val);
+            ctx.freeValue(len_val);
+
+            var i: u32 = 0;
+            while (i < len) : (i += 1) {
+                const val = qjs.JS_GetPropertyUint32(ctx.ptr, bits, i);
+                defer qjs.JS_FreeValue(ctx.ptr, val);
+
+                if (ctx.isString(val)) {
+                    if (ctx.toCString(val)) |s| {
+                        buffer.appendSlice(arena_alloc, std.mem.span(s)) catch {
+                            file_obj.blob.arena.deinit();
+                            rc.allocator.destroy(file_obj);
+                            ctx.freeCString(s); // Free temp string
+                            return ctx.throwOutOfMemory();
+                        };
+                        ctx.freeCString(s);
+                    } else |_| {}
+                } else {
+                    var ab_len: usize = 0;
+                    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &ab_len, val);
+                    if (ptr != null) {
+                        buffer.appendSlice(arena_alloc, ptr[0..ab_len]) catch {
+                            file_obj.blob.arena.deinit();
+                            rc.allocator.destroy(file_obj);
+                            return ctx.throwOutOfMemory();
+                        };
+                    }
+                }
+            }
+        }
+
+        file_obj.blob.data = buffer.toOwnedSlice(arena_alloc) catch {
+            file_obj.blob.arena.deinit();
+            rc.allocator.destroy(file_obj);
+            return ctx.throwOutOfMemory();
+        };
+    }
+
+    // 6. Finalize Common Fields
     file_obj.blob.mime_type = arena_alloc.dupe(u8, mime_type) catch {
         file_obj.blob.arena.deinit();
         rc.allocator.destroy(file_obj);
@@ -127,7 +180,7 @@ fn js_file_constructor(
 
     file_obj.last_modified = last_modified;
 
-    // 5. Wrap in JS Object
+    // 7. Return JS Object
     const obj = qjs.JS_NewObjectClass(ctx.ptr, rc.classes.file);
     if (qjs.JS_IsException(obj)) {
         file_obj.blob.arena.deinit();

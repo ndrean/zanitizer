@@ -1,0 +1,3 @@
+This is a test file for disk streaming upload.
+It demonstrates zero-copy file uploads using curl's MIME API.
+The file is streamed directly from disk without loading into memory.

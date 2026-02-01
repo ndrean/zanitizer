@@ -44,13 +44,14 @@ pub const ScriptEngine = struct {
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
     sandbox: js_security.Sandbox,
 
+    const import_map_json = @embedFile("examples/cdn_import_map.json");
     /// Initialize JS Environment on the heap
     pub fn init(allocator: std.mem.Allocator, sandbox_root: []const u8) !*ScriptEngine {
         const self = try allocator.create(ScriptEngine);
         self.allocator = allocator;
         errdefer allocator.destroy(self);
 
-        self.sandbox = try js_security.Sandbox.init(allocator, sandbox_root);
+        self.sandbox = try js_security.Sandbox.initWithImportMap(allocator, sandbox_root, import_map_json);
         errdefer self.sandbox.deinit();
 
         // Runtime & Context
@@ -327,39 +328,6 @@ pub const ScriptEngine = struct {
         return val;
     }
 
-    // /// Extracts content from all inline <script> tags.
-    // ///
-    // /// Caller owns the returned slice and the strings inside it.
-    // pub fn getC_Scripts(self: *ScriptEngine) ![][:0]const u8 {
-    //     // 1. Find all script tags
-    //     const scripts = try z.querySelectorAll(self.allocator, self.dom.doc, "script");
-    //     defer self.allocator.free(scripts);
-
-    //     var code_list: std.ArrayList([:0]const u8) = .empty;
-    //     errdefer {
-    //         for (code_list.items) |s| self.allocator.free(s);
-    //         code_list.deinit(self.allocator);
-    //     }
-
-    //     for (scripts) |script_el| {
-    //         // 2. Filter out external scripts (<script src="...">)
-    //         if (z.hasAttribute(script_el, "src")) continue;
-
-    //         // 3. Extract content
-    //         // Note: z.elementToNode is needed if textContent expects a Node
-    //         const node = z.elementToNode(script_el);
-    //         const content = z.textContent_zc(node);
-
-    //         // Only add if not empty
-    //         if (content.len > 0) {
-    //             const c_content = try self.allocator.dupeZ(u8, content);
-    //             try code_list.append(self.allocator, c_content);
-    //         }
-    //     }
-
-    //     return try code_list.toOwnedSlice(self.allocator);
-    // }
-
     // Helper to expose C functions easily
     pub fn registerFunction(self: *ScriptEngine, name: [:0]const u8, func: qjs.JSCFunction, args: c_int) !void {
         const global = self.ctx.getGlobalObject();
@@ -600,7 +568,7 @@ pub const ScriptEngine = struct {
         }
     }
 
-    /// Helper to fetch remote resources synchronously (for script/css loading)
+    /// TO BE REMOVED. NOT SAFE. Helper to fetch remote resources synchronously
     pub fn get(self: *ScriptEngine, url: []const u8) ![]u8 {
         var allocating = std.Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();

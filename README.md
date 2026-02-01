@@ -33,11 +33,16 @@ This is not:
 **Security**:
 
 - Runtime limits (memory, stack size, interruptible) for DoS.
-- sandboxed File loading with no symlink for LFI.
+- Downloads limited to HTTPS and declared in _import_map.json_,
+- sandboxed File system limited to current directory and beyond, and no loading if symlink for LFI.
 - Load sanitized and sandboxed HTML, CSS and scripts
   - The `Zanitizer` module is 5 to 50 times faster than DOMPurify integrated in the `Sanitizerconfig`.
   - It is based on a declarative security policy (_html_specs.zig_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
   - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
+
+```sh
+url -s https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css | openssl dgst -sha384 -binary | base64 
+```
 
 It is performant:
 

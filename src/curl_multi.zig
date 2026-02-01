@@ -15,113 +15,14 @@ const curl = @import("curl");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const js_readable_stream = @import("js_readable_stream.zig");
+const js_response = @import("js_response.zig");
 
 // Access raw libcurl C API for constants
 const c = curl.libcurl;
 
 // ============================================================================
-// Response Method Helpers
+// Internal Helpers
 // ============================================================================
-
-fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    const body_val = ctx.getPropertyStr(this, "_body");
-    defer ctx.freeValue(body_val);
-
-    if (ctx.isUndefined(body_val)) return ctx.newString("");
-
-    var len: usize = 0;
-    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &len, body_val);
-    if (ptr == null) return ctx.newString("");
-
-    return ctx.newString(ptr[0..len]);
-}
-
-fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    const text_val = js_res_text(ctx_ptr, this, 0, null);
-    defer ctx.freeValue(text_val);
-
-    if (ctx.isException(text_val)) return text_val;
-
-    const str = ctx.toZString(text_val) catch return ctx.throwOutOfMemory();
-    defer ctx.freeZString(str);
-
-    return ctx.parseJSON(str, "<json>");
-}
-
-fn js_res_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    return ctx.getPropertyStr(this, "_body");
-}
-
-/// response.body getter - returns ReadableStream
-fn js_res_body(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-
-    // Check if we already created a stream (cached in _stream)
-    const cached = ctx.getPropertyStr(this, "_stream");
-    if (!ctx.isUndefined(cached)) {
-        return cached;
-    }
-    ctx.freeValue(cached);
-
-    // Get the ArrayBuffer data
-    const body_val = ctx.getPropertyStr(this, "_body");
-    defer ctx.freeValue(body_val);
-
-    if (ctx.isUndefined(body_val)) {
-        return zqjs.NULL;
-    }
-
-    var len: usize = 0;
-    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &len, body_val);
-    if (ptr == null) {
-        return zqjs.NULL;
-    }
-
-    // Create ReadableStream from the buffer
-    const stream = js_readable_stream.createStreamFromBuffer(ctx, ptr[0..len]) catch {
-        return ctx.throwOutOfMemory();
-    };
-
-    // Cache it on the response
-    ctx.setPropertyStr(this, "_stream", ctx.dupValue(stream)) catch {};
-
-    return stream;
-}
-
-fn js_async_wrapper(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, workFn: fn (?*qjs.JSContext, qjs.JSValue, c_int, [*c]qjs.JSValue) callconv(.c) qjs.JSValue) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    var resolvers: [2]qjs.JSValue = undefined;
-    const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
-    const resolve = resolvers[0];
-    const reject = resolvers[1];
-    defer ctx.freeValue(resolve);
-    defer ctx.freeValue(reject);
-    const result = workFn(ctx_ptr, this, 0, null);
-
-    if (ctx.isException(result)) {
-        const err = ctx.getException();
-        _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
-        ctx.freeValue(err);
-    } else {
-        _ = ctx.call(resolve, zqjs.UNDEFINED, &.{result});
-    }
-    ctx.freeValue(result);
-    return promise;
-}
-
-fn js_text_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_text);
-}
-fn js_json_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_json);
-}
-fn js_arrayBuffer_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_arrayBuffer);
-}
 
 /// Wrapper struct to hold ArrayList and allocator together for write callback
 const WriteBuffer = struct {
@@ -380,27 +281,8 @@ pub const CurlMulti = struct {
                 ctx.freeValue(body_ab);
             };
 
-            // Add response methods: text(), json(), arrayBuffer()
-            const text_fn = qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0);
-            ctx.setPropertyStr(resp, "text", text_fn) catch {
-                ctx.freeValue(text_fn);
-            };
-            const json_fn = qjs.JS_NewCFunction(ctx.ptr, js_json_proxy, "json", 0);
-            ctx.setPropertyStr(resp, "json", json_fn) catch {
-                ctx.freeValue(json_fn);
-            };
-            const ab_fn = qjs.JS_NewCFunction(ctx.ptr, js_arrayBuffer_proxy, "arrayBuffer", 0);
-            ctx.setPropertyStr(resp, "arrayBuffer", ab_fn) catch {
-                ctx.freeValue(ab_fn);
-            };
-
-            // Add body getter (returns ReadableStream)
-            {
-                const atom = qjs.JS_NewAtom(ctx.ptr, "body");
-                const get = qjs.JS_NewCFunction2(ctx.ptr, js_res_body, "get_body", 0, qjs.JS_CFUNC_generic, 0);
-                _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, resp, atom, get, zqjs.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
-                qjs.JS_FreeAtom(ctx.ptr, atom);
-            }
+            // Add response methods: text(), json(), arrayBuffer(), blob(), body
+            js_response.addResponseMethods(ctx, resp);
 
             const ret = ctx.call(req.resolve, zqjs.UNDEFINED, &.{resp});
             ctx.freeValue(ret);
@@ -448,28 +330,40 @@ pub const CurlMulti = struct {
         // Method is always POST for multipart
         try easy.setMethod(.POST);
 
-        // Build multipart using curl's MIME API
+        // Build multipart using curl's MIME API - use raw C API for filename/mime_type support
         var multipart = try easy.createMultiPart();
         errdefer multipart.deinit();
 
         for (entries) |entry| {
             const name_z = try arena.dupeZ(u8, entry.name);
 
+            // Use raw libcurl API to get part pointer for filename/mime_type
+            const part = c.curl_mime_addpart(multipart.mime_handle) orelse return error.MimeAddPart;
+
+            // Set name
+            if (c.curl_mime_name(part, name_z) != c.CURLE_OK) return error.MimeSetName;
+
             // Choose data source: file path (zero-copy streaming) or in-memory data
             if (entry.file_path) |path| {
                 // Stream directly from disk - no memory copy for large files!
                 const path_z = try arena.dupeZ(u8, path);
-                try multipart.addPart(name_z, .{ .file = path_z });
+                if (c.curl_mime_filedata(part, path_z) != c.CURLE_OK) return error.MimeSetFileData;
             } else if (entry.data) |data| {
                 // In-memory data (curl copies internally)
-                try multipart.addPart(name_z, .{ .data = data });
+                if (c.curl_mime_data(part, data.ptr, data.len) != c.CURLE_OK) return error.MimeSetData;
             }
 
-            // TODO: curl MIME API in zig-curl doesn't expose filename/mime_type setters yet
-            // For now, the data is sent but without custom filename/mime-type headers
-            // A future enhancement would be to call curl_mime_filename() and curl_mime_type()
-            _ = entry.filename;
-            _ = entry.mime_type;
+            // Set filename if provided (required for server to recognize as file upload)
+            if (entry.filename) |fname| {
+                const fname_z = try arena.dupeZ(u8, fname);
+                if (c.curl_mime_filename(part, fname_z) != c.CURLE_OK) return error.MimeSetFilename;
+            }
+
+            // Set MIME type if provided
+            if (entry.mime_type) |mime| {
+                const mime_z = try arena.dupeZ(u8, mime);
+                if (c.curl_mime_type(part, mime_z) != c.CURLE_OK) return error.MimeSetType;
+            }
         }
 
         // Set the multipart as the request body

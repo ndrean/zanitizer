@@ -1,0 +1,22 @@
+<html>
+  <head> </head>
+  <body>
+    <h1>Testing CDN import: React</h1>
+    <div id="root"></div>
+    <script type="module">
+      import React from "react";
+      import ReactDOM from "react-dom";
+
+      console.log("[JS] React loaded:", typeof React.createElement);
+
+      const rootElement = document.getElementById("root");
+
+      try {
+        ReactDOM.render("<p>Hello</p>", rootElement);
+        console.log("[JS] ✅ React Success!");
+      } catch (e) {
+        console.log("[JS] ❌ React Error:", e.message);
+      }
+    </script>
+  </body>
+</html>

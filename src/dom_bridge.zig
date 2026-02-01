@@ -9,6 +9,7 @@ const js_DOMParser = @import("js_DomParser.zig");
 const CssSelectorEngine = z.CssSelectorEngine;
 const js_style = @import("js_CSSStyleDeclaration.zig");
 const js_classList = @import("js_classList.zig");
+const js_dataset = @import("js_dataset.zig");
 pub const js_url = @import("js_url.zig");
 const js_headers = @import("js_headers.zig");
 const js_events = @import("js_events.zig");
@@ -18,6 +19,7 @@ const js_formData = @import("js_formData.zig");
 const js_polyfills = @import("js_polyfills.zig");
 const js_filelist = @import("js_filelist.zig");
 const js_file_reader_sync = @import("js_file_reader_sync.zig");
+const js_file_reader = @import("js_file_reader.zig");
 const js_text_encoding = @import("js_text_encoding.zig");
 const js_readable_stream = @import("js_readable_stream.zig");
 const js_writable_stream = @import("js_writable_stream.zig");
@@ -79,6 +81,13 @@ pub const DOMBridge = struct {
                 );
                 z.qjs.JS_FreeAtom(ctx.ptr, atom);
             }
+
+            // Manual: insertBefore(newChild, refChild) - refChild can be null
+            {
+                const ib_fn = ctx.newCFunction(js_insertBefore, "insertBefore", 2);
+                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "insertBefore", ib_fn);
+            }
+
             ctx.setClassProto(rc.classes.dom_node, node_proto);
 
             // --- HTML_ELEMENT ------------------
@@ -194,10 +203,11 @@ pub const DOMBridge = struct {
         try js_url.URLBridge.install(ctx);
         try js_events.EventBridge.install(ctx);
         try js_classList.install(ctx);
+        try js_dataset.install(ctx);
         try js_polyfills.install(ctx);
         try js_file.install(ctx);
         try js_filelist.install(ctx);
-        try js_file_reader_sync.install(ctx);
+        try js_file_reader.FileReaderBridge.install(ctx);
         try js_text_encoding.install(ctx);
         try js_readable_stream.install(ctx);
         try js_writable_stream.install(ctx);
@@ -318,6 +328,33 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "getComputedStyle", gcs_fn);
         // Also attach it to the window object proxy
         try ctx.setPropertyStr(window_obj, "getComputedStyle", ctx.dupValue(gcs_fn));
+
+        // Copy polyfills from globalThis to window (React checks window.requestAnimationFrame)
+        const raf = ctx.getPropertyStr(global, "requestAnimationFrame");
+        if (!ctx.isUndefined(raf)) {
+            try ctx.setPropertyStr(window_obj, "requestAnimationFrame", raf);
+        } else {
+            ctx.freeValue(raf);
+        }
+        const caf = ctx.getPropertyStr(global, "cancelAnimationFrame");
+        if (!ctx.isUndefined(caf)) {
+            try ctx.setPropertyStr(window_obj, "cancelAnimationFrame", caf);
+        } else {
+            ctx.freeValue(caf);
+        }
+        const mc = ctx.getPropertyStr(global, "MessageChannel");
+        if (!ctx.isUndefined(mc)) {
+            try ctx.setPropertyStr(window_obj, "MessageChannel", mc);
+        } else {
+            ctx.freeValue(mc);
+        }
+        const mp = ctx.getPropertyStr(global, "MessagePort");
+        if (!ctx.isUndefined(mp)) {
+            try ctx.setPropertyStr(window_obj, "MessagePort", mp);
+        } else {
+            ctx.freeValue(mp);
+        }
+
         try ctx.setPropertyStr(global, "window", window_obj);
 
         // Standard global aliases
@@ -335,6 +372,43 @@ pub const DOMBridge = struct {
     }
 
     // --- WRAPPERS (Helpers for bindings) ---
+
+    /// Wraps a Zig Document pointer into a JS Value
+    pub fn wrapDocument(ctx: w.Context, doc: *z.HTMLDocument) !w.Value {
+        const rc = RuntimeContext.get(ctx);
+        // const obj = z.qjs.JS_NewObjectClass(ctx.ptr, rc.classes.document);
+        // if (z.qjs.JS_IsException(obj)) return error.Exception;
+
+        const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+        const ptr_addr = @intFromPtr(doc);
+        if (ptr_addr == @intFromPtr(bridge.doc)) {
+            const global = ctx.getGlobalObject();
+            defer ctx.freeValue(global);
+            return ctx.getPropertyStr(global, "document");
+        }
+
+        // Check Cahce
+        if (bridge.node_cache.getPtr(ptr_addr)) |cached_val| {
+            return ctx.dupValue(cached_val.*);
+        }
+
+        const obj = ctx.newObjectClass(rc.classes.owned_document);
+        try ctx.setOpaque(obj, doc);
+
+        const dup_for_cache = ctx.dupValue(obj);
+        try bridge.node_cache.put(ptr_addr, dup_for_cache);
+
+        // 2. Link the Native Pointer
+        // Note: We cast to *anyopaque because JS_SetOpaque expects void*
+        // _ = z.qjs.JS_SetOpaque(obj, @ptrCast(doc));
+
+        // 3. (Optional but Recommended) Identity Preservation
+        // In a full implementation, you would cache this object so that
+        // multiple calls to 'ownerDocument' return the exact same JS object (===).
+        // For now, returning a new wrapper is functional but breaks 'doc === doc'.
+
+        return obj;
+    }
 
     pub fn wrapElement(ctx: w.Context, element: *z.HTMLElement) !w.Value {
         const rc = RuntimeContext.get(ctx);
@@ -354,6 +428,9 @@ pub const DOMBridge = struct {
         const tag_str = ctx.newString(tag);
         try ctx.setPropertyStr(obj, "tagName", tag_str);
 
+        // Add nodeType (ELEMENT_NODE = 1)
+        try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(1));
+
         // store in cache
         const dup_for_cache = ctx.dupValue(obj);
         try bridge.node_cache.put(ptr_addr, dup_for_cache);
@@ -364,6 +441,18 @@ pub const DOMBridge = struct {
     pub fn wrapNode(ctx: w.Context, node: *z.DomNode) !w.Value {
         const rc = RuntimeContext.get(ctx);
         const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+
+        // Special case: document nodes should return the global document object
+        // This ensures parentNode chain terminates correctly (document.parentNode = null)
+        const n_type = z.nodeType(node);
+        if (n_type == .document) {
+            const doc: *z.HTMLDocument = @ptrCast(@alignCast(node));
+            return wrapDocument(ctx, doc);
+            // const global = ctx.getGlobalObject();
+            // defer ctx.freeValue(global);
+            // return ctx.getPropertyStr(global, "document");
+        }
+
         const ptr_addr = @intFromPtr(node);
         // Check cache
         if (bridge.node_cache.getPtr(ptr_addr)) |cached_val| {
@@ -372,21 +461,22 @@ pub const DOMBridge = struct {
         }
 
         var class_id = rc.classes.dom_node; // Default
-        const n_type = z.nodeType(node);
         if (n_type == .element) {
             class_id = rc.classes.html_element;
-        } else if (n_type == .document_fragment) {
-            class_id = rc.classes.document_fragment;
-        } else if (n_type == .document) {
-            class_id = rc.classes.document;
         }
+        // Note: document_fragment nodes from templates are document-owned,
+        // so we use dom_node class (no finalizer). The document_fragment class
+        // with its finalizer is only for JS-created fragments via new DocumentFragment().
 
-        // create new wrapper
-        const obj = ctx.newObjectClass(rc.classes.dom_node);
+        // create new wrapper using the appropriate class
+        const obj = ctx.newObjectClass(class_id);
         try ctx.setOpaque(obj, node);
-        const nodeName = z.nodeName_zc(node);
-        const name_str = ctx.newString(nodeName);
-        try ctx.setPropertyStr(obj, "nodeName", name_str);
+
+        // nodeType is set as instance property (for fast access)
+        // nodeName uses the prototype getter
+        const node_type_num: i32 = @intCast(@intFromEnum(n_type));
+        try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(node_type_num));
+
         // store in cache
         const dup_for_cache = ctx.dupValue(obj);
         try bridge.node_cache.put(ptr_addr, dup_for_cache);
@@ -725,6 +815,66 @@ fn js_get_childNodes(
     }
 
     return array;
+}
+
+/// parent.insertBefore(newChild, refChild) - refChild can be null
+fn js_insertBefore(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+
+    if (argc < 1) return ctx.throwTypeError("insertBefore requires at least 1 argument");
+
+    // Unwrap parent (this)
+    const parent = DOMBridge.unwrapNode(ctx, this_val) orelse
+        return ctx.throwTypeError("'this' is not a Node");
+
+    // Unwrap newChild (first argument)
+    const new_child = DOMBridge.unwrapNode(ctx, argv[0]) orelse
+        return ctx.throwTypeError("First argument must be a Node");
+
+    // Unwrap refChild (second argument, can be null/undefined)
+    const ref_child: ?*z.DomNode = if (argc >= 2 and !ctx.isNull(argv[1]) and !ctx.isUndefined(argv[1]))
+        DOMBridge.unwrapNode(ctx, argv[1])
+    else
+        null;
+
+    // Call the Zig implementation
+    const result = z.jsInsertBefore(parent, new_child, ref_child);
+
+    // Return the inserted node
+    return DOMBridge.wrapNode(ctx, result) catch return w.EXCEPTION;
+}
+
+fn js_get_parentNode(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+    const parent = z.parentNode(node);
+    if (parent) |p| {
+        return DOMBridge.wrapNode(ctx, p) catch return w.EXCEPTION;
+    }
+    return w.NULL;
+}
+
+fn js_get_ownerDocument(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    // Return the global document object
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    return ctx.getPropertyStr(global, "document");
 }
 
 // Dummy implementation to stop JS from crashing

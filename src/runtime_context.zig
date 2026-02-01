@@ -32,6 +32,7 @@ pub const RuntimeContext = struct {
         event: zqjs.ClassID = 0,
         css_style_decl: zqjs.ClassID = 0,
         dom_token_list: zqjs.ClassID = 0,
+        dom_string_map: zqjs.ClassID = 0,
         blob: zqjs.ClassID = 0,
         file: qjs.JSClassID = 0,
         file_list: qjs.JSClassID = 0,

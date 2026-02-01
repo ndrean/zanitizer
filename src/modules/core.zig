@@ -138,6 +138,14 @@ pub fn createComment(doc: *z.HTMLDocument, data: []const u8) !*z.Comment {
     ) orelse Err.CreateCommentFailed;
 }
 
+/// [core] Create a comment node (returns DomNode for JS bindings)
+///
+/// [JS] `document.createComment(data)` method
+pub fn createCommentNode(doc: *z.HTMLDocument, data: []const u8) !*z.DomNode {
+    const comment = try createComment(doc, data);
+    return commentToNode(comment);
+}
+
 /// [core] Element creation with attributes options
 ///
 /// Can create HTMLElements or custom elements.
@@ -237,7 +245,7 @@ test "create elt" {
 // Root, Owner, Body node/element access
 // ---------------------------------------------------------------------------
 
-/// [core] Returns the document root node ("HTML" or "XML")
+/// [core] Returns the document  ("HTML" or "XML")
 pub fn documentRoot(doc: *z.HTMLDocument) ?*z.DomNode {
     return lxb_dom_document_root(doc);
 }
@@ -798,6 +806,48 @@ pub fn tagName(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
     return try allocator.dupe(u8, name_slice);
 }
 
+/// [core] Get the namespace URI for an element
+///
+/// [JS] `element.namespaceURI` property
+/// Returns the namespace URI for the element:
+/// - "http://www.w3.org/1999/xhtml" for HTML elements
+/// - "http://www.w3.org/2000/svg" for SVG elements
+/// - "http://www.w3.org/1998/Math/MathML" for MathML elements
+pub fn namespaceURI(element: *z.HTMLElement) []const u8 {
+    const tag = tagName_zc(element);
+    // Check for SVG elements (common ones)
+    if (std.mem.eql(u8, tag, "SVG") or
+        std.mem.eql(u8, tag, "PATH") or
+        std.mem.eql(u8, tag, "CIRCLE") or
+        std.mem.eql(u8, tag, "RECT") or
+        std.mem.eql(u8, tag, "LINE") or
+        std.mem.eql(u8, tag, "POLYGON") or
+        std.mem.eql(u8, tag, "POLYLINE") or
+        std.mem.eql(u8, tag, "ELLIPSE") or
+        std.mem.eql(u8, tag, "G") or
+        std.mem.eql(u8, tag, "DEFS") or
+        std.mem.eql(u8, tag, "USE") or
+        std.mem.eql(u8, tag, "TEXT") or
+        std.mem.eql(u8, tag, "TSPAN"))
+    {
+        return "http://www.w3.org/2000/svg";
+    }
+    // Check for MathML elements
+    if (std.mem.eql(u8, tag, "MATH") or
+        std.mem.eql(u8, tag, "MI") or
+        std.mem.eql(u8, tag, "MO") or
+        std.mem.eql(u8, tag, "MN") or
+        std.mem.eql(u8, tag, "MROW") or
+        std.mem.eql(u8, tag, "MFRAC") or
+        std.mem.eql(u8, tag, "MSUP") or
+        std.mem.eql(u8, tag, "MSUB"))
+    {
+        return "http://www.w3.org/1998/Math/MathML";
+    }
+    // Default to HTML namespace
+    return "http://www.w3.org/1999/xhtml";
+}
+
 /// [core] Get the allocated qualified name (lowercased)  of an _element_ (namespace:tagname or just tagname) as owned Zig slice
 ///
 /// This is useful for elements with namespaces like SVG or MathML.
@@ -861,6 +911,40 @@ pub fn qualifiedName_zc(element: *z.HTMLElement) []const u8 {
 /// [core] Remove a node from its parent
 pub fn removeNode(node: *z.DomNode) void {
     lxb_dom_node_remove_wo_events(node);
+}
+
+/// [core] Remove a child node from a parent
+///
+/// [JS] `parent.removeChild(child)` method
+/// Returns the removed child node.
+///
+/// ## Example
+/// ```
+/// const removed = z.removeChild(parent, child);
+/// ```
+pub fn removeChild(parent: *z.DomNode, child: *z.DomNode) ?*z.DomNode {
+    // Verify child is actually a child of parent
+    if (parentNode(child) != parent) return null;
+
+    removeNode(child);
+    return child;
+}
+
+test "removeChild" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<html><body><ul><li id=\"1\">First</li><li id=\"2\">Second</li></ul></body></html>");
+    defer destroyDocument(doc);
+
+    const ul = z.getElementByTag(z.bodyNode(doc).?, .ul).?;
+    const first_li = z.getElementById(doc, "1").?;
+
+    const removed = removeChild(elementToNode(ul), elementToNode(first_li));
+    try testing.expect(removed != null);
+    try testing.expect(removed.? == elementToNode(first_li));
+
+    const html = try z.outerHTML(allocator, ul);
+    defer allocator.free(html);
+    try testing.expectEqualStrings("<ul><li id=\"2\">Second</li></ul>", html);
 }
 
 /// [core] Destroy a node from the DOM with its children
@@ -1440,9 +1524,62 @@ pub fn insertAfter(reference_node: *z.DomNode, new_node: *z.DomNode) void {
     lxb_dom_node_insert_after_wo_events(reference_node, new_node);
 }
 
-/// [core] Insert a node before a reference node
+/// [core] Insert a node before a reference node (low-level)
 pub fn insertBefore(reference_node: *z.DomNode, new_node: *z.DomNode) void {
     lxb_dom_node_insert_before_wo_events(reference_node, new_node);
+}
+
+/// [core] JavaScript-compatible insertBefore
+/// `parent.insertBefore(newChild, refChild)` - inserts newChild before refChild
+/// If refChild is null, appends newChild to parent
+/// Returns the inserted node
+pub fn jsInsertBefore(parent: *z.DomNode, new_child: *z.DomNode, ref_child: ?*z.DomNode) *z.DomNode {
+    if (ref_child) |ref| {
+        // Insert before the reference child
+        insertBefore(ref, new_child);
+    } else {
+        // refChild is null - append to parent
+        appendChild(parent, new_child);
+    }
+    return new_child;
+}
+
+/// [core] Replace a child node with a new node
+///
+/// [JS] `parent.replaceChild(newChild, oldChild)` method
+/// Returns the replaced (old) child node.
+///
+/// ## Example
+/// ```
+/// const replaced = z.replaceChild(parent, newNode, oldNode);
+/// ```
+pub fn replaceChild(parent: *z.DomNode, new_child: *z.DomNode, old_child: *z.DomNode) ?*z.DomNode {
+    // Verify old_child is actually a child of parent
+    if (parentNode(old_child) != parent) return null;
+
+    // Insert new_child before old_child, then remove old_child
+    insertBefore(old_child, new_child);
+    removeNode(old_child);
+    return old_child;
+}
+
+test "replaceChild" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<html><body><ul><li id=\"1\">First</li><li id=\"2\">Second</li></ul></body></html>");
+    defer destroyDocument(doc);
+
+    const ul = z.getElementByTag(z.bodyNode(doc).?, .ul).?;
+    const first_li = z.getElementById(doc, "1").?;
+
+    const new_li = try z.createElementWithAttrs(doc, "li", &.{.{ .name = "id", .value = "new" }});
+
+    const replaced = replaceChild(elementToNode(ul), elementToNode(new_li), elementToNode(first_li));
+    try testing.expect(replaced != null);
+    try testing.expect(replaced.? == elementToNode(first_li));
+
+    const html = try z.outerHTML(allocator, ul);
+    defer allocator.free(html);
+    try testing.expectEqualStrings("<ul><li id=\"new\"></li><li id=\"2\">Second</li></ul>", html);
 }
 
 test "insertBefore / insertAfter" {

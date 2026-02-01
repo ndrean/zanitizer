@@ -3,12 +3,10 @@ async function runStreamingTest() {
   const FILE_SIZE_MB = 1;
   const CHUNK_SIZE = 64 * 1024;
   const UPLOAD_URL = "https://httpbin.org/post";
-  console.log(`\n🚀 STARTING STREAMING UPLOAD TEST (${FILE_SIZE_MB}MB)`);
+  console.log(`\n STARTING STREAMING UPLOAD TEST (${FILE_SIZE_MB}MB)`);
 
   try {
-    console.log(
-      `\n[1/3] 💿 Generating ${FILE_SIZE_MB}MB file: "${FILE_NAME}"\n`,
-    );
+    console.log(`\n-  Generating ${FILE_SIZE_MB}MB file: "${FILE_NAME} -"\n`);
     const writeStream = fs.createWriteStream(FILE_NAME);
     const writer = writeStream.getWriter();
     const totalBytes = FILE_SIZE_MB * 1024 * 1024;
@@ -23,10 +21,10 @@ async function runStreamingTest() {
     await writer.close();
     const writeTime = (Date.now() - startWrite) / 1000;
     console.log(
-      `\n✅ ${writeTime.toFixed(2)}s: (${(FILE_SIZE_MB / writeTime).toFixed(2)}MB/s)`,
+      `\nWrite time:  ${writeTime.toFixed(2)}s: (${(FILE_SIZE_MB / writeTime).toFixed(2)}MB/s)`,
     );
 
-    console.log(`\n[2/3] 📦 Preparing Zero-Copy FormData...`);
+    console.log(`\n-  Preparing Zero-Copy FormData -`);
 
     const form = new FormData();
     const diskFile = fs.fileFromPath(FILE_NAME);
@@ -35,7 +33,7 @@ async function runStreamingTest() {
     form.append("media", diskFile);
     form.append("description", "Large streaming upload test");
 
-    console.log(`\n[3/3] 🌍 Uploading to ${UPLOAD_URL}...`);
+    console.log(`\n - Uploading to ${UPLOAD_URL} - `);
 
     const startUpload = Date.now();
 
@@ -44,19 +42,19 @@ async function runStreamingTest() {
       body: form,
     });
     const uploadTime = (Date.now() - startUpload) / 1000;
-    console.log(`📦 Status: ${res.status} ${res.statusText}`);
+    console.log(`Status: ${res.status} ${res.statusText}`);
 
     const json = await res.json();
     if (json.files && json.files.media) {
       console.log(`✅ Server received file!`);
-      // console.log(`   (Server size preview: ${json.files.media.length} chars)`);
+      console.log(`   (Server size preview: ${json.files.media.length} chars)`);
     } else {
       console.log(
         `⚠️  Server didn't report the file (Size might be too big for HttpBin response)`,
       );
     }
-    console.log(`🚀 Upload finished in ${uploadTime.toFixed(2)}s`);
-    // await fs.rm(FILE_NAME);
+    console.log(`Upload finished in ${uploadTime.toFixed(2)}s`);
+    await fs.rm(FILE_NAME);
   } catch (err) {
     console.error("\n❌ TEST FAILED:", err);
   }

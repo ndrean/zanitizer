@@ -222,6 +222,24 @@ fn workCopy(allocator: std.mem.Allocator, p: CopyPayload) ![]u8 {
     return try allocator.dupe(u8, "true");
 }
 
+fn workAppendFile(allocator: std.mem.Allocator, payload: FileWritePayload) ![]u8 {
+    // Open file for appending (create if doesn't exist)
+    const file = try std.fs.cwd().createFile(payload.path, .{
+        .truncate = false, // Don't truncate existing content
+    });
+    defer file.close();
+
+    // Seek to end and write
+    try file.seekFromEnd(0);
+    try file.writeAll(payload.data);
+
+    // Cleanup inputs
+    allocator.free(payload.path);
+    allocator.free(payload.data);
+
+    return try allocator.dupe(u8, "");
+}
+
 fn workRename(allocator: std.mem.Allocator, p: CopyPayload) ![]u8 {
     try std.fs.cwd().rename(p.src, p.dst);
     p.deinit(allocator);
@@ -331,16 +349,6 @@ fn parseWriteArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
     };
 }
 
-// fn parseOnePath(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !PathPayload {
-//     if (args.len < 1) return error.InvalidArgs;
-//     const p = try ctx.toCString(args[0]);
-//     defer ctx.freeCString(p);
-
-//     // Use the loop's allocator (Tracked!)
-//     const path_dupe = try loop.allocator.dupe(u8, std.mem.span(p));
-//     return PathPayload{ .path = path_dupe };
-// }
-
 fn parseTwoPaths(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !CopyPayload {
     if (args.len < 2) return error.InvalidArgs;
 
@@ -371,12 +379,16 @@ pub const FSBridge = struct {
         try ctx.setPropertyStr(fs, "readFile", read_fn);
 
         // readFileBuffer (Binary - ArrayBuffer)
-        // const read_bin_fn = ctx.newCFunction(AsyncBridge.bindAsyncBuffer(FileReadPayload, parseReadArgs, workReadFile), "readFileBuffer", 1);
-        // try ctx.setPropertyStr(fs, "readFileBuffer", read_bin_fn);
+        const read_bin_fn = ctx.newCFunction(AsyncBridge.bindAsyncBuffer(FileReadPayload, parseReadArgs, workReadFile), "readFileBuffer", 1);
+        try ctx.setPropertyStr(fs, "readFileBuffer", read_bin_fn);
 
         // writeFile
         const write_fn = ctx.newCFunction(AsyncBridge.bindAsync(FileWritePayload, parseWriteArgs, workWriteFile), "writeFile", 2);
         try ctx.setPropertyStr(fs, "writeFile", write_fn);
+
+        // appendFile - append data to file (creates if doesn't exist)
+        const append_fn = ctx.newCFunction(AsyncBridge.bindAsync(FileWritePayload, parseWriteArgs, workAppendFile), "appendFile", 2);
+        try ctx.setPropertyStr(fs, "appendFile", append_fn);
 
         // stat - returns {size, mtime, isFile, isDirectory, isSymlink}
         const stat_fn = ctx.newCFunction(AsyncBridge.bindAsyncJson(PathPayload, StatResult, parsePathArg, workStat), "stat", 1);
@@ -390,10 +402,11 @@ pub const FSBridge = struct {
         const readdir_fn = ctx.newCFunction(AsyncBridge.bindAsyncJson(PathPayload, ReadDirResult, parsePathArg, workReadDir), "readDir", 1);
         try ctx.setPropertyStr(fs, "readDir", readdir_fn);
 
-        // try ctx.setPropertyStr(fs, "mkdir", ctx.newCFunction(AsyncBridge.bindAsync(PathPayload, parseOnePath, workMkDir), "mkdir", 1));
+        // mkdir - creates directory (and parents if needed)
+        try ctx.setPropertyStr(fs, "mkdir", ctx.newCFunction(AsyncBridge.bindAsync(PathPayload, parsePathArg, workMkDir), "mkdir", 1));
 
-        // path -> promise
-        // try ctx.setPropertyStr(fs, "rm", ctx.newCFunction(AsyncBridge.bindAsync(PathPayload, parseOnePath, workRm), "rm", 1));
+        // rm - removes file or directory tree
+        try ctx.setPropertyStr(fs, "rm", ctx.newCFunction(AsyncBridge.bindAsync(PathPayload, parsePathArg, workRm), "rm", 1));
 
         // cp -> promise
         try ctx.setPropertyStr(fs, "copyFile", ctx.newCFunction(AsyncBridge.bindAsync(CopyPayload, parseTwoPaths, workCopy), "copyFile", 2));

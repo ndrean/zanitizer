@@ -116,7 +116,7 @@ pub fn build(b: *std.Build) void {
     const gen_bindings = b.addExecutable(.{
         .name = "gen_bindings",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("tools/gen_bindings.zig"),
+            .root_source_file = b.path("tools/template_gen.zig"),
             .target = target,
             .optimize = optimize,
         }),
@@ -201,14 +201,19 @@ pub fn build(b: *std.Build) void {
     const example_files = [_][]const u8{
         "src/examples/extract_script_from_html.zig",
         "src/examples/return_data_from_JS_into_zig.zig",
-        "src/examples/classlist_demo.zig",
-        "src/examples/text_encoding_demo.zig",
+        "src/examples/classlist.zig",
+        "src/examples/text_encoding.zig",
         "src/examples/readable_stream_demo.zig",
         "src/examples/formdata_upload_demo.zig",
         "src/examples/disk_streaming_upload_demo.zig",
         "src/examples/fs_demo.zig",
         "src/examples/writable_stream_demo.zig",
         "src/examples/streaming_demo.zig",
+        "src/examples/file_reader.zig",
+        "src/examples/cdn_import.zig",
+        "src/examples/js-bench-1.zig",
+        "src/examples/js-bench-2.zig",
+        "src/examples/dom_purify.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

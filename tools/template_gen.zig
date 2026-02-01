@@ -49,6 +49,7 @@ pub const ArgType = union(enum) {
     this_document,
     element,
     node,
+    optional_node, // ?*DomNode - for insertBefore refChild etc.
     document,
     document_root,
     this_dom_token_list,
@@ -65,10 +66,12 @@ const ReturnType = union(enum) {
     element,
     optional_element,
     node,
+    // node_list,
     optional_node,
     document,
     owned_document,
     dom_token_list,
+    dom_string_map,
 
     string,
     string_zc,
@@ -168,9 +171,20 @@ const T = struct {
         \\
     ;
 
-    // ========================================================================
+    // NODE PROPERTY - Document (ownerDocument)
+    const NODE_PROP_DOCUMENT_GETTER =
+        \\// Property Getter for {s}
+        \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+        \\    const result = {s}(node);
+        \\    return DOMBridge.wrapDocument(ctx, result) catch w.EXCEPTION;
+        \\}}
+        \\
+    ;
+
     // NODE PROPERTY - Optional Node (firstChild, nextSibling, etc.)
-    // ========================================================================
     const NODE_PROP_OPT_NODE_GETTER =
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
@@ -181,6 +195,29 @@ const T = struct {
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
         \\    return w.NULL;
         \\}}
+        \\
+    ;
+
+    // NODE PROPERTY - parentNode (special: documents return null to prevent infinite loop)
+    const NODE_PROP_PARENT_NODE_GETTER =
+        \\// Property Getter for parentNode (special handling for documents)
+        \\pub fn js_get_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{ .ptr = ctx_ptr };
+        \\    const rc = RuntimeContext.get(ctx);
+        \\
+        \\    // Documents have no parent - return null to prevent infinite loop
+        \\    if (qjs.JS_GetOpaque(this_val, rc.classes.document) != null or
+        \\        qjs.JS_GetOpaque(this_val, rc.classes.owned_document) != null)
+        \\    {
+        \\        return w.NULL;
+        \\    }
+        \\
+        \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+        \\    const result = z.parentNode(node);
+        \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
+        \\    return w.NULL;
+        \\}
         \\
     ;
 
@@ -243,6 +280,56 @@ const T = struct {
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    {s}
         \\    const result = {s}(node{s});
+        \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
+        \\    return w.NULL;
+        \\}}
+        \\
+    ;
+
+    // ========================================================================
+    // NODE METHOD - Boolean (contains)
+    // ========================================================================
+    const NODE_METHOD_BOOL =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    if (argc < 1) return w.EXCEPTION;
+        \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
+        \\    const other = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument must be a Node");
+        \\    const result = {s}(node, other);
+        \\    return if (result) w.TRUE else w.FALSE;
+        \\}}
+        \\
+    ;
+
+    // ========================================================================
+    // NODE METHOD - Uint16 (compareDocumentPosition)
+    // ========================================================================
+    const NODE_METHOD_UINT16 =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    if (argc < 1) return w.EXCEPTION;
+        \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
+        \\    const other = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument must be a Node");
+        \\    const result = {s}(node, other);
+        \\    return qjs.JS_NewInt32(ctx_ptr, @as(i32, result));
+        \\}}
+        \\
+    ;
+
+    // ========================================================================
+    // NODE METHOD - Optional Node with 2 Node args (replaceChild)
+    // ========================================================================
+    const NODE_METHOD_OPT_NODE_2ARGS =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    if (argc < 2) return w.EXCEPTION;
+        \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
+        \\    const arg1 = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("First argument must be a Node");
+        \\    const arg2 = DOMBridge.unwrapNode(ctx, argv[1]) orelse return ctx.throwTypeError("Second argument must be a Node");
+        \\    const result = {s}(node, arg1, arg2);
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
         \\    return w.NULL;
         \\}}
@@ -440,6 +527,30 @@ const T = struct {
         \\
     ;
 
+    // ========================================================================
+    // DOCUMENT METHOD - Node no args (createDocumentFragment)
+    // ========================================================================
+    const DOC_METHOD_NODE_NOARGS =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const doc: *z.HTMLDocument = blk: {{
+        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\        return ctx.throwTypeError("Method called on object that is not a Document");
+        \\    }};
+        \\    const result = {s}(doc) catch |err| {{
+        \\        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
+        \\        std.debug.print("JS Binding Error: {{}}\n", .{{err}});
+        \\        return ctx.throwTypeError("Native Zig Error");
+        \\    }};
+        \\    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;
+        \\}}
+        \\
+    ;
+
     const ELEMENT_PROP_DOM_TOKEN_LIST_GETTER =
         \\// Property Getter for {s} -> DOMTokenList
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
@@ -450,6 +561,22 @@ const T = struct {
         \\    if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
         \\    // Create the proxy object attached to the same pointer
         \\    const obj = ctx.newObjectClass(rc.classes.dom_token_list);
+        \\    _ = qjs.JS_SetOpaque(obj, ptr);
+        \\    return obj;
+        \\}}
+        \\
+    ;
+
+    const ELEMENT_PROP_DOM_STRING_MAP_GETTER =
+        \\// Property Getter for {s} -> DOMStringMap
+        \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+        \\    if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
+        \\    // Create the DOMStringMap proxy object attached to the same element pointer
+        \\    const obj = ctx.newObjectClass(rc.classes.dom_string_map);
         \\    _ = qjs.JS_SetOpaque(obj, ptr);
         \\    return obj;
         \\}}
@@ -858,11 +985,15 @@ const T = struct {
 const Pattern = enum {
     boolean_attribute,
     string_attribute,
+    node_prop_document,
     node_prop_opt_node,
     node_prop_opt_element,
     node_prop_string_zc,
     node_method_void,
     node_method_opt_node,
+    node_method_bool,
+    node_method_uint16,
+    node_method_opt_node_2args,
     node_method_event_listener,
     node_method_dispatch_event,
     element_prop_error_string,
@@ -874,8 +1005,10 @@ const Pattern = enum {
     element_method_alloc_void,
     element_method_alloc_string,
     element_prop_dom_token_list,
+    element_prop_dom_string_map,
     doc_method_element,
     doc_method_node,
+    doc_method_node_noargs,
     doc_method_opt_element,
     doc_prop_opt_element,
     event_prop_string_zc,
@@ -911,6 +1044,7 @@ fn classifyBinding(b: anytype) Pattern {
                 else => .unknown,
             },
             .this_node => switch (b.prop_type) {
+                .document => .node_prop_document,
                 .optional_node => .node_prop_opt_node,
                 .optional_element => .node_prop_opt_element,
                 .string_zc => .node_prop_string_zc,
@@ -922,6 +1056,7 @@ fn classifyBinding(b: anytype) Pattern {
                 .optional_node => .element_prop_opt_node,
                 .optional_element => .element_prop_opt_element,
                 .dom_token_list => .element_prop_dom_token_list,
+                .dom_string_map => .element_prop_dom_string_map,
                 else => .unknown,
             },
             else => .unknown,
@@ -933,11 +1068,15 @@ fn classifyBinding(b: anytype) Pattern {
         return switch (this_type) {
             .this_event => .event_method_void,
             .this_parser => .parser_method_owned_doc,
-            .this_document => switch (b.return_type) {
-                .element => .doc_method_element,
-                .node => .doc_method_node,
-                .optional_element => .doc_method_opt_element,
-                else => .unknown,
+            .this_document => blk: {
+                // Check if method takes no JS arguments (only this_document)
+                const js_arg_count = countJsArgs(b.args);
+                break :blk switch (b.return_type) {
+                    .element => .doc_method_element,
+                    .node => if (js_arg_count == 0) .doc_method_node_noargs else .doc_method_node,
+                    .optional_element => .doc_method_opt_element,
+                    else => .unknown,
+                };
             },
             .this_element => blk: {
                 // Check for allocator in args
@@ -962,9 +1101,19 @@ fn classifyBinding(b: anytype) Pattern {
                         break :blk .node_method_dispatch_event;
                     }
                 }
+                // Check for methods with 2 node arguments
+                var node_arg_count: usize = 0;
+                for (b.args) |arg| {
+                    if (arg == .node) node_arg_count += 1;
+                }
+                if (node_arg_count == 2 and b.return_type == .optional_node) {
+                    break :blk .node_method_opt_node_2args;
+                }
                 break :blk switch (b.return_type) {
                     .void_type => .node_method_void,
                     .optional_node => .node_method_opt_node,
+                    .boolean => .node_method_bool,
+                    .uint32 => .node_method_uint16, // Use uint32 for u16 returns
                     else => .unknown,
                 };
             },
@@ -1124,8 +1273,16 @@ fn generateBinding(writer: anytype, b: anytype) !void {
             try writer.print(T.STRING_ATTR_GETTER, .{ name, attr, name, attr });
             try writer.print(T.STRING_ATTR_SETTER, .{ name, attr, name, attr });
         },
+        .node_prop_document => {
+             try writer.print(T.NODE_PROP_DOCUMENT_GETTER, .{ name, name, b.getter });
+        },
         .node_prop_opt_node => {
-            try writer.print(T.NODE_PROP_OPT_NODE_GETTER, .{ name, name, b.getter });
+            // Special case for parentNode - needs document check to prevent infinite loop
+            if (std.mem.eql(u8, name, "parentNode")) {
+                try writer.writeAll(T.NODE_PROP_PARENT_NODE_GETTER);
+            } else {
+                try writer.print(T.NODE_PROP_OPT_NODE_GETTER, .{ name, name, b.getter });
+            }
         },
         .node_prop_opt_element => {
             try writer.print(T.NODE_PROP_OPT_ELEMENT_GETTER, .{ name, name, b.getter });
@@ -1147,6 +1304,15 @@ fn generateBinding(writer: anytype, b: anytype) !void {
             const extra_args = formatExtraArgsNode(b.args);
             const extra_extract = extractExtraArgsNode(b.args);
             try writer.print(T.NODE_METHOD_OPT_NODE, .{ b.zig_func_name, name, argc_check, extra_extract, b.zig_func_name, extra_args });
+        },
+        .node_method_bool => {
+            try writer.print(T.NODE_METHOD_BOOL, .{ b.zig_func_name, name, b.zig_func_name });
+        },
+        .node_method_uint16 => {
+            try writer.print(T.NODE_METHOD_UINT16, .{ b.zig_func_name, name, b.zig_func_name });
+        },
+        .node_method_opt_node_2args => {
+            try writer.print(T.NODE_METHOD_OPT_NODE_2ARGS, .{ b.zig_func_name, name, b.zig_func_name });
         },
         .node_method_event_listener => {
             try writer.print(T.NODE_METHOD_EVENT_LISTENER, .{ b.zig_func_name, name, b.zig_func_name });
@@ -1178,6 +1344,9 @@ fn generateBinding(writer: anytype, b: anytype) !void {
         .element_prop_dom_token_list => {
             try writer.print(T.ELEMENT_PROP_DOM_TOKEN_LIST_GETTER, .{ name, name });
         },
+        .element_prop_dom_string_map => {
+            try writer.print(T.ELEMENT_PROP_DOM_STRING_MAP_GETTER, .{ name, name });
+        },
         .element_method_opt_string => {
             try writer.print(T.ELEMENT_METHOD_OPT_STRING, .{ b.zig_func_name, name, b.zig_func_name });
         },
@@ -1192,6 +1361,9 @@ fn generateBinding(writer: anytype, b: anytype) !void {
         },
         .doc_method_node => {
             try writer.print(T.DOC_METHOD_NODE, .{ b.zig_func_name, name, b.zig_func_name });
+        },
+        .doc_method_node_noargs => {
+            try writer.print(T.DOC_METHOD_NODE_NOARGS, .{ b.zig_func_name, name, b.zig_func_name });
         },
         .doc_method_opt_element => {
             try writer.print(T.DOC_METHOD_OPT_ELEMENT, .{ b.zig_func_name, name, b.zig_func_name });

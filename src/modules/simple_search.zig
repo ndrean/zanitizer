@@ -256,6 +256,147 @@ pub fn contains(parent: *z.DomNode, child: *z.DomNode) bool {
 
     return false;
 }
+
+/// DOM Node position constants for compareDocumentPosition
+/// These match the W3C DOM specification values
+pub const DocumentPosition = struct {
+    pub const DISCONNECTED: u16 = 1;
+    pub const PRECEDING: u16 = 2;
+    pub const FOLLOWING: u16 = 4;
+    pub const CONTAINS: u16 = 8;
+    pub const CONTAINED_BY: u16 = 16;
+    pub const IMPLEMENTATION_SPECIFIC: u16 = 32;
+};
+
+/// [DOM] Compare the document position of two nodes
+///
+/// [JS] `node.compareDocumentPosition(other)` method
+///
+/// Returns a bitmask indicating the relationship between the nodes:
+/// - DISCONNECTED (1): Nodes are in different documents or disconnected
+/// - PRECEDING (2): other is preceding this node
+/// - FOLLOWING (4): other is following this node
+/// - CONTAINS (8): other contains this node
+/// - CONTAINED_BY (16): other is contained by this node
+/// - IMPLEMENTATION_SPECIFIC (32): Implementation-specific
+pub fn compareDocumentPosition(reference: *z.DomNode, other: *z.DomNode) u16 {
+    // Same node
+    if (reference == other) return 0;
+
+    // Check if nodes share the same document
+    const ref_doc = z.ownerDocument(reference);
+    const other_doc = z.ownerDocument(other);
+    if (ref_doc != other_doc) {
+        // Disconnected, use pointer comparison for consistent ordering
+        return DocumentPosition.DISCONNECTED |
+            DocumentPosition.IMPLEMENTATION_SPECIFIC |
+            (if (@intFromPtr(reference) < @intFromPtr(other))
+                DocumentPosition.PRECEDING
+            else
+                DocumentPosition.FOLLOWING);
+    }
+
+    // Check containment
+    if (contains(reference, other)) {
+        // reference contains other -> other is CONTAINED_BY reference
+        // In the DOM spec, we're asking "where is other relative to reference"
+        // If reference contains other, then other is a descendant (CONTAINED_BY)
+        // and other FOLLOWS reference in document order
+        return DocumentPosition.CONTAINED_BY | DocumentPosition.FOLLOWING;
+    }
+    if (contains(other, reference)) {
+        // other contains reference -> other CONTAINS reference
+        // reference is a descendant of other, so other PRECEDES reference
+        return DocumentPosition.CONTAINS | DocumentPosition.PRECEDING;
+    }
+
+    // Neither contains the other - find document order
+    // Walk up to find common ancestor, then determine order among siblings
+    // Use stack buffer for efficiency (DOM depth rarely exceeds 64 levels)
+
+    // Get ancestors of reference using stack arrays
+    var ref_buf: [64]*z.DomNode = undefined;
+    var ref_count: usize = 0;
+    var current: ?*z.DomNode = reference;
+    while (current) |node| {
+        if (ref_count >= ref_buf.len) break; // Safety limit
+        ref_buf[ref_count] = node;
+        ref_count += 1;
+        current = z.parentNode(node);
+    }
+
+    // Get ancestors of other
+    var other_buf: [64]*z.DomNode = undefined;
+    var other_count: usize = 0;
+    current = other;
+    while (current) |node| {
+        if (other_count >= other_buf.len) break; // Safety limit
+        other_buf[other_count] = node;
+        other_count += 1;
+        current = z.parentNode(node);
+    }
+
+    // Find common ancestor and divergence point
+    // Ancestors are stored child->parent, so reverse iteration to go root->child
+    var ref_idx = ref_count;
+    var other_idx = other_count;
+
+    // Find where paths diverge
+    while (ref_idx > 0 and other_idx > 0) {
+        ref_idx -= 1;
+        other_idx -= 1;
+        if (ref_buf[ref_idx] != other_buf[other_idx]) {
+            // Found divergence - compare sibling order
+            const ref_sibling = ref_buf[ref_idx];
+            const other_sibling = other_buf[other_idx];
+
+            // Walk through siblings to determine order
+            var sibling: ?*z.DomNode = ref_sibling;
+            while (sibling) |s| {
+                if (s == other_sibling) {
+                    // other_sibling comes after ref_sibling
+                    return DocumentPosition.FOLLOWING;
+                }
+                sibling = z.nextSibling(s);
+            }
+            // other_sibling must come before ref_sibling
+            return DocumentPosition.PRECEDING;
+        }
+    }
+
+    // Shouldn't reach here if nodes are in same document
+    return DocumentPosition.DISCONNECTED;
+}
+
+test "compareDocumentPosition" {
+    const allocator = std.testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"a\"><span id=\"b\"></span></div><p id=\"c\"></p>");
+    defer z.destroyDocument(doc);
+
+    const a = z.elementToNode(z.getElementById(doc, "a").?);
+    const b = z.elementToNode(z.getElementById(doc, "b").?);
+    const c = z.elementToNode(z.getElementById(doc, "c").?);
+
+    // Same node
+    try std.testing.expectEqual(@as(u16, 0), compareDocumentPosition(a, a));
+
+    // a contains b
+    const a_b = compareDocumentPosition(a, b);
+    try std.testing.expect(a_b & DocumentPosition.CONTAINED_BY != 0);
+
+    // b is contained by a
+    const b_a = compareDocumentPosition(b, a);
+    try std.testing.expect(b_a & DocumentPosition.CONTAINS != 0);
+
+    // a precedes c (siblings)
+    const a_c = compareDocumentPosition(a, c);
+    try std.testing.expect(a_c & DocumentPosition.FOLLOWING != 0);
+
+    // c follows a
+    const c_a = compareDocumentPosition(c, a);
+    try std.testing.expect(c_a & DocumentPosition.PRECEDING != 0);
+}
+
 /// [attrs] getElementById traversal DOM search
 ///
 /// Returns the first element with matching ID, or null if not found.
@@ -531,7 +672,7 @@ test "getElementByAttribute" {
 
 test "getElementByDataAttribute" {
     const allocator = testing.allocator;
-    const html = 
+    const html =
         \\<div id="user" data-id="1234567890" data-user="carinaanand" data-date-of-birth>
         \\Carina Anand
         \\</div>

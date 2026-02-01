@@ -62,4 +62,70 @@ pub fn install(ctx: w.Context) !void {
 
     const atob = ctx.newCFunction(js_atob, "atob", 1);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "atob", atob);
+
+    // requestAnimationFrame / cancelAnimationFrame polyfill
+    // Uses setTimeout(cb, 0) for immediate execution in headless environment
+    const raf_polyfill =
+        \\(function() {
+        \\    let rafId = 0;
+        \\    const pending = new Map();
+        \\    globalThis.requestAnimationFrame = function(callback) {
+        \\        const id = ++rafId;
+        \\        const timeoutId = setTimeout(function() {
+        \\            pending.delete(id);
+        \\            callback(Date.now());
+        \\        }, 0);
+        \\        pending.set(id, timeoutId);
+        \\        return id;
+        \\    };
+        \\    globalThis.cancelAnimationFrame = function(id) {
+        \\        const timeoutId = pending.get(id);
+        \\        if (timeoutId !== undefined) {
+        \\            clearTimeout(timeoutId);
+        \\            pending.delete(id);
+        \\        }
+        \\    };
+        \\})();
+    ;
+    const result = qjs.JS_Eval(ctx.ptr, raf_polyfill, raf_polyfill.len, "<polyfill:raf>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(result);
+
+    // MessageChannel / MessagePort polyfill
+    // Used by React Scheduler for yielding to the event loop
+    // Uses setTimeout with 1ms delay to ensure async execution and prevent stack overflow
+    const msg_channel_polyfill =
+        \\(function() {
+        \\    class MessagePort {
+        \\        constructor() {
+        \\            this.onmessage = null;
+        \\            this._other = null;
+        \\            this._closed = false;
+        \\        }
+        \\        postMessage(data) {
+        \\            if (this._closed) return;
+        \\            const other = this._other;
+        \\            if (other && other.onmessage && !other._closed) {
+        \\                const handler = other.onmessage;
+        \\                setTimeout(function() {
+        \\                    if (!other._closed) handler({ data: data });
+        \\                }, 1);
+        \\            }
+        \\        }
+        \\        start() {} // No-op, auto-started
+        \\        close() { this._closed = true; this._other = null; }
+        \\    }
+        \\    class MessageChannel {
+        \\        constructor() {
+        \\            this.port1 = new MessagePort();
+        \\            this.port2 = new MessagePort();
+        \\            this.port1._other = this.port2;
+        \\            this.port2._other = this.port1;
+        \\        }
+        \\    }
+        \\    globalThis.MessageChannel = MessageChannel;
+        \\    globalThis.MessagePort = MessagePort;
+        \\})();
+    ;
+    const mc_result = qjs.JS_Eval(ctx.ptr, msg_channel_polyfill, msg_channel_polyfill.len, "<polyfill:msgchannel>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(mc_result);
 }

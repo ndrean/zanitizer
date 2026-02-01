@@ -156,6 +156,10 @@ pub fn preventDefault(ev: *DomEvent) void {
     }
 }
 
+pub fn getDefaultPrevented(ev: *DomEvent) bool {
+    return ev.default_prevented;
+}
+
 pub const EventBridge = struct {
     pub fn install(ctx: w.Context) !void {
         const rc = RuntimeContext.get(ctx);

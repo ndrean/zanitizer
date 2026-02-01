@@ -506,3 +506,232 @@ test "getAttributes_bf" {
     try testing.expect(found_class);
     try testing.expect(found_data);
 }
+
+//==============================================================================
+// Dataset (data-* attributes) with camelCase <-> kebab-case conversion
+//==============================================================================
+
+/// Convert kebab-case to camelCase: "user-id" -> "userId"
+/// Returns slice into provided buffer
+pub fn kebabToCamelCase(input: []const u8, buf: []u8) []u8 {
+    var out_idx: usize = 0;
+    var capitalize_next = false;
+
+    for (input) |c| {
+        if (out_idx >= buf.len) break;
+
+        if (c == '-') {
+            capitalize_next = true;
+        } else if (capitalize_next) {
+            buf[out_idx] = std.ascii.toUpper(c);
+            out_idx += 1;
+            capitalize_next = false;
+        } else {
+            buf[out_idx] = c;
+            out_idx += 1;
+        }
+    }
+    return buf[0..out_idx];
+}
+
+/// Convert camelCase to kebab-case: "userId" -> "user-id"
+/// Returns slice into provided buffer
+pub fn camelToKebabCase(input: []const u8, buf: []u8) []u8 {
+    var out_idx: usize = 0;
+
+    for (input) |c| {
+        if (out_idx >= buf.len) break;
+
+        if (std.ascii.isUpper(c)) {
+            if (out_idx + 1 >= buf.len) break;
+            buf[out_idx] = '-';
+            out_idx += 1;
+            buf[out_idx] = std.ascii.toLower(c);
+            out_idx += 1;
+        } else {
+            buf[out_idx] = c;
+            out_idx += 1;
+        }
+    }
+    return buf[0..out_idx];
+}
+
+/// Get data-* attribute value by camelCase key
+/// e.g., getDataAttribute(el, "userId") returns value of data-user-id
+pub fn getDataAttribute(element: *z.HTMLElement, camel_key: []const u8) ?[]const u8 {
+    // Convert camelCase to data-kebab-case
+    var kebab_buf: [128]u8 = undefined;
+    const kebab = camelToKebabCase(camel_key, &kebab_buf);
+
+    // Build full attribute name: "data-" + kebab
+    var attr_buf: [134]u8 = undefined; // "data-" (5) + 128 + 1
+    if (5 + kebab.len > attr_buf.len) return null;
+
+    @memcpy(attr_buf[0..5], "data-");
+    @memcpy(attr_buf[5..][0..kebab.len], kebab);
+    const attr_name = attr_buf[0 .. 5 + kebab.len];
+
+    return getAttribute_zc(element, attr_name);
+}
+
+/// Set data-* attribute value by camelCase key
+/// e.g., setDataAttribute(el, "userId", "123") sets data-user-id="123"
+pub fn setDataAttribute(element: *z.HTMLElement, camel_key: []const u8, value: []const u8) !void {
+    // Convert camelCase to data-kebab-case
+    var kebab_buf: [128]u8 = undefined;
+    const kebab = camelToKebabCase(camel_key, &kebab_buf);
+
+    // Build full attribute name: "data-" + kebab
+    var attr_buf: [134]u8 = undefined;
+    if (5 + kebab.len > attr_buf.len) return error.KeyTooLong;
+
+    @memcpy(attr_buf[0..5], "data-");
+    @memcpy(attr_buf[5..][0..kebab.len], kebab);
+    const attr_name = attr_buf[0 .. 5 + kebab.len];
+
+    return setAttribute(element, attr_name, value);
+}
+
+/// Remove data-* attribute by camelCase key
+pub fn removeDataAttribute(element: *z.HTMLElement, camel_key: []const u8) !void {
+    var kebab_buf: [128]u8 = undefined;
+    const kebab = camelToKebabCase(camel_key, &kebab_buf);
+
+    var attr_buf: [134]u8 = undefined;
+    if (5 + kebab.len > attr_buf.len) return error.KeyTooLong;
+
+    @memcpy(attr_buf[0..5], "data-");
+    @memcpy(attr_buf[5..][0..kebab.len], kebab);
+    const attr_name = attr_buf[0 .. 5 + kebab.len];
+
+    return removeAttribute(element, attr_name);
+}
+
+/// Check if element has a data-* attribute by camelCase key
+pub fn hasDataAttribute(element: *z.HTMLElement, camel_key: []const u8) bool {
+    var kebab_buf: [128]u8 = undefined;
+    const kebab = camelToKebabCase(camel_key, &kebab_buf);
+
+    var attr_buf: [134]u8 = undefined;
+    if (5 + kebab.len > attr_buf.len) return false;
+
+    @memcpy(attr_buf[0..5], "data-");
+    @memcpy(attr_buf[5..][0..kebab.len], kebab);
+    const attr_name = attr_buf[0 .. 5 + kebab.len];
+
+    return hasAttribute(element, attr_name);
+}
+
+/// DataAttributeEntry holds camelCase key and value
+pub const DataAttributeEntry = struct {
+    key: []const u8, // camelCase key (allocated)
+    value: []const u8, // value (allocated)
+};
+
+/// Get all data-* attributes as camelCase key/value pairs
+/// Caller must free each entry's key and value, then the slice itself
+pub fn getDataAttributes(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]DataAttributeEntry {
+    var result: std.ArrayList(DataAttributeEntry) = .empty;
+    errdefer {
+        for (result.items) |entry| {
+            allocator.free(entry.key);
+            allocator.free(entry.value);
+        }
+        result.deinit(allocator);
+    }
+
+    var attr = getFirstAttribute(element);
+    while (attr) |a| : (attr = getNextAttribute(a)) {
+        const name = getAttributeName_zc(a);
+
+        // Check if this is a data-* attribute
+        if (name.len > 5 and std.mem.startsWith(u8, name, "data-")) {
+            const kebab_part = name[5..]; // After "data-"
+
+            // Convert kebab to camelCase
+            const camel_key = try allocator.alloc(u8, kebab_part.len);
+            const converted = kebabToCamelCase(kebab_part, camel_key);
+
+            // If conversion shortened the string (removed dashes), resize
+            const final_key = if (converted.len < camel_key.len) blk: {
+                const resized = try allocator.realloc(camel_key, converted.len);
+                break :blk resized;
+            } else camel_key;
+
+            // Get value
+            const value_zc = getAttributeValue_zc(a);
+            const value = try allocator.dupe(u8, value_zc);
+
+            try result.append(allocator, .{ .key = final_key, .value = value });
+        }
+    }
+
+    return result.toOwnedSlice(allocator);
+}
+
+/// Free data attributes returned by getDataAttributes
+pub fn freeDataAttributes(allocator: std.mem.Allocator, entries: []DataAttributeEntry) void {
+    for (entries) |entry| {
+        allocator.free(entry.key);
+        allocator.free(entry.value);
+    }
+    allocator.free(entries);
+}
+
+test "kebabToCamelCase" {
+    var buf: [64]u8 = undefined;
+
+    const result1 = kebabToCamelCase("user-id", &buf);
+    try testing.expectEqualStrings("userId", result1);
+
+    const result2 = kebabToCamelCase("foo-bar-baz", &buf);
+    try testing.expectEqualStrings("fooBarBaz", result2);
+
+    const result3 = kebabToCamelCase("simple", &buf);
+    try testing.expectEqualStrings("simple", result3);
+}
+
+test "camelToKebabCase" {
+    var buf: [64]u8 = undefined;
+
+    const result1 = camelToKebabCase("userId", &buf);
+    try testing.expectEqualStrings("user-id", result1);
+
+    const result2 = camelToKebabCase("fooBarBaz", &buf);
+    try testing.expectEqualStrings("foo-bar-baz", result2);
+
+    const result3 = camelToKebabCase("simple", &buf);
+    try testing.expectEqualStrings("simple", result3);
+}
+
+test "dataset operations" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div id=\"test\" data-user-id=\"123\" data-foo-bar=\"hello\">Hello</div>");
+    defer z.destroyDocument(doc);
+    const element = z.getElementById(doc, "test").?;
+
+    // getDataAttribute
+    const user_id = getDataAttribute(element, "userId");
+    try testing.expect(user_id != null);
+    try testing.expectEqualStrings("123", user_id.?);
+
+    const foo_bar = getDataAttribute(element, "fooBar");
+    try testing.expect(foo_bar != null);
+    try testing.expectEqualStrings("hello", foo_bar.?);
+
+    // hasDataAttribute
+    try testing.expect(hasDataAttribute(element, "userId"));
+    try testing.expect(!hasDataAttribute(element, "nonExistent"));
+
+    // setDataAttribute
+    try setDataAttribute(element, "newKey", "newValue");
+    const new_val = getDataAttribute(element, "newKey");
+    try testing.expect(new_val != null);
+    try testing.expectEqualStrings("newValue", new_val.?);
+
+    // getDataAttributes
+    const entries = try getDataAttributes(allocator, element);
+    defer freeDataAttributes(allocator, entries);
+
+    try testing.expect(entries.len >= 3); // userId, fooBar, newKey
+}

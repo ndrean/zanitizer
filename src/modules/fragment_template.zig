@@ -116,6 +116,14 @@ pub fn createDocumentFragment(doc: *z.HTMLDocument) !*z.DocumentFragment {
     return lxb_dom_document_create_document_fragment(doc) orelse Err.FragmentCreateFailed;
 }
 
+/// [fragment] Create a document fragment (returns DomNode for JS bindings)
+///
+/// [JS] `document.createDocumentFragment()` method
+pub fn createDocumentFragmentNode(doc: *z.HTMLDocument) !*z.DomNode {
+    const fragment = try createDocumentFragment(doc);
+    return fragmentToNode(fragment);
+}
+
 /// [fragment] Destroys a document fragment
 pub fn destroyDocumentFragment(fragment: *z.DocumentFragment) void {
     _ = lxb_dom_document_fragment_interface_destroy(fragment);

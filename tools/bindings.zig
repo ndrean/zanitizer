@@ -18,13 +18,6 @@ pub const bindings = [_]BindingSpec{
         .return_type = .optional_node,
     },
     .{
-        .name = "ownerDocument",
-        .zig_func_name = "z.ownerDocument",
-        .kind = .static,
-        .args = &.{.this_node},
-        .return_type = .document,
-    },
-    .{
         .name = "createElement",
         .zig_func_name = "z.createElement",
         .kind = .method,
@@ -42,6 +35,22 @@ pub const bindings = [_]BindingSpec{
         .prop_this = .this_document,
     },
     .{
+        .name = "createComment",
+        .zig_func_name = "z.createCommentNode",
+        .kind = .method,
+        .args = &.{ .this_document, .string },
+        .return_type = .node, // Returns !*DomNode
+        .prop_this = .this_document,
+    },
+    .{
+        .name = "createDocumentFragment",
+        .zig_func_name = "z.createDocumentFragmentNode",
+        .kind = .method,
+        .args = &.{.this_document}, // No string argument
+        .return_type = .node, // Returns !*DomNode
+        .prop_this = .this_document,
+    },
+    .{
         .name = "getElementById",
         .zig_func_name = "z.getElementById",
         .kind = .method,
@@ -50,7 +59,7 @@ pub const bindings = [_]BindingSpec{
         .prop_this = .this_document,
     },
 
-    // DOMParser.parseFromString
+    // DOMParser.parseFromString: TODO
     .{
         .name = "parseFromString",
         .kind = .method,
@@ -59,7 +68,6 @@ pub const bindings = [_]BindingSpec{
         .return_type = .error_owned_document, // Returns !*HTMLDocument
         .prop_this = .this_parser,
     },
-
     .{
         .name = "type",
         .kind = .property,
@@ -72,6 +80,14 @@ pub const bindings = [_]BindingSpec{
         .name = "bubbles",
         .kind = .property,
         .getter = "z.events.getBubbles",
+        .setter = "", // Read-Only
+        .prop_this = .this_event,
+        .prop_type = .boolean,
+    },
+    .{
+        .name = "defaultPrevented",
+        .kind = .property,
+        .getter = "z.events.getDefaultPrevented",
         .setter = "", // Read-Only
         .prop_this = .this_event,
         .prop_type = .boolean,
@@ -151,27 +167,43 @@ pub const bindings = [_]BindingSpec{
         .args = &.{ .this_node, .node },
         .return_type = .void_type,
     },
-    .{
-        .name = "insertBefore",
-        .zig_func_name = "z.insertBefore",
-        .kind = .method,
-        .args = &.{ .this_node, .node },
-        .return_type = .void_type,
-    },
+    // insertBefore is manually implemented in dom_bridge.zig
+    // because it needs special handling for optional refChild parameter
 
-    .{
-        .name = "parentNode",
-        .zig_func_name = "z.parentNode",
-        .kind = .method,
-        .args = &.{.this_node},
-        .return_type = .optional_node,
-    },
     .{
         .name = "remove",
         .zig_func_name = "z.removeNode",
         .kind = .method,
         .args = &.{.this_node},
         .return_type = .void_type,
+    },
+    .{
+        .name = "removeChild",
+        .zig_func_name = "z.removeChild",
+        .kind = .method,
+        .args = &.{ .this_node, .node },
+        .return_type = .optional_node,
+    },
+    .{
+        .name = "replaceChild",
+        .zig_func_name = "z.replaceChild",
+        .kind = .method,
+        .args = &.{ .this_node, .node, .node },
+        .return_type = .optional_node,
+    },
+    .{
+        .name = "contains",
+        .zig_func_name = "z.contains",
+        .kind = .method,
+        .args = &.{ .this_node, .node },
+        .return_type = .boolean,
+    },
+    .{
+        .name = "compareDocumentPosition",
+        .zig_func_name = "z.compareDocumentPosition",
+        .kind = .method,
+        .args = &.{ .this_node, .node },
+        .return_type = .uint32, // u16 fits in uint32
     },
     .{
         .name = "setAttribute",
@@ -213,7 +245,30 @@ pub const bindings = [_]BindingSpec{
     },
 
     // Properties (getters/setters)
-
+    // TODO
+    .{
+        .name = "parentNode",
+        .kind = .property,
+        .getter = "z.parentNode",
+        .setter = "", // Read-Only
+        .prop_this = .this_node,
+        .prop_type = .optional_node,
+    },
+    .{
+        .name = "ownerDocument",
+        .kind = .property,
+        .getter = "z.ownerDocument",
+        .setter = "", // Read-Only
+        .prop_this = .this_node,
+        .prop_type = .document,
+    },
+    // .{
+    //     .name = "childNodes",
+    //     .kind = .property,
+    //     .getter = "z.childNodes",
+    //     .prop_this = .this_node,
+    //     .return_type = .node_list, // Returns ArrayList(*DomNode) -> NodeList
+    // },
     .{
         .name = "body",
         .kind = .property,
@@ -332,11 +387,27 @@ pub const bindings = [_]BindingSpec{
         .prop_this = .this_element,
     },
     .{
+        .name = "namespaceURI",
+        .kind = .property,
+        .getter = "z.namespaceURI_zc",
+        .setter = "", // Read-Only
+        .prop_type = .string_zc,
+        .prop_this = .this_element,
+    },
+    .{
         .name = "classList",
         .kind = .property,
         .getter = "", // Generator handles it
         .setter = "", // Read-only property (the list itself is read-only, content is mutable)
         .prop_type = .dom_token_list, // <--- Triggers our new template
+        .prop_this = .this_element,
+    },
+    .{
+        .name = "dataset",
+        .kind = .property,
+        .getter = "", // Generator handles it via exotic methods
+        .setter = "", // Read-only (the map itself, content is mutable via proxy)
+        .prop_type = .dom_string_map, // <--- Triggers DOMStringMap template
         .prop_this = .this_element,
     },
     // .{
@@ -374,13 +445,13 @@ pub const bindings = [_]BindingSpec{
     .{ .name = "dir", .kind = .string_attribute },
     .{ .name = "role", .kind = .string_attribute },
     .{ .name = "nonce", .kind = .string_attribute },
-    // .{
-    //     .name = "outerHTML",
-    //     .kind = .property,
-    //     .getter = "z.outerHTML",
-    //     .setter = "z.outerHTML",
-    //     .prop_type = .error_string,
-    //     .prop_this = .this_element,
-    // },
+    .{
+        .name = "outerHTML",
+        .kind = .property,
+        .getter = "z.outerHTML",
+        .setter = "z.setOuterHTMLSimple",
+        .prop_type = .error_string,
+        .prop_this = .this_element,
+    },
     // Add more bindings: 'id', 'className', 'children', etc.
 };
