@@ -56,6 +56,132 @@ This program can be used for:
 - Templating & Static Site Generation - (can use template components): no async needed, pure speed.
 - Web scraping on steroids.
 
+## Tests
+
+### zexplorer running js-framework-benchmark VanillaJS code
+
+To ensure the Web primitives are correctly implemented in `zexplorer`, we run VanillaJS code from the [js-vanilla-benchframework tests](https://github.com/krausest/js-framework-benchmark).
+
+The overall tests run below 80ms.
+
+The examples can be built and run with the commands:
+
+```sh
+zig build example -Dname=js-bench-1 -Doptimize=ReleaseFast
+zig build example -Dname=js-bench-2 -Doptimize=ReleaseFast
+zig build example -Dname=js-bench-3 -Doptimize=ReleaseFast
+```
+
+| test                 | t1    | t2    | t3    |
+| -------------------- | ----- | ----- | ----- |
+| Create 1k            | 2.68  | 1.90  | 1.75  |
+| Replace 1k           | 2.56  | 2.34  | 1.81  |
+| Partial Update (10k) | 2.92  | 1.64  | 6.73  |
+| Select Row           | 0.05  | 0.01  | 0.02  |
+| Swap Rows            | 0.06  | 0.10  | 0.14  |
+| Remove Row           | 0.01  | 0.05  | 0.05  |
+| Create 10k           | 27.66 | 20.84 | 16.54 |
+| Append 1k            | 2.76  | 7.41  | 4.02  |
+| Clear                | 4.11  | 7.72  | 5.94  |
+| --                   | --    | --    | --    |
+| Total Engine         | 76    | 70    | 75    |
+
+[TODO]: a CLI ? to run:
+
+```sh
+zxp loc/index.html loc/bench.js loc/test-runner.js
+```
+
+### zexplorer vs jsdom
+
+<details><summary>HTML with embedded benchmark Script</summary>
+
+```html
+<!DOCTYPE html>
+<html>
+  <body>
+    <div id="root"></div>
+    <script>
+      const nb = 10_000;
+      const root = document.getElementById("root");
+      for (let i = 0; i < nb; i++) {
+        const span = document.createElement("span");
+        span.textContent = "Item " + i;
+        root.appendChild(span);
+      }
+      const all = document.querySelectorAll("span");
+      let total = 0;
+      for (let i = 0; i < all.length; i++) {
+        total += all[i].textContent.length;
+      }
+      console.log("Total chars: " + total);
+    </script>
+  </body>
+</html>
+```
+
+</details>
+
+<details><summary>jsdom runner script:</summary>
+
+```js
+console.time("Total");
+const jsdom = require("jsdom");
+const { JSDOM } = jsdom;
+const fs = require("fs");
+
+const html = fs.readFileSync("bench.html", "utf8");
+const dom = new JSDOM(html, { runScripts: "dangerously" });
+console.timeEnd("Total");
+```
+
+</details>
+
+<details><summary>Zexplorer script:</summary>
+
+```zig
+fn bench(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sandbox_root);
+    defer engine.deinit();
+
+    const start = std.time.nanoTimestamp();
+
+    const html = @embedFile("bench.html")
+    try engine.loadHTML(html);
+
+    try engine.executeScripts(allocator, ".");
+    try engine.run();
+
+
+    const end = std.time.nanoTimestamp();
+    const ms = @divFloor(end - start, 1_000_000);
+    std.debug.print("⚡️ Zexplorer Engine Total Time: {d}ms\n", .{ms});
+}
+```
+
+</details>
+
+**Results**
+
+| #rows     | Zexplorer | jsdom  |
+| --------- | --------- | ------ |
+| 100       | 0.13ms    | 241ms  |
+| 1_000     | 0.7ms     | 251ms  |
+| 10_000    | 52ms      | 331ms  |
+| 20_000    | 115ms     | 421ms  |
+| 50_000    | 279ms     | 662ms  |
+| 100_000   | 633ms     | 1062ms |
+| 500_000   | 4323ms    | 4213ms |
+| 1_000_000 | 15165ms   | 9216ms |
+
+---
+
+### Tests Zaniter vs DOMPurify
+
+TODO
+
+---
+
 ## A few examples
 
 The folder _src/examples_  (will!) contains all the test cases.
@@ -355,131 +481,6 @@ You can send p from Zig to JS and receive typed data from JS to Zig.
 
 You can use native Zig functions in JS
 
-## Tests
-
-### zexplorer running js-framework-benchmark VanillaJS code
-
-To ensure the Web primitives are correctly implemented in `zexplorer`, we run VanillaJS code from the [js-vanilla-benchframework tests](https://github.com/krausest/js-framework-benchmark).
-
-The overall tests run below 80ms.
-
-The examples can be built and run with the commands:
-
-```sh
-zig build example -Dname=js-bench-1 -Doptimize=ReleaseFast
-zig build example -Dname=js-bench-2 -Doptimize=ReleaseFast
-zig build example -Dname=js-bench-3 -Doptimize=ReleaseFast
-```
-
-| test                 | t1    | t2    | t3    |
-| -------------------- | ----- | ----- | ----- |
-| Create 1k            | 2.68  | 1.90  | 1.75  |
-| Replace 1k           | 2.56  | 2.34  | 1.81  |
-| Partial Update (10k) | 2.92  | 1.64  | 6.73  |
-| Select Row           | 0.05  | 0.01  | 0.02  |
-| Swap Rows            | 0.06  | 0.10  | 0.14  |
-| Remove Row           | 0.01  | 0.05  | 0.05  |
-| Create 10k           | 27.66 | 20.84 | 16.54 |
-| Append 1k            | 2.76  | 7.41  | 4.02  |
-| Clear                | 4.11  | 7.72  | 5.94  |
-| --                   | --    | --    | --    |
-| Total Engine         | 76    | 70    | 75    |
-
-[TODO]: a CLI ? to run:
-
-```sh
-zxp loc/index.html loc/bench.js loc/test-runner.js
-```
-
-### zexplorer vs jsdom
-
-<details><summary>HTML with embedded benchmark Script</summary>
-
-```html
-<!DOCTYPE html>
-<html>
-  <body>
-    <div id="root"></div>
-    <script>
-      const nb = 10_000;
-      const root = document.getElementById("root");
-      for (let i = 0; i < nb; i++) {
-        const span = document.createElement("span");
-        span.textContent = "Item " + i;
-        root.appendChild(span);
-      }
-      const all = document.querySelectorAll("span");
-      let total = 0;
-      for (let i = 0; i < all.length; i++) {
-        total += all[i].textContent.length;
-      }
-      console.log("Total chars: " + total);
-    </script>
-  </body>
-</html>
-```
-
-</details>
-
-<details><summary>jsdom runner script:</summary>
-
-```js
-console.time("Total");
-const jsdom = require("jsdom");
-const { JSDOM } = jsdom;
-const fs = require("fs");
-
-const html = fs.readFileSync("bench.html", "utf8");
-const dom = new JSDOM(html, { runScripts: "dangerously" });
-console.timeEnd("Total");
-```
-
-</details>
-
-<details><summary>Zexplorer script:</summary>
-
-```zig
-fn bench(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sandbox_root);
-    defer engine.deinit();
-
-    const start = std.time.nanoTimestamp();
-
-    const html = @embedFile("bench.html")
-    try engine.loadHTML(html);
-
-    try engine.executeScripts(allocator, ".");
-    try engine.run();
-
-
-    const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000_000);
-    std.debug.print("⚡️ Zexplorer Engine Total Time: {d}ms\n", .{ms});
-}
-```
-
-</details>
-
-**Results**
-
-| #rows     | Zexplorer | jsdom  |
-| --------- | --------- | ------ |
-| 100       | 0.13ms    | 241ms  |
-| 1_000     | 0.7ms     | 251ms  |
-| 10_000    | 52ms      | 331ms  |
-| 20_000    | 115ms     | 421ms  |
-| 50_000    | 279ms     | 662ms  |
-| 100_000   | 633ms     | 1062ms |
-| 500_000   | 4323ms    | 4213ms |
-| 1_000_000 | 15165ms   | 9216ms |
-
----
-
-### Tests Zaniter vs DOMPurify
-
-TODO
-
----
 
 ## DOM API integration
   
