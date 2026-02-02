@@ -63,7 +63,6 @@ let index = 1,
   selected;
 
 function create(n = 1000) {
-  console.log("create");
   if (data.length < n) {
     set(data.length);
     append(n - data.length);

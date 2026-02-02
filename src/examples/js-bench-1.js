@@ -94,7 +94,6 @@ class Store {
     return this;
   }
   run() {
-    console.log("running");
     this.data = this.buildData();
     this.selected = null;
   }

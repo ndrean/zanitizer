@@ -12,10 +12,10 @@ function click(selector) {
 }
 
 function measure(name, fn) {
-  const start = Date.now();
+  const start = performance.now();
   fn();
-  const end = Date.now();
-  console.log(`[${name}] ${end - start} ms`);
+  const end = performance.now();
+  console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
 }
 
 console.log("\n🚀 Starting VanillaJS-3 Benchmark...\n");

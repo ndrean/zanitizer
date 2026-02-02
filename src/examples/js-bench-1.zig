@@ -18,10 +18,10 @@ pub fn main() !void {
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
 
-    try js_framework_1_bench(gpa, sandbox_root);
+    try testRun(gpa, sandbox_root);
 }
 
-fn js_framework_1_bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
+fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
@@ -41,6 +41,6 @@ fn js_framework_1_bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
     defer engine.ctx.freeValue(val2);
 
     const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000);
-    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n\n", .{ms});
+    const ms = @divFloor(end - start, 1_000_000);
+    std.debug.print("\n⚡️ Zexplorer Engine Total Time: {d}ms\n\n", .{ms});
 }

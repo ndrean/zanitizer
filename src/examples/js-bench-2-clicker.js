@@ -8,13 +8,13 @@ function click(selector) {
 }
 
 function measure(name, fn) {
-  const start = Date.now();
+  const start = performance.now();
   fn();
-  const end = Date.now();
-  console.log(`[${name}] ${end - start} ms`);
+  const end = performance.now();
+  console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
 }
 
-console.log("\n🚀 Starting VanillaJS-2 Benchmark...\n");
+console.log("\n🚀 Starting VanillaJS-2 Benchmark\n");
 
 measure("Create 1k", () => click("#run"));
 measure("Replace 1k", () => click("#run"));
