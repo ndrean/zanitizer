@@ -351,7 +351,8 @@ Run the file name with:  `zig build example -Dname=test_solidjs -Doptimize=Relea
 
 ### Preact with htm
 
- > [!IMPORTANT] Use `ReleaseFast`
+ > [!IMPORTANT] 
+ > Use `ReleaseFast`
 
  ```sh
  zig build example -Dname=test_htm -Domptimize=ReleaseFast
