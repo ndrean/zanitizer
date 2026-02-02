@@ -19,20 +19,17 @@
       const Counter = () => {
         const [localCount, setLocalCount] = createSignal(0);
 
-        // Create DOM elements manually
         const container = document.createElement("div");
         const p = document.createElement("p");
         const button = document.createElement("button");
         button.textContent = "Add +1";
 
-        // Reactive effect updates the DOM when signal changes
         createEffect(() => {
           console.log(`[JS] Rendered! Count: ${localCount()}`);
           p.textContent = `Count: ${localCount()}`;
         });
 
-        // Button click handler
-        button.onclick = () => setLocalCount((c) => c + 1);
+        // button.onclick = () => setLocalCount((c) => c + 1);
 
         // Auto-increment every 500ms, stop after 3 iterations
         let iterations = 0;
@@ -53,7 +50,6 @@
 
       try {
         render(Counter, document.getElementById("root"));
-        console.log("[JS] SolidJS render success!");
       } catch (e) {
         console.log("[JS] SolidJS Error:", e.message);
         if (e.stack)

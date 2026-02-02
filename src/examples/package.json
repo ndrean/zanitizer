@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@grucloud/bau": "^0.106.0"
+  }
+}

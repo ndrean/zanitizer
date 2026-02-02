@@ -21,7 +21,7 @@ function measure(name, fn) {
 
 // --- Benchmark Suite ---
 
-console.log("\n🚀 Starting VanillaJS-3 Benchmark (EventListener Version)...\n");
+console.log("\n🚀 Starting VanillaJS-1 Benchmark (EventListener Version)...\n");
 
 // 1. Create 1,000 rows
 // We click the button #run.

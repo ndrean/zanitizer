@@ -1,0 +1,45 @@
+<html>
+  <body>
+    <h1>Testing onclick polyfill</h1>
+    <button id="test-btn">Click me</button>
+    <div id="output"></div>
+    <script>
+      // Polyfill for onclick
+      Object.defineProperty(HTMLElement.prototype, "onclick", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return this._onclick_handler || null;
+        },
+        set(newHandler) {
+          console.log("[JS] onclick setter called with:", typeof newHandler);
+          if (this._onclick_handler) {
+            this.removeEventListener("click", this._onclick_handler);
+            this._onclick_handler = null;
+          }
+          if (typeof newHandler === "function") {
+            this._onclick_handler = newHandler;
+            this.addEventListener("click", newHandler);
+            console.log("[JS] Added click listener");
+          }
+        },
+      });
+
+      const btn = document.getElementById("test-btn");
+      console.log("[JS] Button found:", btn ? "yes" : "no");
+      console.log("[JS] Button tagName:", btn?.tagName);
+
+      // Test 1: Direct onclick assignment
+      btn.onclick = function() {
+        console.log("[JS] Button clicked via onclick!");
+      };
+
+      console.log("[JS] onclick handler set:", typeof btn.onclick);
+
+      // Test 2: dispatchEvent
+      console.log("[JS] Dispatching click event...");
+      btn.dispatchEvent(new Event("click", { bubbles: true }));
+      console.log("[JS] Done");
+    </script>
+  </body>
+</html>

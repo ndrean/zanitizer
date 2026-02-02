@@ -25,18 +25,19 @@ fn js_framework_1_bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    z.print("\n=== JS-framework-2 --------------------------------\n\n", .{});
+    z.print("\n=== JS-framework-3 --------------------------------\n\n", .{});
 
     const start = std.time.nanoTimestamp();
 
-    const html = @embedFile("js-bench-2.html");
+    const html = @embedFile("js-bench-3.html");
+
     try engine.loadHTML(html);
 
-    const js = @embedFile("js-bench-2.js");
+    const js = @embedFile("js-bench-3.js");
     const val1 = try engine.evalModule(js, "<class>");
     engine.ctx.freeValue(val1);
 
-    const clicker = @embedFile("js-bench-2-clicker.js");
+    const clicker = @embedFile("js-bench-3-clicker.js");
     const val2 = try engine.evalModule(clicker, "<clicker.js>");
     defer engine.ctx.freeValue(val2);
 

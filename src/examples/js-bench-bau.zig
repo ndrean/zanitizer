@@ -18,27 +18,30 @@ pub fn main() !void {
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
 
-    try js_framework_1_bench(gpa, sandbox_root);
+    try testRun(gpa, sandbox_root);
 }
 
-fn js_framework_1_bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
+fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    z.print("\n=== JS-framework-2 --------------------------------\n\n", .{});
+    z.print("\n=== JS-framework-Bau --------------------------------\n\n", .{});
 
     const start = std.time.nanoTimestamp();
 
-    const html = @embedFile("js-bench-2.html");
+    const html = @embedFile("js-bench-bau.html");
+
     try engine.loadHTML(html);
 
-    const js = @embedFile("js-bench-2.js");
-    const val1 = try engine.evalModule(js, "<class>");
-    engine.ctx.freeValue(val1);
+    // const js = @embedFile("js-bench-bau.js");
 
-    const clicker = @embedFile("js-bench-2-clicker.js");
-    const val2 = try engine.evalModule(clicker, "<clicker.js>");
-    defer engine.ctx.freeValue(val2);
+    try engine.executeScripts(allocator, ".");
+
+    try engine.run();
+
+    // const app = z.getElementById(engine.dom.doc, "app");
+
+    // try z.prettyPrint(allocator, z.elementToNode(app.?));
 
     const end = std.time.nanoTimestamp();
     const ms = @divFloor(end - start, 1_000);

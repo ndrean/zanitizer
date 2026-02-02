@@ -24,7 +24,7 @@ pub fn main() !void {
 fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     var engine = try ScriptEngine.init(gpa, sandbox_root);
     defer engine.deinit();
-    const html = @embedFile("test_htm_preact.html");
+    const html = @embedFile("test_preact_hooks.html");
     try engine.loadHTML(html);
     try engine.executeScripts(gpa, ".");
     engine.run() catch |err| {
