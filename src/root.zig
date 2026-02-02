@@ -412,6 +412,8 @@ pub const FrameworkSpec = specs.FrameworkSpec;
 pub const DANGEROUS_ATTRIBUTES = specs.DANGEROUS_ATTRIBUTES;
 pub const isDangerousAttribute = specs.isDangerousAttribute;
 pub const DANGEROUS_JS_PATTERNS = specs.DANGEROUS_JS_PATTERNS;
+pub const MXSS_PATTERNS = specs.MXSS_PATTERNS;
+pub const containsMxssPattern = specs.containsMxssPattern;
 pub const DOM_CLOBBERING_NAMES = specs.DOM_CLOBBERING_NAMES;
 pub const isDomClobberingName = specs.isDomClobberingName;
 pub const FRAMEWORK_SPECS = specs.FRAMEWORK_SPECS;
@@ -520,6 +522,9 @@ pub const hasAttributes = attrs.hasAttributes;
 
 pub const getAttribute = attrs.getAttribute;
 pub const getAttribute_zc = attrs.getAttribute_zc;
+pub const iterateDomAttributes = attrs.iterateDomAttributes;
+pub const getAttributeName_zc = attrs.getAttributeName_zc;
+pub const getAttributeValue_zc = attrs.getAttributeValue_zc;
 
 pub const setAttribute = attrs.setAttribute;
 pub const removeAttribute = attrs.removeAttribute;

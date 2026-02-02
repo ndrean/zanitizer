@@ -8,7 +8,6 @@ function previewFile(input) {
   const reader = new FileReader();
 
   reader.onload = () => {
-    // () => {
     console.log("[JS] onload");
     const result = reader.result;
     console.log("📸 Image Preview Ready!");

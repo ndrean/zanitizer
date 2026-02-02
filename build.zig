@@ -216,6 +216,11 @@ pub fn build(b: *std.Build) void {
         "src/examples/js-bench-3.zig",
         "src/examples/js-bench-bau.zig",
         "src/examples/dom_purify.zig",
+        "src/examples/test_encoding.zig",
+        "src/examples/jsdom_zexplorer_speed_test.zig",
+        "src/examples/h5sc-test.zig",
+        "src/examples/blob_url.zig",
+        "src/examples/blob_object_url.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

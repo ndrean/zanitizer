@@ -83,14 +83,8 @@ fn deleteContents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: 
 
         // Save next before deleting current
         const next = z.nextSibling(node);
-
         // Remove from DOM
         _ = z.removeChild(parent, node);
-
-        // (Optional) Free the wrapper if strict memory management is needed,
-        // but GC usually handles the JS wrapper side.
-        // Lexbor node destruction happens when the Doc is destroyed or explicitly freed.
-
         curr = next;
     }
 

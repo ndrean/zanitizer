@@ -191,7 +191,7 @@ fn getAttributeName(allocator: std.mem.Allocator, attr: *DomAttr) ![]u8 {
 }
 
 /// [attributes] Get attribute name as borrowed slice (zero-copy)
-fn getAttributeName_zc(attr: *DomAttr) []const u8 {
+pub fn getAttributeName_zc(attr: *DomAttr) []const u8 {
     var name_len: usize = 0;
     const name_ptr = lxb_dom_attr_qualified_name(
         attr,
@@ -201,7 +201,7 @@ fn getAttributeName_zc(attr: *DomAttr) []const u8 {
 }
 
 /// [attributes] Get attribute value as borrowed slice (zero-copy)
-fn getAttributeValue_zc(attr: *DomAttr) []const u8 {
+pub fn getAttributeValue_zc(attr: *DomAttr) []const u8 {
     var value_len: usize = 0;
     const value_ptr = lxb_dom_attr_value_noi(
         attr,
@@ -312,11 +312,27 @@ pub const AttributeIterator = struct {
     }
 };
 
+pub const DomAttrIterator = struct {
+    current: ?*DomAttr,
+
+    pub fn next(self: *@This()) ?*DomAttr {
+        const attr = self.current orelse return null;
+
+        self.current = lxb_dom_element_next_attribute_noi(attr);
+
+        return attr;
+    }
+};
+
 /// Create a zero-allocation iterator for an element's attributes
 pub fn iterateAttributes(element: *z.HTMLElement) AttributeIterator {
     return .{ .current = lxb_dom_element_first_attribute_noi(element) };
 }
 
+/// Create a zero-allocation iterator for an element's attributes
+pub fn iterateDomAttributes(element: *z.HTMLElement) DomAttrIterator {
+    return .{ .current = lxb_dom_element_first_attribute_noi(element) };
+}
 // ----------------------------------------------------------
 
 /// [attributes] Remove attribute from element

@@ -58,11 +58,13 @@ This program can be used for:
 
 ## Tests
 
+The goal is to review the [DOM examples repo](https://github.com/mdn/dom-examples).
+
 ### zexplorer running js-framework-benchmark VanillaJS code
 
 To ensure the Web primitives are correctly implemented in `zexplorer`, we run VanillaJS code from the [js-vanilla-benchframework tests](https://github.com/krausest/js-framework-benchmark).
 
-The overall tests run below 80ms.
+The engine runs all tests below 80ms.
 
 The examples can be built and run with the commands:
 
@@ -176,9 +178,39 @@ fn bench(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
 
 ---
 
-### Tests Zaniter vs DOMPurify
+### Tests Zaniter module
 
-TODO
+Th module is faster than DOMPurify but probably not as complete. It is based on DOM parsing into a documentFragment, applying whitelisting and html_specs rules before injecting back into the DOM.
+
+- DOMPurify test suite: <https://github.com/cure53/DOMPurify/tree/main/test>
+- OWASP XSS Filter Evasion Cheat Sheet: <https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html>
+- PortSwigger XSS cheat sheet: <https://portswigger.net/web-security/cross-site-scripting/cheat-sheet>
+- DOMPurify CVEs: Especially CVE-2024-47875 (mXSS via nesting) <https://github.com/cure53/DOMPurify>
+
+#### H5SC Quality test
+
+139 real-world XSS attack vectors from [html5sec.org](https://html5sec.org/)
+
+Results:
+
+#### Speed test
+
+```sh
+zig build example -Dname=dom_purify -Doptimize=ReleaseFast
+```
+
+The test is to process _src/examples/dom_purify.html_:
+
+```txt
+=== DOMPurify Benchmark -------
+
+Input size: 36526 bytes
+Output size: 16501 bytes
+Total Engine time: 1.052 ms
+
+DOMPurify reference: ~11 ms
+(without JSDom overhead)
+```
 
 ---
 
@@ -1530,18 +1562,21 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ───────────────────────────────────────────────────────────────────────────────
 Language            Files       Lines    Blanks  Comments       Code Complexity
 ───────────────────────────────────────────────────────────────────────────────
-Zig                    63      36,064     3,157     3,374     29,533      3,595
-Markdown                3       3,425       623         0      2,802          0
-C                       1         155        24        31        100         17
-HTML                    1          23         2         0         21          0
+Zig                   120      64,448     5,480     6,105     52,863      9,450
+JavaScript             23       2,459       253       165      2,041        205
+HTML                   20       5,190       494       152      4,544          0
+Markdown                5       2,662       647         0      2,015          0
+JSON                    3          32         0         0         32          0
+C                       1         210        34        39        137         29
 License                 1          21         4         0         17          0
+Plain Text              1         332        57         0        275          0
 ───────────────────────────────────────────────────────────────────────────────
-Total                  69      39,688     3,810     3,405     32,473      3,612
+Total                 174      75,354     6,969     6,461     61,924      9,684
 ───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $1,043,984
-Estimated Schedule Effort (organic) 13.98 months
-Estimated People Required (organic) 6.63
+Estimated Cost to Develop (organic) $2,056,114
+Estimated Schedule Effort (organic) 18.09 months
+Estimated People Required (organic) 10.10
 ───────────────────────────────────────────────────────────────────────────────
-Processed 1462363 bytes, 1.462 megabytes (SI)
+Processed 3039412 bytes, 3.039 megabytes (SI)
 ───────────────────────────────────────────────────────────────────────────────
 ```

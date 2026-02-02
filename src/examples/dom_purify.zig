@@ -24,10 +24,12 @@ pub fn main() !void {
 fn purifyDemo(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== File System API Demo ===\n\n", .{});
 
+    var timer = try std.time.Timer.start();
+
     var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    const dirty = @embedFile("fdom_purify.html");
+    const dirty = @embedFile("dom_purify.html");
 
     // const result = engine.eval(js, "<purify>", .module) catch |err| {
     //     z.print("Eval error: {}\n", .{err});
@@ -66,8 +68,6 @@ fn purifyDemo(allocator: std.mem.Allocator, sbx: []const u8) !void {
         },
     };
 
-    var timer = try std.time.Timer.start();
-
     try z.sanitizeWithCss(
         allocator,
         body,
@@ -81,11 +81,12 @@ fn purifyDemo(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
+    z.print("{s}\n", .{result});
 
     std.debug.print("\n=== DOMPurify Benchmark -------\n\n", .{});
     std.debug.print("Input size: {} bytes\n", .{dirty.len});
     std.debug.print("Output size: {} bytes\n", .{result.len});
-    std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
+    std.debug.print("Total Engine time: {d:.3} ms\n", .{elapsed_ms});
     std.debug.print("DOMPurify reference: ~11 ms\n", .{});
 
     engine.run() catch |err| {
