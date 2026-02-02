@@ -380,9 +380,7 @@ fn filterSvgAttributes(context: *SanitizeContext, element: *z.HTMLElement) !void
         }
 
         // Validate href and xlink:href with strict SVG URI rules
-        if (!should_remove and (std.mem.eql(u8, attr_pair.name, "href") or
-            std.mem.eql(u8, attr_pair.name, "xlink:href")))
-        {
+        if (!should_remove and z.isSvgUrlAttribute(attr_pair.name)) {
             // SVG URIs must be fragment-only (#id) for security
             if (!z.validateSvgUri(attr_pair.value)) {
                 should_remove = true;
@@ -412,10 +410,8 @@ fn filterMathMLAttributes(context: *SanitizeContext, element: *z.HTMLElement) !v
         }
 
         // Validate color values for mathcolor/mathbackground
-        if (!should_remove and (std.mem.eql(u8, attr_pair.name, "mathcolor") or
-            std.mem.eql(u8, attr_pair.name, "mathbackground")))
-        {
-            // TODO: Validate color values (no javascript:, data:, etc.)
+        if (!should_remove and z.isMathMLColorAttribute(attr_pair.name)) {
+            // Validate color values (no javascript:, data:, etc.)
             if (!z.validateUri(attr_pair.value)) {
                 should_remove = true;
             }
@@ -853,7 +849,7 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
 
         // DOM Clobbering Protection: remove id/name that shadow DOM properties
         if (!should_remove and context.options.sanitize_dom_clobbering) {
-            if (std.mem.eql(u8, attr_pair.name, "id") or std.mem.eql(u8, attr_pair.name, "name")) {
+            if (z.isDomClobberingAttribute(attr_pair.name)) {
                 if (z.isDomClobberingName(attr_pair.value)) {
                     should_remove = true;
                 }
@@ -878,43 +874,31 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
         }
 
         // Standard Attributes (The Spec Engine)
+        // Uses findAttributeSpecEnum which handles prefix matching (aria-*, data-*, etc.)
         if (!should_remove) {
-            if (z.getElementSpecByEnum(tag)) |elem_spec| {
-                var found_spec: ?z.AttrSpec = null;
-
-                for (elem_spec.allowed_attrs) |spec| {
-                    if (std.mem.eql(u8, spec.name, attr_pair.name)) {
-                        found_spec = spec;
-                        break;
+            if (z.findAttributeSpecEnum(tag, attr_pair.name)) |spec| {
+                // A. Enum Validation
+                if (spec.valid_values) |valid_vals| {
+                    var is_valid_enum = false;
+                    for (valid_vals) |val| {
+                        if (std.mem.eql(u8, val, attr_pair.value)) {
+                            is_valid_enum = true;
+                            break;
+                        }
                     }
+                    if (!is_valid_enum) should_remove = true;
                 }
 
-                if (found_spec) |spec| {
-                    // A. Enum Validation
-                    if (spec.valid_values) |valid_vals| {
-                        var is_valid_enum = false;
-                        for (valid_vals) |val| {
-                            if (std.mem.eql(u8, val, attr_pair.value)) {
-                                is_valid_enum = true;
-                                break;
-                            }
-                        }
-                        if (!is_valid_enum) should_remove = true;
-                    }
-
-                    // B. Validator Function (Handles href, src, style, xlink:href)
-                    if (!should_remove) {
-                        if (spec.validator) |validator| {
-                            if (!validator(attr_pair.value)) {
-                                should_remove = true;
-                            }
+                // B. Validator Function (Handles href, src, style, xlink:href)
+                if (!should_remove) {
+                    if (spec.validator) |validator| {
+                        if (!validator(attr_pair.value)) {
+                            should_remove = true;
                         }
                     }
-                } else {
-                    should_remove = true; // Attribute not in allowlist
                 }
             } else {
-                should_remove = true; // No spec for this tag
+                should_remove = true; // Attribute not in allowlist
             }
         }
 

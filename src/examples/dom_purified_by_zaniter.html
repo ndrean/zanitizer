@@ -2,13 +2,13 @@
 
 <svg></svg>
 
-<div role="dialog" class="msg">
-  <button class="modal-close" type="button">
+<div aria-labelledby="msg--title" role="dialog" class="msg">
+  <button class="modal-close" aria-label="close" type="button">
     <i class="icon-close"></i>some button
   </button>
 </div>
 
-<input /><input />
+<input type="checkbox" checked /><input type="checkbox" />
 
 <svg>
   <defs>
@@ -119,17 +119,24 @@
         <b>
           <math display="block">
             <mrow>
-              <menclose><mi>a</mi></menclose
-              ><mo>,</mo> <menclose><mi mathcolor="#FF0000">a</mi></menclose
-              ><mo>,</mo> <menclose mathcolor="#FF0000"><mi>a</mi></menclose
+              <menclose notation="box"><mi>a</mi></menclose
               ><mo>,</mo>
-              <menclose mathbackground="#80FF80"
+              <menclose notation="box"><mi mathcolor="#FF0000">a</mi></menclose
+              ><mo>,</mo>
+              <menclose notation="box" mathcolor="#FF0000"><mi>a</mi></menclose
+              ><mo>,</mo>
+              <menclose notation="box" mathbackground="#80FF80"
                 ><mi mathcolor="#FF0000">a</mi></menclose
               ><mo>,</mo>
-              <menclose mathcolor="#FF0000" mathbackground="#80FF80"
+              <menclose
+                notation="box"
+                mathcolor="#FF0000"
+                mathbackground="#80FF80"
                 ><mi>a</mi></menclose
               ><mo>,</mo>
-              <menclose><mi mathbackground="#80FF80">a</mi></menclose>
+              <menclose notation="box"
+                ><mi mathbackground="#80FF80">a</mi></menclose
+              >
             </mrow>
           </math>
 
@@ -182,7 +189,10 @@
         <div id="13">//["'`--&gt;]]&gt;]</div>
 
         <div id="14">
-          <input value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!" />//["'`--&gt;]]&gt;]
+          <input
+            pattern="^((a+.)a)+$"
+            value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!"
+          />//["'`--&gt;]]&gt;]
         </div>
 
         <div id="15">//["'`--&gt;]]&gt;]</div>

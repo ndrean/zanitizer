@@ -259,6 +259,10 @@ pub const getElementSpecFast = specs.getElementSpecFast;
 pub const isVoidElementEnum = specs.isVoidElementEnum;
 pub const isAttributeAllowedEnum = specs.isAttributeAllowedEnum;
 pub const getElementSpecByEnum = specs.getElementSpecByEnum;
+pub const findAttributeSpecEnum = specs.findAttributeSpecEnum;
+pub const isSvgUrlAttribute = specs.isSvgUrlAttribute;
+pub const isMathMLColorAttribute = specs.isMathMLColorAttribute;
+pub const isDomClobberingAttribute = specs.isDomClobberingAttribute;
 
 pub const commentToNode = lxb.commentToNode;
 pub const nodeToComment = lxb.nodeToComment;

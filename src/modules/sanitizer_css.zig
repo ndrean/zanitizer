@@ -469,11 +469,9 @@ pub const CssSanitizer = struct {
         }
         const lower_prop = lower_buf[0..property.len];
 
-        // Check blacklist first (always blocked)
-        for (specs.DANGEROUS_CSS_PROPERTIES) |dangerous| {
-            if (std.mem.eql(u8, lower_prop, dangerous)) {
-                return false;
-            }
+        // Check blacklist first (always blocked) - O(1) lookup
+        if (specs.DANGEROUS_CSS_PROPERTIES.has(lower_prop)) {
+            return false;
         }
 
         // If using whitelist, check against safe properties

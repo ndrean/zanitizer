@@ -4,7 +4,9 @@
 
 [WIP]
 
-An opinionated  `Zig` based HTML processor that lets you write JavaScript and executes at native speed on a server.
+An opinionated  `Zig` based HTML processor that lets you write JavaScript and executes DOM operations at native speed on a server.
+
+It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold boot.
 
 Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
 
@@ -19,8 +21,6 @@ What it has:
 - DOM/CSS native sanitizer (based on H5SC testing suite),
 - can inject native Zig primitives (statistics, CSV parsing...),
 - integrated Web API classes: `Worker`, `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `FileReader`, `Fetch`.
-
-It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) included a native speed.
 
 What it does not have (yet): async I/O
 
@@ -42,13 +42,15 @@ This is not:
 
 It is performant:
 
-- 24kB of the DOMPurify HTML test is processed in 1ms and the H5SC is processed (in debug/test mode) in 1.3ms.
-- It runs the js-framework  vanilla JavaScript benchmark tests much faster than `jsdom`.
+- cold boot: 1ms,
+- 24kB of the DOMPurify HTML test is processed in 1ms and H5SC tests compliant
+- runs the js-framework  vanilla JavaScript benchmark tests much faster than `jsdom`.
 
 This program can be used for:
 
 ## Use cases
 
+- serverless DOM rendering on-demand with instant start (DOM invoices to PDF in milliseconds)
 - Email sanitization if you need zero XSS and maximum speed
 - SSR with untrusted templates with sandbox processing
 - HTML transformation pipelines: inject `Zig` code for hot paths (CSV parsing, crypto...)
@@ -96,68 +98,192 @@ zxp loc/index.html loc/bench.js loc/test-runner.js
 
 ### zexplorer vs jsdom
 
-<details><summary>HTML with embedded benchmark Script</summary>
+We build a simple DOM and run querySelectors and populate elements to compare teh performance of `zexplorer` vs `JSDom`.
 
-```html
-<!DOCTYPE html>
-<html>
-  <body>
-    <div id="root"></div>
-    <script>
-      const nb = 10_000;
-      const root = document.getElementById("root");
-      for (let i = 0; i < nb; i++) {
-        const span = document.createElement("span");
-        span.textContent = "Item " + i;
-        root.appendChild(span);
-      }
-      const all = document.querySelectorAll("span");
-      let total = 0;
-      for (let i = 0; i < all.length; i++) {
-        total += all[i].textContent.length;
-      }
-      console.log("Total chars: " + total);
-    </script>
-  </body>
-</html>
-```
-
-</details>
-
-<details><summary>jsdom runner script:</summary>
+<details><summary>JSDOM script</summary>
 
 ```js
-console.time("Total");
-const jsdom = require("jsdom");
-const { JSDOM } = jsdom;
-const fs = require("fs");
+const { JSDOM } = require("jsdom");
+const { performance } = require("perf_hooks");
 
-const html = fs.readFileSync("bench.html", "utf8");
-const dom = new JSDOM(html, { runScripts: "dangerously" });
-console.timeEnd("Total");
+const values = [100, 1000, 10_000, 20_000, 50_000];
+
+console.log("\n=== JSDOM Benchmark --------------------------------\n");
+
+for (const nb of values) {
+  const globalStart = performance.now();
+
+  // We enable runScripts so we can execute the test logic inside the context
+  const dom = new JSDOM(`<!DOCTYPE html><body></body>`, {
+    runScripts: "dangerously",
+    resources: "usable",
+  });
+
+  const { window } = dom;
+
+  window.NB = nb;
+
+  // Benchmark Script
+
+  const scriptContent = `
+    let start = performance.now();
+    const NB = window.NB; // Access injected global
+    console.log(\`[Internal] Starting DOM creation test with \${NB} elements\`);
+    
+    const btn = document.createElement("button");
+    const form = document.createElement("form");
+    form.appendChild(btn);
+    document.body.appendChild(form);
+
+    const mylist = document.createElement("ul");
+
+    for (let i = 1; i <= NB; i++) {
+      const item = document.createElement("li");
+      item.textContent = "Item " + i * 10;
+      item.setAttribute("id", i.toString());
+      mylist.appendChild(item);
+    }
+    document.body.appendChild(mylist);
+
+    const lis = document.querySelectorAll("li");
+    
+    let clickCount = 0;
+        
+    btn.addEventListener("click", () => {
+      clickCount++;
+      btn.textContent = \`Clicked \${clickCount}\`;
+    });
+
+    const clickEvent = new window.Event("click");
+    for (let i = 0; i < NB; i++) {
+      btn.dispatchEvent(clickEvent);
+    }
+
+    let time = performance.now() - start;
+
+    console.log(
+      JSON.stringify({
+        time: time.toFixed(2),
+        elementCount: lis.length,
+        last_li_id: lis[lis.length - 1].getAttribute("id"),
+        last_li_text: lis[lis.length - 1].textContent,
+        success: clickCount === NB,
+      })
+    );
+  `;
+
+  console.log(`[Node] Running with NB=${nb}`);
+  window.eval(scriptContent);
+
+  const globalEnd = performance.now();
+  const totalMs = (globalEnd - globalStart).toFixed(2);
+
+  console.log(`⚡️ JSDOM Total Time: ${totalMs}ms\n`);
+
+  window.close();
+}
 ```
 
 </details>
+
+
 
 <details><summary>Zexplorer script:</summary>
 
 ```zig
-fn bench(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sandbox_root);
-    defer engine.deinit();
+const std = @import("std");
+const z = @import("zexplorer");
+const ScriptEngine = z.ScriptEngine;
 
-    const start = std.time.nanoTimestamp();
+pub fn main() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const gpa, const is_debug = gpa: {
+        break :gpa switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = debug_allocator.deinit();
+    };
 
-    const html = @embedFile("bench.html")
-    try engine.loadHTML(html);
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
 
-    try engine.executeScripts(allocator, ".");
-    try engine.run();
+    try bench(gpa, sandbox_root);
+}
 
+fn bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    z.print("\n=== JS-simple-bench --------------------------------\n\n", .{});
 
-    const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000_000);
-    std.debug.print("⚡️ Zexplorer Engine Total Time: {d}ms\n", .{ms});
+    const values = [_]u32{ 100, 1000, 10000, 20000, 50000 };
+
+    for (values) |v| {
+        z.print("[Zig]-> Running with NB={d}\n", .{v});
+        const start = std.time.nanoTimestamp();
+        var engine = try ScriptEngine.init(allocator, sbx);
+
+        const js =
+            \\ let start = performance.now();
+            \\ console.log(`Starting DOM creation test with {d} elements`);
+            \\ const btn = document.createElement("button");
+            \\ const form = document.createElement("form");
+            \\ form.appendChild(btn);
+            \\ document.body.appendChild(form);
+            \\ const mylist = document.createElement("ul");
+            \\ for (let i = 1; i <= parseInt({d}); i++) {{
+            \\   const item = document.createElement("li");
+            \\   item.textContent = "Item " + i * 10;
+            \\   item.setAttribute("id", i.toString());
+            \\   mylist.appendChild(item);
+            \\ }}
+            \\ document.body.appendChild(mylist);
+            \\
+            // \\ let time = performance.now() - start;
+            \\
+            \\ const lis = document.querySelectorAll("li");
+            \\ console.log(lis.length);
+            \\
+            // \\ start = performance.now();
+            \\ let clickCount = 0;
+            \\ btn.addEventListener("click", () => {{
+            \\  clickCount++;
+            \\  btn.textContent = `Clicked ${{clickCount}}`;
+            \\ }});
+            \\
+            \\ // Simulate clicks
+            \\ for (let i = 0; i < parseInt({d}); i++) {{
+            \\   btn.dispatchEvent("click");
+            \\ }}
+            \\
+            \\ const time = performance.now() - start;
+            \\
+            \\ console.log(
+            \\   JSON.stringify({{
+            \\     time: time.toFixed(2),
+            \\     elementCount: lis.length,
+            \\     last_li_id: lis[lis.length - 1].getAttribute("id"),
+            \\     last_li_text: lis[lis.length - 1].textContent,
+            \\     success: clickCount === parseInt({d}),
+            \\   }}),
+            \\ );
+        ;
+
+        const script = try std.fmt.allocPrint(allocator, js, .{ v, v, v, v });
+        defer allocator.free(script);
+        const body = try std.fmt.allocPrint(allocator, "<body><script>{s}</script></body>", .{script});
+        // z.print("{s}\n", .{body});
+        defer allocator.free(body);
+        try engine.loadHTML(body);
+
+        try engine.executeScripts(allocator, ".");
+
+        const end = std.time.nanoTimestamp();
+        const ms = @as(f64, @floatFromInt(end - start)) / 1_000_000.0;
+        std.debug.print("\n⚡️ Zexplorer Engine Total Time: {d:.2}ms\n\n", .{ms});
+
+        engine.deinit();
+    }
 }
 ```
 
@@ -165,16 +291,17 @@ fn bench(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
 
 **Results**
 
-| #rows     | Zexplorer | jsdom  |
-| --------- | --------- | ------ |
-| 100       | 0.13ms    | 241ms  |
-| 1_000     | 0.7ms     | 251ms  |
-| 10_000    | 52ms      | 331ms  |
-| 20_000    | 115ms     | 421ms  |
-| 50_000    | 279ms     | 662ms  |
-| 100_000   | 633ms     | 1062ms |
-| 500_000   | 4323ms    | 4213ms |
-| 1_000_000 | 15165ms   | 9216ms |
+The start time of the engine is approx 0.7ms (difference between the engine setup & loop execution and the JavaScript execution, as measured by `performance()` ).
+
+| #rows  | JS/Zexplorer | Total/Zexplorer | JS/JSDom | Total/JSDom |
+| ------ | ------------ | --------------- | -------- | ----------- |
+| 100    | 0.29 ms      | 1.10 ms         | 9.81 ms  | 36.72 ms    |
+| 1_000  | 2.3 ms       | 3.0 ms          | 27.9 ms  | 32.90 ms    |
+| 10_000 | 25.1 ms      | 25.7 ms         | 191.1 ms | 197.9 ms    |
+| 20_000 | 49.3 ms      | 50.0 ms         | 315.4 ms | 318.9 ms    |
+| 50_000 | 123.5 ms     | 124.2 ms        | 741.4 ms | 745.5 ms    |
+
+The DOM operations are externalized from the JavaScript runtime and these results demonstrate this cleaarly.
 
 ---
 

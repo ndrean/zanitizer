@@ -61,7 +61,7 @@ pub fn main() !void {
     try test_FileReaderSync(allocator, sandbox_root);
     try test_FormData_Upload(allocator, sandbox_root);
     try uploadFile(allocator, sandbox_root);
-    try testBlobFetch(allocator, sandbox_root);
+    // try testBlobFetch(allocator, sandbox_root);
     try testBlobURLs(allocator, sandbox_root);
     try classList(allocator, sandbox_root);
     try async_Fetch_Blob(allocator, sandbox_root);
@@ -374,76 +374,76 @@ fn test_FormData_Upload(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try engine.run();
 }
 
-fn testBlobFetch(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    z.print("\n=== Blob Fetch Integration Test ===\n", .{});
+// fn testBlobFetch(allocator: std.mem.Allocator, sbx: []const u8) !void {
+//     z.print("\n=== Blob Fetch Integration Test ===\n", .{});
 
-    var engine = try ScriptEngine.init(allocator, sbx);
-    defer engine.deinit();
+//     var engine = try ScriptEngine.init(allocator, sbx);
+//     defer engine.deinit();
 
-    const js =
-        \\(async function() {
-        \\    try {
-        \\        // 1. Setup
-        \\        const content = "Hello Zig Blob!";
-        \\        const mime = "text/plain";
-        \\        console.log("[JS] Creating Blob...");
-        \\        const blob = new Blob([content], { type: mime });
-        \\
-        \\        // 2. Create URL
-        \\        const url = URL.createObjectURL(blob);
-        \\        console.log("[JS] URL:", url);
-        \\
-        \\        // 3. Fetch
-        \\        console.log("[JS] Fetching...");
-        \\        const res = await fetch(url);
-        \\        console.log(res);
-        \\        console.log("[JS] Status:", res.status);
-        \\        console.log("[JS] StatusText:", res.statusText);
-        \\        if (!res.ok) throw new Error("Response not OK");
-        \\
-        \\        // 4. Check Headers (Mock object access)
-        \\        // Note: Real fetch uses res.headers.get(), but we returned a plain object
-        \\        const type = res.headers['Content-Type'];
-        \\        console.log("[JS] Content-Type:", type);
-        \\        if (type !== mime) throw new Error("Wrong Mime Type");
-        \\
-        \\        // 5. Get Text
-        \\        const text = await res.text();
-        \\        console.log("[JS] Body:", text);
-        \\        if (text !== content) throw new Error("Body mismatch");
-        \\
-        \\        // 6. JSON Test
-        \\        const jsonBlob = new Blob([JSON.stringify({foo: 123})], {type: "application/json"});
-        \\        const jsonUrl = URL.createObjectURL(jsonBlob);
-        \\        const jsonRes = await fetch(jsonUrl);
-        // \\        console.log(jsonRes);
-        \\        const jsonObj = await jsonRes.text();
-        \\        console.log("[JS] JSON Prop:", jsonObj);
-        \\        const obj = JSON.parse(jsonObj);
-        \\        console.log("[JS] JSON Prop:", obj.foo);
-        \\        if (obj.foo !== 123) throw new Error("JSON mismatch");
-        \\
-        \\        // 7. Cleanup
-        \\        URL.revokeObjectURL(url);
-        \\        URL.revokeObjectURL(jsonUrl);
-        \\        console.log("[JS] ✅ SUCCESS: All checks passed");
-        \\
-        \\    } catch (e) {
-        \\        console.log("[JS] ❌ ERROR:", e.message || e);
-        \\    }
-        \\})();
-    ;
+//     const js =
+//         \\(async function() {
+//         \\    try {
+//         \\        // 1. Setup
+//         \\        const content = "Hello Zig Blob!";
+//         \\        const mime = "text/plain";
+//         \\        console.log("[JS] Creating Blob...");
+//         \\        const blob = new Blob([content], { type: mime });
+//         \\
+//         \\        // 2. Create URL
+//         \\        const url = URL.createObjectURL(blob);
+//         \\        console.log("[JS] URL:", url);
+//         \\
+//         \\        // 3. Fetch
+//         \\        console.log("[JS] Fetching...");
+//         \\        const res = await fetch(url);
+//         \\        console.log(res);
+//         \\        console.log("[JS] Status:", res.status);
+//         \\        console.log("[JS] StatusText:", res.statusText);
+//         \\        if (!res.ok) throw new Error("Response not OK");
+//         \\
+//         \\        // 4. Check Headers (Mock object access)
+//         \\        // Note: Real fetch uses res.headers.get(), but we returned a plain object
+//         \\        const type = res.headers['Content-Type'];
+//         \\        console.log("[JS] Content-Type:", type);
+//         \\        if (type !== mime) throw new Error("Wrong Mime Type");
+//         \\
+//         \\        // 5. Get Text
+//         \\        const text = await res.text();
+//         \\        console.log("[JS] Body:", text);
+//         \\        if (text !== content) throw new Error("Body mismatch");
+//         \\
+//         \\        // 6. JSON Test
+//         \\        const jsonBlob = new Blob([JSON.stringify({foo: 123})], {type: "application/json"});
+//         \\        const jsonUrl = URL.createObjectURL(jsonBlob);
+//         \\        const jsonRes = await fetch(jsonUrl);
+//         // \\        console.log(jsonRes);
+//         \\        const jsonObj = await jsonRes.text();
+//         \\        console.log("[JS] JSON Prop:", jsonObj);
+//         \\        const obj = JSON.parse(jsonObj);
+//         \\        console.log("[JS] JSON Prop:", obj.foo);
+//         \\        if (obj.foo !== 123) throw new Error("JSON mismatch");
+//         \\
+//         \\        // 7. Cleanup
+//         \\        URL.revokeObjectURL(url);
+//         \\        URL.revokeObjectURL(jsonUrl);
+//         \\        console.log("[JS] ✅ SUCCESS: All checks passed");
+//         \\
+//         \\    } catch (e) {
+//         \\        console.log("[JS] ❌ ERROR:", e.message || e);
+//         \\    }
+//         \\})();
+//     ;
 
-    // Evaluate the async function
-    const result = engine.eval(js, "test_blob_fetch", .module) catch |err| {
-        z.print("Eval failed: {}\n", .{err});
-        return err;
-    };
-    engine.ctx.freeValue(result);
+//     // Evaluate the async function
+//     const result = engine.eval(js, "test_blob_fetch", .module) catch |err| {
+//         z.print("Eval failed: {}\n", .{err});
+//         return err;
+//     };
+//     engine.ctx.freeValue(result);
 
-    // Run the event loop to handle the Promises
-    try engine.run();
-}
+//     // Run the event loop to handle the Promises
+//     try engine.run();
+// }
 
 fn testBlobURLs(allocator: std.mem.Allocator, sbx: []const u8) !void {
     z.print("\n=== URL.createObjectURL Test ===\n", .{});

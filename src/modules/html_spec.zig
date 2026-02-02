@@ -58,6 +58,9 @@ pub const DANGEROUS_ATTRIBUTES = std.StaticStringMap(void).initComptime(.{
     .{ "integrity", {} }, // Can be abused to load malicious resources
     .{ "formaction", {} }, // Can hijack form submissions
     .{ "background", {} }, // Legacy background attribute can execute script in IE
+
+    // Focus hijacking (DOMPurify blocks globally)
+    .{ "autofocus", {} }, // Can steal focus, enable keystroke theft, combine with paste events
 });
 
 pub const DANGEROUS_JS_PATTERNS = [_][]const u8{
@@ -192,14 +195,14 @@ pub const DANGEROUS_CSS_PATTERNS = [_][]const u8{
     "@namespace", // Can enable SVG/XLink attacks
 };
 
-pub const DANGEROUS_CSS_PROPERTIES = [_][]const u8{
-    "behavior",
-    "-moz-binding",
-    "-webkit-user-modify",
-    "-o-link",
-    "-o-link-source",
-    "filter", // when used with progid:
-};
+pub const DANGEROUS_CSS_PROPERTIES = std.StaticStringMap(void).initComptime(.{
+    .{ "behavior", {} },
+    .{ "-moz-binding", {} },
+    .{ "-webkit-user-modify", {} },
+    .{ "-o-link", {} },
+    .{ "-o-link-source", {} },
+    .{ "filter", {} }, // when used with progid:
+});
 
 pub const DANGEROUS_CSS_VALUES = [_][]const u8{
     "url(javascript:",
@@ -317,16 +320,16 @@ pub const SVG_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
 /// These can execute JavaScript or load external resources
 pub const MATHML_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     // Can execute JavaScript
-    .{ "maction", {} },        // Has actiontype and xlink:href attributes
+    .{ "maction", {} }, // Has actiontype and xlink:href attributes
     .{ "annotation-xml", {} }, // Can contain HTML/SVG with scripts
-    .{ "annotation", {} },     // Can contain text that gets executed
-    .{ "semantics", {} },      // Wrapper for dangerous annotations
+    .{ "annotation", {} }, // Can contain text that gets executed
+    .{ "semantics", {} }, // Wrapper for dangerous annotations
 
     // Can load external resources or have style risks
-    .{ "mpadded", {} },     // Can have background images
-    .{ "mphantom", {} },    // Similar risks
+    .{ "mpadded", {} }, // Can have background images
+    .{ "mphantom", {} }, // Similar risks
     .{ "maligngroup", {} }, // Style/layout risks
-    .{ "malignmark", {} },  // Style/layout risks
+    .{ "malignmark", {} }, // Style/layout risks
 });
 
 /// Safe MathML elements (allowlist) - purely for mathematical notation
@@ -336,10 +339,10 @@ pub const MATHML_SAFE_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     .{ "math", {} },
 
     // Basic token elements (text only)
-    .{ "mi", {} },    // identifier
-    .{ "mo", {} },    // operator
-    .{ "mn", {} },    // number
-    .{ "ms", {} },    // string literal
+    .{ "mi", {} }, // identifier
+    .{ "mo", {} }, // operator
+    .{ "mn", {} }, // number
+    .{ "ms", {} }, // string literal
     .{ "mtext", {} }, // text
 
     // Basic layout (structure only)
@@ -377,7 +380,7 @@ pub const MATHML_SAFE_ATTRIBUTES = std.StaticStringMap(void).initComptime(.{
     .{ "dir", {} },
     .{ "mathsize", {} },
     .{ "mathvariant", {} },
-    .{ "mathcolor", {} },      // Validated separately for color values
+    .{ "mathcolor", {} }, // Validated separately for color values
     .{ "mathbackground", {} }, // Validated separately for color values
 
     // Positioning
@@ -409,6 +412,9 @@ pub const MATHML_SAFE_ATTRIBUTES = std.StaticStringMap(void).initComptime(.{
     .{ "columnspacing", {} },
     .{ "frame", {} },
     .{ "framespacing", {} },
+
+    // menclose notation attribute
+    .{ "notation", {} }, // e.g., "box", "longdiv", "circle" - purely presentational
 });
 
 /// Check if a MathML element is dangerous
@@ -424,6 +430,23 @@ pub fn isMathMLElementSafe(tag_name: []const u8) bool {
 /// Check if a MathML attribute is safe
 pub fn isMathMLAttributeSafe(attr_name: []const u8) bool {
     return MATHML_SAFE_ATTRIBUTES.has(attr_name);
+}
+
+/// Check if a MathML attribute requires color validation
+/// mathcolor and mathbackground can potentially contain dangerous values
+pub fn isMathMLColorAttribute(attr_name: []const u8) bool {
+    return std.mem.eql(u8, attr_name, "mathcolor") or std.mem.eql(u8, attr_name, "mathbackground");
+}
+
+/// Check if an SVG attribute is a URL attribute requiring validation
+/// href and xlink:href can contain javascript: or other dangerous URIs
+pub fn isSvgUrlAttribute(attr_name: []const u8) bool {
+    return std.mem.eql(u8, attr_name, "href") or std.mem.eql(u8, attr_name, "xlink:href");
+}
+
+/// Check if an attribute is used for DOM clobbering checks (id, name)
+pub fn isDomClobberingAttribute(attr_name: []const u8) bool {
+    return std.mem.eql(u8, attr_name, "id") or std.mem.eql(u8, attr_name, "name");
 }
 
 /// Check if an SVG element is in the allowlist
@@ -800,9 +823,7 @@ fn trimUnicodeWhitespace(value: []const u8) []const u8 {
             // Skip the whitespace character (could be multi-byte)
             if (start + 1 < end and value[start] >= 0xC0) {
                 // Multi-byte UTF-8
-                if (value[start] < 0xE0) start += 2
-                else if (value[start] < 0xF0) start += 3
-                else start += 4;
+                if (value[start] < 0xE0) start += 2 else if (value[start] < 0xF0) start += 3 else start += 4;
             } else {
                 start += 1;
             }
@@ -863,6 +884,56 @@ pub fn validateUri(value: []const u8) bool {
     }
 
     // default Allow (http, https, relative, mailto, etc.)
+    return true;
+}
+
+/// Validates audio src URIs - allows data:audio/* in addition to standard URIs
+pub fn validateAudioUri(value: []const u8) bool {
+    var buf: [4096]u8 = undefined;
+    const decoded = normalizeUri(&buf, value) catch value;
+    const trimmed = trimUnicodeWhitespace(decoded);
+
+    if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "vbscript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "file:")) return false;
+
+    if (startsWithIgnoreCase(trimmed, "data:")) {
+        // Allow audio data URIs
+        if (startsWithIgnoreCase(trimmed, "data:audio/")) return true;
+        // Block dangerous types
+        if (startsWithIgnoreCase(trimmed, "data:text/javascript")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/html")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/xml")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:image/svg")) return false;
+        // Block unknown data URIs for audio
+        return false;
+    }
+
+    return true;
+}
+
+/// Validates video src URIs - allows data:video/* in addition to standard URIs
+pub fn validateVideoUri(value: []const u8) bool {
+    var buf: [4096]u8 = undefined;
+    const decoded = normalizeUri(&buf, value) catch value;
+    const trimmed = trimUnicodeWhitespace(decoded);
+
+    if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "vbscript:")) return false;
+    if (startsWithIgnoreCase(trimmed, "file:")) return false;
+
+    if (startsWithIgnoreCase(trimmed, "data:")) {
+        // Allow video data URIs
+        if (startsWithIgnoreCase(trimmed, "data:video/")) return true;
+        // Block dangerous types
+        if (startsWithIgnoreCase(trimmed, "data:text/javascript")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/html")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:text/xml")) return false;
+        if (startsWithIgnoreCase(trimmed, "data:image/svg")) return false;
+        // Block unknown data URIs for video
+        return false;
+    }
+
     return true;
 }
 
@@ -928,14 +999,24 @@ const form_attrs = [_]AttrSpec{
 
 /// Input-specific attributes
 const input_attrs = [_]AttrSpec{
-    .{ .name = "type", .valid_values = &[_][]const u8{ "text", "email", "password", "number", "tel", "url", "search", "submit", "reset", "button", "hidden" } },
+    .{ .name = "type", .valid_values = &[_][]const u8{ "text", "email", "password", "number", "tel", "url", "search", "submit", "reset", "button", "hidden", "checkbox", "radio", "file", "date", "time", "datetime-local", "month", "week", "color", "range" } },
     .{ .name = "name" },
     .{ .name = "value" },
     .{ .name = "placeholder" },
     .{ .name = "required", .valid_values = &[_][]const u8{""} }, // boolean attribute
+    .{ .name = "disabled", .valid_values = &[_][]const u8{""} }, // boolean attribute
+    .{ .name = "checked", .valid_values = &[_][]const u8{""} }, // boolean attribute for checkbox/radio
+    .{ .name = "pattern" }, // regex validation pattern
     .{ .name = "minlength" },
     .{ .name = "maxlength" },
+    .{ .name = "min" },
+    .{ .name = "max" },
+    .{ .name = "step" },
     .{ .name = "readonly", .valid_values = &[_][]const u8{""} }, // boolean attribute
+    .{ .name = "autocomplete" },
+    // .{ .name = "autofocus", .valid_values = &[_][]const u8{""} }, // boolean attribute. DOMPurify disables by default
+    .{ .name = "accept" }, // for file inputs
+    .{ .name = "multiple", .valid_values = &[_][]const u8{""} }, // boolean attribute for file/email
 } ++ common_attrs;
 
 /// SVG-specific attributes
@@ -1157,19 +1238,22 @@ pub const element_specs = [_]ElementSpec{
     .{ .tag_enum = .dd, .allowed_attrs = &common_attrs },
 
     // Media elements
-    .{ .tag_enum = .video, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "src", .validator = validateUri },
-        .{ .name = "controls", .valid_values = &[_][]const u8{""} },
-        .{ .name = "autoplay", .valid_values = &[_][]const u8{""} },
-        .{ .name = "loop", .valid_values = &[_][]const u8{""} },
-        .{ .name = "muted", .valid_values = &[_][]const u8{""} },
-        .{ .name = "poster", .validator = validateUri },
-        .{ .name = "preload", .valid_values = &[_][]const u8{ "none", "metadata", "auto" } },
-        .{ .name = "width" },
-        .{ .name = "height" },
-    } ++ common_attrs) },
+    .{
+        .tag_enum = .video,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "src", .validator = validateVideoUri },
+            .{ .name = "controls", .valid_values = &[_][]const u8{""} },
+            .{ .name = "autoplay", .valid_values = &[_][]const u8{""} },
+            .{ .name = "loop", .valid_values = &[_][]const u8{""} },
+            .{ .name = "muted", .valid_values = &[_][]const u8{""} },
+            .{ .name = "poster", .validator = validateUri }, // poster is an image
+            .{ .name = "preload", .valid_values = &[_][]const u8{ "none", "metadata", "auto" } },
+            .{ .name = "width" },
+            .{ .name = "height" },
+        } ++ common_attrs),
+    },
     .{ .tag_enum = .audio, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "src", .validator = validateUri },
+        .{ .name = "src", .validator = validateAudioUri },
         .{ .name = "controls", .valid_values = &[_][]const u8{""} },
         .{ .name = "autoplay", .valid_values = &[_][]const u8{""} },
         .{ .name = "loop", .valid_values = &[_][]const u8{""} },
@@ -1563,6 +1647,30 @@ pub fn getElementSpecByEnum(tag: z.HtmlTag) ?*const ElementSpec {
     return element_spec_map.get(tag);
 }
 
+/// Find attribute spec with prefix matching support (aria-*, data-*, x-bind:*, etc.)
+/// Returns the matching AttrSpec or null if not found.
+/// This is the single source of truth for attribute matching logic.
+pub fn findAttributeSpecEnum(tag: z.HtmlTag, attr_name: []const u8) ?AttrSpec {
+    const elem_spec = getElementSpecByEnum(tag) orelse return null;
+
+    for (elem_spec.allowed_attrs) |attr_spec| {
+        // Exact match
+        if (std.mem.eql(u8, attr_spec.name, attr_name)) {
+            return attr_spec;
+        }
+        // Prefix matches for aria-*, data-*, and framework attributes
+        if ((std.mem.eql(u8, attr_spec.name, "aria") and std.mem.startsWith(u8, attr_name, "aria-")) or
+            (std.mem.eql(u8, attr_spec.name, "data") and std.mem.startsWith(u8, attr_name, "data-")) or
+            (std.mem.eql(u8, attr_spec.name, "x-bind") and std.mem.startsWith(u8, attr_name, "x-bind:")) or
+            (std.mem.eql(u8, attr_spec.name, "phx-value") and std.mem.startsWith(u8, attr_name, "phx-value-")) or
+            (std.mem.eql(u8, attr_spec.name, "v-bind") and std.mem.startsWith(u8, attr_name, "v-bind:")))
+        {
+            return attr_spec;
+        }
+    }
+    return null;
+}
+
 /// Fast enum-based attribute validation
 pub fn isAttributeAllowedEnum(tag: z.HtmlTag, attr_name: []const u8) bool {
     // SECURITY: Block framework event handlers that contain executable JavaScript
@@ -1571,22 +1679,8 @@ pub fn isAttributeAllowedEnum(tag: z.HtmlTag, attr_name: []const u8) bool {
         return false;
     }
 
-    const spec = getElementSpecByEnum(tag) orelse return false;
-
-    for (spec.allowed_attrs) |attr_spec| {
-        if (std.mem.eql(u8, attr_spec.name, attr_name)) {
-            return attr_spec.safe;
-        }
-        // Handle prefix matches for framework and data attributes
-        // NOTE: Event handlers (x-on:*, v-on:*) are blocked above
-        if ((std.mem.eql(u8, attr_spec.name, "aria") and std.mem.startsWith(u8, attr_name, "aria-")) or
-            (std.mem.eql(u8, attr_spec.name, "data") and std.mem.startsWith(u8, attr_name, "data-")) or
-            (std.mem.eql(u8, attr_spec.name, "x-bind") and std.mem.startsWith(u8, attr_name, "x-bind:")) or
-            (std.mem.eql(u8, attr_spec.name, "phx-value") and std.mem.startsWith(u8, attr_name, "phx-value-")) or
-            (std.mem.eql(u8, attr_spec.name, "v-bind") and std.mem.startsWith(u8, attr_name, "v-bind:")))
-        {
-            return attr_spec.safe;
-        }
+    if (findAttributeSpecEnum(tag, attr_name)) |spec| {
+        return spec.safe;
     }
     return false;
 }
@@ -1886,4 +1980,79 @@ test "SVG element allowlist and blocklist" {
     // Unknown elements should not be in either list
     try testing.expect(!isSvgElementAllowed("unknown-element"));
     try testing.expect(!isSvgElementDangerous("unknown-element"));
+}
+
+// =============================================================================
+// REGRESSION TESTS: Attribute preservation/removal behaviors
+// These tests verify specific decisions made to match or improve on DOMPurify
+// =============================================================================
+
+test "regression: ARIA attributes preserved via prefix matching" {
+    // ARIA attributes should be preserved when framework_attrs are enabled
+    // Regression test for: aria-labelledby, aria-label on div/button
+    // These use prefix matching: "aria" matches "aria-*"
+    try testing.expect(isAttributeAllowedEnum(.div, "aria-label"));
+    try testing.expect(isAttributeAllowedEnum(.div, "aria-labelledby"));
+    try testing.expect(isAttributeAllowedEnum(.div, "aria-hidden"));
+    try testing.expect(isAttributeAllowedEnum(.button, "aria-label"));
+    try testing.expect(isAttributeAllowedEnum(.button, "aria-pressed"));
+}
+
+test "regression: MathML notation attribute preserved" {
+    // The notation attribute on menclose should be preserved
+    // Regression test for: <menclose notation="box">
+    try testing.expect(isMathMLAttributeSafe("notation"));
+}
+
+test "regression: MathML color attributes preserved" {
+    // mathcolor and mathbackground should be preserved
+    // Regression test for: <mi mathcolor="#FF0000">, <menclose mathbackground="#80FF80">
+    try testing.expect(isMathMLAttributeSafe("mathcolor"));
+    try testing.expect(isMathMLAttributeSafe("mathbackground"));
+    try testing.expect(isMathMLColorAttribute("mathcolor"));
+    try testing.expect(isMathMLColorAttribute("mathbackground"));
+}
+
+test "regression: autofocus globally blocked (security - matches DOMPurify)" {
+    // autofocus should be in DANGEROUS_ATTRIBUTES and blocked globally
+    // Security: prevents focus-hijacking attacks on any element
+    // DOMPurify removes autofocus from ALL elements for the same reason
+    try testing.expect(DANGEROUS_ATTRIBUTES.has("autofocus"));
+
+    // Verify it's blocked on various elements
+    try testing.expect(!isAttributeAllowedEnum(.input, "autofocus"));
+    try testing.expect(!isAttributeAllowedEnum(.button, "autofocus"));
+    try testing.expect(!isAttributeAllowedEnum(.textarea, "autofocus"));
+}
+
+test "regression: input type, checked, pattern, value attributes preserved" {
+    // Common input attributes should be preserved
+    try testing.expect(isAttributeAllowedEnum(.input, "type"));
+    try testing.expect(isAttributeAllowedEnum(.input, "checked"));
+    try testing.expect(isAttributeAllowedEnum(.input, "pattern"));
+    try testing.expect(isAttributeAllowedEnum(.input, "value"));
+    try testing.expect(isAttributeAllowedEnum(.input, "name"));
+    try testing.expect(isAttributeAllowedEnum(.input, "placeholder"));
+}
+
+test "regression: data:image/* URIs allowed, data:image/svg blocked" {
+    // data:image/jpeg, data:image/png should be allowed
+    try testing.expect(validateUri("data:image/jpeg,abc123"));
+    try testing.expect(validateUri("data:image/png;base64,abc123"));
+    try testing.expect(validateUri("data:image/gif,abc"));
+
+    // data:image/svg should be blocked (can contain scripts)
+    try testing.expect(!validateUri("data:image/svg+xml,<svg></svg>"));
+    try testing.expect(!validateUri("data:image/svg,<svg></svg>"));
+
+    // Bare data: URIs without image type should be blocked
+    try testing.expect(!validateUri("data:,123"));
+    try testing.expect(!validateUri("data:text/plain,hello"));
+}
+
+test "regression: SVG image element is blocked (security)" {
+    // SVG <image> element should be blocked as dangerous
+    // It can load external SVGs containing scripts via href/xlink:href
+    try testing.expect(isSvgElementDangerous("image"));
+    try testing.expect(!isSvgElementAllowed("image"));
 }

@@ -153,3 +153,6 @@ fn example5_filtering(allocator: std.mem.Allocator) !void {
 
     std.debug.print("  Filtered sanitizer created!\n\n", .{});
 }
+
+// NOTE: Regression tests for attribute preservation/removal behaviors
+// are now in src/modules/html_spec.zig and run with `zig build test`

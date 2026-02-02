@@ -63,7 +63,7 @@ fn purifyDemo(allocator: std.mem.Allocator, sbx: []const u8) !void {
             .sanitize_inline_styles = true,
             .strict_uri_validation = true,
             .allow_custom_elements = false,
-            .allow_framework_attrs = false,
+            .allow_framework_attrs = true,
             .sanitize_dom_clobbering = true,
         },
     };
