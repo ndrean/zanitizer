@@ -40,9 +40,7 @@ This is not:
   - It is based on a declarative security policy (_html_specs.zig_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
   - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
 
-```sh
-url -s https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css | openssl dgst -sha384 -binary | base64 
-```
+
 
 It is performant:
 
@@ -2827,7 +2825,17 @@ zig build run -Doptimize=ReleaseFast
 
 ---
 
-### Notes on search in `lexbor` source/examples
+### Notes
+
+#### url hash
+
+Example:
+
+```sh
+curl -s https://cdn.jsdelivr.net/npm/animate.css@4.1.1/animate.min.css | openssl dgst -sha384 -binary | base64 
+```
+
+#### on search in `lexbor` source/examples
 
 <https://github.com/lexbor/lexbor/tree/master/examples/lexbor>
 
