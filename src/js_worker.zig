@@ -674,8 +674,7 @@ fn workerGCMark(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue, mark_func: ?*const qj
     _ = mark_func;
 }
 
-fn workerFinalizer(rt_ptr: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
-    _ = rt_ptr;
+fn workerFinalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
     std.debug.print("[Finalizer] Worker object finalizing.\n", .{});
     const ptr = qjs.JS_GetOpaque(val, worker_class_id);
     if (ptr) |p| {

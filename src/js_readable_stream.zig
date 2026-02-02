@@ -596,7 +596,7 @@ fn createRejectedPromise(ctx: zqjs.Context, msg: []const u8) qjs.JSValue {
 }
 
 // =========================================================
-// Class ID helpers (for finalizers which don't have RuntimeContext)
+// Class ID helpers for finalizers which don't have RuntimeContext
 
 var g_stream_class_id: qjs.JSClassID = 0;
 var g_reader_class_id: qjs.JSClassID = 0;

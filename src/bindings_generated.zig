@@ -512,6 +512,27 @@ pub fn js_set_nodeValue(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     };
     return w.UNDEFINED;
 }
+// Property Getter for data
+pub fn js_get_data(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+    const result = z.nodeValue_zc(node);
+    return ctx.newString(result);
+}
+// Property Setter for data
+pub fn js_set_data(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+    z.setNodeValue(node, val_str) catch |err| {
+        std.debug.print("JS Setter Error (data): {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error in Setter");
+    };
+    return w.UNDEFINED;
+}
 // Property Getter for innerText
 pub fn js_get_innerText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     _ = argc; _ = argv;
@@ -11161,6 +11182,13 @@ pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
         const atom = qjs.JS_NewAtom(ctx, "nodeValue");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nodeValue, "get_nodeValue", 0, qjs.JS_CFUNC_generic, 0);
         const set_fn = qjs.JS_NewCFunction2(ctx, js_set_nodeValue, "set_nodeValue", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "data");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_data, "get_data", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_data, "set_data", 1, qjs.JS_CFUNC_generic, 0);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }

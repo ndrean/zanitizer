@@ -58,6 +58,7 @@ pub const bindings = [_]BindingSpec{
         .return_type = .optional_element,
         .prop_this = .this_document,
     },
+    // createRange is manually implemented in dom_bridge.zig (returns JS Range object)
 
     // DOMParser.parseFromString: TODO
     .{
@@ -288,6 +289,15 @@ pub const bindings = [_]BindingSpec{
     },
     .{
         .name = "nodeValue",
+        .kind = .property,
+        .getter = "z.nodeValue_zc",
+        .setter = "z.setNodeValue",
+        .prop_type = .string_zc,
+        .prop_this = .this_node,
+    },
+    .{
+        // CharacterData.data - alias for nodeValue (used by Preact for text updates)
+        .name = "data",
         .kind = .property,
         .getter = "z.nodeValue_zc",
         .setter = "z.setNodeValue",

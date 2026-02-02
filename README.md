@@ -18,7 +18,7 @@ What it has:
 - `Workers`(OS threads for parallel processing),
 - DOM/CSS native sanitizer (based on H5SC testing suite),
 - can inject native Zig primitives (statistics, CSV parsing...),
-- integrated Web API classes: `Worker`, `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `Fetch`.
+- integrated Web API classes: `Worker`, `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `FileReader`, `Fetch`.
 
 It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) included a native speed.
 
@@ -67,6 +67,125 @@ The folder _src/examples_  (will!) contains all the test cases.
 Run the file name with:  `zig build example -Dname=extract_script_from_html`
 
 **TODO**: migrate from _main.zig_ to /examples
+
+### Reactive framework : SolidJS (no JSX)
+
+```html
+<html>
+  <body>
+    <h1>Testing CDN import: SolidJS</h1>
+    <div id="root"></div>
+    <script type="module">
+      import { createSignal, createEffect, onCleanup } from "solid-js";
+      import { render } from "solid-js/web";
+      // Skip html template tag - it has regex issues in QuickJS
+      // import html from "solid-js/html";
+
+      console.log("[JS] SolidJS loaded");
+      console.log("[JS] createSignal:", typeof createSignal);
+      console.log("[JS] render:", typeof render);
+
+      // Basic reactivity test
+      const [count, setCount] = createSignal(1);
+
+      // Component using manual DOM (works with QuickJS)
+      const Counter = () => {
+        const [localCount, setLocalCount] = createSignal(0);
+
+        // Create DOM elements manually
+        const container = document.createElement("div");
+        const p = document.createElement("p");
+        const button = document.createElement("button");
+        button.textContent = "Add +1";
+
+        // Reactive effect updates the DOM when signal changes
+        createEffect(() => {
+          console.log(`[JS] Rendered! Count: ${localCount()}`);
+          p.textContent = `Count: ${localCount()}`;
+        });
+
+        // Button click handler
+        button.onclick = () => setLocalCount((c) => c + 1);
+
+        // Auto-increment every 500ms, stop after 3 iterations
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          setLocalCount((c) => c + 1);
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+          }
+        }, 500);
+        onCleanup(() => clearInterval(interval));
+
+        container.appendChild(p);
+        container.appendChild(button);
+        return container;
+      };
+
+      try {
+        render(Counter, document.getElementById("root"));
+        console.log("[JS] SolidJS render success!");
+      } catch (e) {
+        console.log("[JS] SolidJS Error:", e.message);
+        if (e.stack)
+          console.log(
+            "[JS] Stack:",
+            e.stack.split("\n").slice(0, 3).join("\n"),
+          );
+      }
+    </script>
+  </body>
+</html>
+```
+
+```zig
+fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
+    var engine = try ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+
+    const html = @embedFile("test_solidjs.html");
+    try engine.loadHTML(html);
+    try engine.executeScripts(gpa, ".");
+    engine.run() catch |err| {
+        z.print("Run error: {}\n", .{err});
+        return err;
+    };
+    const root = z.getElementById(engine.dom.doc, "root");
+    try z.prettyPrint(gpa, z.elementToNode(root.?));
+}
+```
+
+`zig build exaple -Dname=test_solidjs`
+
+```txt
+[Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
+[Zig] Import map: solid-js/web -> https://unpkg.com/solid-js@1.8.0/web/dist/web.js
+[Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
+
+[JS] SolidJS loaded
+[JS] createSignal: function
+[JS] render: function
+[JS] Rendered! Count: 0
+[JS] SolidJS render success!
+[JS] Rendered! Count: 1
+[JS] Rendered! Count: 2
+[JS] Rendered! Count: 3
+[JS] Auto-increment stopped after 3 iterations
+
+<div id="root">
+  <div>
+    <p>
+      "Count: 3"
+    </p>
+    <button>
+      "Add +1"
+    </button>
+  </div>
+</div>
+```
+
 
 ### Upload a file
 

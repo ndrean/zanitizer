@@ -44,7 +44,9 @@ pub const ScriptEngine = struct {
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
     sandbox: js_security.Sandbox,
 
+    // TODO: need to read the import_map as external
     const import_map_json = @embedFile("examples/cdn_import_map.json");
+
     /// Initialize JS Environment on the heap
     pub fn init(allocator: std.mem.Allocator, sandbox_root: []const u8) !*ScriptEngine {
         const self = try allocator.create(ScriptEngine);

@@ -1533,7 +1533,16 @@ pub fn insertBefore(reference_node: *z.DomNode, new_node: *z.DomNode) void {
 /// `parent.insertBefore(newChild, refChild)` - inserts newChild before refChild
 /// If refChild is null, appends newChild to parent
 /// Returns the inserted node
+///
+/// Per DOM Living Standard: If newChild is already in the document, it is
+/// removed from its current parent before being inserted at the new location.
 pub fn jsInsertBefore(parent: *z.DomNode, new_child: *z.DomNode, ref_child: ?*z.DomNode) *z.DomNode {
+    // DOM spec compliance: remove node from its current position first
+    // (Lexbor's insertBefore doesn't do this, causing corrupted sibling chains)
+    if (parentNode(new_child) != null) {
+        removeNode(new_child);
+    }
+
     if (ref_child) |ref| {
         // Insert before the reference child
         insertBefore(ref, new_child);

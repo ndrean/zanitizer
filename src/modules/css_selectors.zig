@@ -158,9 +158,20 @@ pub const CssSelectorEngine = struct {
         const list = try self.getSelector(selector);
 
         var ctx = FirstContext{ .result = null };
-        const status = lxb_selectors_find(self.selectors, root_node, list, findFirstCb, &ctx);
 
-        if (status != z._OK and ctx.result == null) return error.SelectorFindError;
+        // Special handling for DocumentFragment: lexbor doesn't descend into fragment children
+        if (z.nodeType(root_node) == .document_fragment) {
+            var child = z.firstChild(root_node);
+            while (child) |c| : (child = z.nextSibling(c)) {
+                if (z.isTypeElement(c)) {
+                    _ = lxb_selectors_find(self.selectors, c, list, findFirstCb, &ctx);
+                    if (ctx.result != null) break; // Found first match
+                }
+            }
+        } else {
+            const status = lxb_selectors_find(self.selectors, root_node, list, findFirstCb, &ctx);
+            if (status != z._OK and ctx.result == null) return error.SelectorFindError;
+        }
         return ctx.result;
     }
 
@@ -172,8 +183,20 @@ pub const CssSelectorEngine = struct {
         var ctx = AllContext.init(self.allocator);
         defer ctx.deinit();
 
-        const status = lxb_selectors_find(self.selectors, root_node, list, findAllCb, &ctx);
-        if (status != z._OK) return error.SelectorFindError;
+        // Special handling for DocumentFragment: lexbor doesn't descend into fragment children
+        // So we manually iterate through each element child and run the selector on it
+        if (z.nodeType(root_node) == .document_fragment) {
+            var child = z.firstChild(root_node);
+            while (child) |c| : (child = z.nextSibling(c)) {
+                if (z.isTypeElement(c)) {
+                    // Search within this element subtree
+                    _ = lxb_selectors_find(self.selectors, c, list, findAllCb, &ctx);
+                }
+            }
+        } else {
+            const status = lxb_selectors_find(self.selectors, root_node, list, findAllCb, &ctx);
+            if (status != z._OK) return error.SelectorFindError;
+        }
         return ctx.results.toOwnedSlice(self.allocator);
     }
 

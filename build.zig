@@ -213,6 +213,8 @@ pub fn build(b: *std.Build) void {
         "src/examples/cdn_import.zig",
         "src/examples/js-bench-1.zig",
         "src/examples/js-bench-2.zig",
+        "src/examples/js-bench-3.zig",
+        "src/examples/js-bench-bau.zig",
         "src/examples/dom_purify.zig",
     };
     for (example_files) |example_file| {

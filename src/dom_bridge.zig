@@ -23,6 +23,7 @@ const js_file_reader = @import("js_file_reader.zig");
 const js_text_encoding = @import("js_text_encoding.zig");
 const js_readable_stream = @import("js_readable_stream.zig");
 const js_writable_stream = @import("js_writable_stream.zig");
+const js_range = @import("js_range.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -82,10 +83,39 @@ pub const DOMBridge = struct {
                 z.qjs.JS_FreeAtom(ctx.ptr, atom);
             }
 
+            // children property (element children only) - needed for DocumentFragment
+            {
+                const atom = z.qjs.JS_NewAtom(ctx.ptr, "children");
+                const get_fn = ctx.newCFunction(js_get_children, "get_children", 0);
+                _ = z.qjs.JS_DefinePropertyGetSet(
+                    ctx.ptr,
+                    node_proto,
+                    atom,
+                    get_fn,
+                    zqjs.UNDEFINED,
+                    z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE,
+                );
+                z.qjs.JS_FreeAtom(ctx.ptr, atom);
+            }
+
             // Manual: insertBefore(newChild, refChild) - refChild can be null
             {
                 const ib_fn = ctx.newCFunction(js_insertBefore, "insertBefore", 2);
                 _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "insertBefore", ib_fn);
+            }
+
+            // Manual: appendChild - overrides generated binding to handle DocumentFragment
+            {
+                const ac_fn = ctx.newCFunction(js_appendChild_manual, "appendChild", 1);
+                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "appendChild", ac_fn);
+            }
+
+            // ParentNode mixin: querySelector/querySelectorAll (also on Node for DocumentFragment support)
+            {
+                const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
+                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "querySelector", qs_fn);
+                const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
+                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "querySelectorAll", qsa_fn);
             }
 
             ctx.setClassProto(rc.classes.dom_node, node_proto);
@@ -211,6 +241,8 @@ pub const DOMBridge = struct {
         try js_text_encoding.install(ctx);
         try js_readable_stream.install(ctx);
         try js_writable_stream.install(ctx);
+        try js_file_reader_sync.FileReaderSyncBridge.install(ctx);
+        try js_range.RangeBridge.install(ctx);
 
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);
@@ -287,6 +319,13 @@ pub const DOMBridge = struct {
         // Host Communication API Helper (sendToHost)
         const fn_val = ctx.newCFunction(js_reportResult, "sendToHost", 1);
         try ctx.setPropertyStr(global, "sendToHost", fn_val);
+
+        // Expose HTMLElement constructor globally (needed for polyfills like onclick)
+        // Create a constructor object with the class prototype
+        const html_element_ctor = ctx.newCFunction2(js_HTMLElement_constructor, "HTMLElement", 0, z.qjs.JS_CFUNC_constructor, 0);
+        const html_element_proto = ctx.getClassProto(rc.classes.html_element);
+        try ctx.setPropertyStr(html_element_ctor, "prototype", html_element_proto);
+        try ctx.setPropertyStr(global, "HTMLElement", html_element_ctor);
     }
 
     fn createDocumentAPI(self: *DOMBridge, global: w.Value, _: w.ClassID) !void {
@@ -299,12 +338,18 @@ pub const DOMBridge = struct {
         try ctx.setOpaque(doc_obj, self.doc);
         try ctx.setPropertyStr(doc_obj, "_native_doc", ctx.dupValue(doc_obj));
 
-        // Manual Bindings (querySelector)
+        // Manual Bindings (querySelector, createRange)
         const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
         try ctx.setPropertyStr(doc_obj, "querySelector", qs_fn);
 
         const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
         try ctx.setPropertyStr(doc_obj, "querySelectorAll", qsa_fn);
+
+        const cr_fn = ctx.newCFunction(js_createRange, "createRange", 0);
+        try ctx.setPropertyStr(doc_obj, "createRange", cr_fn);
+
+        const gtn_fn = ctx.newCFunction(js_getElementsByTagName, "getElementsByTagName", 1);
+        try ctx.setPropertyStr(doc_obj, "getElementsByTagName", gtn_fn);
 
         // Expose 'document' on global
         try ctx.setPropertyStr(global, "document", doc_obj);
@@ -476,6 +521,16 @@ pub const DOMBridge = struct {
         // nodeName uses the prototype getter
         const node_type_num: i32 = @intCast(@intFromEnum(n_type));
         try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(node_type_num));
+
+        // For element nodes, also set tagName (consistent with wrapElement)
+        // This is critical because cloneNode uses wrapNode, and cached nodes
+        // must have tagName for children[] access to work correctly
+        if (n_type == .element) {
+            const element: *z.HTMLElement = @ptrCast(@alignCast(node));
+            const tag = z.tagName_zc(element);
+            const tag_str = ctx.newString(tag);
+            try ctx.setPropertyStr(obj, "tagName", tag_str);
+        }
 
         // store in cache
         const dup_for_cache = ctx.dupValue(obj);
@@ -678,6 +733,17 @@ fn js_reportResult(
     return z.wrapper.UNDEFINED;
 }
 
+// HTMLElement constructor (throws - elements cannot be constructed directly)
+fn js_HTMLElement_constructor(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    return ctx.throwTypeError("Illegal constructor: HTMLElement cannot be constructed directly");
+}
+
 // --- NATIVE CALLBACKS (Using Wrapper API) ---
 fn js_querySelector(
     ctx_ptr: ?*z.qjs.JSContext,
@@ -700,6 +766,9 @@ fn js_querySelector(
         root_node = z.documentRoot(doc);
     } else if (ctx.getOpaque(this_val, rc.classes.document_fragment)) |ptr| {
         root_node = z.fragmentToNode(@ptrCast(ptr));
+    } else if (ctx.getOpaque(this_val, rc.classes.dom_node)) |ptr| {
+        // Generic node (includes cloned DocumentFragments wrapped as dom_node)
+        root_node = @ptrCast(@alignCast(ptr));
     } else {
         return ctx.throwTypeError("querySelector called on invalid object");
     }
@@ -730,7 +799,7 @@ fn js_querySelectorAll(
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
-    // Unwrap 'this' (Polymorphic: Element, Document, or Fragment)
+    // Unwrap 'this' (Polymorphic: Element, Document, Fragment, or generic Node)
     var root_node: ?*z.DomNode = null;
 
     if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
@@ -740,6 +809,9 @@ fn js_querySelectorAll(
         root_node = z.documentRoot(doc);
     } else if (ctx.getOpaque(this_val, rc.classes.document_fragment)) |ptr| {
         root_node = z.fragmentToNode(@ptrCast(ptr));
+    } else if (ctx.getOpaque(this_val, rc.classes.dom_node)) |ptr| {
+        // Generic node (includes cloned DocumentFragments wrapped as dom_node)
+        root_node = @ptrCast(@alignCast(ptr));
     } else {
         return ctx.throwTypeError("querySelectorAll called on invalid object");
     }
@@ -791,6 +863,50 @@ fn js_matches(
     return ctx.newBool(result);
 }
 
+fn js_getElementsByTagName(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.EXCEPTION;
+
+    // Get document from 'this'
+    const ptr = ctx.getOpaque(this_val, rc.classes.document);
+    if (ptr == null) return ctx.throwTypeError("getElementsByTagName() called on non-Document");
+    const doc: *z.HTMLDocument = @ptrCast(@alignCast(ptr));
+
+    const tag_name = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(tag_name);
+
+    const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+
+    // Convert to uppercase for lexbor (HTML spec: case-insensitive)
+    var upper_buf: [64]u8 = undefined;
+    const upper_tag = blk: {
+        if (tag_name.len > upper_buf.len) break :blk tag_name; // Too long, use as-is
+        for (tag_name, 0..) |c, i| {
+            upper_buf[i] = std.ascii.toUpper(c);
+        }
+        break :blk upper_buf[0..tag_name.len];
+    };
+
+    // Use Zig's getElementsByTagName
+    const elements = z.getElementsByTagName(bridge.allocator, doc, upper_tag) catch return w.EXCEPTION;
+    defer bridge.allocator.free(elements);
+
+    // Convert to JS Array
+    const array = ctx.newArray();
+    for (elements, 0..) |el, i| {
+        const val = DOMBridge.wrapElement(ctx, el) catch continue;
+        _ = ctx.setPropertyUint32(array, @intCast(i), val) catch {};
+    }
+
+    return array;
+}
+
 fn js_get_childNodes(
     ctx_ptr: ?*z.qjs.JSContext,
     this_val: zqjs.Value,
@@ -812,6 +928,34 @@ fn js_get_childNodes(
         const val = DOMBridge.wrapNode(ctx, child) catch continue;
         // accessor array[i] = child
         _ = ctx.setPropertyUint32(array, @intCast(i), val) catch {};
+    }
+
+    return array;
+}
+
+// children property - returns only element children (not text nodes)
+fn js_get_children(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+
+    // Unwrap 'this' to *DomNode
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+
+    const array = ctx.newArray();
+    var idx: u32 = 0;
+
+    // Iterate through children, only include elements
+    var child = z.firstChild(node);
+    while (child) |c| : (child = z.nextSibling(c)) {
+        if (z.nodeToElement(c)) |el| {
+            const val = DOMBridge.wrapElement(ctx, el) catch continue;
+            _ = ctx.setPropertyUint32(array, idx, val) catch {};
+            idx += 1;
+        }
     }
 
     return array;
@@ -849,6 +993,44 @@ fn js_insertBefore(
     return DOMBridge.wrapNode(ctx, result) catch return w.EXCEPTION;
 }
 
+/// parent.appendChild(child) - handles DocumentFragment specially (moves children)
+fn js_appendChild_manual(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+
+    if (argc < 1) return ctx.throwTypeError("appendChild requires 1 argument");
+
+    // Unwrap parent (this)
+    const parent = DOMBridge.unwrapNode(ctx, this_val) orelse
+        return ctx.throwTypeError("'this' is not a Node");
+
+    // Unwrap child (first argument)
+    const child = DOMBridge.unwrapNode(ctx, argv[0]) orelse
+        return ctx.throwTypeError("Argument must be a Node");
+
+    // Check if child is a DocumentFragment
+    const child_type = z.nodeType(child);
+    if (child_type == .document_fragment) {
+        // Move all children from fragment to parent
+        var frag_child = z.firstChild(child);
+        while (frag_child) |fc| {
+            const next = z.nextSibling(fc);
+            z.appendChild(parent, fc);
+            frag_child = next;
+        }
+        // Return the (now empty) fragment
+        return DOMBridge.wrapNode(ctx, child) catch return w.EXCEPTION;
+    } else {
+        // Normal appendChild
+        z.appendChild(parent, child);
+        return DOMBridge.wrapNode(ctx, child) catch return w.EXCEPTION;
+    }
+}
+
 fn js_get_parentNode(
     ctx_ptr: ?*z.qjs.JSContext,
     this_val: zqjs.Value,
@@ -875,6 +1057,33 @@ fn js_get_ownerDocument(
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
     return ctx.getPropertyStr(global, "document");
+}
+
+pub fn documentCreateRange(ctx: zqjs.Context, _: *z.HTMLDocument) !zqjs.Value {
+    // Just call new Range() logic
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    const ctor = ctx.getPropertyStr(global, "Range");
+    defer ctx.freeValue(ctor);
+
+    // Call constructor with 0 args
+    return ctx.callConstructor(ctor, &.{});
+}
+
+fn js_createRange(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    // Call Range constructor with 0 args
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    const ctor = ctx.getPropertyStr(global, "Range");
+    defer ctx.freeValue(ctor);
+    // Use JS_CallConstructor directly with argc=0
+    return z.qjs.JS_CallConstructor(ctx.ptr, ctor, 0, null);
 }
 
 // Dummy implementation to stop JS from crashing

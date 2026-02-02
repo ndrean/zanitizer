@@ -42,6 +42,38 @@ pub fn constructor(
     return obj;
 }
 
+// Getter for `children` property (returns array of element children)
+fn js_get_children(
+    ctx_ptr: ?*qjs.JSContext,
+    this_val: qjs.JSValue,
+    _: c_int,
+    _: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = ctx.getOpaque(this_val, rc.classes.document_fragment);
+    if (ptr == null) return ctx.throwTypeError("Not a DocumentFragment");
+    const frag: *Fragment = @ptrCast(@alignCast(ptr));
+
+    const node = z.fragmentToNode(frag);
+    const array = ctx.newArray();
+
+    // Iterate through children and collect elements
+    var child = z.firstChild(node);
+    var idx: u32 = 0;
+    while (child) |c| : (child = z.nextSibling(c)) {
+        if (z.nodeToElement(c)) |el| {
+            const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+            const wrapped = DOMBridge.wrapElement(ctx, el) catch continue;
+            _ = ctx.setPropertyUint32(array, idx, wrapped) catch {};
+            idx += 1;
+        }
+    }
+
+    return array;
+}
+
 pub const DocFragmentBridge = struct {
     pub fn install(ctx: w.Context) !void {
         const rc = RuntimeContext.get(ctx);
@@ -61,6 +93,14 @@ pub const DocFragmentBridge = struct {
             const node_proto = ctx.getClassProto(rc.classes.dom_node);
             defer ctx.freeValue(node_proto);
             try ctx.setPrototype(proto, node_proto);
+        }
+
+        // Add children getter
+        {
+            const atom = qjs.JS_NewAtom(ctx.ptr, "children");
+            defer qjs.JS_FreeAtom(ctx.ptr, atom);
+            const get_fn = ctx.newCFunction(js_get_children, "get_children", 0);
+            _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, atom, get_fn, w.UNDEFINED, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         }
 
         const ctor = ctx.newCFunction2(constructor, "DocumentFragment", 0, z.qjs.JS_CFUNC_constructor, 0);
