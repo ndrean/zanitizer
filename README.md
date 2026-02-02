@@ -349,7 +349,137 @@ Run the file name with:  `zig build example -Dname=test_solidjs -Doptimize=Relea
 
 **TODO**: migrate from _main.zig_ to /examples
 
-### Reactive framework : SolidJS (no JSX)
+### Preact with htm
+
+ >[!IMPORTANT] Use `ReleaseFast`
+
+ ```sh
+ zig build example -Dname=test_htm -Domptimize=ReleaseFast
+ ```
+
+```html
+<html>
+  <body>
+    <h1>HTM + Preact Demo</h1>
+    <div id="root"></div>
+    <script type="module">
+      import { html, render, useState } from "htm/preact/standalone";
+
+      const root = document.getElementById("root");
+
+      const Button = ({ onClick, children }) => {
+        console.log("[JS] Button render");
+        return html`<button id="increment-btn" onclick=${onClick}>${children}</button>`;
+      };
+
+      const CountDisplay = ({ count }) => {
+        console.log("[JS] CountDisplay render, count =", count);
+        return html`<p id="count-display">Count: ${count}</p>`;
+      };
+
+      const App = () => {
+        const [count, setCount] = useState(0);
+        console.log("[JS] App render, count =", count);
+
+        const handleClick = () => {
+          console.log("[JS] Button clicked!");
+          setCount((c) => c + 1);
+        };
+
+        return html`
+          <div class="app">
+            <h2>HTM Counter</h2>
+            <${CountDisplay} count=${count} />
+            <${Button} onClick=${handleClick}>+1<//>
+          </div>
+        `;
+      };
+
+      try {
+        render(html`<${App} />`, root);
+        console.log("[JS] Rendered successfully!");
+        console.log("[JS] innerHTML:", root.innerHTML);
+
+        const btn = document.getElementById("increment-btn");
+        if (btn) {
+          console.log("[JS] Testing clicks...");
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => btn.dispatchEvent(new Event("click")), (i + 1) * 100);
+          }
+          setTimeout(() => {
+            console.log("[JS] Final count:", document.getElementById("count-display")?.textContent);
+          }, 500);
+        }
+      } catch (e) {
+        console.log("[JS] ERROR:", e.message);
+        if (e.stack) console.log("[JS] Stack:", e.stack.split("\n").slice(0, 3).join("\n"));
+      }
+    </script>
+  </body>
+</html>
+```
+
+The Preact/htm code can be compiled to bytecode which eliminates parsing+compilation.
+
+The Zig function to run (**TODO**: simply even more: load+execute in one go)
+
+```zig
+fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
+    var engine = try ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+    const html = @embedFile("test_htm.html");
+    try engine.loadHTML(html);
+    try engine.executeScripts(gpa, ".");
+    engine.run() catch |err| {
+        z.print("Run error: {}\n", .{err});
+        return err;
+    };
+    engine.processJobs();
+    const root = z.getElementById(engine.dom.doc, "root");
+    try z.prettyPrint(gpa, z.elementToNode(root.?));
+}
+```
+
+The output shows that the hooks are triggered and the DOM is updated.
+
+```txt
+[JS] App render, count = 0
+[JS] CountDisplay render, count = 0
+[JS] Button render
+[JS] Rendered successfully!
+[JS] innerHTML: <div class="app"><h2>HTM Counter</h2><p id="count-display">Count: 0</p><button id="increment-btn">+1</button></div>
+[JS] Testing clicks...
+[JS] Button clicked!
+[JS] App render, count = 1
+[JS] CountDisplay render, count = 1
+[JS] Button render
+[JS] Button clicked!
+[JS] App render, count = 2
+[JS] CountDisplay render, count = 2
+[JS] Button render
+[JS] Button clicked!
+[JS] App render, count = 3
+[JS] CountDisplay render, count = 3
+[JS] Button render
+[JS] Final count: Count: 3
+<div id="root">
+  <div class="app">
+    <h2>
+      "HTM Counter"
+    </h2>
+    <p id="count-display">
+      "Count: "
+      "3"
+    </p>
+    <button id="increment-btn">
+      "+1"
+    </button>
+  </div>
+</div>
+```
+
+
+### SolidJS as reactive framework (no JSX pollyfil)
 
 ```html
 <html>

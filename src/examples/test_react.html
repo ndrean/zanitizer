@@ -1,21 +1,70 @@
 <html>
   <head> </head>
   <body>
-    <h1>Testing CDN import: React</h1>
+    <h1>Testing React API (via Preact/Compat)</h1>
     <div id="root"></div>
     <script type="module">
+      // ============================================================
+      // Using preact/compat which provides React API compatibility
+      //
+      // Real React (v17/v18) fails in QuickJS with:
+      //   "invalid 'instanceof' right operand"
+      // due to internal fiber type checks.
+      //
+      // Solution: Use preact/compat as drop-in replacement
+      //
+      // NOTES:
+      // - Use lowercase event handlers: onclick (not onClick)
+      // - Run with --release=fast to avoid stack overflow
+      //   zig build example -Dname=test_react --release=fast
+      // ============================================================
+
       import React from "react";
       import ReactDOM from "react-dom";
 
-      console.log("[JS] React loaded:", typeof React.createElement);
+      console.log("[JS] React API (preact/compat) loaded");
+      console.log("[JS] React.createElement:", typeof React.createElement);
+      console.log("[JS] React.useState:", typeof React.useState);
 
       const rootElement = document.getElementById("root");
 
+      // Using React API with hooks
+      const { useState } = React;
+
+      const Counter = () => {
+        const [count, setCount] = useState(0);
+        console.log("[JS] Counter render, count =", count);
+        return React.createElement(
+          "div",
+          { className: "counter" },
+          React.createElement("p", { id: "count-display" }, `Count: ${count}`),
+          React.createElement(
+            "button",
+            { id: "increment-btn", onclick: () => setCount((c) => c + 1) },
+            "+1"
+          )
+        );
+      };
+
       try {
-        ReactDOM.render("<p>Hello</p>", rootElement);
-        console.log("[JS] ✅ React Success!");
+        ReactDOM.render(React.createElement(Counter), rootElement);
+        console.log("[JS] ✅ Rendered!");
+        console.log("[JS] innerHTML:", rootElement.innerHTML);
+
+        // Test clicks
+        const btn = document.getElementById("increment-btn");
+        if (btn) {
+          console.log("[JS] Testing clicks...");
+          for (let i = 0; i < 3; i++) {
+            setTimeout(() => btn.dispatchEvent(new Event("click")), (i + 1) * 100);
+          }
+          setTimeout(() => {
+            console.log("[JS] Final count:", document.getElementById("count-display")?.textContent);
+          }, 500);
+        }
       } catch (e) {
-        console.log("[JS] ❌ React Error:", e.message);
+        console.log("[JS] ❌ Error:", e.message);
+        if (e.stack) console.log("[JS] Stack:", e.stack.split("\n").slice(0, 5).join("\n"));
       }
     </script>
   </body>

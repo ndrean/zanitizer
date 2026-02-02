@@ -42,6 +42,14 @@ async function test() {
     URL.revokeObjectURL(url);
     URL.revokeObjectURL(jsonUrl);
     console.log("[JS] ✅ All checks passed");
+
+    const tagRE =
+      /(?:<!--[\S\s]*?-->|<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>)/g;
+
+    const html = `<div class="some-class" data-value="test">`;
+
+    const arr = tagRE.exec(html);
+    console.log("[JS] RegExp Test:", arr);
   } catch (e) {
     console.log("[JS] ❌ ERROR:", e.message || e);
   }

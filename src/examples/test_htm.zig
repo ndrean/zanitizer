@@ -24,15 +24,14 @@ pub fn main() !void {
 fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     var engine = try ScriptEngine.init(gpa, sandbox_root);
     defer engine.deinit();
-
-    const html = @embedFile("test_react.html");
+    const html = @embedFile("test_htm.html");
     try engine.loadHTML(html);
     try engine.executeScripts(gpa, ".");
     engine.run() catch |err| {
         z.print("Run error: {}\n", .{err});
         return err;
     };
+    engine.processJobs();
     const root = z.getElementById(engine.dom.doc, "root");
-
     try z.prettyPrint(gpa, z.elementToNode(root.?));
 }

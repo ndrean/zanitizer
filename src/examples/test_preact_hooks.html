@@ -1,6 +1,6 @@
 <html>
   <body>
-    <h1>Preact Demo (QuickJS compatible)</h1>
+    <h1>Preact Demo - Nested Components Test</h1>
     <div id="root"></div>
     <script type="module">
       import { h, render } from "preact";
@@ -11,24 +11,48 @@
       const root = document.getElementById("root");
 
       // ============================================================
-      // QuickJS Limitations:
-      // 1. onclick/on* props cause regex stack overflow in Preact
-      // 2. Nested components cause stack overflow
-      // Workaround: Manual event binding after render
+      // IMPORTANT: Must run with --release=fast
+      //   zig build example -Dname=test_preact_hooks --release=fast
+      //
+      // Debug mode causes stack overflow due to:
+      // - Smaller QuickJS stack size
+      // - No inlining/tail-call optimization
+      // - Preact's recursive VDOM diffing exhausts the stack
+      //
+      // With --release=fast: All features work (nested, hooks, onclick)
       // ============================================================
 
-      // Store setCount globally so we can access it after render
       let globalSetCount = null;
 
+      // Nested component: Button with onclick prop
+      const Button = ({ id, children, onClick }) => {
+        console.log("[JS] Button component render");
+        return h("button", { id, onclick: onClick }, children);
+      };
+
+      // Nested component: Counter display
+      const CountDisplay = ({ count }) => {
+        console.log("[JS] CountDisplay render, count =", count);
+        return h("p", { id: "count-display" }, `Count: ${count}`);
+      };
+
+      // Parent component with nested children + useState
       const App = () => {
         const [count, setCount] = useState(0);
         globalSetCount = setCount;
         console.log("[JS] App render, count =", count);
 
-        return h('div', { class: 'app' },
-          h('h1', null, 'Preact Counter'),
-          h('p', { id: 'count-display' }, `Count: ${count}`),
-          h('button', { id: 'increment-btn' }, '+1')
+        const handleClick = () => {
+          console.log("[JS] onclick prop triggered!");
+          setCount((c) => c + 1);
+        };
+
+        return h(
+          "div",
+          { class: "app" },
+          h("h1", null, "Preact Counter"),
+          h(CountDisplay, { count }),
+          h(Button, { id: "increment-btn", onClick: handleClick }, "+1"),
         );
       };
 
@@ -37,35 +61,20 @@
         console.log("[JS] Rendered successfully!");
         console.log("[JS] innerHTML:", root.innerHTML);
 
-        // Manual event binding (workaround for onclick prop issue)
-        const btn = document.getElementById('increment-btn');
+        // Test onclick via dispatchEvent
+        const btn = document.getElementById("increment-btn");
         if (btn) {
-          btn.addEventListener('click', () => {
-            console.log("[JS] Button clicked!");
-            if (globalSetCount) {
-              globalSetCount(c => c + 1);
-            }
-          });
-          console.log("[JS] Click handler attached to button");
-
-          // Test clicking via dispatchEvent
-          console.log("[JS] Dispatching test clicks...");
+          console.log("[JS] Testing onclick prop...");
           for (let i = 0; i < 3; i++) {
-            setTimeout(() => {
-              btn.dispatchEvent(new Event('click'));
-            }, (i + 1) * 500);
+            setTimeout(() => btn.dispatchEvent(new Event("click")), (i + 1) * 100);
           }
-
-          // Check DOM after all clicks
           setTimeout(() => {
-            console.log("[JS] Final innerHTML:", root.innerHTML);
-            const countEl = document.getElementById('count-display');
-            console.log("[JS] Count element text:", countEl?.textContent);
-          }, 2000);
+            console.log("[JS] Final count:", document.getElementById("count-display")?.textContent);
+          }, 500);
         }
       } catch (e) {
-        console.log("[JS] Render error:", e.message);
-        if (e.stack) console.log("[JS] Stack:", e.stack.split("\n").slice(0, 3).join("\n"));
+        console.log("[JS] ERROR:", e.message);
+        console.log("[JS] TIP: Run with --release=fast to avoid stack overflow");
       }
     </script>
   </body>

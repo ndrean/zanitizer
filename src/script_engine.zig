@@ -426,6 +426,16 @@ pub const ScriptEngine = struct {
         }
     }
 
+    pub fn processJobs(self: *ScriptEngine) void {
+        while (true) {
+            // Run pending Jobs (Promises/Microtasks)
+            // returns < 0 if exception, 0 if no jobs, > 0 if job executed
+            var ctx: ?*qjs.JSContext = self.ctx.ptr;
+            const ret = qjs.JS_ExecutePendingJob(self.rt.ptr, &ctx);
+            if (ret <= 0) break;
+        }
+    }
+
     /// [host] Process all <script> tags in the document (Inline and Remote)
     pub fn executeScripts(self: *ScriptEngine, allocator: std.mem.Allocator, base_dir: []const u8) !void {
         const scripts = try z.querySelectorAll(
@@ -510,6 +520,7 @@ pub const ScriptEngine = struct {
                 self.ctx.freeValue(val);
             }
         }
+        self.processJobs();
     }
 
     /// Scans the DOM for <link rel="stylesheet"> and loads them securely

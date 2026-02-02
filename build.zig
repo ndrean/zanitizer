@@ -142,6 +142,23 @@ pub fn build(b: *std.Build) void {
     const gen_async_bindings_step = b.step("gen-async-bindings", "Generate Async QuickJS bindings code");
     gen_async_bindings_step.dependOn(&gen_async_bindings_run.step);
 
+    // Bytecode generator for pre-compiling JavaScript
+    const gen_bytecode = b.addExecutable(.{
+        .name = "gen-bytecode",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/gen_bytecode.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    gen_bytecode.addIncludePath(quickjs_src_path);
+    gen_bytecode.linkLibrary(qjs_lib);
+    gen_bytecode.linkLibC();
+    b.installArtifact(gen_bytecode);
+
+    const gen_bytecode_step = b.step("gen-bytecode", "Build bytecode compiler tool");
+    gen_bytecode_step.dependOn(&gen_bytecode.step);
+
     // SINGLE TEST TARGET - this runs ALL tests from all modules
     const lib_test = b.step("test", "Run units tests");
 

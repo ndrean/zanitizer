@@ -57,6 +57,43 @@ pub fn install(ctx: w.Context) !void {
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
 
+    const env_polyfill =
+        \\if (typeof globalThis.process === 'undefined') {
+        \\    globalThis.process = { env: { NODE_ENV: 'production' } };
+        \\}
+    ;
+    const env_result = qjs.JS_Eval(ctx.ptr, env_polyfill, env_polyfill.len, "<polyfill:env>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(env_result);
+
+    // Browser error types that React may check with instanceof
+    const browser_types_polyfill =
+        \\(function() {
+        \\    if (typeof globalThis.DOMException === 'undefined') {
+        \\        class DOMException extends Error {
+        \\            constructor(message, name) {
+        \\                super(message);
+        \\                this.name = name || 'DOMException';
+        \\                this.code = 0;
+        \\            }
+        \\        }
+        \\        globalThis.DOMException = DOMException;
+        \\    }
+        \\    if (typeof globalThis.AbortController === 'undefined') {
+        \\        class AbortSignal {
+        \\            constructor() { this.aborted = false; this.onabort = null; }
+        \\        }
+        \\        class AbortController {
+        \\            constructor() { this.signal = new AbortSignal(); }
+        \\            abort() { this.signal.aborted = true; if (this.signal.onabort) this.signal.onabort(); }
+        \\        }
+        \\        globalThis.AbortController = AbortController;
+        \\        globalThis.AbortSignal = AbortSignal;
+        \\    }
+        \\})();
+    ;
+    const bt_result = qjs.JS_Eval(ctx.ptr, browser_types_polyfill, browser_types_polyfill.len, "<polyfill:browser_types>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(bt_result);
+
     const btoa = ctx.newCFunction(js_btoa, "btoa", 1);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "btoa", btoa);
 
@@ -67,53 +104,84 @@ pub fn install(ctx: w.Context) !void {
     // Uses setTimeout(cb, 0) for immediate execution in headless environment
     const raf_polyfill =
         \\(function() {
-        \\    let rafId = 0;
-        \\    const pending = new Map();
+        \\    let callbacks = [];
+        \\    let pending = false;
+        \\    let idCounter = 0;
+        \\
         \\    globalThis.requestAnimationFrame = function(callback) {
-        \\        const id = ++rafId;
-        \\        const timeoutId = setTimeout(function() {
-        \\            pending.delete(id);
-        \\            callback(Date.now());
-        \\        }, 0);
-        \\        pending.set(id, timeoutId);
+        \\        const id = ++idCounter;
+        \\        callbacks.push({id, callback});
+        \\        if (!pending) {
+        \\            pending = true;
+        \\            // Use a microtask to schedule the flush.
+        \\            // This ensures all rAFs called in the same sync block of code
+        \\            // are batched together.
+        \\            Promise.resolve().then(function() {
+        \\                pending = false;
+        \\                const now = Date.now();
+        \\                const cbs = callbacks;
+        \\                callbacks = []; // Clear before calling, in case they queue more frames
+        \\                for (const item of cbs) {
+        \\                    try {
+        \\                        item.callback(now);
+        \\                    } catch (e) {
+        \\                        console.log("Error in requestAnimationFrame callback:", e);
+        \\                    }
+        \\                }
+        \\            });
+        \\        }
         \\        return id;
         \\    };
+        \\
         \\    globalThis.cancelAnimationFrame = function(id) {
-        \\        const timeoutId = pending.get(id);
-        \\        if (timeoutId !== undefined) {
-        \\            clearTimeout(timeoutId);
-        \\            pending.delete(id);
-        \\        }
+        \\        callbacks = callbacks.filter(cb => cb.id !== id);
         \\    };
         \\})();
     ;
     const result = qjs.JS_Eval(ctx.ptr, raf_polyfill, raf_polyfill.len, "<polyfill:raf>", qjs.JS_EVAL_TYPE_GLOBAL);
     ctx.freeValue(result);
 
-    // MessageChannel / MessagePort polyfill
-    // Used by React Scheduler for yielding to the event loop
-    // Uses setTimeout with 1ms delay to ensure async execution and prevent stack overflow
     const msg_channel_polyfill =
         \\(function() {
+        \\    if (globalThis.MessageChannel) return; // Don't polyfill if it exists
+        \\
         \\    class MessagePort {
         \\        constructor() {
         \\            this.onmessage = null;
         \\            this._other = null;
         \\            this._closed = false;
+        \\            this._queue = [];
         \\        }
         \\        postMessage(data) {
         \\            if (this._closed) return;
-        \\            const other = this._other;
-        \\            if (other && other.onmessage && !other._closed) {
-        \\                const handler = other.onmessage;
-        \\                setTimeout(function() {
-        \\                    if (!other._closed) handler({ data: data });
-        \\                }, 1);
+        \\            if (this._other) {
+        \\                this._other._queue.push(data);
+        \\                // Schedule a microtask to deliver the message
+        \\                Promise.resolve().then(() => {
+        \\                    if (this._other && !this._other._closed && this._other.onmessage) {
+        \\                        const message = this._other._queue.shift();
+        \\                        if (message !== undefined) {
+        \\                            try {
+        \\                                this._other.onmessage({ data: message });
+        \\                            } catch(e) {
+        \\                                console.log("Error in MessagePort onmessage:", e);
+        \\                            }
+        \\                        }
+        \\                    }
+        \\                });
         \\            }
         \\        }
-        \\        start() {} // No-op, auto-started
-        \\        close() { this._closed = true; this._other = null; }
+        \\        start() {}
+        \\        close() {
+        \\            if (!this._closed) {
+        \\                this._closed = true;
+        \\                if (this._other) {
+        \\                    this._other.close();
+        \\                }
+        \\            }
+        \\        }
         \\    }
+        \\
         \\    class MessageChannel {
         \\        constructor() {
         \\            this.port1 = new MessagePort();
@@ -128,4 +196,49 @@ pub fn install(ctx: w.Context) !void {
     ;
     const mc_result = qjs.JS_Eval(ctx.ptr, msg_channel_polyfill, msg_channel_polyfill.len, "<polyfill:msgchannel>", qjs.JS_EVAL_TYPE_GLOBAL);
     ctx.freeValue(mc_result);
+
+    const event_handler_polyfill =
+        \\(function() {
+        \\    const events = ['click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout', 'mousemove', 'mouseenter', 'mouseleave', 'keydown', 'keyup', 'keypress', 'submit', 'input', 'change', 'focus', 'blur', 'load', 'error', 'scroll', 'resize'];
+        \\
+        \\    events.forEach(event => {
+        \\        const prop = 'on' + event;
+        \\        const privateProp = '_' + prop;
+        \\        const guardProp = '__guard_' + prop;
+        \\
+        \\        Object.defineProperty(HTMLElement.prototype, prop, {
+        \\            configurable: true,
+        \\            enumerable: true,
+        \\            get() {
+        \\                return this[privateProp] || null;
+        \\            },
+        \\            set(handler) {
+        \\                // 1. RECURSION GUARD: Stop if we are already handling this property
+        \\                if (this[guardProp]) return;
+        \\                this[guardProp] = true;
+        \\
+        \\                try {
+        \\                    // 2. Remove old handler
+        \\                    if (this[privateProp]) {
+        \\                        this.removeEventListener(event, this[privateProp]);
+        \\                    }
+        \\                    
+        \\                    // 3. Add new handler
+        \\                    if (typeof handler === 'function') {
+        \\                        this[privateProp] = handler;
+        \\                        this.addEventListener(event, handler);
+        \\                    } else {
+        \\                        this[privateProp] = null;
+        \\                    }
+        \\                } finally {
+        \\                    // 4. Release Guard
+        \\                    this[guardProp] = false;
+        \\                }
+        \\            }
+        \\        });
+        \\    });
+        \\})();
+    ;
+    const eh_result = qjs.JS_Eval(ctx.ptr, event_handler_polyfill, event_handler_polyfill.len, "<polyfill:events>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(eh_result);
 }

@@ -1,12 +1,14 @@
 {
   "imports": {
     "estoolkit": "https://cdn.jsdelivr.net/npm/es-toolkit@1.44.0/+esm",
-    "react": "https://cdn.jsdelivr.net/npm/react@17.0.2/+esm",
-    "react-dom": "https://cdn.jsdelivr.net/npm/react-dom@17.0.2/+esm",
+    "react": "https://cdn.jsdelivr.net/npm/preact@10.19.3/compat/+esm",
+    "react-dom": "https://cdn.jsdelivr.net/npm/preact@10.19.3/compat/+esm",
+    "react-dom/client": "https://cdn.jsdelivr.net/npm/preact@10.19.3/compat/client/+esm",
     "preact": "https://cdn.jsdelivr.net/npm/preact@10.19.3/+esm",
     "preact/hooks": "https://cdn.jsdelivr.net/npm/preact@10.19.3/hooks/+esm",
     "htm": "https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.module.js",
     "htm/preact": "https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/index.module.js",
+    "htm/preact/standalone": "https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js",
     "solid-js": "https://unpkg.com/solid-js@1.8.0/dist/solid.js",
     "solid-js/web": "https://unpkg.com/solid-js@1.8.0/web/dist/web.js",
     "solid-js/html": "https://unpkg.com/solid-js@1.8.0/html/dist/html.js"

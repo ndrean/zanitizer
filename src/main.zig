@@ -56,6 +56,7 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
+    try elTest(allocator, sandbox_root);
     // try js_framework_2_bench(allocator, sandbox_root);
     try timersAndEncoding(allocator, sandbox_root);
     try test_FileReaderSync(allocator, sandbox_root);
@@ -128,6 +129,21 @@ pub fn main() !void {
     try demoInsertAdjacentHTML(allocator);
     try demoSetInnerHTML(allocator);
     // try demoSuspiciousAttributes(allocator);
+}
+
+fn elTest(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    const js =
+        \\console.log("Start");
+        \\Promise.resolve().then(() => console.log("Promise Run"));
+        \\console.log("End");
+    ;
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const res = try engine.evalModule(js, "<el>");
+    engine.ctx.freeValue(res);
+
+    try engine.run();
 }
 
 fn timersAndEncoding(allocator: std.mem.Allocator, sbx: []const u8) !void {
