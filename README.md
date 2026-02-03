@@ -698,7 +698,8 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 
 </details>
 
-It renders:
+<details>
+<summary>Vue 3 rendering in the terminal</summary>
 
 ```txt
 [JS] First render: <div class="counter-app"><h2>Vue Counter</h2><p id="count-display">Count: 0</p><button id="increment-btn">+1</button></div>
