@@ -569,6 +569,8 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 
 ```
 
+</details>
+
 <details>
 <summary>The output shows that the signal triggered DOM updates.
 </summary>
