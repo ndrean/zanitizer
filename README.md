@@ -352,10 +352,10 @@ Run the file name with:  `zig build example -Dname=test_solidjs -Doptimize=Relea
 ### Preact with htm
 
  > [!IMPORTANT] 
- > Use `ReleaseFast`
+ > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
 
  ```sh
- zig build example -Dname=test_htm -Domptimize=ReleaseFast
+ zig build example -Dname=test_htm -Doptimize=ReleaseFast
  ```
 
 ```html
