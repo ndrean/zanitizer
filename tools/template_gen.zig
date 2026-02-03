@@ -393,6 +393,26 @@ const T = struct {
         \\
     ;
 
+    const ELEMENT_PROP_STRING_ZC_SETTER =
+        \\// Property Setter for {s}
+        \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+        \\    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
+        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+        \\    defer ctx.freeZString(val_str);
+        \\    {s}(el, val_str) catch |err| {{
+        \\        std.debug.print("JS Setter Error ({s}): {{}}\n", .{{err}});
+        \\        return ctx.throwTypeError("Native Zig Error in Setter");
+        \\    }};
+        \\    return w.UNDEFINED;
+        \\}}
+        \\
+    ;
+
     // ========================================================================
     // ELEMENT PROPERTY - Optional Node (content for <template>)
     // ========================================================================
@@ -1328,6 +1348,9 @@ fn generateBinding(writer: anytype, b: anytype) !void {
         },
         .element_prop_string_zc => {
             try writer.print(T.ELEMENT_PROP_STRING_ZC_GETTER, .{ name, name, b.getter });
+            if (b.setter.len > 0) {
+                try writer.print(T.ELEMENT_PROP_STRING_ZC_SETTER, .{ name, name, b.setter, name });
+            }
         },
         .element_prop_opt_node => {
             try writer.print(T.ELEMENT_PROP_OPT_NODE_GETTER, .{ name, name, b.getter });

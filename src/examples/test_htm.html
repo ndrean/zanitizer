@@ -12,10 +12,9 @@
 
       // ============================================================
       // HTM allows JSX-like syntax with tagged template literals
-      // No build step needed! Uses native template strings.
       //
       // IMPORTANT: Run with --release=fast
-      //   zig build example -Dname=test_htm --release=fast
+      //   zig build example -Dname=test_htm -Doptimize=RereleaseFast
       // ============================================================
 
       // Nested component using HTM syntax
@@ -52,7 +51,7 @@
       try {
         render(html`<${App} />`, root);
         console.log("[JS] Rendered successfully!");
-        console.log("[JS] innerHTML:", root.innerHTML);
+        console.log("[JS] Initial innerHTML: ", root.innerHTML);
 
         // Test clicks
         const btn = document.getElementById("increment-btn");

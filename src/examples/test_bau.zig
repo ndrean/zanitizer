@@ -18,23 +18,20 @@ pub fn main() !void {
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
 
-    try run_test(gpa, sandbox_root);
+    try runBau(gpa, sandbox_root);
 }
 
-fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
+fn runBau(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     var engine = try ScriptEngine.init(gpa, sandbox_root);
     defer engine.deinit();
-
-    const html = @embedFile("test_solidjs.html");
+    const html = @embedFile("test_bau.html");
     try engine.loadHTML(html);
-
     try engine.executeScripts(gpa, ".");
-
     engine.run() catch |err| {
         z.print("Run error: {}\n", .{err});
         return err;
     };
-    const root = z.getElementById(engine.dom.doc, "root");
-
-    try z.prettyPrint(gpa, z.elementToNode(root.?));
+    // engine.processJobs();
+    // const root = z.getElementById(engine.dom.doc, "root");
+    // try z.printDOM(gpa, engine.dom.doc, "Final HTML");
 }

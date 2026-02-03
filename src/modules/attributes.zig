@@ -152,6 +152,13 @@ pub fn setAttribute(element: *z.HTMLElement, name: []const u8, value: []const u8
     ) orelse return error.AttributeSetFailed;
 }
 
+/// [attributes] Set the className (class attribute) on element
+///
+/// [JS] `element.className = value` equivalent
+pub fn setClassName(element: *z.HTMLElement, value: []const u8) !void {
+    try setAttribute(element, "class", value);
+}
+
 /// [attributes] Set many attributes name/value pairs on element
 ///
 /// Returns null if any attribute could not be set

@@ -345,14 +345,14 @@ DOMPurify reference: ~11 ms
 
 The folder _src/examples_  (will!) contains all the test cases.
 
-Run the file name with:  `zig build example -Dname=test_solidjs -Doptimize=ReleaseFast`
-
-**TODO**: migrate from _main.zig_ to /examples
-
-### Preact with htm
-
- > [!IMPORTANT] 
+> [!IMPORTANT] 
  > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
+
+We use helpers to permit JSX.
+
+### Preact with `htm`
+
+`zig build example -Dname=test_htm -Doptimize=ReleaseFast`
 
  ```sh
  zig build example -Dname=test_htm -Doptimize=ReleaseFast
@@ -482,8 +482,9 @@ The output shows that the hooks are triggered and the DOM is updated.
 </div>
 ```
 
+### SolidJS with `html`
 
-### SolidJS as reactive framework (no JSX pollyfil)
+`zig build example -Dname=test_solidjs --release=fast`
 
 ```html
 <html>
@@ -493,80 +494,71 @@ The output shows that the hooks are triggered and the DOM is updated.
     <script type="module">
       import { createSignal, createEffect, onCleanup } from "solid-js";
       import { render } from "solid-js/web";
+      import html from "solid-js/html";
 
       console.log("[JS] SolidJS loaded");
+      const root = document.getElementById("root");
 
       const [count, setCount] = createSignal(1);
 
       const Counter = () => {
         const [localCount, setLocalCount] = createSignal(0);
 
-        // Create DOM elements manually
-        const container = document.createElement("div");
-        const p = document.createElement("p");
-        const button = document.createElement("button");
-        button.textContent = "Add +1";
-
-        // Reactive effect updates the DOM when signal changes
         createEffect(() => {
           console.log(`[JS] Rendered! Count: ${localCount()}`);
-          p.textContent = `Count: ${localCount()}`;
+          console.log("[JS]", root.innerHTML);
         });
 
-        // Button click handler
-        button.onclick = () => setLocalCount((c) => c + 1);
-
-        // Auto-increment every 500ms, stop after 3 iterations
-        let iterations = 0;
-        const interval = setInterval(() => {
-          iterations++;
+        const handleClick = () => {
+          console.log("[JS] Button clicked!");
           setLocalCount((c) => c + 1);
-          if (iterations >= 3) {
-            clearInterval(interval);
-            console.log("[JS] Auto-increment stopped after 3 iterations");
-          }
-        }, 500);
-        onCleanup(() => clearInterval(interval));
+        };
 
-        container.appendChild(p);
-        container.appendChild(button);
-        return container;
+        return html`
+          <div class="counter-app">
+            <h2>SolidJS Counter</h2>
+            <p id="count-display">Count: ${localCount}</p>
+            <button id="increment-btn" onclick=${handleClick}>+1</button>
+          </div>
+        `;
       };
 
       try {
-        render(Counter, document.getElementById("root"));
-        console.log("[JS] SolidJS render success!");
+        render(() => html`<${Counter} />`, root);
+        console.log("[JS] First render: ", root.innerHTML);
+
+        // simulate periodic clicks
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          const btn = document.getElementById("increment-btn");
+          if (btn) {
+            btn.dispatchEvent(new Event("click", { bubbles: true }));
+          }
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+            console.log(
+              "[JS] Final:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }
+        }, 100);
       } catch (e) {
         console.log("[JS] SolidJS Error:", e.message);
         if (e.stack)
           console.log(
             "[JS] Stack:",
-            e.stack.split("\n").slice(0, 3).join("\n"),
+            e.stack.split("\n").slice(0, 5).join("\n"),
           );
       }
     </script>
   </body>
 </html>
+
 ```
 
-```zig
-fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
-    var engine = try ScriptEngine.init(gpa, sandbox_root);
-    defer engine.deinit();
-
-    const html = @embedFile("test_solidjs.html");
-    try engine.loadHTML(html);
-    try engine.executeScripts(gpa, ".");
-    engine.run() catch |err| {
-        z.print("Run error: {}\n", .{err});
-        return err;
-    };
-    const root = z.getElementById(engine.dom.doc, "root");
-    try z.prettyPrint(gpa, z.elementToNode(root.?));
-}
-```
-
-`zig build example -Dname=test_solidjs`
+The output is:
 
 ```txt
 [Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
@@ -574,20 +566,144 @@ fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 [Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
 
 [JS] SolidJS loaded
+[JS] createSignal: function
+[JS] render: function
 [JS] Rendered! Count: 0
-[JS] SolidJS render success!
+[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 0<!--#--></p><button id="increment-btn">+1</button></div>
+[JS] First render:  <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 0<!--#--></p><button id="increment-btn">+1</button></div>
+[JS] Button clicked!
 [JS] Rendered! Count: 1
+[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 1<!--#--></p><button id="increment-btn">+1</button></div>
+[JS] Button clicked!
 [JS] Rendered! Count: 2
+[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 2<!--#--></p><button id="increment-btn">+1</button></div>
+[JS] Button clicked!
 [JS] Rendered! Count: 3
+[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 3<!--#--></p><button id="increment-btn">+1</button></div>
 [JS] Auto-increment stopped after 3 iterations
-
+[JS] Final: Count: 3
 <div id="root">
-  <div>
-    <p>
+  <div class="counter-app">
+    <h2>
+      "SolidJS Counter"
+    </h2>
+    <p id="count-display">
+      "Count: "
+      "3"
+    </p>
+    <button id="increment-btn">
+      "+1"
+    </button>
+  </div>
+</div>
+```
+
+### Vue with `h`
+
+TODO: finish treeWalker
+
+`zig build example -Dname=test_vue --release=fast`
+
+```html
+<html>
+  <body>
+    <h1>Testing CDN import: Vue 3</h1>
+    <div id="root"></div>
+    <script type="module">
+      // Vue 3 with render functions (h)
+      
+      // Vue checks for browser globals during mount
+      if (typeof SVGElement === "undefined") {
+        globalThis.SVGElement = class SVGElement {};
+      }
+      if (typeof Element === "undefined") {
+        globalThis.Element = class Element {};
+      }
+
+      import { createApp, ref, h, watchEffect } from "vue";
+
+      console.log("[JS] Vue 3 loaded");
+      console.log("[JS] createApp:", typeof createApp);
+      console.log("[JS] ref:", typeof ref);
+
+      const root = document.getElementById("root");
+
+      const Counter = {
+        setup() {
+          const count = ref(0);
+          const increment = () => {
+            console.log("[JS] Button clicked!");
+            count.value++;
+          };
+          return { count, increment };
+        },
+        render() {
+          return h("div", { class: "counter-app" }, [
+            h("h2", null, "Vue Counter"),
+            h("p", { id: "count-display" }, `Count: ${this.count}`),
+            h(
+              "button",
+              { id: "increment-btn", onClick: this.increment },
+              "+1",
+            ),
+          ]);
+        },
+      };
+
+      try {
+        const app = createApp(Counter);
+        app.mount(root);
+        console.log("[JS] First render:", root.innerHTML);
+
+        // simulate periodic clicks
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          const btn = document.getElementById("increment-btn");
+          if (btn) {
+            btn.dispatchEvent(new Event("click", { bubbles: true }));
+          }
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+            console.log(
+              "[JS] Final:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }
+        }, 100);
+      } catch (e) {
+        console.log("[JS] Vue Error:", e.message);
+        if (e.stack)
+          console.log(
+            "[JS] Stack:",
+            e.stack.split("\n").slice(0, 5).join("\n"),
+          );
+      }
+    </script>
+  </body>
+</html>
+```
+
+It renders:
+
+```txt
+[JS] First render: <div class="counter-app"><h2>Vue Counter</h2><p id="count-display">Count: 0</p><button id="increment-btn">+1</button></div>
+[JS] Button clicked!
+[JS] Button clicked!
+[JS] Button clicked!
+[JS] Auto-increment stopped after 3 iterations
+[JS] Final: Count: 2
+<div id="root">
+  <div class="counter-app">
+    <h2>
+      "Vue Counter"
+    </h2>
+    <p id="count-display">
       "Count: 3"
     </p>
-    <button>
-      "Add +1"
+    <button id="increment-btn">
+      "+1"
     </button>
   </div>
 </div>

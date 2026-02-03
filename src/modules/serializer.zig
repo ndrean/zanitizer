@@ -91,8 +91,14 @@ pub fn getHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
 /// Caller needs to free the returned slice.
 /// Returns an empty slice if the element has no children.
 pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
+    // Browser spec: template.innerHTML reads from template.content (DocumentFragment)
+    const serialize_node = if (z.elementToTemplate(element)) |template|
+        z.templateContent(template)
+    else
+        z.elementToNode(element);
+
     // Return empty string for elements with no children (matches browser behavior)
-    if (z.firstChild(z.elementToNode(element)) == null) {
+    if (z.firstChild(serialize_node) == null) {
         return try allocator.alloc(u8, 0);
     }
 
@@ -102,9 +108,7 @@ pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
         .size = 0,
     };
 
-    const element_node = z.elementToNode(element);
-
-    if (lxb_html_serialize_deep_str(element_node, &str) != z._OK) {
+    if (lxb_html_serialize_deep_str(serialize_node, &str) != z._OK) {
         return Err.SerializeFailed;
     }
 

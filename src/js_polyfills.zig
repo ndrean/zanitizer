@@ -197,6 +197,26 @@ pub fn install(ctx: w.Context) !void {
     const mc_result = qjs.JS_Eval(ctx.ptr, msg_channel_polyfill, msg_channel_polyfill.len, "<polyfill:msgchannel>", qjs.JS_EVAL_TYPE_GLOBAL);
     ctx.freeValue(mc_result);
 
+    const mutation_observer_polyfill =
+        \\(function() {
+        \\    if (globalThis.MutationObserver) return;
+        \\
+        \\    class MutationObserver {
+        \\        constructor(callback) {
+        \\            // This is a stub. The callback will never be called.
+        \\            // It's here to prevent "MutationObserver is not a constructor" errors.
+        \\        }
+        \\        observe(target, options) { /* Do nothing */ }
+        \\        disconnect() { /* Do nothing */ }
+        \\        takeRecords() { return []; }
+        \\    }
+        \\
+        \\    globalThis.MutationObserver = MutationObserver;
+        \\})();
+    ;
+    const mo_result = qjs.JS_Eval(ctx.ptr, mutation_observer_polyfill, mutation_observer_polyfill.len, "<polyfill:mutation_observer>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(mo_result);
+
     const event_handler_polyfill =
         \\(function() {
         \\    const events = ['click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout', 'mousemove', 'mouseenter', 'mouseleave', 'keydown', 'keyup', 'keypress', 'submit', 'input', 'change', 'focus', 'blur', 'load', 'error', 'scroll', 'resize'];

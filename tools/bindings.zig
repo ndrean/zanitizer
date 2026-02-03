@@ -392,7 +392,7 @@ pub const bindings = [_]BindingSpec{
         .name = "className",
         .kind = .property,
         .getter = "z.className",
-        .setter = "",
+        .setter = "z.setClassName",
         .prop_type = .string_zc,
         .prop_this = .this_element,
     },

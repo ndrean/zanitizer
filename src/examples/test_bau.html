@@ -1,0 +1,60 @@
+<html>
+  <head> </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import Bau from "src/examples/bau.js";
+
+      const bau = Bau();
+      console.log(typeof bau);
+      const { button, span } = bau.tags;
+
+      const counter = bau.state(0);
+      console.log(counter.val);
+
+      // Create a component defined by a function that returns a real DOM node.
+      function Counter() {
+        return span(
+          "❤️ ",
+          counter,
+          " ",
+          button({ onclick: () => ++counter.val }, "👍"),
+          button({ onclick: () => --counter.val }, "👎"),
+        );
+      }
+      try {
+        const div = document.getElementById("app");
+        console.log(Counter());
+        // div.replaceChildren(Counter());
+
+        // console.log("[JS] Rendered successfully!");
+        console.log("[JS] Initial innerHTML: ", div.innerHTML);
+
+        // Test clicks
+        const btn = document.querySelector("button");
+        if (btn) {
+          console.log("[JS] Testing clicks...");
+          for (let i = 0; i < 3; i++) {
+            setTimeout(
+              () => btn.dispatchEvent(new Event("click", { bubbles: true })),
+              (i + 1) * 100,
+            );
+          }
+          setTimeout(() => {
+            console.log(
+              "[JS] Final count:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }, 500);
+        }
+      } catch (e) {
+        console.log("[JS] ERROR:", e.message);
+        if (e.stack)
+          console.log(
+            "[JS] Stack:",
+            e.stack.split("\n").slice(0, 3).join("\n"),
+          );
+      }
+    </script>
+  </body>
+</html>

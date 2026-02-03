@@ -351,6 +351,9 @@ pub const DOMBridge = struct {
         const gtn_fn = ctx.newCFunction(js_getElementsByTagName, "getElementsByTagName", 1);
         try ctx.setPropertyStr(doc_obj, "getElementsByTagName", gtn_fn);
 
+        const ctn_fn = ctx.newCFunction(js_createTextNode, "createTextNode", 1);
+        try ctx.setPropertyStr(doc_obj, "createTextNode", ctn_fn);
+
         // Expose 'document' on global
         try ctx.setPropertyStr(global, "document", doc_obj);
     }
@@ -398,6 +401,21 @@ pub const DOMBridge = struct {
             try ctx.setPropertyStr(window_obj, "MessagePort", mp);
         } else {
             ctx.freeValue(mp);
+        }
+
+        const mo = ctx.getPropertyStr(global, "MutationObserver");
+        if (!ctx.isUndefined(mo)) {
+            try ctx.setPropertyStr(window_obj, "MutationObserver", mo);
+        } else {
+            ctx.freeValue(mo);
+        }
+
+        // Expose document on window (SolidJS uses window.document for event delegation)
+        const doc = ctx.getPropertyStr(global, "document");
+        if (!ctx.isUndefined(doc)) {
+            try ctx.setPropertyStr(window_obj, "document", doc);
+        } else {
+            ctx.freeValue(doc);
         }
 
         try ctx.setPropertyStr(global, "window", window_obj);
@@ -1094,4 +1112,31 @@ fn js_preventDefault(
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
     return w.UNDEFINED;
+}
+
+fn js_createTextNode(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    // const rc = RuntimeContext.get(ctx);
+
+    // 'this' is the document object. We need to unwrap it to create a node in the right context.
+    const doc_node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("createTextNode called on invalid object");
+    const doc = z.ownerDocument(doc_node);
+
+    if (argc < 1) {
+        // DOM spec says createTextNode with no arguments creates an empty text node.
+        const empty_text_node = z.createTextNode(doc, "") catch return w.EXCEPTION;
+        return DOMBridge.wrapNode(ctx, empty_text_node) catch w.EXCEPTION;
+    }
+
+    const text_content = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(text_content);
+
+    const text_node = z.createTextNode(doc, text_content) catch return w.EXCEPTION;
+
+    return DOMBridge.wrapNode(ctx, text_node) catch w.EXCEPTION;
 }

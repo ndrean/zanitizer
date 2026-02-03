@@ -674,6 +674,22 @@ pub fn js_get_className(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     const result = z.className(el);
     return ctx.newString(result);
 }
+// Property Setter for className
+pub fn js_set_className(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+    z.setClassName(el, val_str) catch |err| {
+        std.debug.print("JS Setter Error (className): {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error in Setter");
+    };
+    return w.UNDEFINED;
+}
 // Property Getter for namespaceURI
 pub fn js_get_namespaceURI(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     _ = argc; _ = argv;
@@ -11273,7 +11289,7 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "className");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_className, "get_className", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_className, "set_className", 1, qjs.JS_CFUNC_generic, 0);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }

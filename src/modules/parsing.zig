@@ -91,6 +91,20 @@ extern "c" fn lxb_html_element_inner_html_set(
 /// For 90% of use cases, this is sufficient and recommended.
 pub fn setInnerHTML(element: *z.HTMLElement, content: []const u8) !void {
     _ = lxb_html_element_inner_html_set(element, content.ptr, content.len) orelse return Err.FragmentParseFailed;
+
+    // Browser spec: template.innerHTML populates template.content (DocumentFragment),
+    // not the element's direct children. Move parsed children to the content fragment.
+    if (z.elementToTemplate(element)) |template| {
+        const frag_node = z.templateContent(template);
+        const el_node = z.elementToNode(element);
+        var child = z.firstChild(el_node);
+        while (child != null) {
+            const next = z.nextSibling(child.?);
+            z.removeNode(child.?);
+            z.appendChild(frag_node, child.?);
+            child = next;
+        }
+    }
 }
 
 /// [parse] Polymorphic Setter for document.body = "<html>"

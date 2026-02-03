@@ -167,12 +167,18 @@ pub fn createElementWithAttrs(
     name: []const u8,
     attrs: []const z.AttributePair,
 ) !*z.HTMLElement {
-    const element = lxb_html_document_create_element_noi(
-        doc,
-        name.ptr,
-        name.len,
-        null,
-    ) orelse return Err.CreateElementFailed;
+    // Special handling for <template> - must use createTemplate to get
+    // proper HTMLTemplateElement with content DocumentFragment.
+    // The _noi variant creates a generic element without the template interface.
+    const element = if (std.ascii.eqlIgnoreCase(name, "template"))
+        z.templateToElement(try z.createTemplate(doc))
+    else
+        lxb_html_document_create_element_noi(
+            doc,
+            name.ptr,
+            name.len,
+            null,
+        ) orelse return Err.CreateElementFailed;
 
     if (attrs.len == 0) return element;
 

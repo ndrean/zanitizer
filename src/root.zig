@@ -531,6 +531,7 @@ pub const getAttributeName_zc = attrs.getAttributeName_zc;
 pub const getAttributeValue_zc = attrs.getAttributeValue_zc;
 
 pub const setAttribute = attrs.setAttribute;
+pub const setClassName = attrs.setClassName;
 pub const removeAttribute = attrs.removeAttribute;
 
 pub const setAttributes = attrs.setAttributes;

@@ -5,54 +5,65 @@
     <script type="module">
       import { createSignal, createEffect, onCleanup } from "solid-js";
       import { render } from "solid-js/web";
-      // import html from "solid-js/html"; <-- ?? pb
+      import html from "solid-js/html"; //<-- ?? pb
 
       console.log("[JS] SolidJS loaded");
       console.log("[JS] createSignal:", typeof createSignal);
       console.log("[JS] render:", typeof render);
+
+      const root = document.getElementById("root");
 
       const [count, setCount] = createSignal(1);
 
       const Counter = () => {
         const [localCount, setLocalCount] = createSignal(0);
 
-        const container = document.createElement("div");
-        const p = document.createElement("p");
-        const button = document.createElement("button");
-        button.textContent = "Add +1";
-
         createEffect(() => {
           console.log(`[JS] Rendered! Count: ${localCount()}`);
-          p.textContent = `Count: ${localCount()}`;
+          console.log("[JS]", root.innerHTML);
         });
 
-        // button.onclick = () => setLocalCount((c) => c + 1);
-
-        // Auto-increment every 500ms, stop after 3 iterations
-        let iterations = 0;
-        const interval = setInterval(() => {
-          iterations++;
+        const handleClick = () => {
+          console.log("[JS] Button clicked!");
           setLocalCount((c) => c + 1);
-          if (iterations >= 3) {
-            clearInterval(interval);
-            console.log("[JS] Auto-increment stopped after 3 iterations");
-          }
-        }, 500);
-        onCleanup(() => clearInterval(interval));
+        };
 
-        container.appendChild(p);
-        container.appendChild(button);
-        return container;
+        return html`
+          <div class="counter-app">
+            <h2>SolidJS Counter</h2>
+            <p id="count-display">Count: ${localCount}</p>
+            <button id="increment-btn" onclick=${handleClick}>+1</button>
+          </div>
+        `;
       };
 
       try {
-        render(Counter, document.getElementById("root"));
+        render(() => html`<${Counter} />`, root);
+        console.log("[JS] First render: ", root.innerHTML);
+
+        // simulate periodic clicks
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          const btn = document.getElementById("increment-btn");
+          if (btn) {
+            btn.dispatchEvent(new Event("click", { bubbles: true }));
+          }
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+            console.log(
+              "[JS] Final:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }
+        }, 100);
       } catch (e) {
         console.log("[JS] SolidJS Error:", e.message);
         if (e.stack)
           console.log(
             "[JS] Stack:",
-            e.stack.split("\n").slice(0, 3).join("\n"),
+            e.stack.split("\n").slice(0, 5).join("\n"),
           );
       }
     </script>
