@@ -420,9 +420,10 @@ Run the file name with:  `zig build example -Dname=test_solidjs -Doptimize=Relea
 </html>
 ```
 
-The Preact/htm code can be compiled to bytecode which eliminates parsing+compilation. The raw byes will be `@embedFile` in the executable.
+The Preact/htm code is compiled to bytecode which eliminates parsing+compilation.
+The raw byes will be `@embedFile` in the executable.
 
-The engine does this as a pre-step.
+The engine does this as a pre-step. You can still upload "on-the-fly" an import (cf the SolidJS example below).
 
 The Zig function to run (**TODO**: simply even more: load+execute in one go)
 
