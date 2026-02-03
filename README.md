@@ -420,7 +420,9 @@ Run the file name with:  `zig build example -Dname=test_solidjs -Doptimize=Relea
 </html>
 ```
 
-The Preact/htm code can be compiled to bytecode which eliminates parsing+compilation.
+The Preact/htm code can be compiled to bytecode which eliminates parsing+compilation. The raw byes will be `@embedFile` in the executable.
+
+The engine does this as a pre-step.
 
 The Zig function to run (**TODO**: simply even more: load+execute in one go)
 
@@ -490,17 +492,11 @@ The output shows that the hooks are triggered and the DOM is updated.
     <script type="module">
       import { createSignal, createEffect, onCleanup } from "solid-js";
       import { render } from "solid-js/web";
-      // Skip html template tag - it has regex issues in QuickJS
-      // import html from "solid-js/html";
 
       console.log("[JS] SolidJS loaded");
-      console.log("[JS] createSignal:", typeof createSignal);
-      console.log("[JS] render:", typeof render);
 
-      // Basic reactivity test
       const [count, setCount] = createSignal(1);
 
-      // Component using manual DOM (works with QuickJS)
       const Counter = () => {
         const [localCount, setLocalCount] = createSignal(0);
 
@@ -577,8 +573,6 @@ fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 [Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
 
 [JS] SolidJS loaded
-[JS] createSignal: function
-[JS] render: function
 [JS] Rendered! Count: 0
 [JS] SolidJS render success!
 [JS] Rendered! Count: 1

@@ -5,17 +5,14 @@
     <script type="module">
       import { createSignal, createEffect, onCleanup } from "solid-js";
       import { render } from "solid-js/web";
-      // Skip html template tag - it has regex issues in QuickJS
-      // import html from "solid-js/html";
+      // import html from "solid-js/html"; <-- ?? pb
 
       console.log("[JS] SolidJS loaded");
       console.log("[JS] createSignal:", typeof createSignal);
       console.log("[JS] render:", typeof render);
 
-      // Basic reactivity test
       const [count, setCount] = createSignal(1);
 
-      // Component using manual DOM (works with QuickJS)
       const Counter = () => {
         const [localCount, setLocalCount] = createSignal(0);
 
