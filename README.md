@@ -611,7 +611,7 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 </div>
 ```
 
-</details>>
+</details>
 
 ### Vue with templates strings
 
