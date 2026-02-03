@@ -226,8 +226,7 @@ const Main = () =>
   );
 
 const app = document.getElementById("app");
-console.log(`Main?: ${typeof Main({})}`);
-app.innerHTML = Main({});
+app.replaceChildren(Main({}));
 
 function measure(name, fn) {
   const start = Date.now();
@@ -242,23 +241,24 @@ const f1 = () => measure("Create 1k", run);
 f1();
 
 // We click run again, which triggers clear() + add() internally
-// measure("Replace 1k", run);
+measure("Replace 1k", run);
 
-// // Partial Update (Warmup: Create 10k first)
-// runLots(); // Setup 10k
-// measure("Partial Update (10k)", () => update());
+// Partial Update (Warmup: Create 10k first)
+runLots(); // Setup 10k
+measure("Partial Update (10k)", () => update());
 
-// // Select Row: the second row's label
-// measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
-// // Swap Rows (Reset to 1k first)
-// run(); // Reset to 1k
-// measure("Swap Rows", () => swapRows());
-// // Remove the 2nd row
-// // measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
-// measure("Create 10k", () => runLots());
-// // Append 1,000 Rows (to the existing 10k)
-// measure("Append 1k", () => add());
-// measure("Clear", () => clear());
-// // sanity check
-// const count = document.querySelectorAll("tr").length;
-// console.log(`✅ Final Row Count: ${count} (Should be 0)`);
+// Select Row: the second row's label
+measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
+// Swap Rows (Reset to 1k first)
+run(); // Reset to 1k
+measure("Swap Rows", () => swapRows());
+// Remove the 2nd row
+measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+measure("Create 10k", () => runLots());
+// Append 1,000 Rows (to the existing 10k)
+measure("Append 1k", () => add());
+measure("Clear", () => clear());
+// sanity check
+
+const count = document.querySelectorAll("tr").length;
+console.log(`✅ Final Row Count: ${count} (Should be 0)`);

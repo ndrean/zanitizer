@@ -23,9 +23,10 @@ pub fn main() !void {
 
 fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbx);
+
     defer engine.deinit();
 
-    z.print("\n=== JS-framework-Bau --------------------------------\n\n", .{});
+    z.print("\n=== JS-framework-Bau -----------------------------\n\n", .{});
 
     const start = std.time.nanoTimestamp();
 

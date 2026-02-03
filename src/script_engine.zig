@@ -520,7 +520,7 @@ pub const ScriptEngine = struct {
                 self.ctx.freeValue(val);
             }
         }
-        self.processJobs();
+        // self.processJobs(); // force jobs after all scripts have been executed
     }
 
     /// Scans the DOM for <link rel="stylesheet"> and loads them securely

@@ -1,13 +1,14 @@
 <html>
   <body>
-    <h1>Testing CDN import: Vue 3</h1>
+    <h1>Testing CDN import: Vue 3 (Template Compiler)</h1>
     <div id="root"></div>
     <script type="module">
       // ============================================================
-      // Vue 3 with render functions (h)
+      // Vue 3 with TEMPLATE COMPILER
       //
-      // Uses h() instead of template compiler to minimize DOM API surface.
-      // Vue's Proxy-based reactivity works natively in QuickJS.
+      // Uses template strings instead of h() render functions.
+      // This exercises: createComment, splitText, cloneNode,
+      // createDocumentFragment, nodeName, nodeType, insertAdjacentHTML.
       //
       // IMPORTANT: Run with --release=fast
       //   zig build example -Dname=test_vue -Doptimize=ReleaseFast
@@ -21,13 +22,16 @@
         globalThis.Element = class Element {};
       }
 
-      import { createApp, ref, h, watchEffect } from "vue";
+      // import Vue from "vue";
 
-      console.log("[JS] Vue 3 loaded");
+      // const { createApp, ref, compile } = Vue;
+      import { createApp, ref, compile } from "vue";
+
+      console.log("[JS] Vue 3 loaded (template compiler path)");
       console.log("[JS] createApp:", typeof createApp);
       console.log("[JS] ref:", typeof ref);
 
-      const root = document.getElementById("root");
+      // const root = document.getElementById("root");
 
       const Counter = {
         setup() {
@@ -38,22 +42,28 @@
           };
           return { count, increment };
         },
-        render() {
-          return h("div", { class: "counter-app" }, [
-            h("h2", null, "Vue Counter"),
-            h("p", { id: "count-display" }, `Count: ${this.count}`),
-            h(
-              "button",
-              { id: "increment-btn", onClick: this.increment },
-              "+1",
-            ),
-          ]);
-        },
+        template: `
+          <div class="counter-app">
+            <h2>Vue Counter (Template)</h2>
+            <p id="count-display">Count: {{ count }}</p>
+            <button id="increment-btn" @click="increment">+1</button>
+          </div>
+        `,
       };
 
       try {
+        // First, manually compile the template to see what the compiler outputs
+        // if (typeof compile === "function") {
+        //   const result = compile(Counter.template);
+        //   console.log("[JS] Compiled render code:", result.toString());
+        // } else {
+        //   console.log("[JS] compile function not available");
+        // }
+
         const app = createApp(Counter);
-        app.mount(root);
+        const root = document.getElementById("root");
+
+        app.mount("#root");
         console.log("[JS] First render:", root.innerHTML);
 
         // simulate periodic clicks

@@ -278,6 +278,7 @@ pub const textContent_zc = text.textContent_zc;
 /// Note: not style aware.
 pub const innerText = text.textContent_zc; // alias
 pub const replaceText = text.replaceText;
+pub const splitText = text.splitText;
 pub const setContentAsText = text.setContentAsText;
 pub const setTextContent = text.setTextContent;
 pub const escapeHtml = text.escapeHtml;

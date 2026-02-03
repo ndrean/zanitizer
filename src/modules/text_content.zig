@@ -383,6 +383,64 @@ test "gets all text elements from Fragment" {
     try testing.expectEqualStrings("FirstSecondThirdFourthFifth", text_content);
 }
 
+/// [core] Split a text node at the given character offset (DOM Level 1).
+///
+/// Truncates this text node's data to `data[0..offset]`,
+/// creates a new text node with `data[offset..]`, and inserts
+/// it as the next sibling. Returns the new text node.
+///
+/// Used by Vue's template compiler to isolate {{ interpolations }}.
+pub fn splitText(node: *z.DomNode, offset: u32) !*z.DomNode {
+    if (z.nodeType(node) != .text) return Err.NotTextNode;
+
+    const full_text = z.textContent_zc(node);
+    const off: usize = @intCast(offset);
+    if (off > full_text.len) return Err.DomException;
+
+    const doc = z.ownerDocument(node);
+
+    // Create new text node with remaining text (lexbor copies internally)
+    const new_node = try z.createTextNode(doc, full_text[off..]);
+
+    // Insert as next sibling before truncating
+    z.insertAfter(node, new_node);
+
+    // Truncate original: replace entire content with just the prefix [0..off]
+    if (lxb_dom_character_data_replace(
+        node,
+        full_text.ptr, // source data (prefix is at the start)
+        off, // keep only first `off` bytes
+        0, // start at position 0
+        full_text.len, // replace entire content
+    ) != z._OK) return Err.SetTextContentFailed;
+
+    return new_node;
+}
+
+test "splitText" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<p>Hello World</p>");
+    defer z.destroyDocument(doc);
+
+    const p = z.firstChild(z.bodyNode(doc).?).?;
+    const text_node = z.firstChild(p).?;
+    try testing.expectEqualStrings("Hello World", z.textContent_zc(text_node));
+
+    // Split at offset 5: "Hello" + " World"
+    const new_node = try splitText(text_node, 5);
+
+    try testing.expectEqualStrings("Hello", z.textContent_zc(text_node));
+    try testing.expectEqualStrings(" World", z.textContent_zc(new_node));
+
+    // new_node should be the next sibling
+    try testing.expect(z.nextSibling(text_node) == new_node);
+
+    // Split at offset 0: "" + "Hello"
+    const empty_split = try splitText(text_node, 0);
+    try testing.expectEqualStrings("", z.textContent_zc(text_node));
+    try testing.expectEqualStrings("Hello", z.textContent_zc(empty_split));
+}
+
 /// [core] HTML escape text content for safe output
 ///
 /// Caller must free the returned slice.

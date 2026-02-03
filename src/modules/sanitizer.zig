@@ -3282,7 +3282,7 @@ fn quickCheck(allocator: std.mem.Allocator, input: []const u8, expect: []const u
     // try z.prettyPrint(allocator, z.bodyNode(doc).?);
     const reality = try z.minifyHtmlString(allocator, innerHTML);
     defer allocator.free(reality);
-    z.print("{s}\n", .{reality});
+    // z.print("{s}\n", .{reality});
     try testing.expectEqualStrings(expect, reality);
 }
 
@@ -3948,20 +3948,18 @@ test "dom_purify" {
 
     try sanitizeWithCss(allocator, body, custom_mode, &css_sanitizer);
 
-    const elapsed_ns = timer.read();
-    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-    const elapsed_ms = elapsed_us / 1000.0;
+    _ = timer.read();
 
     std.debug.print("\n=== DOMPurify Benchmark ===\n", .{});
-    std.debug.print("Input size: {} bytes\n", .{dirty.len});
-    std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
-    std.debug.print("DOMPurify reference: ~11 ms\n", .{});
-    std.debug.print("Speedup: {d:.1}x faster\n", .{11.0 / elapsed_ms});
+    // std.debug.print("Input size: {} bytes\n", .{dirty.len});
+    // std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
+    // std.debug.print("DOMPurify reference: ~11 ms\n", .{});
+    // std.debug.print("Speedup: {d:.1}x faster\n", .{11.0 / elapsed_ms});
 
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
 
-    std.debug.print("Output size: {} bytes\n", .{result.len});
+    // std.debug.print("Output size: {} bytes\n", .{result.len});
 
     // Write output to file for comparison
     if (std.fs.cwd().createFile("zig-output.html", .{})) |file| {
@@ -4000,8 +3998,8 @@ test "html5sec.org vectors" {
     defer allocator.free(input);
 
     std.debug.print("\n=== HTML5 Security Cheatsheet Test (Zig) ===\n", .{});
-    std.debug.print("Input size: {} bytes\n", .{input.len});
-    std.debug.print("Total vectors: 139\n\n", .{});
+    // std.debug.print("Input size: {} bytes\n", .{input.len});
+    // std.debug.print("Total vectors: 139\n\n", .{});
 
     const doc = try z.parseHTML(allocator, input);
     defer z.destroyDocument(doc);
@@ -4009,24 +4007,24 @@ test "html5sec.org vectors" {
     var css_sanitizer = try CssSanitizer.init(allocator, .{});
     defer css_sanitizer.deinit();
 
-    var timer = try std.time.Timer.start();
+    // var timer = try std.time.Timer.start();
     try sanitizeWithCss(allocator, z.bodyNode(doc).?, SanitizerMode.strict, &css_sanitizer);
-    const elapsed_ns = timer.read();
-    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-    const elapsed_ms = elapsed_us / 1000.0;
+    // const elapsed_ns = timer.read();
+    // const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+    // const elapsed_ms = elapsed_us / 1000.0;
 
-    std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
+    // std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
 
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
 
-    std.debug.print("Output size: {} bytes\n", .{result.len});
+    // std.debug.print("Output size: {} bytes\n", .{result.len});
 
     // Write output to file for comparison with DOMPurify
     if (std.fs.cwd().createFile("/tmp/h5sc-zig-output.html", .{})) |file| {
         defer file.close();
         _ = file.write(result) catch {};
-        std.debug.print("Wrote output to /tmp/h5sc-zig-output.html\n\n", .{});
+        // std.debug.print("Wrote output to /tmp/h5sc-zig-output.html\n\n", .{});
     } else |_| {}
 
     // Basic security checks - ensure no actual executable event handlers

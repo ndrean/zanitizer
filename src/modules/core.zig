@@ -1543,6 +1543,21 @@ pub fn insertBefore(reference_node: *z.DomNode, new_node: *z.DomNode) void {
 /// Per DOM Living Standard: If newChild is already in the document, it is
 /// removed from its current parent before being inserted at the new location.
 pub fn jsInsertBefore(parent: *z.DomNode, new_child: *z.DomNode, ref_child: ?*z.DomNode) *z.DomNode {
+    // DOM spec: DocumentFragment inserts all its children, not itself
+    if (z.nodeType(new_child) == .document_fragment) {
+        var frag_child = firstChild(new_child);
+        while (frag_child) |fc| {
+            const next = nextSibling(fc);
+            if (ref_child) |ref| {
+                insertBefore(ref, fc);
+            } else {
+                appendChild(parent, fc);
+            }
+            frag_child = next;
+        }
+        return new_child;
+    }
+
     // DOM spec compliance: remove node from its current position first
     // (Lexbor's insertBefore doesn't do this, causing corrupted sibling chains)
     if (parentNode(new_child) != null) {

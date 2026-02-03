@@ -3,6 +3,7 @@
     <h1>Testing onclick polyfill</h1>
     <button id="test-btn">Click me</button>
     <div id="output"></div>
+    <div id="test"></div>
     <script>
       // Polyfill for onclick
       Object.defineProperty(HTMLElement.prototype, "onclick", {
@@ -30,7 +31,7 @@
       console.log("[JS] Button tagName:", btn?.tagName);
 
       // Test 1: Direct onclick assignment
-      btn.onclick = function() {
+      btn.onclick = function () {
         console.log("[JS] Button clicked via onclick!");
       };
 

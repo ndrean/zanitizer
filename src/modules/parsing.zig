@@ -107,6 +107,24 @@ pub fn setInnerHTML(element: *z.HTMLElement, content: []const u8) !void {
     }
 }
 
+test "vue_temp" {
+    const allocator = testing.allocator;
+    const doc = try z.parseHTML(allocator, "<div></div>");
+    defer z.destroyDocument(doc);
+    const div = try z.querySelector(allocator, doc, "div");
+    const input =
+        \\<div class="counter-app">
+        \\    <h2>Vue Counter (Template)</h2>
+        \\    <p id="count-display">Count: 0</p>
+        \\    <button id="increment-btn">+1</button>
+        \\  </div>
+    ;
+    try z.setInnerHTML(div.?, input);
+
+    const inner = try z.innerHTML(allocator, div.?);
+    defer allocator.free(inner);
+}
+
 /// [parse] Polymorphic Setter for document.body = "<html>"
 /// Behaves like setInnerHTML on the body element.
 pub fn setDocumentBody(node: *z.DomNode, html: []const u8) !void {

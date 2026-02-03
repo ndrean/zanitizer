@@ -24,6 +24,7 @@ const js_text_encoding = @import("js_text_encoding.zig");
 const js_readable_stream = @import("js_readable_stream.zig");
 const js_writable_stream = @import("js_writable_stream.zig");
 const js_range = @import("js_range.zig");
+const js_tree_walker = @import("js_tree_walker.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -98,6 +99,21 @@ pub const DOMBridge = struct {
                 z.qjs.JS_FreeAtom(ctx.ptr, atom);
             }
 
+            // isConnected property (read-only) - walks up to document
+            {
+                const atom = z.qjs.JS_NewAtom(ctx.ptr, "isConnected");
+                const get_fn = ctx.newCFunction(js_get_isConnected, "get_isConnected", 0);
+                _ = z.qjs.JS_DefinePropertyGetSet(
+                    ctx.ptr,
+                    node_proto,
+                    atom,
+                    get_fn,
+                    zqjs.UNDEFINED,
+                    z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE,
+                );
+                z.qjs.JS_FreeAtom(ctx.ptr, atom);
+            }
+
             // Manual: insertBefore(newChild, refChild) - refChild can be null
             {
                 const ib_fn = ctx.newCFunction(js_insertBefore, "insertBefore", 2);
@@ -116,6 +132,30 @@ pub const DOMBridge = struct {
                 _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "querySelector", qs_fn);
                 const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
                 _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "querySelectorAll", qsa_fn);
+            }
+            // Add modern DOM manipulation methods
+            const append_fn = ctx.newCFunction(js_append, "append", -1);
+            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "append", append_fn);
+
+            const prepend_fn = ctx.newCFunction(js_prepend, "prepend", -1);
+            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "prepend", prepend_fn);
+
+            const before_fn = ctx.newCFunction(js_before, "before", -1);
+            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "before", before_fn);
+
+            const after_fn = ctx.newCFunction(js_after, "after", -1);
+            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "after", after_fn);
+
+            const replaceWith_fn = ctx.newCFunction(js_replaceWith, "replaceWith", -1);
+            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "replaceWith", replaceWith_fn);
+
+            const replaceChildren_fn = ctx.newCFunction(js_replaceChildren, "replaceChildren", -1);
+            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "replaceChildren", replaceChildren_fn);
+
+            // Text.splitText(offset)
+            {
+                const split_fn = ctx.newCFunction(js_splitText, "splitText", 1);
+                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "splitText", split_fn);
             }
 
             ctx.setClassProto(rc.classes.dom_node, node_proto);
@@ -167,6 +207,18 @@ pub const DOMBridge = struct {
                 "matches",
                 matches_fn,
             );
+
+            // Element.insertAdjacentHTML(position, html)
+            {
+                const iah_fn = ctx.newCFunction(js_insertAdjacentHTML, "insertAdjacentHTML", 2);
+                try ctx.setPropertyStr(el_proto, "insertAdjacentHTML", iah_fn);
+            }
+
+            // Element.focus() - no-op in headless environment
+            {
+                const focus_fn = ctx.newCFunction(js_focus, "focus", 0);
+                try ctx.setPropertyStr(el_proto, "focus", focus_fn);
+            }
 
             // Inheritance: HTMLElement -> Node
             {
@@ -224,6 +276,17 @@ pub const DOMBridge = struct {
             ctx.setClassProto(rc.classes.css_style_decl, style_proto);
         }
 
+        // Expose HTMLElement constructor globally BEFORE polyfills
+        // (polyfills like onclick need HTMLElement.prototype to exist)
+        {
+            const global = ctx.getGlobalObject();
+            defer ctx.freeValue(global);
+            const html_element_ctor = ctx.newCFunction2(js_HTMLElement_constructor, "HTMLElement", 0, z.qjs.JS_CFUNC_constructor, 0);
+            const html_element_proto = ctx.getClassProto(rc.classes.html_element);
+            try ctx.setPropertyStr(html_element_ctor, "prototype", html_element_proto);
+            try ctx.setPropertyStr(global, "HTMLElement", html_element_ctor);
+        }
+
         // Web APIs classes
         try js_DocFragment.DocFragmentBridge.install(ctx);
         try js_DOMParser.DOMParserBridge.install(ctx);
@@ -243,6 +306,7 @@ pub const DOMBridge = struct {
         try js_writable_stream.install(ctx);
         try js_file_reader_sync.FileReaderSyncBridge.install(ctx);
         try js_range.RangeBridge.install(ctx);
+        try js_tree_walker.TreeWalkerBridge.install(ctx);
 
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);
@@ -320,12 +384,7 @@ pub const DOMBridge = struct {
         const fn_val = ctx.newCFunction(js_reportResult, "sendToHost", 1);
         try ctx.setPropertyStr(global, "sendToHost", fn_val);
 
-        // Expose HTMLElement constructor globally (needed for polyfills like onclick)
-        // Create a constructor object with the class prototype
-        const html_element_ctor = ctx.newCFunction2(js_HTMLElement_constructor, "HTMLElement", 0, z.qjs.JS_CFUNC_constructor, 0);
-        const html_element_proto = ctx.getClassProto(rc.classes.html_element);
-        try ctx.setPropertyStr(html_element_ctor, "prototype", html_element_proto);
-        try ctx.setPropertyStr(global, "HTMLElement", html_element_ctor);
+        // HTMLElement constructor is now exposed in init() before polyfills
     }
 
     fn createDocumentAPI(self: *DOMBridge, global: w.Value, _: w.ClassID) !void {
@@ -353,6 +412,9 @@ pub const DOMBridge = struct {
 
         const ctn_fn = ctx.newCFunction(js_createTextNode, "createTextNode", 1);
         try ctx.setPropertyStr(doc_obj, "createTextNode", ctn_fn);
+
+        const ctw_fn = ctx.newCFunction(js_tree_walker.js_createTreeWalker, "createTreeWalker", 2);
+        try ctx.setPropertyStr(doc_obj, "createTreeWalker", ctw_fn);
 
         // Expose 'document' on global
         try ctx.setPropertyStr(global, "document", doc_obj);
@@ -486,10 +548,10 @@ pub const DOMBridge = struct {
         const obj = ctx.newObjectClass(rc.classes.html_element);
         try ctx.setOpaque(obj, element);
 
-        // Add convenience properties like tagName
+        // Add convenience properties like tagName / nodeName (zero-copy)
         const tag = z.tagName_zc(element);
-        const tag_str = ctx.newString(tag);
-        try ctx.setPropertyStr(obj, "tagName", tag_str);
+        try ctx.setPropertyStr(obj, "tagName", ctx.newString(tag));
+        try ctx.setPropertyStr(obj, "nodeName", ctx.newString(tag));
 
         // Add nodeType (ELEMENT_NODE = 1)
         try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(1));
@@ -535,10 +597,13 @@ pub const DOMBridge = struct {
         const obj = ctx.newObjectClass(class_id);
         try ctx.setOpaque(obj, node);
 
-        // nodeType is set as instance property (for fast access)
-        // nodeName uses the prototype getter
+        // nodeType and nodeName as instance properties (for fast access)
         const node_type_num: i32 = @intCast(@intFromEnum(n_type));
         try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(node_type_num));
+
+        // nodeName: uses zero-copy lexbor lookup (#text, #comment, DIV, etc.)
+        const node_name = z.nodeName_zc(node);
+        try ctx.setPropertyStr(obj, "nodeName", ctx.newString(node_name));
 
         // For element nodes, also set tagName (consistent with wrapElement)
         // This is critical because cloneNode uses wrapNode, and cached nodes
@@ -546,8 +611,7 @@ pub const DOMBridge = struct {
         if (n_type == .element) {
             const element: *z.HTMLElement = @ptrCast(@alignCast(node));
             const tag = z.tagName_zc(element);
-            const tag_str = ctx.newString(tag);
-            try ctx.setPropertyStr(obj, "tagName", tag_str);
+            try ctx.setPropertyStr(obj, "tagName", ctx.newString(tag));
         }
 
         // store in cache
@@ -1139,4 +1203,195 @@ fn js_createTextNode(
     const text_node = z.createTextNode(doc, text_content) catch return w.EXCEPTION;
 
     return DOMBridge.wrapNode(ctx, text_node) catch w.EXCEPTION;
+}
+
+/// Helper to convert a list of JS values (nodes or strings) into a single DocumentFragment
+fn jsValuesToFragment(ctx: w.Context, doc: *z.HTMLDocument, argc: c_int, argv: [*c]const zqjs.Value) !*z.DomNode {
+    const frag_node = z.createDocumentFragmentNode(doc) catch return error.LexborError;
+
+    var i: usize = 0;
+    while (i < argc) : (i += 1) {
+        if (DOMBridge.unwrapNode(ctx, argv[i])) |node| {
+            _ = z.appendChild(frag_node, node);
+        } else {
+            // Convert to string if not a node
+            const str = ctx.toZString(argv[i]) catch ""; // Convert null/undefined to ""
+            defer ctx.freeZString(str);
+            if (str.len > 0) {
+                const text_node = z.createTextNode(doc, str) catch return error.LexborError;
+                _ = z.appendChild(frag_node, text_node);
+            }
+        }
+    }
+    return frag_node;
+}
+
+fn js_append(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for append");
+    const doc = z.ownerDocument(parent);
+    const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
+    defer z.destroyNode(frag);
+
+    // appendChild on a fragment moves the fragment's children, not the fragment itself.
+    var frag_child = z.firstChild(frag);
+    while (frag_child) |fc| {
+        const next = z.nextSibling(fc);
+        z.appendChild(parent, fc);
+        frag_child = next;
+    }
+    return w.UNDEFINED;
+}
+
+fn js_get_isConnected(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return zqjs.FALSE;
+
+    // Walk up parentNode chain; if we reach a document node, it's connected
+    var current: ?*z.DomNode = node;
+    while (current) |cur| {
+        if (z.nodeType(cur) == .document) return zqjs.TRUE;
+        current = z.parentNode(cur);
+    }
+    return zqjs.FALSE;
+}
+
+fn js_focus(_: ?*z.qjs.JSContext, _: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    // No-op in headless environment
+    return w.UNDEFINED;
+}
+
+fn js_prepend(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for prepend");
+    const doc = z.ownerDocument(parent);
+    const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
+    defer z.destroyNode(frag);
+    _ = z.jsInsertBefore(parent, frag, z.firstChild(parent));
+    return w.UNDEFINED;
+}
+
+fn js_before(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const child = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for before");
+    const parent = z.parentNode(child) orelse return w.UNDEFINED;
+    const doc = z.ownerDocument(parent);
+    const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
+    defer z.destroyNode(frag);
+    _ = z.jsInsertBefore(parent, frag, child);
+    return w.UNDEFINED;
+}
+
+fn js_after(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const child = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for after");
+    const parent = z.parentNode(child) orelse return w.UNDEFINED;
+    const doc = z.ownerDocument(parent);
+    const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
+    defer z.destroyNode(frag);
+    _ = z.jsInsertBefore(parent, frag, z.nextSibling(child));
+    return w.UNDEFINED;
+}
+
+/// Text.splitText(offset) - splits a text node at the given offset
+fn js_splitText(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    if (argc < 1) return ctx.throwTypeError("splitText requires 1 argument");
+
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse
+        return ctx.throwTypeError("'this' is not a Node");
+
+    var offset: i32 = undefined;
+    if (z.qjs.JS_ToInt32(ctx_ptr, &offset, argv[0]) < 0) return w.EXCEPTION;
+    if (offset < 0) return ctx.throwTypeError("Offset must be non-negative");
+
+    const result = z.splitText(node, @intCast(offset)) catch |err| {
+        return switch (err) {
+            z.Err.NotTextNode => ctx.throwTypeError("splitText called on non-text node"),
+            z.Err.DomException => ctx.throwTypeError("INDEX_SIZE_ERR: offset exceeds text length"),
+            else => ctx.throwTypeError("splitText failed"),
+        };
+    };
+
+    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;
+}
+
+/// Element.insertAdjacentHTML(position, html) - inserts parsed HTML relative to element
+fn js_insertAdjacentHTML(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 2) return ctx.throwTypeError("insertAdjacentHTML requires 2 arguments");
+
+    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("insertAdjacentHTML called on non-Element");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const position_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(position_str);
+
+    const html_str = ctx.toZString(argv[1]) catch return w.EXCEPTION;
+    defer ctx.freeZString(html_str);
+
+    z.insertAdjacentHTML(rc.allocator, el, position_str, html_str) catch |err| {
+        return switch (err) {
+            z.Err.InvalidPosition => ctx.throwTypeError("Invalid position for insertAdjacentHTML"),
+            else => ctx.throwTypeError("insertAdjacentHTML failed"),
+        };
+    };
+
+    return w.UNDEFINED;
+}
+
+fn js_replaceWith(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const child = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for replaceWith");
+    const parent = z.parentNode(child) orelse return w.UNDEFINED;
+    const doc = z.ownerDocument(parent);
+    const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
+    defer z.destroyNode(frag);
+
+    // Insert fragment children before the old child, then remove old child
+    var frag_child = z.firstChild(frag);
+    while (frag_child) |fc| {
+        const next = z.nextSibling(fc);
+        z.insertBefore(child, fc);
+        frag_child = next;
+    }
+    z.removeNode(child);
+    return w.UNDEFINED;
+}
+
+fn js_replaceChildren(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for replaceChildren");
+
+    // 1. Remove all existing children
+    while (z.firstChild(parent)) |child| {
+        z.removeNode(child);
+    }
+
+    // 2. Append new children (if any)
+    if (argc > 0) {
+        const doc = z.ownerDocument(parent);
+        const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
+        defer z.destroyNode(frag);
+
+        var frag_child = z.firstChild(frag);
+        while (frag_child) |fc| {
+            const next = z.nextSibling(fc);
+            z.appendChild(parent, fc);
+            frag_child = next;
+        }
+    }
+    return w.UNDEFINED;
 }

@@ -358,6 +358,8 @@ We use helpers to permit JSX.
  zig build example -Dname=test_htm -Doptimize=ReleaseFast
  ```
 
+<details><summary>Preact with html</summary>
+
 ```html
 <html>
   <body>
@@ -420,6 +422,8 @@ We use helpers to permit JSX.
 </html>
 ```
 
+</details>
+
 The Preact/htm code is compiled to bytecode which eliminates parsing+compilation.
 The raw byes will be `@embedFile` in the executable.
 
@@ -444,7 +448,9 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 }
 ```
 
-The output shows that the hooks are triggered and the DOM is updated.
+<details>
+<summary>The output shows that the hooks are triggered and the DOM is updated.
+</summary>
 
 ```txt
 [JS] App render, count = 0
@@ -482,9 +488,14 @@ The output shows that the hooks are triggered and the DOM is updated.
 </div>
 ```
 
+</details>
+
 ### SolidJS with `html`
 
 `zig build example -Dname=test_solidjs --release=fast`
+
+<details>
+<summary>SolidJS with html</summary>
 
 ```html
 <html>
@@ -558,7 +569,9 @@ The output shows that the hooks are triggered and the DOM is updated.
 
 ```
 
-The output is:
+<details>
+<summary>The output shows that the signal triggered DOM updates.
+</summary>
 
 ```txt
 [Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
@@ -598,20 +611,23 @@ The output is:
 </div>
 ```
 
-### Vue with `h`
+</details>>
 
-TODO: finish treeWalker
+### Vue with templates strings
 
 `zig build example -Dname=test_vue --release=fast`
+
+<details>
+<summary>Vue 3 (Template Compiler)</summary>
 
 ```html
 <html>
   <body>
-    <h1>Testing CDN import: Vue 3</h1>
+    <h1>Testing CDN import: Vue 3 (Template Compiler)</h1>
     <div id="root"></div>
     <script type="module">
-      // Vue 3 with render functions (h)
-      
+      // Uses template strings 
+
       // Vue checks for browser globals during mount
       if (typeof SVGElement === "undefined") {
         globalThis.SVGElement = class SVGElement {};
@@ -620,13 +636,7 @@ TODO: finish treeWalker
         globalThis.Element = class Element {};
       }
 
-      import { createApp, ref, h, watchEffect } from "vue";
-
-      console.log("[JS] Vue 3 loaded");
-      console.log("[JS] createApp:", typeof createApp);
-      console.log("[JS] ref:", typeof ref);
-
-      const root = document.getElementById("root");
+      import { createApp, ref, compile } from "vue";
 
       const Counter = {
         setup() {
@@ -637,22 +647,20 @@ TODO: finish treeWalker
           };
           return { count, increment };
         },
-        render() {
-          return h("div", { class: "counter-app" }, [
-            h("h2", null, "Vue Counter"),
-            h("p", { id: "count-display" }, `Count: ${this.count}`),
-            h(
-              "button",
-              { id: "increment-btn", onClick: this.increment },
-              "+1",
-            ),
-          ]);
-        },
+        template: `
+          <div class="counter-app">
+            <h2>Vue Counter (Template)</h2>
+            <p id="count-display">Count: {{ count }}</p>
+            <button id="increment-btn" @click="increment">+1</button>
+          </div>
+        `,
       };
 
       try {
         const app = createApp(Counter);
-        app.mount(root);
+        const root = document.getElementById("root");
+
+        app.mount("#root");
         console.log("[JS] First render:", root.innerHTML);
 
         // simulate periodic clicks
@@ -683,7 +691,10 @@ TODO: finish treeWalker
     </script>
   </body>
 </html>
+
 ```
+
+</details>
 
 It renders:
 
@@ -708,6 +719,8 @@ It renders:
   </div>
 </div>
 ```
+
+</details>
 
 ### Upload a file
 

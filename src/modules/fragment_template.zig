@@ -694,6 +694,11 @@ test "use template element" {
 
     const template_elt = z.getElementById(doc, "productrow").?;
     defer z.destroyNode(z.elementToNode(template_elt));
+    const inner1 = try innerTemplateHTML(allocator, template_elt);
+    defer allocator.free(inner1);
+    const inner2 = try z.innerHTML(allocator, template_elt);
+    defer allocator.free(inner2);
+    z.print("{s}, {s}, {s}\n", .{ z.tagName_zc(template_elt), inner1, inner2 });
 
     try testing.expect(z.isNodeEmpty(z.elementToNode(template_elt)));
 

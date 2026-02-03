@@ -26,6 +26,7 @@ fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     defer engine.deinit();
     const html = @embedFile("test_onclick.html");
     try engine.loadHTML(html);
+
     try engine.executeScripts(gpa, ".");
     engine.run() catch |err| {
         z.print("Run error: {}\n", .{err});

@@ -33,5 +33,6 @@ fn runBau(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     };
     // engine.processJobs();
     // const root = z.getElementById(engine.dom.doc, "root");
-    // try z.printDOM(gpa, engine.dom.doc, "Final HTML");
+
+    try z.printDOM(gpa, engine.dom.doc, "Final HTML");
 }

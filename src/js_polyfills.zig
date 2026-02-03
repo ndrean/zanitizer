@@ -123,9 +123,15 @@ pub fn install(ctx: w.Context) !void {
         \\                callbacks = []; // Clear before calling, in case they queue more frames
         \\                for (const item of cbs) {
         \\                    try {
+        \\                        if (typeof item.callback !== 'function') {
+        \\                            console.log("RAF: callback is not a function:", typeof item.callback, item.callback);
+        \\                            continue;
+        \\                        }
         \\                        item.callback(now);
         \\                    } catch (e) {
-        \\                        console.log("Error in requestAnimationFrame callback:", e);
+        \\                        console.log("Error in RAF callback:", e === null ? "null" : e === undefined ? "undefined" : e);
+        \\                        if (e && e.message) console.log("  message:", e.message);
+        \\                        if (e && e.stack) console.log("  stack:", e.stack.split('\n').slice(0, 5).join('\n'));
         \\                    }
         \\                }
         \\            });
