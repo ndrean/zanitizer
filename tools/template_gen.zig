@@ -496,6 +496,38 @@ const T = struct {
     ;
 
     // ========================================================================
+    // DOCUMENT METHOD - Element with 2 string args (createElementNS)
+    // First arg is nullable (null/undefined → "")
+    // ========================================================================
+    const DOC_METHOD_ELEMENT_2STR =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    if (argc < 2) return w.EXCEPTION;
+        \\    const doc: *z.HTMLDocument = blk: {{
+        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\        return ctx.throwTypeError("Method called on object that is not a Document");
+        \\    }};
+        \\    const arg1 = if (!ctx.isNull(argv[0]) and !ctx.isUndefined(argv[0]))
+        \\        ctx.toZString(argv[0]) catch return w.EXCEPTION
+        \\    else
+        \\        "";
+        \\    defer if (arg1.len > 0) ctx.freeZString(arg1);
+        \\    const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
+        \\    defer ctx.freeZString(arg2);
+        \\    const result = {s}(doc, arg1, arg2) catch |err| {{
+        \\        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
+        \\        std.debug.print("JS Binding Error: {{}}\n", .{{err}});
+        \\        return ctx.throwTypeError("Native Zig Error");
+        \\    }};
+        \\    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;
+        \\}}
+        \\
+    ;
+
+    // ========================================================================
     // DOCUMENT METHOD - Element (createElement)
     // ========================================================================
     const DOC_METHOD_ELEMENT =
@@ -1027,6 +1059,7 @@ const Pattern = enum {
     element_prop_dom_token_list,
     element_prop_dom_string_map,
     doc_method_element,
+    doc_method_element_2str,
     doc_method_node,
     doc_method_node_noargs,
     doc_method_opt_element,
@@ -1092,7 +1125,7 @@ fn classifyBinding(b: anytype) Pattern {
                 // Check if method takes no JS arguments (only this_document)
                 const js_arg_count = countJsArgs(b.args);
                 break :blk switch (b.return_type) {
-                    .element => .doc_method_element,
+                    .element => if (js_arg_count >= 2) .doc_method_element_2str else .doc_method_element,
                     .node => if (js_arg_count == 0) .doc_method_node_noargs else .doc_method_node,
                     .optional_element => .doc_method_opt_element,
                     else => .unknown,
@@ -1381,6 +1414,9 @@ fn generateBinding(writer: anytype, b: anytype) !void {
         },
         .doc_method_element => {
             try writer.print(T.DOC_METHOD_ELEMENT, .{ b.zig_func_name, name, b.zig_func_name });
+        },
+        .doc_method_element_2str => {
+            try writer.print(T.DOC_METHOD_ELEMENT_2STR, .{ b.zig_func_name, name, b.zig_func_name });
         },
         .doc_method_node => {
             try writer.print(T.DOC_METHOD_NODE, .{ b.zig_func_name, name, b.zig_func_name });

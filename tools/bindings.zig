@@ -25,6 +25,14 @@ pub const bindings = [_]BindingSpec{
         .return_type = .element, // Returns !*HTMLElement
         .prop_this = .this_document,
     },
+    .{
+        .name = "createElementNS",
+        .zig_func_name = "z.createElementNS",
+        .kind = .method,
+        .args = &.{ .this_document, .string, .string }, // namespaceURI (nullable), qualifiedName
+        .return_type = .element, // Returns !*HTMLElement
+        .prop_this = .this_document,
+    },
 
     .{
         .name = "createTextNode",

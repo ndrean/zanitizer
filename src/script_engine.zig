@@ -59,9 +59,9 @@ pub const ScriptEngine = struct {
         // Runtime & Context
         self.rt = try zqjs.Runtime.init(allocator);
         errdefer self.rt.deinit();
-        self.rt.setMemoryLimit(16 * 1024 * 1024); // 16 MB
-        self.rt.setGCThreshold(1024 * 1024); // 1MB before GC
-        self.rt.setMaxStackSize(128 * 1024);
+        self.rt.setMemoryLimit(64 * 1024 * 1024); // 64 MB
+        self.rt.setGCThreshold(4 * 1024 * 1024); // 4MB before GC
+        self.rt.setMaxStackSize(512 * 1024);
 
         self.rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
         self.rt.setCanBlock(false);

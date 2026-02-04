@@ -482,6 +482,19 @@ pub const DOMBridge = struct {
 
         try ctx.setPropertyStr(global, "window", window_obj);
 
+        // Expose navigator on global (React accesses it as bare `navigator`, not `window.navigator`)
+        try ctx.setPropertyStr(global, "navigator", ctx.dupValue(nav_obj));
+
+        // document.defaultView → globalThis (React 19 accesses constructors like
+        // document.defaultView.HTMLIFrameElement; in browsers defaultView === window === globalThis)
+        const doc_val = ctx.getPropertyStr(global, "document");
+        if (!ctx.isUndefined(doc_val)) {
+            try ctx.setPropertyStr(doc_val, "defaultView", ctx.dupValue(global));
+            ctx.freeValue(doc_val);
+        } else {
+            ctx.freeValue(doc_val);
+        }
+
         // Standard global aliases
         try ctx.setPropertyStr(global, "globalThis", ctx.dupValue(global));
         try ctx.setPropertyStr(global, "self", ctx.dupValue(global));
@@ -518,10 +531,16 @@ pub const DOMBridge = struct {
         }
 
         const obj = ctx.newObjectClass(rc.classes.owned_document);
-        try ctx.setOpaque(obj, doc);
+        ctx.setOpaque(obj, doc) catch {
+            _ = ctx.throwTypeError("Failed to wrap document node");
+            return error.Exception;
+        };
 
         const dup_for_cache = ctx.dupValue(obj);
-        try bridge.node_cache.put(ptr_addr, dup_for_cache);
+        bridge.node_cache.put(ptr_addr, dup_for_cache) catch {
+            _ = ctx.throwTypeError("Out of memory caching document node");
+            return error.Exception;
+        };
 
         // 2. Link the Native Pointer
         // Note: We cast to *anyopaque because JS_SetOpaque expects void*
@@ -546,19 +565,34 @@ pub const DOMBridge = struct {
         }
         // create new wrapper
         const obj = ctx.newObjectClass(rc.classes.html_element);
-        try ctx.setOpaque(obj, element);
+        ctx.setOpaque(obj, element) catch {
+            _ = ctx.throwTypeError("Failed to wrap element");
+            return error.Exception;
+        };
 
         // Add convenience properties like tagName / nodeName (zero-copy)
         const tag = z.tagName_zc(element);
-        try ctx.setPropertyStr(obj, "tagName", ctx.newString(tag));
-        try ctx.setPropertyStr(obj, "nodeName", ctx.newString(tag));
+        ctx.setPropertyStr(obj, "tagName", ctx.newString(tag)) catch {
+            _ = ctx.throwTypeError("Failed to set tagName on element");
+            return error.Exception;
+        };
+        ctx.setPropertyStr(obj, "nodeName", ctx.newString(tag)) catch {
+            _ = ctx.throwTypeError("Failed to set nodeName on element");
+            return error.Exception;
+        };
 
         // Add nodeType (ELEMENT_NODE = 1)
-        try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(1));
+        ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(1)) catch {
+            _ = ctx.throwTypeError("Failed to set nodeType on element");
+            return error.Exception;
+        };
 
         // store in cache
         const dup_for_cache = ctx.dupValue(obj);
-        try bridge.node_cache.put(ptr_addr, dup_for_cache);
+        bridge.node_cache.put(ptr_addr, dup_for_cache) catch {
+            _ = ctx.throwTypeError("Out of memory caching element node");
+            return error.Exception;
+        };
 
         return obj;
     }
@@ -595,15 +629,24 @@ pub const DOMBridge = struct {
 
         // create new wrapper using the appropriate class
         const obj = ctx.newObjectClass(class_id);
-        try ctx.setOpaque(obj, node);
+        ctx.setOpaque(obj, node) catch {
+            _ = ctx.throwTypeError("Failed to wrap node");
+            return error.Exception;
+        };
 
         // nodeType and nodeName as instance properties (for fast access)
         const node_type_num: i32 = @intCast(@intFromEnum(n_type));
-        try ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(node_type_num));
+        ctx.setPropertyStr(obj, "nodeType", ctx.newInt32(node_type_num)) catch {
+            _ = ctx.throwTypeError("Failed to set nodeType on node");
+            return error.Exception;
+        };
 
         // nodeName: uses zero-copy lexbor lookup (#text, #comment, DIV, etc.)
         const node_name = z.nodeName_zc(node);
-        try ctx.setPropertyStr(obj, "nodeName", ctx.newString(node_name));
+        ctx.setPropertyStr(obj, "nodeName", ctx.newString(node_name)) catch {
+            _ = ctx.throwTypeError("Failed to set nodeName on node");
+            return error.Exception;
+        };
 
         // For element nodes, also set tagName (consistent with wrapElement)
         // This is critical because cloneNode uses wrapNode, and cached nodes
@@ -611,12 +654,18 @@ pub const DOMBridge = struct {
         if (n_type == .element) {
             const element: *z.HTMLElement = @ptrCast(@alignCast(node));
             const tag = z.tagName_zc(element);
-            try ctx.setPropertyStr(obj, "tagName", ctx.newString(tag));
+            ctx.setPropertyStr(obj, "tagName", ctx.newString(tag)) catch {
+                _ = ctx.throwTypeError("Failed to set tagName on node");
+                return error.Exception;
+            };
         }
 
         // store in cache
         const dup_for_cache = ctx.dupValue(obj);
-        try bridge.node_cache.put(ptr_addr, dup_for_cache);
+        bridge.node_cache.put(ptr_addr, dup_for_cache) catch {
+            _ = ctx.throwTypeError("Out of memory caching node");
+            return error.Exception;
+        };
 
         return obj;
     }
@@ -835,7 +884,7 @@ fn js_querySelector(
 ) callconv(.c) zqjs.Value {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    if (argc < 1) return w.EXCEPTION;
+    if (argc < 1) return ctx.throwTypeError("querySelector requires 1 argument");
 
     // Unwrap 'this' (Polymorphic): try Element first (most common), then Document, then Fragment
     var root_node: ?*z.DomNode = null;
@@ -879,7 +928,7 @@ fn js_querySelectorAll(
 ) callconv(.c) zqjs.Value {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    if (argc < 1) return w.EXCEPTION;
+    if (argc < 1) return ctx.throwTypeError("querySelectorAll requires 1 argument");
 
     // Unwrap 'this' (Polymorphic: Element, Document, Fragment, or generic Node)
     var root_node: ?*z.DomNode = null;
@@ -999,7 +1048,7 @@ fn js_get_childNodes(
     const rc = RuntimeContext.get(ctx);
 
     // Unwrap 'this' to *DomNode
-    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("childNodes: 'this' is not a Node");
 
     const children = z.childNodes(rc.allocator, node) catch return w.EXCEPTION;
     defer rc.allocator.free(children); // Free the slice (pointers inside are owned by Doc)
@@ -1025,7 +1074,7 @@ fn js_get_children(
     const ctx = w.Context{ .ptr = ctx_ptr };
 
     // Unwrap 'this' to *DomNode
-    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("children: 'this' is not a Node");
 
     const array = ctx.newArray();
     var idx: u32 = 0;

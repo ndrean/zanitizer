@@ -20,6 +20,22 @@ extern "c" fn lxb_html_document_clean(doc: *z.HTMLDocument) void;
 
 extern "c" fn lxb_html_document_create_element_noi(doc: *z.HTMLDocument, tag_name: [*]const u8, tag_len: usize, reserved_for_opt: ?*anyopaque) ?*z.HTMLElement;
 
+// Namespace-aware element creation (lxb_dom_element_create)
+// Returns lxb_dom_element_t* which is layout-compatible with *z.HTMLElement
+// when the document is an HTML document (create_interface allocates lxb_html_element_t).
+extern "c" fn lxb_dom_element_create(
+    doc: *z.DomDocument,
+    local_name: [*]const u8,
+    lname_len: usize,
+    ns_name: ?[*]const u8,
+    ns_len: usize,
+    prefix: ?[*]const u8,
+    prefix_len: usize,
+    is_value: ?[*]const u8,
+    is_len: usize,
+    sync_custom: bool,
+) ?*z.HTMLElement;
+
 extern "c" fn lxb_dom_document_create_text_node(doc: *z.HTMLDocument, text: [*]const u8, text_len: usize) ?*z.DomNode;
 
 extern "c" fn lxb_dom_node_insert_before_wo_events(to: *z.DomNode, node: *z.DomNode) void;
@@ -106,6 +122,45 @@ pub fn asDom(html_doc: *z.HTMLDocument) *z.DomDocument {
 /// ```
 pub fn createElement(doc: *z.HTMLDocument, name: []const u8) !*z.HTMLElement {
     return z.createElementWithAttrs(doc, name, &.{});
+}
+
+/// [core] Namespace-aware element creation
+///
+/// [JS] `document.createElementNS(namespaceURI, qualifiedName)`
+/// Uses lexbor's lxb_dom_element_create which properly sets the namespace
+/// on the created element's internal node.
+///
+/// ## Example
+/// ```
+/// const svg = try createElementNS(doc, "http://www.w3.org/2000/svg", "svg");
+/// const div = try createElementNS(doc, "http://www.w3.org/1999/xhtml", "div");
+/// ```
+pub fn createElementNS(doc: *z.HTMLDocument, ns_uri: []const u8, qualified_name: []const u8) !*z.HTMLElement {
+    // Handle <template> specially (same as createElement)
+    if (std.ascii.eqlIgnoreCase(qualified_name, "template")) {
+        return z.templateToElement(try z.createTemplate(doc));
+    }
+
+    // Split "prefix:localName" if present (e.g. "xlink:href" → prefix="xlink", local="href")
+    var local_name = qualified_name;
+    var prefix: ?[]const u8 = null;
+    if (std.mem.indexOfScalar(u8, qualified_name, ':')) |colon_idx| {
+        prefix = qualified_name[0..colon_idx];
+        local_name = qualified_name[colon_idx + 1 ..];
+    }
+
+    return lxb_dom_element_create(
+        doc.asDom(),
+        local_name.ptr,
+        local_name.len,
+        if (ns_uri.len > 0) ns_uri.ptr else null,
+        ns_uri.len,
+        if (prefix) |p| p.ptr else null,
+        if (prefix) |p| p.len else 0,
+        null, // is (custom elements)
+        0,
+        false, // sync_custom
+    ) orelse return Err.CreateElementFailed;
 }
 
 /// [core] Create a text node in the document

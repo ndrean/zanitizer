@@ -62,6 +62,30 @@ pub fn js_createElement(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     };
     return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;
 }
+/// Generated wrapper for z.createElementNS
+pub fn js_createElementNS(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 2) return w.EXCEPTION;
+    const doc: *z.HTMLDocument = blk: {
+        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        return ctx.throwTypeError("Method called on object that is not a Document");
+    };
+    const arg1 = if (!ctx.isNull(argv[0]) and !ctx.isUndefined(argv[0]))
+        ctx.toZString(argv[0]) catch return w.EXCEPTION
+    else
+        "";
+    defer if (arg1.len > 0) ctx.freeZString(arg1);
+    const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg2);
+    const result = z.createElementNS(doc, arg1, arg2) catch |err| {
+        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
+        std.debug.print("JS Binding Error: {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error");
+    };
+    return DOMBridge.wrapElement(ctx, result) catch w.EXCEPTION;
+}
 /// Generated wrapper for z.createTextNode
 pub fn js_createTextNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
@@ -11149,6 +11173,7 @@ pub fn installDocumentBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "parseHTML", qjs.JS_NewCFunction(ctx, js_parseHTML, "parseHTML", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "documentRoot", qjs.JS_NewCFunction(ctx, js_documentRoot, "documentRoot", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "createElement", qjs.JS_NewCFunction(ctx, js_createElement, "createElement", 1));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "createElementNS", qjs.JS_NewCFunction(ctx, js_createElementNS, "createElementNS", 2));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "createTextNode", qjs.JS_NewCFunction(ctx, js_createTextNode, "createTextNode", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "createComment", qjs.JS_NewCFunction(ctx, js_createComment, "createComment", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "createDocumentFragment", qjs.JS_NewCFunction(ctx, js_createDocumentFragment, "createDocumentFragment", 0));

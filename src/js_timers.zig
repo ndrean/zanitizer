@@ -16,13 +16,17 @@ fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:
 
 fn js_setTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    if (argc < 2) return ctx.throwTypeError("setTimeout requires 2 arguments");
+    // if (argc < 2) return ctx.throwTypeError("setTimeout requires 2 arguments");
+    if (argc < 1) return ctx.throwTypeError("setTimeout requires callback");
 
     const rc = RuntimeContext.get(ctx);
     const loop = rc.loop;
 
     var delay: i64 = 0;
-    _ = qjs.JS_ToInt64(ctx_ptr, &delay, argv[1]);
+    if (argc > 1) {
+        if (qjs.JS_ToInt64(ctx.ptr, &delay, argv[1]) != 0) return zqjs.EXCEPTION;
+    }
+    // _ = qjs.JS_ToInt64(ctx_ptr, &delay, argv[1]);
 
     // addTimer(ctx, callback, delay, is_interval)
     const id = loop.addTimer(ctx, argv[0], delay, false) catch return ctx.throwOutOfMemory();

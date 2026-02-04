@@ -65,6 +65,47 @@ pub fn install(ctx: w.Context) !void {
     const env_result = qjs.JS_Eval(ctx.ptr, env_polyfill, env_polyfill.len, "<polyfill:env>", qjs.JS_EVAL_TYPE_GLOBAL);
     ctx.freeValue(env_result);
 
+    // React/Preact needs to attach global listeners (e.g. "resize", "unhandledrejection")
+    const window_events_polyfill =
+        \\(function() {
+        \\    const listeners = new Map();
+        \\
+        \\    globalThis.addEventListener = function(event, callback) {
+        \\        if (!listeners.has(event)) listeners.set(event, new Set());
+        \\        listeners.get(event).add(callback);
+        \\    };
+        \\
+        \\    globalThis.removeEventListener = function(event, callback) {
+        \\        if (listeners.has(event)) {
+        \\            listeners.get(event).delete(callback);
+        \\        }
+        \\    };
+        \\
+        \\
+        \\    globalThis.dispatchEvent = function(event) {
+        \\        if (listeners.has(event.type)) {
+        \\            listeners.get(event.type).forEach(cb => {
+        \\                try { cb(event); } catch(e) { console.error(e); }
+        \\            });
+        \\        }
+        \\        return true;
+        \\    };
+        \\})();
+    ;
+    const we_result = qjs.JS_Eval(ctx.ptr, window_events_polyfill, window_events_polyfill.len, "<polyfill:window_events>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(we_result);
+
+    // HTML element constructors React 19 checks via `instanceof window.HTMLIFrameElement`
+    const html_types_polyfill =
+        \\(function() {
+        \\    if (typeof globalThis.HTMLIFrameElement === 'undefined') {
+        \\        globalThis.HTMLIFrameElement = class HTMLIFrameElement {};
+        \\    }
+        \\})();
+    ;
+    const ht_result = qjs.JS_Eval(ctx.ptr, html_types_polyfill, html_types_polyfill.len, "<polyfill:html_types>", qjs.JS_EVAL_TYPE_GLOBAL);
+    ctx.freeValue(ht_result);
+
     // Browser error types that React may check with instanceof
     const browser_types_polyfill =
         \\(function() {
@@ -121,16 +162,13 @@ pub fn install(ctx: w.Context) !void {
         \\                const now = Date.now();
         \\                const cbs = callbacks;
         \\                callbacks = []; // Clear before calling, in case they queue more frames
-        \\                for (const item of cbs) {
+        \\                for (let ci = 0; ci < cbs.length; ci++) {
+        \\                    const item = cbs[ci];
         \\                    try {
-        \\                        if (typeof item.callback !== 'function') {
-        \\                            console.log("RAF: callback is not a function:", typeof item.callback, item.callback);
-        \\                            continue;
-        \\                        }
         \\                        item.callback(now);
         \\                    } catch (e) {
-        \\                        console.log("Error in RAF callback:", e === null ? "null" : e === undefined ? "undefined" : e);
-        \\                        if (e && e.message) console.log("  message:", e.message);
+        \\                        console.log("RAF[" + ci + "/" + cbs.length + "] error:", e);
+        \\                        if (e && e.message) console.log("  msg:", e.message);
         \\                        if (e && e.stack) console.log("  stack:", e.stack.split('\n').slice(0, 5).join('\n'));
         \\                    }
         \\                }
@@ -149,6 +187,23 @@ pub fn install(ctx: w.Context) !void {
 
     const msg_channel_polyfill =
         \\(function() {
+        \\    // MessageEvent: React 19 scheduler checks `event instanceof MessageEvent`
+        \\    if (typeof globalThis.MessageEvent === 'undefined') {
+        \\        class MessageEvent {
+        \\            constructor(type, init) {
+        \\                this.type = type || 'message';
+        \\                this.data = init && init.data !== undefined ? init.data : null;
+        \\                this.origin = init && init.origin || '';
+        \\                this.lastEventId = init && init.lastEventId || '';
+        \\                this.source = init && init.source || null;
+        \\                this.ports = init && init.ports || [];
+        \\                this.bubbles = false;
+        \\                this.cancelable = false;
+        \\            }
+        \\        }
+        \\        globalThis.MessageEvent = MessageEvent;
+        \\    }
+        \\
         \\    if (globalThis.MessageChannel) return; // Don't polyfill if it exists
         \\
         \\    class MessagePort {
@@ -168,7 +223,7 @@ pub fn install(ctx: w.Context) !void {
         \\                        const message = this._other._queue.shift();
         \\                        if (message !== undefined) {
         \\                            try {
-        \\                                this._other.onmessage({ data: message });
+        \\                                this._other.onmessage(new MessageEvent('message', { data: message }));
         \\                            } catch(e) {
         \\                                console.log("Error in MessagePort onmessage:", e);
         \\                            }

@@ -188,6 +188,7 @@ pub const setOuterHTMLSimple = serialize.setOuterHTMLSimple;
 pub const DOMParser = parse.DOMParser;
 
 pub const createElement = lxb.createElement;
+pub const createElementNS = lxb.createElementNS;
 pub const createElementWithAttrs = lxb.createElementWithAttrs;
 pub const createTextNode = lxb.createTextNode;
 

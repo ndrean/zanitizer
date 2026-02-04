@@ -1,38 +1,13 @@
 # HTML parser & JavaScript execution at native speed
 
-Building blocks: 
+Building blocks:
 
 - `lexbor` [License](https://github.com/lexbor/lexbor/blob/master/LICENSE)
 - `quickjs` [icense](https://github.com/bellard/quickjs/blob/master/LICENSE)
   
-## What Works Now in `main()`
+## Zig / QuickJS interop
 
-✅ JS Execution
-
-```zig
-const ctx = qjs.JS_NewContext(rt);
-const result = qjs.JS_Eval(ctx, "2 + 2", 5, "<input>", 0);
-// Returns: 4
-```
-
-✅ Extract & Execute Scripts from HTML
-
-```zig
-// Fetch HTML from URL
-const page = try z.get(allocator, url);
-// Parse & find all script tags
-const doc = try z.createDocFromString(page);
-const scripts = try z.querySelectorAll(allocator, doc, "script");
-
-// Execute each script with QuickJS
-for (scripts) |script_elt| {
-    const js_code = z.textContent_zc(z.elementToNode(script_elt));
-    const result = qjs.JS_Eval(ctx, js_code.ptr, js_code.len, "<script>", 0);
-    // Script executed!
-}
-```
-
-✅ Access JavaScript Variables from Zig
+- JS -> Zig via `globalThis`
 
 ```zig
 // JavaScript creates a variable
@@ -44,6 +19,38 @@ const result_prop = qjs.JS_GetPropertyStr(ctx, global, "result");
 const result_str = qjs.JS_ToCString(ctx, result_prop);
 // result_str = "Hello from JS"
 ```
+
+- Inject native Zig functions in the JS runtime for  Data Transformation Pipelines
+
+```javascript
+const response = await z.get("/api/products");
+const json = await response.json(); // QuickJS built-in
+
+// 2. Extract prices (JavaScript - simple logic)
+const prices = json.products.map(p => p.price);
+
+// 3. Convert to TypedArray
+const priceBuffer = new Float64Array(prices);
+
+// 4. Complex transformations (Zig)
+const stats = z.computeStats(priceBuffer); 
+const normalized = z.normalizeArray(priceBuffer);
+
+// 5. Generate HTML (JavaScript - templating)
+const html = `
+    <div class="stats">
+        <h2>Price Analysis</h2>
+        <p>Average: $${stats.mean.toFixed(2)}</p>
+        <p>Range: $${stats.min} - $${stats.max}</p>
+    </div>
+    <div class="products">
+        ${json.products.map((p, i) =>
+            `<div>$${p.price} (${normalized[i].toFixed(2)})</div>`
+        ).join("")}
+    </div>
+`;
+```
+
 
 ## Quick start Configuration
 
@@ -67,28 +74,9 @@ pub fn main() !void {
 
 ## SSR Architecture with API Mapping
 
-```txt
-┌─────────────────────────────────────┐
-│     JavaScript (QuickJS)            │
-│  document.createElement("div")      │
-│  element.appendChild(child)         │
-│  document.querySelector(".foo")     │
-└─────────┬───────────────────────────┘
-          │ Bridge Functions (Zig)
-          ↓
-┌─────────────────────────────────────┐
-│   Zexplorer/Lexbor Primitives       │
-│   z.createElement()                 │
-│   z.appendChild()                   │
-│   z.querySelectorAll()              │
-└─────────┬───────────────────────────┘
-          │
-          ↓
-┌─────────────────────────────────────┐
-│      Lexbor C Library               │
-│   (Actual DOM Tree in Memory)       │
-└─────────────────────────────────────┘
-```
+Binding Zig wrappers of `lexbor` primitives into `QuickJS`: methods, prop setter/getter,  either on Node, Document, Element, Window.
+
+The DOM is hold by lexbor in memory. QuickJS has access to pointers.
 
 ### The API Mapping Dictionary (TODO)
 
@@ -161,79 +149,13 @@ pub fn js_appendChild(ctx: *JSContext, this: JSValue, argc: c_int, argv: [*c]JSV
 }
 ```
 
-## Use Cases Enabled
+## Framework Support
 
-### Server-Side React/Vue/Preact
+Generate _Bytecode_ from Zig code for Preact, SolidJS, VueJS
 
-```js
-// React SSR example (with polyfills)
-import { renderToString } from 'react-dom/server';
+Template Engines (htmm, solid/html, Handlebars, Mustache, EJS...)
 
-const App = () => (
-  <div className="container">
-    <h1>Hello from Zig + QuickJS!</h1>
-  </div>
-);
-
-const html = renderToString(<App />);
-// Returns HTML string that Zig can use
-```
-
-### Template Engines (Handlebars, Mustache, EJS...)
-
-```js
-const template = Handlebars.compile(`
-  <div class="user">
-    <h2>{{name}}</h2>
-    <p>{{email}}</p>
-  </div>
-`);
-
-const html = template({ name: "John", email: "john@example.com" });
-```
-
-### HTMX/Alpine.js SSR
-
-```js
-// Process HTMX attributes server-side
-const container = document.createElement("div");
-container.setAttribute("hx-get", "/api/data");
-container.setAttribute("hx-swap", "innerHTML");
-
-document.body.appendChild(container);
-// Lex bor DOM now contains the HTMX-ready HTML
-```
-
-### Dynamic Component Generation
-
-```js
-function createCard(title, content) {
-  const card = document.createElement("div");
-  card.className = "card";
-
-  const h2 = document.createElement("h2");
-  h2.textContent = title;
-
-  const p = document.createElement("p");
-  p.textContent = content;
-
-  card.appendChild(h2);
-  card.appendChild(p);
-
-  return card;
-}
-
-// Generate 100 cards
-for (let i = 0; i < 100; i++) {
-  const card = createCard(`Item ${i}`, `Description ${i}`);
-  document.body.appendChild(card);
-}
-
-// Extract final HTML from lexbor
-const html = getHTMLFromDOM(); // Your innerHTML() function
-```
-
-### Web Scraping with JS Execution
+## Example: Web Scraping with JS Execution
 
 ```zig
 // Fetch page → Parse → Execute its JavaScript → Extract dynamic content
@@ -278,16 +200,18 @@ const html = renderToHTML(data); // JS function
 
 ## Security Notes
 
-QuickJS has **no sandboxing by default**. For production:
+Directory **sandboxing**
+
+Runtime limits:
 
 ```zig
-// Set memory limits
+// memory limits
 qjs.JS_SetMemoryLimit(rt, 10 * 1024 * 1024); // 10MB
 
-// Set stack size
+// stack size
 qjs.JS_SetMaxStackSize(rt, 256 * 1024); // 256KB
 
-// Add interrupt handler for timeouts
+// interrupt handler for timeouts
 qjs.JS_SetInterruptHandler(rt, handler, userdata);
 ```
 
@@ -329,7 +253,6 @@ promise.then(value => {
   console.log(value);
 });
 
-// IMPORTANT: You must execute pending jobs!
 ```
 
 **From Zig:**
@@ -371,8 +294,6 @@ console.log(fib.next().value); // 0
 console.log(fib.next().value); // 1
 console.log(fib.next().value); // 1
 ```
-
-**Tested and working!** (see [main.zig:204-221](src/main.zig#L204-L221))
 
 ✅ Async Generators
 
@@ -468,31 +389,7 @@ example();
 
 ---
 
-⚠️ PARTIAL - Needs Polyfills/Implementation
-
-- Streams API.
-QuickJS **does NOT include** the Web Streams API (`ReadableStream`, `WritableStream`, `TransformStream`) by default.
-
-Potentially polyfill from JavaScript?
-
-```js
-// Use a polyfill like 'web-streams-polyfill'
-import { ReadableStream } from 'web-streams-polyfill';
-
-const stream = new ReadableStream({
-  start(controller) {
-    controller.enqueue("chunk 1");
-    controller.enqueue("chunk 2");
-    controller.close();
-  }
-});
-
-for await (const chunk of stream) {
-  console.log(chunk);
-}
-```
-
-Or implement in Zig:
+⚠️ Streams - Needs Polyfills/Implementation Or implement in Zig:
 
 ```zig
 // Create a native ReadableStream backed by Zig I/O
@@ -504,24 +401,8 @@ fn js_createReadableStream(...) callconv(.c) qjs.JSValue {
 
 > Stream parser is implemented in lexbor.
 
-- Event Loop / setTimeout / setInterval. QuickJS has a basic event loop, but `setTimeout`/`setInterval` are _NOT built-in_, or  use the extension `quickjs-libc`
+- Event Loop / setTimeout / setInterval: use the extension `quickjs-libc`?
 
-=> Zig implementation
-
-```zig
-// Pseudo-code
-fn js_setTimeout(ctx: *qjs.JSContext, ...) callconv(.c) qjs.JSValue {
-    const callback = argv[0];
-    const delay_ms = argv[1];
-
-    // Schedule callback for later execution
-    timer_queue.add(callback, delay_ms);
-
-    return JS_NewInt32(ctx, timer_id);
-}
-```
-
-**Alternative:** Use the `quickjs-libc` extensions (if you include them):
 
 ```c
 // quickjs-libc.c provides:
@@ -531,183 +412,3 @@ fn js_setTimeout(ctx: *qjs.JSContext, ...) callconv(.c) qjs.JSValue {
 ```
 
 To enable, add `quickjs-libc.c` to your build and call `js_init_module_os()`.
-
-- fetch() API  ❌. Use Zigimplementation
-
-```zig
-fn js_fetch(ctx: *qjs.JSContext, ...) callconv(.c) qjs.JSValue {
-    const url = JS_ToCString(ctx, argv[0]);
-    const response = z.get(allocator, url) catch return JS_EXCEPTION;
-
-    const promise = JS_NewPromiseCapability(ctx);
-    JS_Call(ctx, promise.resolve, response_text, 1, &response_val);
-    return promise.promise;
-}
-```
-
-### DOM APIs
-
-We bridge Lexbor with the DOM API.
-
----
-
-## ❌ NOT Supported
-
-### WebAssembly
-
-Alternatives:
-
-- Integrate `wasmer` or `wasmtime` separately
-- Use Zig's own WASM support for compiling/running WASM
-
-### Browser-Specific APIs
-
-These are not in QuickJS by default:
-
-- `window`, `document`, `navigator` (but you're building this!)
-- `localStorage`, `sessionStorage`
-- `WebSocket`, `WebRTC`
-- Canvas, WebGL
-- Service Workers
-- IndexedDB
-
-**But:** You can implement any of these by mapping to Zig functions!
-
-## JavaScript or Zig and Interop
-
-```js
-// SLOW
-let sum = 0;
-for (let i = 0; i < 1_000_000; i++) {
-    sum += Math.sqrt(i) * Math.sin(i);
-}
-
-//FAST in Zig
-const sum = Native.processArray(data);
-```
-
-Use JavaScript (QuickJS) for:
-
-- Orchestration & Logic
-  
-   ```js
-   // JavaScript decides what to do
-   const products = querySelectorAll(".product");
-   const prices = products.map(el => extractPrice(el));
-   const stats = z.computeStats(prices); // Zig does math
-   ```
-
-- Small Loops (<100 iterations)
-  
-   ```js
-   // Fast enough in JavaScript
-   const headers = ["Name", "Age", "Email"];
-   const html = headers.map(h => `<th>${h}</th>`).join("");
-   ```
-
-- String Templates
-  
-   ```js
-   // Simple string ops are fine
-   const report = `Total: ${total}, Average: ${avg}`;
-   ```
-
-- Object Manipulation
-  
-   ```javascript
-   const config = { ...defaults, ...userSettings };
-   ```
-
-Use Zig (Native) for:
-
-- Large Loops (>1000 iterations)
-
-   ```js
-   // ❗️
-   for (let i = 0; i < data.length; i++) {
-       result[i] = Math.sqrt(data[i]) * Math.sin(data[i]);
-   }
-
-   //✅ Zig
-   const result = z.transformArray(data);
-   ```
-
-- Math-Heavy Computations`
-
-- Text Processing (regex, parsing)
-
-Example:
-
-- Fetch: **Zig** (instant startup vs V8's 50ms warmup)
-- Parse: **Lexbor** (30k elements/sec, C-level performance)
-- Extract: **JavaScript** (simple logic, fast enough)
-- Stats: **Zig** (100x faster than JS loops)
-- Template: **JavaScript** (simple string ops, fast enough)
-
-- Statistics using TypedArrays (Zero-Copy):
-
-```javascript
-// JS
-const data = Array.from({ length: 100_000 }, () => Math.random() * 100);
-
-// Convert to TypedArray for zero-copy performance
-const buffer = new Float64Array(data);
-
-// Zig processes at native speed (no copying!)
-const stats = z.computeStats(buffer);
-
-console.log(`
-    Mean: ${stats.mean}
-    Median: ${stats.median}
-    Std Dev: ${stats.stddev}
-    Min: ${stats.min}
-    Max: ${stats.max}
-`);
-```
-
-- HTML generation: Generate 10,000 product cards
-  
-```js
-// ❌ SLOW: Loop in JavaScript
-let html = "";
-for (let i = 0; i < 10_000; i++) {
-    html += `<div class="card">Product ${i}</div>`;
-}
-
-// ✅ FAST: Bulk generation in Zig
-const html = z.generateCards(10_000);
-```
-
-- Data Transformation Pipeline
-
-```javascript
-// Real-world: Process API response
-
-// 1. Fetch (Zig)
-const response = await z.get("/api/products");
-const json = await response.json(); // QuickJS built-in
-
-// 2. Extract prices (JavaScript - simple logic)
-const prices = json.products.map(p => p.price);
-
-// 3. Convert to TypedArray
-const priceBuffer = new Float64Array(prices);
-
-// 4. Complex transformations (Zig)
-const stats = z.computeStats(priceBuffer);
-const normalized = z.normalizeArray(priceBuffer);
-
-// 5. Generate HTML (JavaScript - templating)
-const html = `
-    <div class="stats">
-        <h2>Price Analysis</h2>
-        <p>Average: $${stats.mean.toFixed(2)}</p>
-        <p>Range: $${stats.min} - $${stats.max}</p>
-    </div>
-    <div class="products">
-        ${json.products.map((p, i) =>
-            `<div>$${p.price} (${normalized[i].toFixed(2)})</div>`
-        ).join("")}
-    </div>
-`;
-```

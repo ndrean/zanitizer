@@ -74,21 +74,26 @@ The examples can be built and run with the commands:
 zig build example -Dname=js-bench-1 -Doptimize=ReleaseFast
 zig build example -Dname=js-bench-2 -Doptimize=ReleaseFast
 zig build example -Dname=js-bench-3 -Doptimize=ReleaseFast
+zig build example -Dname=js-bench-bau -Doptimize=ReleaseFast
 ```
 
-| test                 | t1    | t2    | t3    |
-| -------------------- | ----- | ----- | ----- |
-| Create 1k            | 2.68  | 1.90  | 1.75  |
-| Replace 1k           | 2.56  | 2.34  | 1.81  |
-| Partial Update (10k) | 2.92  | 1.64  | 6.73  |
-| Select Row           | 0.05  | 0.01  | 0.02  |
-| Swap Rows            | 0.06  | 0.10  | 0.14  |
-| Remove Row           | 0.01  | 0.05  | 0.05  |
-| Create 10k           | 27.66 | 20.84 | 16.54 |
-| Append 1k            | 2.76  | 7.41  | 4.02  |
-| Clear                | 4.11  | 7.72  | 5.94  |
-| --                   | --    | --    | --    |
-| Total Engine         | 76    | 70    | 75    |
+Source:
+<https://githhub.com/krausest/js-framework-benchmark>
+
+
+| test                 | t1    | t2    | t3    | bau   |
+| -------------------- | ----- | ----- | ----- | ----- |
+| Create 1k            | 2.68  | 1.90  | 1.75  | 2.02  |
+| Replace 1k           | 2.56  | 2.34  | 1.81  | 1.88  |
+| Partial Update (10k) | 2.92  | 1.64  | 6.73  | 5.55  |
+| Select Row           | 0.05  | 0.01  | 0.02  | 0.02  |
+| Swap Rows            | 0.06  | 0.10  | 0.14  | 0.01  |
+| Remove Row           | 0.01  | 0.05  | 0.05  | 0.01  |
+| Create 10k           | 27.66 | 20.84 | 16.54 | 22.92 |
+| Append 1k            | 2.76  | 7.41  | 4.02  | 1.94  |
+| Clear                | 4.11  | 7.72  | 5.94  | 0.01  |
+| --                   | --    | --    | --    | --    |
+| Total Engine         | 76    | 70    | 75    | 68    |
 
 [TODO]: a CLI ? to run:
 
@@ -98,7 +103,9 @@ zxp loc/index.html loc/bench.js loc/test-runner.js
 
 ### zexplorer vs jsdom
 
-We build a simple DOM and run querySelectors and populate elements to compare teh performance of `zexplorer` vs `JSDom`.
+While JSDOM emulates more of the many web standards, zeplorer can run Vaniila code, Preact/React code (no JSX, via templating) or Vue (again via templating) or SolidJS (via templating). Check the examples below.
+
+We present a comparison in performance between `JSDOM` and `zexplorer` on a Vanilla example where build a simple DOM and run querySelectors and populate elements.
 
 <details><summary>JSDOM script</summary>
 
@@ -301,7 +308,7 @@ The start time of the engine is approx 0.7ms (difference between the engine setu
 | 20_000 | 49.3 ms      | 50.0 ms         | 315.4 ms | 318.9 ms    |
 | 50_000 | 123.5 ms     | 124.2 ms        | 741.4 ms | 745.5 ms    |
 
-The DOM operations are externalized from the JavaScript runtime and these results demonstrate this cleaarly.
+The DOM operations are externalized from the JavaScript runtime and these results demonstrate this clearly.
 
 ---
 
@@ -343,22 +350,235 @@ DOMPurify reference: ~11 ms
 
 ## A few examples
 
-The folder _src/examples_  (will!) contains all the test cases.
+The folder _src/examples_  contains all the test cases.
 
 > [!IMPORTANT] 
  > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
 
-We use helpers to permit JSX.
 
-### Preact with `htm`
+### Run React bundled code
 
-`zig build example -Dname=test_htm -Doptimize=ReleaseFast`
+You run can bundled JSX code in zexplorer. It is a two-step process.
+
+For example, the code below is React code:
+
+```jsx
+// App.jsx
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+
+const Item = ({ value }) => {
+  return <li className="item">Value: <strong>{value}</strong></li>;
+};
+
+const List = ({ onlyEven }) => {
+  const allNumbers = [1, 2, 3, 4, 5, 6, 7];
+
+  // useMemo ensures we only filter when 'onlyEven' changes
+  const displayedNumbers = useMemo(() => {
+    console.log(`[React] Calculating filter (Even: ${onlyEven})`);
+    if (onlyEven) {
+      return allNumbers.filter(n => n % 2 === 0);
+    }
+    return allNumbers;
+  }, [onlyEven]);
+
+  return (
+    <ul id="list-container">
+      {displayedNumbers.map(n => <Item key={n} value={n} />)}
+    </ul>
+  );
+};
+
+const App = () => {
+  const [onlyEven, setOnlyEven] = useState(false);
+  const [renderCount, setRenderCount] = useState(1);
+
+  useEffect(() => {
+    console.log("[React] 👍 App Mounted");
+  }, []);
+
+  return (
+    <div style={{ padding: 20, fontFamily: 'sans-serif' }}>
+      <h1>Zexplorer Memo Test</h1>
+
+      {/* Control Panel */}
+      <div style={{ marginBottom: 15 }}>
+        <button
+          id="btn-toggle"
+          onClick={() => setOnlyEven(prev => !prev)}
+        >
+          {onlyEven ? "Show All" : "Show Even Only"}
+        </button>
+
+        <button
+          id="btn-force"
+          onClick={() => setRenderCount(c => c + 1)}
+          style={{ marginLeft: 10 }}
+        >
+          Force Re-render ({renderCount})
+        </button>
+      </div>
+
+      <p>Status: {onlyEven ? "Filtering Active" : "Showing All"}</p>
+
+      {/* Nested List */}
+      <List onlyEven={onlyEven} />
+    </div>
+  );
+};
+
+const rootNode = document.getElementById('root');
+if (rootNode) {
+  const root = createRoot(rootNode);
+  root.render(<App />);
+}
+```
+
+We will bundle it into a single JS file using `bun`.
+
+```js
+// build_react.js
+const result = await Bun.build({
+  entrypoints: ["App.jsx"],
+  outdir: "dist",
+  naming: "app.js",
+  target: "browser",
+  minify: true,
+});
+
+if (!result.success) {
+  console.error("❌ Build Failed:");
+  for (const msg of result.logs) console.error(msg);
+  process.exit(1);
+}
+
+console.log("🟢 Build Complete: dist/app.js");
+```
+
+To bundle _App.jsx_, you need to do:
+
+```sh
+bun add react react-dom
+bun build_react.js
+```
+
+This produces a file in _dist/app.js_. 
+
+Now, you may test your React code. Here we test how `useMemo` works.
+
+```html
+<html>
+  <body>
+    <div id="root"><!-- REACT root div --></div>
+    <script type="module" src="zexp-react/dist/app.js"></script>
+    <script type="module">
+      // Helper to wait for re-renders (Microtasks)
+      async function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      async function runTest() {
+        console.log("[Test] Waiting for mount...");
+        await sleep(10);
+        // temporary fix: wait for React to finish the async mount
+
+        const list = document.getElementById("list-container");
+        const btn = document.getElementById("btn-toggle");
+        const btnForce = document.getElementById("btn-force");
+
+        // Initial State
+        console.log(`[Test] Items initially: ${list.children.length}`);
+
+        if (list.children.length !== 7)
+          console.error("❌ Initial render failed");
+
+        //Tset Trigger useMemo (Click Filter)
+        console.log("[Test] Clicking 'Show Even Only'");
+        btn.dispatchEvent(new Event("click", { bubbles: true }));
+        await sleep(5);
+        console.log(`[Test] Items after filter: ${list.children.length}`); // Should be 3
+        if (list.children.length !== 3) console.error("❌ Filter failed");
+
+        // Force Re-render to check Memo
+        // If Memo works, "Calculating filter..." should NOT print in console for this step === Should NOT trigger Memo
+        console.log("[Test] Clicking 'Force Re-render'...");
+        btnForce.dispatchEvent(new Event("click", { bubbles: true }));
+      }
+
+      runTest();
+    </script>
+  </body>
+</html>
+```
+
+The logs in the terminal confirms that `useMemo` works as expected.
+
+`zig build example -Dname=test_react -Doptimize=ReleaseFast`
+
+```txt
+[Zig] SECURE  LOADER 
+[Test] Waiting for mount
+[React] Calculating filter (Even: false)
+[React] 👍 App Mounted
+[Test] Items initially: 7
+[Test] Clicking 'Show Even Only'
+[React] Calculating filter (Even: true)
+[Test] Items after filter: 3
+[Test] Clicking 'Force Re-render'...
+[Test] ✅ Sequence Complete. Check console for Memo logs.
+<div id="root">
+  <div>
+    <h1>
+      "Zexplorer Memo Test"
+    </h1>
+    <div>
+      <button id="btn-toggle">
+        "Show All"
+      </button>
+      <button id="btn-force">
+        "Force Re-render ("
+        "2"
+        ")"
+      </button>
+    </div>
+    <p>
+      "Status: "
+      "Filtering Active"
+    </p>
+    <ul id="list-container">
+      <li class="item">
+        "Value: "
+        <strong>
+          "2"
+        </strong>
+      </li>
+      <li class="item">
+        "Value: "
+        <strong>
+          "4"
+        </strong>
+      </li>
+      <li class="item">
+        "Value: "
+        <strong>
+          "6"
+        </strong>
+      </li>
+    </ul>
+  </div>
+</div>
+
+```
+
+### Preact with `html` template strings
 
  ```sh
  zig build example -Dname=test_htm -Doptimize=ReleaseFast
  ```
 
-<details><summary>Preact with html</summary>
+<details><summary>Preact with html and imports via CDN</summary>
 
 ```html
 <html>
@@ -424,12 +644,12 @@ We use helpers to permit JSX.
 
 </details>
 
-The Preact/htm code is compiled to bytecode which eliminates parsing+compilation.
-The raw byes will be `@embedFile` in the executable.
+The Preact/htm code can be compiled to bytecode and embedded in the executable.
 
 The engine does this as a pre-step. You can still upload "on-the-fly" an import (cf the SolidJS example below).
 
-The Zig function to run (**TODO**: simply even more: load+execute in one go)
+
+<details><summary>The Zig runner function</summary>
 
 ```zig
 fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
@@ -447,6 +667,8 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     try z.prettyPrint(gpa, z.elementToNode(root.?));
 }
 ```
+
+</details>
 
 <details>
 <summary>The output shows that the hooks are triggered and the DOM is updated.
@@ -490,7 +712,7 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 
 </details>
 
-### SolidJS with `html`
+### SolidJS templated with `html`
 
 `zig build example -Dname=test_solidjs --release=fast`
 
@@ -752,7 +974,7 @@ fn uploadFile(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
 
-    cosnt script = readFile("js/test_send_post.js");
+    const script = readFile("js/test_send_post.js");
     defer allocator.free(script);
 
     const res = try engine.eval(script, "<fetch>", .module);
