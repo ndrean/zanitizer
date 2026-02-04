@@ -503,7 +503,7 @@ Now, you may test your React code. Here we test how `useMemo` works.
 
         // Force Re-render to check Memo
         // If Memo works, "Calculating filter..." should NOT print in console for this step === Should NOT trigger Memo
-        console.log("[Test] Clicking 'Force Re-render'...");
+        console.log("[Test] Clicking 'Force Re-render'");
         btnForce.dispatchEvent(new Event("click", { bubbles: true }));
       }
 
@@ -526,8 +526,9 @@ The logs in the terminal confirms that `useMemo` works as expected.
 [Test] Clicking 'Show Even Only'
 [React] Calculating filter (Even: true)
 [Test] Items after filter: 3
-[Test] Clicking 'Force Re-render'...
-[Test] ✅ Sequence Complete. Check console for Memo logs.
+[Test] Clicking 'Force Re-render'
+
+[Zig] Render BODY
 <div id="root">
   <div>
     <h1>
@@ -570,6 +571,7 @@ The logs in the terminal confirms that `useMemo` works as expected.
   </div>
 </div>
 
+[Zig] RT destroyed --------
 ```
 
 ### Preact with `html` template strings
