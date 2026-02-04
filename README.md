@@ -466,7 +466,7 @@ bun build_react.js
 
 This produces a file in _dist/app.js_. 
 
-Now, you may test your React code. Here we test how `useMemo` works.
+Now, you may test your React code. Here we test how `useMemo` works by producing clicks on the button via ``dispatchEvent`.
 
 ```html
 <html>
