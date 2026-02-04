@@ -7,14 +7,11 @@
       import { html, render, useState } from "htm/preact/standalone";
 
       console.log("[JS] HTM + Preact standalone loaded");
-
       const root = document.getElementById("root");
 
       // ============================================================
       // HTM allows JSX-like syntax with tagged template literals
-      //
       // IMPORTANT: Run with --release=fast
-      //   zig build example -Dname=test_htm -Doptimize=RereleaseFast
       // ============================================================
 
       // Nested component using HTM syntax

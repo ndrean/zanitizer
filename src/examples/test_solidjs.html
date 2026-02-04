@@ -1,52 +1,71 @@
 <html>
   <body>
-    <h1>Testing CDN import: SolidJS</h1>
+    <h1>Testing CDN import: SolidJS (Nested Components)</h1>
     <div id="root"></div>
     <script type="module">
-      import { createSignal, createEffect, onCleanup } from "solid-js";
+      import { createSignal, createEffect, onMount } from "solid-js";
       import { render } from "solid-js/web";
-      import html from "solid-js/html"; //<-- ?? pb
+      import html from "solid-js/html";
 
       console.log("[JS] SolidJS loaded");
-      console.log("[JS] createSignal:", typeof createSignal);
-      console.log("[JS] render:", typeof render);
-
       const root = document.getElementById("root");
 
-      const [count, setCount] = createSignal(1);
+      // --- Nested Components ---
+      // Note: solid-js/html's dynamicProperty wraps ALL function-valued
+      // component props as reactive getters (calls them on access).
+      // Unlike JSX (where Babel distinguishes signal accessors from
+      // regular functions), html templates treat all functions as
+      // reactive accessors. So we pass event handlers wrapped in an
+      // object to avoid auto-calling.
 
-      const Counter = () => {
-        const [localCount, setLocalCount] = createSignal(0);
-
-        createEffect(() => {
-          console.log(`[JS] Rendered! Count: ${localCount()}`);
-          console.log("[JS]", root.innerHTML);
-        });
-
-        const handleClick = () => {
-          console.log("[JS] Button clicked!");
-          setLocalCount((c) => c + 1);
-        };
-
+      const Button = (props) => {
+        const handleClick = () => props.actions.increment();
         return html`
-          <div class="counter-app">
-            <h2>SolidJS Counter</h2>
-            <p id="count-display">Count: ${localCount}</p>
-            <button id="increment-btn" onclick=${handleClick}>+1</button>
-          </div>
+          <button type="button" id="btn" onclick=${handleClick}>
+            ${props.children}
+          </button>
         `;
       };
 
-      try {
-        render(() => html`<${Counter} />`, root);
-        console.log("[JS] First render: ", root.innerHTML);
+      function Counter(props) {
+        createEffect(() => {
+          console.log("[JS] Effect: count =", props.count);
+        });
 
-        // simulate periodic clicks
+        return html`
+          <div class="counter-app">
+            <h2>SolidJS Counter (Nested)</h2>
+            <p id="count-display">Count: ${() => props.count}</p>
+            <${Button} actions=${props.actions} children=${"👍 +1"} />
+          </div>
+        `;
+      }
+
+      const App = () => {
+        const [localCount, setLocalCount] = createSignal(0);
+        // Wrap handlers in an object so dynamicProperty doesn't
+        // auto-call them (objects are not functions)
+        const actions = { increment: () => setLocalCount((c) => c + 1) };
+
+        onMount(() => {
+          console.log("[JS] App mounted");
+          console.log("[JS] initial innerHTML:", root.innerHTML);
+        });
+
+        return html`<${Counter} count=${localCount} actions=${actions} />`;
+      };
+
+      try {
+        render(() => html`<${App} />`, root);
+        console.log("[JS] First render:", root.innerHTML);
+
+        // Simulate periodic clicks
         let iterations = 0;
         const interval = setInterval(() => {
           iterations++;
-          const btn = document.getElementById("increment-btn");
+          const btn = document.getElementById("btn");
           if (btn) {
+            console.log("[JS] dispatching click", iterations);
             btn.dispatchEvent(new Event("click", { bubbles: true }));
           }
           if (iterations >= 3) {

@@ -3,10 +3,9 @@
   <body>
     <div id="app"></div>
     <script type="module">
-      import Bau from "src/examples/bau.js";
+      import Bau from "vendor/bau.js";
 
       const bau = Bau();
-      console.log(typeof bau);
       const { button, span } = bau.tags;
 
       const counter = bau.state(0);
@@ -18,14 +17,12 @@
           counter,
           " ",
           button({ onclick: () => ++counter.val }, "👍"),
-          button({ onclick: () => --counter.val }, "👎"),
         );
       }
       try {
         const div = document.getElementById("app");
         div.replaceChildren(Counter());
 
-        console.log("[JS] Rendered successfully!");
         console.log("[JS] Initial innerHTML: ", div.innerHTML);
 
         // Test clicks

@@ -1,7 +1,6 @@
-import Bau from "bau.js";
+import Bau from "vendor/bau.js";
 
 const bau = Bau();
-console.log(typeof bau);
 
 const { a, button, div, tr, td, table, tbody, h1, span } = bau.tags;
 
@@ -87,7 +86,6 @@ const dataState = bau.state([]);
 let selectedRow = null;
 
 const run = () => {
-  console.log("running");
   dataState.val = buildData(1000);
   selectedRow = null;
 };
@@ -229,10 +227,10 @@ const app = document.getElementById("app");
 app.replaceChildren(Main({}));
 
 function measure(name, fn) {
-  const start = Date.now();
+  const start = performance.now();
   fn();
-  const end = Date.now();
-  console.log(`[${name}] ${end - start} ms`);
+  const end = performance.now();
+  console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
 }
 
 console.log("\n🚀 Starting Bau Benchmark...\n");
@@ -248,12 +246,18 @@ runLots(); // Setup 10k
 measure("Partial Update (10k)", () => update());
 
 // Select Row: the second row's label
-measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
+measure("Select Row", () => {
+  const el = document.querySelector("tbody tr:nth-child(2) td:nth-child(2) a");
+  if (el) el.dispatchEvent(new Event("click", { bubbles: true }));
+});
 // Swap Rows (Reset to 1k first)
 run(); // Reset to 1k
 measure("Swap Rows", () => swapRows());
 // Remove the 2nd row
-measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+measure("Remove Row", () => {
+  const el = document.querySelector("tbody tr:nth-child(2) td:nth-child(3) a");
+  if (el) el.dispatchEvent(new Event("click", { bubbles: true }));
+});
 measure("Create 10k", () => runLots());
 // Append 1,000 Rows (to the existing 10k)
 measure("Append 1k", () => add());

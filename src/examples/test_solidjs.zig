@@ -11,6 +11,7 @@ pub fn main() !void {
             .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
         };
     };
+
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };

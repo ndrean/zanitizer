@@ -1,0 +1,16 @@
+{
+  "name": "zexp-react",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "preact": "^10.28.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

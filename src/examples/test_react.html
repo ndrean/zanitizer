@@ -1,71 +1,52 @@
 <html>
-  <head> </head>
   <body>
-    <h1>Testing React API (via Preact/Compat)</h1>
-    <div id="root"></div>
+    <div id="root"><!-- REACT root div --></div>
+    <script src="zexp-react/dist/app.js"></script>
     <script type="module">
-      // ============================================================
-      // Using preact/compat which provides React API compatibility
-      //
-      // Real React (v17/v18) fails in QuickJS with:
-      //   "invalid 'instanceof' right operand"
-      // due to internal fiber type checks.
-      //
-      // Solution: Use preact/compat as drop-in replacement
-      //
-      // NOTES:
-      // - Use lowercase event handlers: onclick (not onClick)
-      // - Run with --release=fast to avoid stack overflow
-      //   zig build example -Dname=test_react --release=fast
-      // ============================================================
+      // Helper to wait for re-renders (Microtasks)
+      // const tick = () => new Promise((r) => setTimeout(r, 5));
 
-      import React from "react";
-      import ReactDOM from "react-dom";
-
-      console.log("[JS] React API (preact/compat) loaded");
-      console.log("[JS] React.createElement:", typeof React.createElement);
-      console.log("[JS] React.useState:", typeof React.useState);
-
-      const rootElement = document.getElementById("root");
-
-      // Using React API with hooks
-      const { useState } = React;
-
-      const Counter = () => {
-        const [count, setCount] = useState(0);
-        console.log("[JS] Counter render, count =", count);
-        return React.createElement(
-          "div",
-          { className: "counter" },
-          React.createElement("p", { id: "count-display" }, `Count: ${count}`),
-          React.createElement(
-            "button",
-            { id: "increment-btn", onclick: () => setCount((c) => c + 1) },
-            "+1"
-          )
-        );
-      };
-
-      try {
-        ReactDOM.render(React.createElement(Counter), rootElement);
-        console.log("[JS] ✅ Rendered!");
-        console.log("[JS] innerHTML:", rootElement.innerHTML);
-
-        // Test clicks
-        const btn = document.getElementById("increment-btn");
-        if (btn) {
-          console.log("[JS] Testing clicks...");
-          for (let i = 0; i < 3; i++) {
-            setTimeout(() => btn.dispatchEvent(new Event("click")), (i + 1) * 100);
-          }
-          setTimeout(() => {
-            console.log("[JS] Final count:", document.getElementById("count-display")?.textContent);
-          }, 500);
-        }
-      } catch (e) {
-        console.log("[JS] ❌ Error:", e.message);
-        if (e.stack) console.log("[JS] Stack:", e.stack.split("\n").slice(0, 5).join("\n"));
+      async function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
       }
+
+      async function runTest() {
+        console.log("[Test] Waiting for mount");
+        await sleep(10);
+        // temporary fix: wait for React to finish the async mount
+
+        const list = document.getElementById("list-container");
+        const btn = document.getElementById("btn-toggle");
+        const btnForce = document.getElementById("btn-force");
+
+        // Test 1: Initial State
+        console.log(`[Test] Items initially: ${list.children.length}`);
+
+        if (list.children.length !== 7)
+          console.error("❌ Initial render failed");
+
+        //Tset 2: Trigger useMemo (Click Filter)
+        console.log("[Test] Clicking 'Show Even Only'");
+        btn.dispatchEvent(new Event("click", { bubbles: true }));
+        await sleep(5);
+        console.log(`[Test] Items after filter: ${list.children.length}`); // Should be 5
+        if (list.children.length !== 3) console.error("❌ Filter failed");
+
+        // --- CHECK 3: Force Re-render (Should NOT trigger Memo) ---
+
+        // If Memo works, "Calculating filter..." should NOT print in console for this step
+
+        console.log("[Test] Clicking 'Force Re-render'...");
+        btnForce.dispatchEvent(new Event("click", { bubbles: true }));
+        await sleep(5);
+
+        console.log(
+          "[Test] ✅ Sequence Complete. Check console for Memo logs.",
+        );
+      }
+
+      // Start the test
+      runTest();
     </script>
   </body>
 </html>
