@@ -1,5 +1,10 @@
-function click(fn) {
-  fn();
+function click(selector) {
+  const el = document.querySelector(selector);
+  if (!el) {
+    console.log("❌ Not found: " + selector);
+    return;
+  }
+  el.dispatchEvent("click");
 }
 
 function measure(name, fn) {
@@ -9,27 +14,24 @@ function measure(name, fn) {
   console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
 }
 
-console.log("\n🚀 Starting Bau Benchmark...\n");
+console.log("\n🚀 Starting VanillaJS-20 Benchmark\n");
 
-measure("Create 1k", () => click(run));
-// We click run again, which triggers clear() + add() internally
+measure("Create 1k", () => click("#run"));
 measure("Replace 1k", () => click("#run"));
 
-// Partial Update (Warmup: Create 10k first)
-click("#runlots"); // Setup 10k
+click("#runlots");
 measure("Partial Update (10k)", () => click("#update"));
 
-// Select Row: the second row's label
 measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
-// Swap Rows (Reset to 1k first)
-click("#run"); // Reset to 1k
+
+click("#run");
 measure("Swap Rows", () => click("#swaprows"));
-// Remove the 2nd row
+
 measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+
 measure("Create 10k", () => click("#runlots"));
-// Append 1,000 Rows (to the existing 10k)
 measure("Append 1k", () => click("#add"));
 measure("Clear", () => click("#clear"));
-// sanity check
+
 const count = document.querySelectorAll("tr").length;
 console.log(`✅ Final Row Count: ${count} (Should be 0)`);

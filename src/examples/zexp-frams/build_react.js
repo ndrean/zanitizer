@@ -1,9 +1,9 @@
 console.log("Starting Bun Build REACT for Zexplorer...");
 
 const result = await Bun.build({
-  entrypoints: ["App.jsx"],
+  entrypoints: ["BenchReact.jsx"],
   outdir: "dist",
-  naming: "app.js",
+  naming: "bench-react.js",
   target: "browser",
   minify: true,
 });

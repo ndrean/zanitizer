@@ -1,4 +1,5 @@
 "use strict";
+
 const adjectives = [
   "pretty",
   "large",
@@ -54,95 +55,136 @@ const nouns = [
   "mouse",
   "keyboard",
 ];
-
-const tbody = document.querySelector("tbody"),
-  l1 = adjectives.length,
-  l2 = colours.length,
-  l3 = nouns.length;
+const [l1, l2, l3] = [adjectives.length, colours.length, nouns.length];
+const data = [],
+  nTemplates = (n) => Math.round(n / 100),
+  tbody = document.getElementsByTagName("tbody")[0];
 let index = 1,
-  op = null,
-  c1 = null,
-  c2 = null,
-  c998 = null,
-  data = [],
-  selected = null;
+  i,
+  lbl,
+  selected;
 
-const app = {
-  run(n = 1000) {
-    if (data.length > 0) app.clear();
-    app.add(n);
-  },
-  runlots() {
-    app.run(10000);
-  },
-  add(n = 1000) {
-    const templ = document.querySelector("template");
-    const item = templ.content.firstElementChild;
-    const id = item.firstElementChild.firstChild;
-    const lbl = item.querySelector("a").firstChild;
-    for (let i = 0; i < n; i++) {
-      id.nodeValue = index++;
-      data.push(
-        (lbl.nodeValue = `${adjectives[Math.round(Math.random() * 1000) % l1]} ${colours[Math.round(Math.random() * 1000) % l2]} ${nouns[Math.round(Math.random() * 1000) % l3]}`),
-      );
-      tbody.appendChild(item.cloneNode(true));
+function create(n = 1000) {
+  if (data.length < n) {
+    set(data.length);
+    append(n - data.length);
+  } else {
+    set(data.length);
+    if (data.length > n) {
+      data.length = n;
+      const rg = document.createRange();
+      rg.setStartBefore(tbody.children[n]);
+      rg.setEndAfter(tbody.lastElementChild);
+      rg.deleteContents();
     }
-  },
-  update() {
-    for (let i = 0, item; i < data.length; i += 10) {
-      if (op === "update" && item?.hasOwnProperty("next")) item = item.next;
-      else if (item) {
-        item.next = tbody.childNodes[i];
-        item = item.next;
-      } else item = tbody.childNodes[i];
-      if (!item.hasOwnProperty("el"))
-        item.el = item.querySelector("a").firstChild;
-      item.el.nodeValue = data[i] += " !!!";
-    }
-  },
-  clear() {
-    tbody.textContent = "";
-    data = [];
-  },
-  swaprows() {
-    if (data.length < 999) return;
-    const d1 = data[1];
-    data[1] = data[998];
-    data[998] = d1;
-    if (op === "swaprows") {
-      const temp = c1;
-      c1 = c998;
-      c998 = temp;
-    } else {
-      c1 = tbody.children[1];
-      c2 = c1.nextElementSibling;
-      c998 = tbody.children[998];
-    }
-    tbody.insertBefore(c1, c998);
-    tbody.insertBefore(c998, c2);
-  },
-};
-
-// tbody.addEventListener(new Event("click"), (e) => {
-tbody.addEventListener("click", (e) => {
-  e.stopPropagation();
-  e.preventDefault();
-  op = "null";
-  if (e.target.tagName === "A") {
-    const element = e.target.parentNode.parentNode;
-    if (selected) selected.className = "";
-    selected = element === selected ? null : element;
-    if (selected) selected.className = "danger";
-  } else if (e.target.tagName === "SPAN") {
-    const element = e.target.parentNode.parentNode.parentNode;
-    const index = Array.prototype.indexOf.call(tbody.children, element);
-    element.remove();
-    data.splice(index, 1);
   }
-});
-document.querySelector("#app-actions").addEventListener("click", (e) => {
-  e.stopPropagation();
-  e.preventDefault();
-  app[e.target.id]();
-  op = e.target.id;
-});
+}
+function set(n) {
+  const indices = tbody.querySelectorAll("td:first-child");
+  const labels = tbody.querySelectorAll("a.lbl");
+  let r1, r2, r3;
+  for (i = 0; i < n; i++) {
+    r1 = Math.round(Math.random() * 1000) % l1;
+    r2 = Math.round(Math.random() * 1000) % l2;
+    r3 = Math.round(Math.random() * 1000) % l3;
+    indices[i].firstChild.nodeValue = index++;
+    labels[i].firstChild.nodeValue = data[i] =
+      `${adjectives[r1]} ${colours[r2]} ${nouns[r3]}`;
+  }
+}
+function append(n = 1000) {
+  const nt = nTemplates(n);
+  let j = 0,
+    r1,
+    r2,
+    r3;
+  const itemTemplate = document
+    .getElementById("itemTemplate")
+    .content.cloneNode(true);
+  while (nt >= itemTemplate.children.length * 2)
+    itemTemplate.appendChild(itemTemplate.cloneNode(true));
+  while (nt > itemTemplate.children.length)
+    itemTemplate.appendChild(itemTemplate.firstElementChild.cloneNode(true));
+
+  const ids = Array.prototype.map.call(
+    itemTemplate.querySelectorAll("td:first-child"),
+    (i) => i.firstChild,
+  );
+  const labels = Array.prototype.map.call(
+    itemTemplate.querySelectorAll("a.lbl"),
+    (i) => i.firstChild,
+  );
+
+  while ((n -= nt) >= 0) {
+    for (i = 0; i < nt; i++, j++) {
+      r1 = Math.round(Math.random() * 1000) % l1;
+      r2 = Math.round(Math.random() * 1000) % l2;
+      r3 = Math.round(Math.random() * 1000) % l3;
+      ids[i].nodeValue = index++;
+      data.push(
+        (labels[i].nodeValue = `${adjectives[r1]} ${colours[r2]} ${nouns[r3]}`),
+      );
+    }
+    tbody.appendChild(itemTemplate.cloneNode(true));
+  }
+}
+function update() {
+  const labels = tbody.querySelectorAll("a.lbl"),
+    length = labels.length;
+  for (i = 0; i < length; i += 10)
+    labels[i].firstChild.nodeValue = data[i] = `${data[i]} !!!`;
+}
+function clear() {
+  data.length = 0;
+  tbody.textContent = "";
+}
+
+function swap() {
+  if (data.length < 999) return;
+  [data[1], data[998]] = [data[998], data[1]];
+  const [id1, lbl1] = tbody.children[1].querySelectorAll(
+    "td:first-child, a.lbl",
+  );
+  const [id998, lbl998] = tbody.children[998].querySelectorAll(
+    "td:first-child, a.lbl",
+  );
+  [id1.firstChild.nodeValue, id998.firstChild.nodeValue] = [
+    id998.firstChild.nodeValue,
+    id1.firstChild.nodeValue,
+  ];
+  [lbl1.firstChild.nodeValue, lbl998.firstChild.nodeValue] = [
+    lbl998.firstChild.nodeValue,
+    lbl1.firstChild.nodeValue,
+  ];
+}
+tbody.onclick = (e) => {
+  e.preventDefault;
+  e.stopPropagation;
+  if (e.target.matches("a.lbl")) {
+    const element = e.target.parentNode.parentNode;
+    if (element === selected)
+      selected.className = selected.className ? "" : "danger";
+    else {
+      if (selected) selected.className = "";
+      element.className = "danger";
+      selected = element;
+    }
+  } else if (e.target.matches("span.remove")) {
+    let temp;
+    const element = e.target.parentNode.parentNode.parentNode;
+    data.splice(Array.prototype.indexOf.call(tbody.children, element), 1);
+    element.remove();
+  }
+};
+for (let [key, fn] of Object.entries({
+  run: create,
+  runlots: () => create(10000),
+  add: append,
+  update,
+  clear,
+  swaprows: swap,
+}))
+  document.getElementById(key).addEventListener("click", (e) => {
+    e.stopPropagation();
+    fn();
+  });

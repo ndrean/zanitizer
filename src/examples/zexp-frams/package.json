@@ -3,7 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@babel/core": "^7.29.0",
+    "@types/bun": "latest",
+    "babel-preset-solid": "^1.9.10"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
@@ -11,6 +13,7 @@
   "dependencies": {
     "preact": "^10.28.3",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "solid-js": "^1.9.11"
   }
 }

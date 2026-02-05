@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vue Benchmark</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      // SVGElement/Element polyfills are now in js_polyfills.zig
+      // (import hoisting runs the module before inline polyfills execute)
+      import "js-bench-vue.js";
+      __flush();
+
+      function click(selector) {
+        const el = document.querySelector(selector);
+        if (!el) {
+          console.log("Not found: " + selector);
+          return;
+        }
+        el.dispatchEvent(new Event("click", { bubbles: true }));
+      }
+
+      function measure(name, fn) {
+        const start = performance.now();
+        fn();
+        const end = performance.now();
+        console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
+      }
+
+      console.log("\n=== Vue3 Benchmark ===\n");
+
+      // Warmup
+      click("#run");
+
+      if (document.querySelectorAll("tr").length === 0) {
+        console.log("Mount failed - no rows created.");
+      } else {
+        measure("Create 1k", () => click("#run"));
+        measure("Replace 1k", () => click("#run"));
+        click("#runlots"); // Setup 10k
+        measure("Partial Update (10k)", () => click("#update"));
+
+        measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
+        click("#run"); // Reset to 1k
+        measure("Swap Rows", () => click("#swaprows"));
+        measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+        measure("Create 10k", () => click("#runlots"));
+        measure("Append 1k", () => click("#add"));
+        measure("Clear", () => click("#clear"));
+
+        const count = document.querySelectorAll("tr").length;
+        console.log(`\nFinal Row Count: ${count} (expected 0)`);
+      }
+    </script>
+  </body>
+</html>
