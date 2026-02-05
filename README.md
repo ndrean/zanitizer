@@ -377,7 +377,7 @@ The folder _src/examples_  contains all the test cases.
 
 You run can bundled JSX code in zexplorer. It is a two-step process.
 
-For example, the code below is React code:
+<details><summary>This code below is React code:</summary>
 
 ```jsx
 // App.jsx
@@ -453,6 +453,8 @@ if (rootNode) {
 }
 ```
 
+</details>
+
 We will bundle it into a single JS file using `bun`.
 
 ```js
@@ -484,6 +486,8 @@ bun build_react.js
 This produces a file in _dist/app.js_.
 
 Now, you may test your React code. Here we test how `useMemo` works by producing clicks on the button via ``dispatchEvent`.
+
+<details><summary>JS code to test the React snippet</summary>
 
 ```html
 <html>
@@ -526,9 +530,13 @@ Now, you may test your React code. Here we test how `useMemo` works by producing
 </html>
 ```
 
-The logs in the terminal confirms that `useMemo` works as expected.
+</details>
+
+You run this JS test code with the engine. The logs in the terminal confirms that `useMemo` works as expected.
 
 `zig build example -Dname=test_react -Doptimize=ReleaseFast`
+
+<details><summary>Logs</summary>
 
 ```txt
 [Zig] SECURE  LOADER 
@@ -586,6 +594,8 @@ The logs in the terminal confirms that `useMemo` works as expected.
 
 [Zig] RT destroyed --------
 ```
+
+</details>
 
 ### Preact with `html` template strings
 
