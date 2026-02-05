@@ -8,7 +8,7 @@ This engine parses HTML into a real DOM and executes JavaScript against it — w
 It includes a built-in DOM+CSS sanitizer and can run native Zig computations alongside JS. a
 It outputs a cleaned structured HTML or extracted data, without a browser.
 
-Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution and embeds enough Web API surface to run client framework code.
+Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, it embeds enough Web API surface to run client framework code.
 
 By providing a DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold bootand sandboxed filesystem, at the cost of a much thiner coverage of the Web API.
 
@@ -39,19 +39,19 @@ This is not:
 - Downloads limited to HTTPS and declared in _import_map.json_,
 - sandboxed File system limited to current directory and beyond, and no loading if symlink for LFI.
 - Load sanitized and sandboxed HTML, CSS and scripts
-  - The `Zanitizer` module is 5 to 50 times faster than DOMPurify integrated in the `Sanitizerconfig`.
+  - The `Zanitizer` module is fast and integrated in the `Sanitizerconfig`.
   - It is based on a declarative security policy (_html_specs.zig_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
   - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
 
-It is performant:
+The main characteristic of the engine is:
 
-- cold boot: 1ms,
-- 24kB of the DOMPurify HTML test is processed in 1ms and H5SC tests compliant
-- runs the js-framework  vanilla JavaScript benchmark tests much faster than `jsdom`.
+- fast cold boot: 1ms,
+- fast sanitization: 24kB of the DOMPurify HTML test is processed in 1ms and H5SC tests compliant
+- runs real client-framework code; tested against a few frameworks made on the js-framework-benchmark (React, Vue, SolidJS, vanilla, bau).
+
+## What for?
 
 This program can be used for:
-
-## Use cases
 
 - serverless DOM rendering on-demand with instant start (DOM invoices to PDF in milliseconds)
 - Email sanitization if you need zero XSS and maximum speed
@@ -63,12 +63,11 @@ This program can be used for:
 
 ## Tests
 
-The goal is to review the [DOM examples repo](https://github.com/mdn/dom-examples).
+The goal is to review enough parts of the [DOM examples repo](https://github.com/mdn/dom-examples) and surface enough ot the Web API to be usefull.
 
 ### zexplorer running js-framework-benchmark code
 
 To ensure the Web primitives are correctly implemented in `zexplorer`, we run code from the [js-vanilla-bench-framework tests](https://github.com/krausest/js-framework-benchmark).
-
 
 The examples can be built and run with the commands:
 
@@ -199,8 +198,6 @@ for (const nb of values) {
 ```
 
 </details>
-
-
 
 <details><summary>Zexplorer script:</summary>
 
@@ -970,7 +967,9 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 
 </details>
 
-### Upload a file
+### Other examples
+
+<details><summary>uppload a file: POST a Blob</summary>
 
 Create a filetext blob and append it to a formData object and upload to the test endpoint `httpbin` (it returns the data it received).
 
@@ -1030,7 +1029,11 @@ The output in the terminal is:
 }
 ```
 
-### CSS and JS executed (using file sources)
+</details>
+
+---
+
+<details><summary>CSS in JS using source files</summary>
 
 File: _/js/js-and-css/style.css_
 
@@ -1135,6 +1138,10 @@ In the terminal:
 </html>
 ```
 
+</details>
+
+---
+
 ## Zig to JS intercomm and native function injection in JS
 
 TODO
@@ -1143,8 +1150,7 @@ You can send p from Zig to JS and receive typed data from JS to Zig.
 
 You can use native Zig functions in JS
 
-
-## DOM API integration
+## State of the DOM API integration
   
 - **Event Loop**. Native Zig thread-safe loop handling Timers (microtasks) and  Promises (macrotasks).
 - **Worker pool**: OS-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
@@ -1167,9 +1173,9 @@ You can use native Zig functions in JS
 
 No AsyncIO, no WebSocket, no planned WASM support.
   
-## Examples
+## A few JS examples
 
-**Import CSS**
+<details><summary>Import CSS</summary>
 
 ```zig
 fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
@@ -1238,7 +1244,11 @@ fn additional_stylesheet_style_tag(allocator: std.mem.Allocator) !void {
 }
 ```
 
-**Use Reactive DOM primitives in async JavaScript code executed by `Zig`**
+</details>
+
+---
+
+<details><summary>Use Reactive DOM primitives in async JavaScript code executed by Zig</summary>
 
 ```js
 const btn = document.createElement("button");
@@ -1256,9 +1266,7 @@ for (let i = 1; i < 3; i++) {
 document.body.appendChild(mylist);
 console.log("[JS] Initial document", document.body.innerHTML);
 
-// --------------------------------------------------------------------
 // DOM Event Listener with Delayed action with Timer
-// --------------------------------------------------------------------
 
 form.addEventListener("submit", (e) => {
   e.preventDefault(); // Prevent actual form submission
@@ -1271,9 +1279,7 @@ setTimeout(() => {
   console.log("[JS] Final HTML: ", document.body.innerHTML);
 }, 1000);
 
-// --------------------------------------------------------------------
 // Simple reactive object
-// --------------------------------------------------------------------
 
 function createReactiveObject(target, callback) {
   return new Proxy(target, {
@@ -1382,7 +1388,9 @@ And the Zig code to run this snippet:
     try z.prettyPrint(allocator, body_node.?);
 ```
 
-**Import JavaScript libraries**: `es-toolkit`
+</details>
+
+<details><summary>Import JavaScript libraries: es-toolkit</summary>
 
 Download the `es-toolikt` library:
 
@@ -1463,7 +1471,9 @@ fn importModule(allocator: std.mem.Allocator) !void {
 }
 ```
 
-**Worker**
+</details>
+
+<details><summary>Worker</summary>
 
 ```mermaid
 sequenceDiagram
@@ -1483,104 +1493,54 @@ sequenceDiagram
     Note right of WorkerZig: Looks up property "onmessage"
 ```
 
-### DOM API integration
+</details>
 
-This project exposes a significant / essential subset of all available `lexbor` functions:
+## Dual DOM primitives
 
-- DOM parser engine (document or fragment context-aware)
-- CSS cascade stylesheet(s) and inline CSS (CSS-in-JS)
-- streaming and chunk processing
-- Serialization
-- Sanitization
-- CSS selectors search with cached CSS selectors parsing
-- Support of `<template>` elements.
-- Attribute search
-- DOM manipulation
-- DOM / HTML-string normalization with options (remove comments, whitespace, empty nodes)
-- Pretty printing
+The DOM primitives are accessible in the Zig code. Since these primitives are ported into the JavaScrcipt runtime, you can access them in the runtime.
 
-### `lexbor` DOM memory management: Document Ownership and zero-copy functions
-
-In `lexbor`, nodes belong to documents, and the document acts as the memory manager.
-
-When a node is attached to a document (either directly or through a fragment that gets appended), the document owns it.
-
-Every time you create a document, you need to call `destroyDocument()`: it automatically destroys ALL nodes that belong to it.
-
-When a node is NOT attached to any document, you must manually destroy it.
-
-Some functions borrow memory from `lexbor` for zero-copy operations: their result is consumed immediately.
-
-We opted for the following convention: add `_zc` (for _zero_copy_) to the **non allocated** version of a function. For example, you can get the qualifiedName of an HTMLElement with the allocated version `qualifiedName(allocator, node)` or by mapping to `lexbor` memory with `qualifiedName_zc(node)`. The non-allocated must be consumed immediately whilst the allocated result can outlive the calling function.
-
-### **The Event Loop**
-
-```mermaid
-graph TD
-    %% Nodes
-    Start((Loop Start)) --> SignalCheck{Ctrl+C?}
-    SignalCheck -- Yes --> Exit
-    SignalCheck -- No --> Microtasks1
-
-    subgraph "Phase 1: Microtasks (High Priority)"
-    Microtasks1[Flush Pending Jobs]
-    note1[Executes all .then callbacks]
-    end
-
-    Microtasks1 --> ExitCheck{Can Exit?}
-    ExitCheck -- Empty Queue & No Timers --> Exit
-    ExitCheck -- Active --> Timers
-
-    subgraph "Phase 2: Timers (Macrotask)"
-    Timers[Check Timers]
-    note2[Did a timer fire?]
-    end
-
-    Timers -- Yes! Fired one --> Start
-    Timers -- No, all waiting --> Workers
-
-    subgraph "Phase 3: Native Workers (Macrotask)"
-    Workers[Check Worker Queue]
-    note3[Did a thread finish?]
-    end
-
-    Workers -- Yes! Task Resolved --> Start
-    Workers -- No, queue empty --> Sleep
-
-    subgraph "Phase 4: Idle"
-    Sleep[Sleep for Min Timer, 10ms]
-    end
-
-    Sleep --> Start
-
-    %% Styling
-    style Microtasks1 fill:#f96,stroke:#333,stroke-width:2px
-    style Start fill:#bbf,stroke:#333
-    style Exit fill:#f66,stroke:#333
-```
-
----
-
-## Install
-
-[![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
-
-```sh
-zig fetch --save https://github.com/ndrean/zexplorer/archive/main.tar.gz
-```
-
-In your _build.zig_:
+For example, you create a document in the Zig code, insert a DIV and a P:
 
 ```zig
-const zexplorer = b.dependency("zexplorer", .{
-    .target = target,
-    .optimize = optimize,
-});
-
-exe.root_module.addImport("zexplorer", zexplorer.module("zexplorer"));
+const doc = try z.parseHTML("<div>Hi</div>");
+defer z.destroyDocument(doc);
+const p = try z.createElement(doc, "p");
+const div = try z.querySelector(allocator, "div");
+z.appendChild(div.?, p);
+try prettyPrint(allocator, div);
 ```
 
-## Example: Create document and parse
+This will output in the terminal:
+
+```txt
+<div>
+  "Hi"
+  <p></p>
+</div>
+```
+
+The Zig code runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`. 
+
+So in the JavaScript code that the engine will run, you can:
+
+```js
+document.createElement("div");
+document.createElement("p");
+const div = document.querySelector("div");
+div.textContent = "Hi"
+div.appendChild(p);
+conosle.log(div.outerHTML);
+```
+
+The Zig engine will run this JS code and you will see in the terminal:
+
+```txt
+<div>Hi <p></p></div>
+```
+
+### Examples using Zig
+
+<details><summary>Example: Create document and parse</summary>
 
 You have a few methods available.
 
@@ -1613,11 +1573,11 @@ Your document now contains this HTML:
 </body>
 ```
 
-[TODO] Ref in examples
+</details>
 
 ---
 
-## Example: scrap the web and explore a page
+<details><summary>Example: scrap the web and explore a page</summary>
 
 ```zig
 test "scrap example.com" {
@@ -1657,24 +1617,16 @@ test "scrap example.com" {
 }
 ```
 
----
-
 You will get a colourful print in your terminal, where the attributes, values, html elements get coloured.
 
-<details><summary> HTML content of example.com</summary>
-
+<details><summary> HTML content of example.com</summary
 <img width="965" height="739" alt="Screenshot 2025-09-09 at 13 54 12" src="https://github.com/user-attachments/assets/ff770cdb-95ab-468b-aa5e-5bbc30cf6649" />
-
-</details>
 
 You will also see the value of the `href` attribute of a the first `<a>` link:
 
 ```txt
  https://www.iana.org/domains/example
  ```
-
-<details>
-<summary>You will then see the text content of the STYLE element (no CSS parsing):</summary>
 
 ```css
 body {
@@ -1708,15 +1660,13 @@ a:link, a:visited {
 
 ---
 
-## HTMX Server-Side Rendering with Template Interpolation
+<details><summary>HTMX Server-Side Rendering with Template Interpolation</summary>
 
 This example demonstrates high-performance server-side rendering with `HTMX` integration and template interpolation, achieving 280K+ operations per second.
 
 The rendering is _stateless_. The state is server-side driven, maintained in a database.
 
 There is no need for a templating langugage: using multiline strings and loops or conditionals is largely enough to build HTML strings, and faster.
-
-<details><summary>Fake HTML page</summary>
 
 ```zig
 const blog_html =
@@ -1783,10 +1733,6 @@ post?" hx-target="closest .blog-post">
 ;
 ```
 
-</details>
-
----
-
 The code below parses the whole HTML delivered when the client connects, and starts the parser and css engine.
 
 When the webserver receives an HTMX request, the server returns a serialized updated HTML string.
@@ -1802,7 +1748,7 @@ pub fn main() !void {
     const doc = try z.parseHTML(gpa, blog_html);
     defer z.destroyDocument(doc);
 
-    var css_engine = try z.createCssEngine(allocator);
+    var css_engine = try z.CssSelectorEngine.init(allocator);
     defer css_engine.deinit();
 
     var parser = try z.Parser.init(allocator);
@@ -1906,9 +1852,11 @@ count);
 }
 ```
 
+</details>
+
 ---
 
-## Example: scan a page for potential malicious content
+<details><summary>Example: scan a page for potential malicious content</summary>
 
 The intent is to highlight potential XSS threats. It works by parsing the string into a fragment. When a HTMLElement gets an unknown attribute, its colour is white and the attribute value is highlighted in RED.
 
@@ -1939,11 +1887,7 @@ try z.prettyPrint(allocator, body);
 
 You get the following output in your terminal.
 
----
-
 <img width="931" height="499" alt="Screenshot 2025-09-09 at 16 08 19" src="https://github.com/user-attachments/assets/45cfea8b-73d9-401e-8c23-457e0a6f92e1" />
-
----
 
 We can then run a _sanitization_ process against the DOM, so you get a context where the attributes are whitelisted.
 
@@ -1956,9 +1900,11 @@ The result is shown below.
 
 <img width="900" height="500" alt="Screenshot 2025-09-09 at 16 11 30" src="https://github.com/user-attachments/assets/ff7fa678-328b-495a-8a81-2ff465141be3" />
 
+</details>
+
 ---
 
-## Example: using the parser with sanitization option
+<details><summary>Example: using the parser with sanitization option</summary>
 
 You can create a sanitized document with the parser (a ready-to-use parsing engine).
 
@@ -1970,9 +1916,11 @@ const doc = try parser.parseFromString(html, .none);
 defer z.destroyDocument(doc);
 ```
 
+</details>
+
 ---
 
-## Example: Processing streams
+<details><summary>Example: Processing streams</summary>
 
 You receive chunks and build a document.
 
@@ -2048,9 +1996,11 @@ chunk:  </tbody></table></body></html>;
   <img src="https://github.com/ndrean/z-html/blob/main/images/tree-table.png" width="300" alt="image"/>
 </p>
 
+</details>
+
 ---
 
-## Example: Search examples and attributes and classList DOMTOkenList like
+<details><summary>Example: Search examples and attributes and classList DOMTOkenList like</summary>
 
 We have two types of search available, each with different behaviors and use cases:
 
@@ -2077,12 +2027,12 @@ const html =
 A CSS Selector search and some walker search and attributes:
 
 ```zig
-const doc = try z.createDocFromString(html);
+const doc = try z.parseHTML(allocator,html);
 defer z.destroyDocument(doc);
 const body = z.bodyNode(doc).?;
 
-var css_engine = try z.createCssEngine(allocator);
-defer css_engine.deinit();
+var css_engine = try CssSelectorEngine.init(allocator);
+defer engine.deinit();
 
 const divs = try css_engine.querySelectorAll(body, "div");
 std.debug.assert(divs.len == 3);
@@ -2115,11 +2065,101 @@ _ = try footer_token_list.toggle("new-footer");
 std.debug.assert(!footer_token_list.contains("new-footer"));
 ```
 
-## Other examples in _main.zig_
-
-The file _main.zig_ shows more use cases with parsing and serialization as well as the tests  (`setInnerHTML`, `setInnerSafeHTML`, `insertAdjacentElement` or `insertAdjacentHTML`...)
+</details>
 
 ---
+
+### Other examples
+
+Move main() to src/examples
+
+---
+
+## Notes
+
+### Notes on `lexbor` DOM memory management: Document Ownership and zero-copy functions
+
+In `lexbor`, nodes belong to documents, and the document acts as the memory manager.
+
+When a node is attached to a document (either directly or through a fragment that gets appended), the document owns it.
+
+Every time you create a document, you need to call `destroyDocument()`: it automatically destroys ALL nodes that belong to it.
+
+When a node is NOT attached to any document, you must manually destroy it.
+
+Some functions borrow memory from `lexbor` for zero-copy operations: their result is consumed immediately.
+
+We opted for the following convention: add `_zc` (for _zero_copy_) to the **non allocated** version of a function. For example, you can get the qualifiedName of an HTMLElement with the allocated version `qualifiedName(allocator, node)` or by mapping to `lexbor` memory with `qualifiedName_zc(node)`. The non-allocated must be consumed immediately whilst the allocated result can outlive the calling function.
+
+### **The Event Loop**
+
+```mermaid
+graph TD
+    %% Nodes
+    Start((Loop Start)) --> SignalCheck{Ctrl+C?}
+    SignalCheck -- Yes --> Exit
+    SignalCheck -- No --> Microtasks1
+
+    subgraph "Phase 1: Microtasks (High Priority)"
+    Microtasks1[Flush Pending Jobs]
+    note1[Executes all .then callbacks]
+    end
+
+    Microtasks1 --> ExitCheck{Can Exit?}
+    ExitCheck -- Empty Queue & No Timers --> Exit
+    ExitCheck -- Active --> Timers
+
+    subgraph "Phase 2: Timers (Macrotask)"
+    Timers[Check Timers]
+    note2[Did a timer fire?]
+    end
+
+    Timers -- Yes! Fired one --> Start
+    Timers -- No, all waiting --> Workers
+
+    subgraph "Phase 3: Native Workers (Macrotask)"
+    Workers[Check Worker Queue]
+    note3[Did a thread finish?]
+    end
+
+    Workers -- Yes! Task Resolved --> Start
+    Workers -- No, queue empty --> Sleep
+
+    subgraph "Phase 4: Idle"
+    Sleep[Sleep for Min Timer, 10ms]
+    end
+
+    Sleep --> Start
+
+    %% Styling
+    style Microtasks1 fill:#f96,stroke:#333,stroke-width:2px
+    style Start fill:#bbf,stroke:#333
+    style Exit fill:#f66,stroke:#333
+```
+
+---
+
+
+## Install
+
+[![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
+
+TO BE REVIEWED
+
+```sh
+zig fetch --save https://github.com/ndrean/zexplorer/archive/main.tar.gz
+```
+
+In your _build.zig_:
+
+```zig
+const zexplorer = b.dependency("zexplorer", .{
+    .target = target,
+    .optimize = optimize,
+});
+
+exe.root_module.addImport("zexplorer", zexplorer.module("zexplorer"));
+```
 
 ## Building the lib
 
