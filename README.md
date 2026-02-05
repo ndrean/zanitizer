@@ -1619,7 +1619,8 @@ test "scrap example.com" {
 
 You will get a colourful print in your terminal, where the attributes, values, html elements get coloured.
 
-<details><summary> HTML content of example.com</summary
+HTML content of example.com
+
 <img width="965" height="739" alt="Screenshot 2025-09-09 at 13 54 12" src="https://github.com/user-attachments/assets/ff770cdb-95ab-468b-aa5e-5bbc30cf6649" />
 
 You will also see the value of the `href` attribute of a the first `<a>` link:
@@ -1908,7 +1909,7 @@ The result is shown below.
 
 You can create a sanitized document with the parser (a ready-to-use parsing engine).
 
-```c
+```zig
 var parser = try z.DOMParser.init(testing.allocator);
 defer parser.deinit();
 
@@ -2069,7 +2070,7 @@ std.debug.assert(!footer_token_list.contains("new-footer"));
 
 ---
 
-### Other examples
+### Provide other examples
 
 Move main() to src/examples
 
