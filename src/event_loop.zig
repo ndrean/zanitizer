@@ -52,7 +52,7 @@ pub const EventLoop = struct {
     thread_pool: std.Thread.Pool,
     mutex: std.Thread.Mutex = .{},
     task_queue: std.ArrayList(AsyncTask),
-    task_cond: std.Thread.Condition = .{},
+    wakeup_fds: [2]std.posix.fd_t,
     timers: std.ArrayList(Timer),
     next_timer_id: i32 = 1,
     should_exit: bool = false,
@@ -70,11 +70,20 @@ pub const EventLoop = struct {
 
     pub fn create(allocator: std.mem.Allocator, rt: *zqjs.Runtime) !*EventLoop {
         const self = try allocator.create(EventLoop);
+
+        // Non-blocking pipe for waking the event loop from worker threads
+        const wakeup_fds = try std.posix.pipe2(.{ .NONBLOCK = true, .CLOEXEC = true });
+        errdefer {
+            std.posix.close(wakeup_fds[0]);
+            std.posix.close(wakeup_fds[1]);
+        }
+
         self.* = .{
             .allocator = allocator,
             .rt = rt,
             .timers = .{},
             .task_queue = .{},
+            .wakeup_fds = wakeup_fds,
             .thread_pool = undefined,
             .task_arena = std.heap.ArenaAllocator.init(allocator),
         };
@@ -132,6 +141,11 @@ pub const EventLoop = struct {
         if (self.curl_multi) |cm| cm.deinit();
         self.task_arena.deinit();
         self.rt.freeValue(self.on_error_handler);
+
+        // Close wakeup pipe (thread_pool already joined above)
+        std.posix.close(self.wakeup_fds[0]);
+        std.posix.close(self.wakeup_fds[1]);
+
         self.allocator.destroy(self);
     }
 
@@ -230,7 +244,22 @@ pub const EventLoop = struct {
             }
             return;
         };
-        self.task_cond.signal();
+        self.wake();
+    }
+
+    /// Signal the event loop to wake up from poll().
+    /// Safe to call from any thread. Non-blocking.
+    fn wake(self: *EventLoop) void {
+        _ = std.posix.write(self.wakeup_fds[1], &.{1}) catch {};
+    }
+
+    /// Drain all pending bytes from the wakeup pipe.
+    fn drainWakeupPipe(self: *EventLoop) void {
+        var buf: [64]u8 = undefined;
+        while (true) {
+            const n = std.posix.read(self.wakeup_fds[0], &buf) catch return;
+            if (n == 0) return; // EOF — write end closed (shutdown)
+        }
     }
 
     pub fn processAsyncTasks(self: *EventLoop) bool {
@@ -381,15 +410,21 @@ pub const EventLoop = struct {
                 curl_did_work = result.completed > 0;
             }
 
-            // 5. Sleep (Avoid CPU Spin)
+            // 5. Wait for events (self-pipe wakeup replaces CPU-spinning sleep)
             if (!did_async_work and !curl_did_work and next_timeout > 0) {
-                // If we have pending jobs now (rare, but possible if pollWorkers queued one),
-                // don't sleep!
                 if (self.rt.isJobPending()) continue;
 
-                const wait_cap: usize = if (mode == .Server) 50 else 10;
-                const sleep_ns = @min(next_timeout, wait_cap) * 1_000_000;
-                std.Thread.sleep(@intCast(sleep_ns));
+                const wait_cap: i64 = if (mode == .Server) 50 else 10;
+                const timeout_ms: i32 = @intCast(@min(next_timeout, wait_cap));
+
+                var poll_fds = [1]std.posix.pollfd{
+                    .{ .fd = self.wakeup_fds[0], .events = std.posix.POLL.IN, .revents = 0 },
+                };
+                _ = std.posix.poll(&poll_fds, timeout_ms) catch 0;
+
+                if (poll_fds[0].revents & std.posix.POLL.IN != 0) {
+                    self.drainWakeupPipe();
+                }
             }
         }
     }

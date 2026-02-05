@@ -1,34 +1,37 @@
-# zexplorer: a JavaScript programmable HTML processor on steroids
+# zexplorer: a native serverless DOM & JS execution engine with a sanitization pipeline
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 [WIP]
 
-An opinionated  `Zig` based HTML processor that lets you write JavaScript and executes DOM operations at native speed on a server.
+This engine parses HTML into a real DOM and executes JavaScript against it — with an event loop, timers, fetch, and workers — without a browser.
+It includes a built-in DOM+CSS sanitizer and can run native Zig computations alongside JS. a
+It outputs a cleaned structured HTML or extracted data, without a browser.
 
-It can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold boot.
+Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution and embeds enough Web API surface to run client framework code.
 
-Based on [lexbor](https://lexbor.com/) and [quickJS-ng](https://quickjs-ng.github.io/quickjs/).
+By providing a DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold bootand sandboxed filesystem, at the cost of a much thiner coverage of the Web API.
 
 ## Project description
 
 What it has:
 
+- real DOM + CSS parsing into a native DOM tree
+- DOM + CSS mutations allowed with JavaScript or native execution
 - runs most DOM primitives and executes ES6 JavaScript
+- built-in deterministic sanitization (DOM & CSS aware cleaning)
 - sandboxed file system (upload directory only),
-- `fetch` API (via Curl Multi HTTP requests),
-- `Workers`(OS threads for parallel processing),
-- DOM/CSS native sanitizer (based on H5SC testing suite),
-- can inject native Zig primitives (statistics, CSV parsing...),
-- integrated Web API classes: `Worker`, `URL`, `ULRSearchParams`, `Headers`, `Event`, `DocumentFragment`, `DOMParser`, `Blob`, `FormData`, `File`, `FileReaderSync`, `FileReader`, `Fetch`.
+- event loop,
+- Web primitives integrated: Timers, fetch, workers (OS threads), document-fragment, templates, URL, ULRSearchParams, Headers, Event, DOMParser, Blob, FormData, File, FileReaderSync, FileReader integrated.
 
-What it does not have (yet): async I/O
+What it does not have: async I/O
 
 This is not:
 
 - a headless browser,
 - not `Node.js` nor `bun`,
-- not for streaming/async I/O workloads.
+- not for streaming/async I/O workloads
+- does not process JSX code.
 
 **Security**:
 
@@ -62,48 +65,52 @@ This program can be used for:
 
 The goal is to review the [DOM examples repo](https://github.com/mdn/dom-examples).
 
-### zexplorer running js-framework-benchmark VanillaJS code
+### zexplorer running js-framework-benchmark code
 
-To ensure the Web primitives are correctly implemented in `zexplorer`, we run VanillaJS code from the [js-vanilla-benchframework tests](https://github.com/krausest/js-framework-benchmark).
+To ensure the Web primitives are correctly implemented in `zexplorer`, we run code from the [js-vanilla-bench-framework tests](https://github.com/krausest/js-framework-benchmark).
 
-The engine runs all tests below 80ms.
 
 The examples can be built and run with the commands:
 
 ```sh
-zig build example -Dname=js-bench-1 -Doptimize=ReleaseFast
-zig build example -Dname=js-bench-2 -Doptimize=ReleaseFast
-zig build example -Dname=js-bench-3 -Doptimize=ReleaseFast
-zig build example -Dname=js-bench-bau -Doptimize=ReleaseFast
+cd src/examples
+zig build example -Dname=js-bench-* -Doptimize=ReleaseFast
 ```
 
 Source:
-<https://githhub.com/krausest/js-framework-benchmark>
 
+- [Vanilla-1-keyed](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/vanillajs-1/src/Main.js)
+- [Vanilla-2-non-keyd](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/vanillajs-3/src/Main.js)
+- [Vanilla-3-k](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/vanillajs-3/src/Main.js)
+- [bau](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/bau/main.js)
+- [Comp(*) Solid](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid/src/main.jsx)
+- [Temp(**) Solid](https://github.com/ndrean/zexplorer/src/examples/js-bench-solid.js)
+- [React18](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx)
+- [Vue3](https://github.com/ndrean/zexplorer/src/examples/js-bench-vue3.js)
 
-| test                 | t1    | t2    | t3    | bau   |
-| -------------------- | ----- | ----- | ----- | ----- |
-| Create 1k            | 2.68  | 1.90  | 1.75  | 2.02  |
-| Replace 1k           | 2.56  | 2.34  | 1.81  | 1.88  |
-| Partial Update (10k) | 2.92  | 1.64  | 6.73  | 5.55  |
-| Select Row           | 0.05  | 0.01  | 0.02  | 0.02  |
-| Swap Rows            | 0.06  | 0.10  | 0.14  | 0.01  |
-| Remove Row           | 0.01  | 0.05  | 0.05  | 0.01  |
-| Create 10k           | 27.66 | 20.84 | 16.54 | 22.92 |
-| Append 1k            | 2.76  | 7.41  | 4.02  | 1.94  |
-| Clear                | 4.11  | 7.72  | 5.94  | 0.01  |
-| --                   | --    | --    | --    | --    |
-| Total Engine         | 76    | 70    | 75    | 68    |
+Ref: browser Vanilla
 
-[TODO]: a CLI ? to run:
+| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] | [bau] | [Comp(*) Solid] | [Temp(**) Solid] | [React18] | Vue3(***) |
+| ---------------- | ---- | --------- | ------------ | --------- | ----- | --------------- | ---------------- | --------- | --------- |
+| Create 1k        | 22.0 | 2.68      | 1.90         | 1.75      | 2.02  | 18.4            | 16.7             | 53.5      | 57.1      |
+| Replace 1k       | 24.4 | 2.56      | 2.34         | 1.81      | 1.88  | 18.3            | 17.6             | 55.1      | 56.9      |
+| Partial Up (10k) | 9.5  | 2.92      | 1.64         | 6.73      | 5.55  | 7.6             | 138.4            | 232.4     | 241.5     |
+| Select Row       | 2.2  | 0.05      | 0.01         | 0.02      | 0.02  | 3.5             | 127.9            | 197.4     | 196.4     |
+| Swap Rows        | 11.7 | 0.06      | 0.10         | 0.14      | 0.01  | 1.1             | 10.3             | 21.5      | 22.9      |
+| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      | 0.01  | 0.5             | 10.8             | 19.7      | 20.1      |
+| Create 10k       | 229  | 27.66     | 20.84        | 16.54     | 22.92 | 141.3           | 142.0            | 469.4     | 474.1     |
+| Append 1k        | 25.6 | 2.76      | 7.41         | 4.02      | 1.94  | 17.7            | 173.7            | 246.6     | 249.4     |
+| Clear            | 9.0  | 4.11      | 7.72         | 5.94      | 0.01  | 56.4            | 23.7             | 36.7      | 37.5      |
+| --               | --   | --        | --           | --        | --    |
+| Total Engine     | --   | 76        | 70           | 75        | 68    | 524             | 1087             | 2096      | 2167      |
 
-```sh
-zxp loc/index.html loc/bench.js loc/test-runner.js
-```
+() compiled JSX->JS with `bun`
+(**) templated with `html` and using `map` instead of `For`
+(***) templated
 
 ### zexplorer vs jsdom
 
-While JSDOM emulates more of the many web standards, zeplorer can run Vaniila code, Preact/React code (no JSX, via templating) or Vue (again via templating) or SolidJS (via templating). Check the examples below.
+While JSDOM emulates more of the many web standards, zexplorer can run Vanilla code, Preact/React code (no JSX, via templating or compiled) or Vue (again via templating) or SolidJS (via templating or compiled). Check the examples below.
 
 We present a comparison in performance between `JSDOM` and `zexplorer` on a Vanilla example where build a simple DOM and run querySelectors and populate elements.
 
@@ -314,26 +321,40 @@ The DOM operations are externalized from the JavaScript runtime and these result
 
 ### Tests Zaniter module
 
-Th module is faster than DOMPurify but probably not as complete. It is based on DOM parsing into a documentFragment, applying whitelisting and html_specs rules before injecting back into the DOM.
+The goal is to be as performant as [DOMPurify](https://github.com/cure53/DOMPurify) in terms of sanitization. It's a DOM-level sanitizer, not a string filter. It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure. It can allow framework attributes.
+
+This is a two phase process. We firstly parse the input into a real DocumentFragment. It walks the tree DOM and attributes, URIs and CSS (parsed & sanitized). It applies whitelist and [html_specs rules](https://github.com/ndrean/zexplorer/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
+
+There are settings for the sanitizer (remove commemnts, remove/keep <script>, <style>, custom elements, allow framework attributes, embedded media with attributes in context...). Preset built-in modes are proposed but can be customized per run 
+
+**TODO**: CL-args to run sanitization only with args
+
+#### Quality test
+
+It is tested against collected tests from:
 
 - DOMPurify test suite: <https://github.com/cure53/DOMPurify/tree/main/test>
 - OWASP XSS Filter Evasion Cheat Sheet: <https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html>
 - PortSwigger XSS cheat sheet: <https://portswigger.net/web-security/cross-site-scripting/cheat-sheet>
 - DOMPurify CVEs: Especially CVE-2024-47875 (mXSS via nesting) <https://github.com/cure53/DOMPurify>
 
-#### H5SC Quality test
+Tests:
 
-139 real-world XSS attack vectors from [html5sec.org](https://html5sec.org/)
+- 139 real-world XSS attack vectors from [html5sec.org](https://html5sec.org/) with output in <https://github.com/ndrean/zexplorer/src/examples/h5sc-test_output.html>
+- sanitization of the "dirty" HTML:  <https://cure53.de/purify> in <https://github.com/ndrean/src/examples/dom_purify.zig>
+- tests in [Zanitizer module](https://github.com/ndrean/zexplorer/src/modules/sanitizer.zig) and [Zanitizer-css module](https://github.com/ndrean/zexplorer/src/modules/sanitizer_css.zig)
 
-Results:
+```sh
+zig build test
+zig build example -Dname=h5sc-test -Doptimize=ReleaseFast
+zig build example -Dname=dom_purify -Doptimize=ReleaseFast
+```
 
-#### Speed test
+#### Speed test against JSDOM
 
 ```sh
 zig build example -Dname=dom_purify -Doptimize=ReleaseFast
 ```
-
-The test is to process _src/examples/dom_purify.html_:
 
 ```txt
 === DOMPurify Benchmark -------
@@ -354,7 +375,6 @@ The folder _src/examples_  contains all the test cases.
 
 > [!IMPORTANT] 
  > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
-
 
 ### Run React bundled code
 
@@ -464,7 +484,7 @@ bun add react react-dom
 bun build_react.js
 ```
 
-This produces a file in _dist/app.js_. 
+This produces a file in _dist/app.js_.
 
 Now, you may test your React code. Here we test how `useMemo` works by producing clicks on the button via ``dispatchEvent`.
 
@@ -474,14 +494,10 @@ Now, you may test your React code. Here we test how `useMemo` works by producing
     <div id="root"><!-- REACT root div --></div>
     <script type="module" src="zexp-react/dist/app.js"></script>
     <script type="module">
-      // Helper to wait for re-renders (Microtasks)
-      async function sleep(ms) {
-        return new Promise((resolve) => setTimeout(resolve, ms));
-      }
-
+   
       async function runTest() {
         console.log("[Test] Waiting for mount...");
-        await sleep(10);
+        __flush(); // Drain React's async scheduler
         // temporary fix: wait for React to finish the async mount
 
         const list = document.getElementById("list-container");
@@ -497,7 +513,7 @@ Now, you may test your React code. Here we test how `useMemo` works by producing
         //Tset Trigger useMemo (Click Filter)
         console.log("[Test] Clicking 'Show Even Only'");
         btn.dispatchEvent(new Event("click", { bubbles: true }));
-        await sleep(5);
+        __flush();
         console.log(`[Test] Items after filter: ${list.children.length}`); // Should be 3
         if (list.children.length !== 3) console.error("❌ Filter failed");
 
@@ -887,6 +903,7 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
         const root = document.getElementById("root");
 
         app.mount("#root");
+        __flush(); // Drain  async scheduler
         console.log("[JS] First render:", root.innerHTML);
 
         // simulate periodic clicks
@@ -896,6 +913,7 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
           const btn = document.getElementById("increment-btn");
           if (btn) {
             btn.dispatchEvent(new Event("click", { bubbles: true }));
+            __flush(); // Drain async scheduler
           }
           if (iterations >= 3) {
             clearInterval(interval);
@@ -931,7 +949,9 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
 [JS] Button clicked!
 [JS] Button clicked!
 [JS] Auto-increment stopped after 3 iterations
-[JS] Final: Count: 2
+[JS] Final: Count: 3
+
+[Zig] Render BODY
 <div id="root">
   <div class="counter-app">
     <h2>
@@ -945,6 +965,7 @@ fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
     </button>
   </div>
 </div>
+[Zig] RT destroyed --------
 ```
 
 </details>

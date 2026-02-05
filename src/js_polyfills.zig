@@ -28,6 +28,29 @@ pub fn js_btoa(
     return ctx.newString(output);
 }
 
+// __flush(): Drain all pending microtasks (Promises)
+// Useful for waiting on React 19's async scheduler to complete
+pub fn js_flush(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    _: c_int,
+    _: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const rt = qjs.JS_GetRuntime(ctx_ptr);
+    var ctx_out: ?*qjs.JSContext = ctx_ptr;
+
+    // Drain all pending jobs (microtasks/promises)
+    var iterations: u32 = 0;
+    const max_iterations: u32 = 10000; // Safety limit
+
+    while (iterations < max_iterations) : (iterations += 1) {
+        const ret = qjs.JS_ExecutePendingJob(rt, &ctx_out);
+        if (ret <= 0) break; // No more jobs or error
+    }
+
+    return w.UNDEFINED;
+}
+
 // atob: ASCII to Binary (Base64 Decode)
 pub fn js_atob(
     ctx_ptr: ?*qjs.JSContext,
@@ -95,11 +118,19 @@ pub fn install(ctx: w.Context) !void {
     const we_result = qjs.JS_Eval(ctx.ptr, window_events_polyfill, window_events_polyfill.len, "<polyfill:window_events>", qjs.JS_EVAL_TYPE_GLOBAL);
     ctx.freeValue(we_result);
 
-    // HTML element constructors React 19 checks via `instanceof window.HTMLIFrameElement`
+    // HTML/SVG element constructors that frameworks check at startup
+    // React 19: `instanceof window.HTMLIFrameElement`
+    // Vue 3: `instanceof SVGElement` during mount
     const html_types_polyfill =
         \\(function() {
         \\    if (typeof globalThis.HTMLIFrameElement === 'undefined') {
         \\        globalThis.HTMLIFrameElement = class HTMLIFrameElement {};
+        \\    }
+        \\    if (typeof globalThis.SVGElement === 'undefined') {
+        \\        globalThis.SVGElement = class SVGElement {};
+        \\    }
+        \\    if (typeof globalThis.Element === 'undefined') {
+        \\        globalThis.Element = class Element {};
         \\    }
         \\})();
     ;
@@ -140,6 +171,10 @@ pub fn install(ctx: w.Context) !void {
 
     const atob = ctx.newCFunction(js_atob, "atob", 1);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "atob", atob);
+
+    // __flush: drain pending microtasks (useful for React 19 async scheduler)
+    const flush = ctx.newCFunction(js_flush, "__flush", 0);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "__flush", flush);
 
     // requestAnimationFrame / cancelAnimationFrame polyfill
     // Uses setTimeout(cb, 0) for immediate execution in headless environment

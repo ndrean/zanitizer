@@ -835,6 +835,13 @@ pub fn dispatchEvent(
         }
     }
 
+    // Browser spec: drain microtask queue after dispatching an event.
+    // This lets frameworks like Vue/React flush their schedulers (nextTick)
+    // without requiring an explicit __flush() call after every dispatchEvent.
+    const rt = z.qjs.JS_GetRuntime(ctx.ptr);
+    var ctx_out: ?*z.qjs.JSContext = ctx.ptr;
+    while (z.qjs.JS_ExecutePendingJob(rt, &ctx_out) > 0) {}
+
     return !ev_struct.default_prevented;
 }
 

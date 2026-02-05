@@ -51,7 +51,6 @@ const html = `
 `;
 ```
 
-
 ## Quick start Configuration
 
 Check _build.zig_
@@ -402,7 +401,6 @@ fn js_createReadableStream(...) callconv(.c) qjs.JSValue {
 > Stream parser is implemented in lexbor.
 
 - Event Loop / setTimeout / setInterval: use the extension `quickjs-libc`?
-
 
 ```c
 // quickjs-libc.c provides:

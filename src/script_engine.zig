@@ -59,9 +59,9 @@ pub const ScriptEngine = struct {
         // Runtime & Context
         self.rt = try zqjs.Runtime.init(allocator);
         errdefer self.rt.deinit();
-        self.rt.setMemoryLimit(64 * 1024 * 1024); // 64 MB
-        self.rt.setGCThreshold(4 * 1024 * 1024); // 4MB before GC
-        self.rt.setMaxStackSize(512 * 1024);
+        self.rt.setMemoryLimit(256 * 1024 * 1024); // 256 MB
+        self.rt.setGCThreshold(32 * 1024 * 1024); // 32MB before GC (avoid mid-render collection)
+        self.rt.setMaxStackSize(4 * 1024 * 1024); // 4 MB stack for deep vnode trees
 
         self.rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
         self.rt.setCanBlock(false);
@@ -496,7 +496,7 @@ pub const ScriptEngine = struct {
 
                 code = text; // borrowed from Lexbor
                 // virtual filename for stack
-                const name = try std.fmt.allocPrint(self.allocator, "inline-script-{d}.js", .{i});
+                const name = try std.fmt.allocPrint(self.allocator, "{s}/inline-script-{d}.js", .{ base_dir, i });
                 filename_owned = name;
                 filename = name;
             }
