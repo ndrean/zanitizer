@@ -23,7 +23,7 @@ pub fn main() !void {
     // try testAsyncJavaScriptAPI(gpa, sandbox_root);
     // try testAsyncBlob(gpa, sandbox_root);
     // try canvasToDataURL(gpa, sandbox_root);
-    try canvasToBlob(gpa, sandbox_root);
+    // try canvasToBlob(gpa, sandbox_root);
     try createImageToBlob(gpa, sandbox_root);
 }
 
@@ -240,10 +240,25 @@ fn createImageToBlob(allocator: std.mem.Allocator, sbc: []const u8) !void {
         // \\ const resp = await fetch("https://dummyjson.com/image/150");
         \\  const blob = await resp.blob();
         \\  const img = await createImageBitmap(blob);
-        \\  const canvas = new Canvas(img.width, img.height);
+        \\  const canvas = document.createElement('canvas');
+        \\  canvas.width = img.width*2;
+        \\  canvas.height = img.height*2;
+        // \\  possible: const canvas = new Canvas(img.width*2, img.height*2);
         \\  const ctx = canvas.getContext('2d');
+        // \\  ctx.scale(2,2);
         \\  ctx.drawImage(img, 0, 0);
-        \\  // confirm the image is what we expect
+        \\  ctx.fillStyle = "blue";
+        \\  console.log("[JS] font-size: ", ctx.font);
+        \\  ctx.font = "20px";
+        \\  const txt = "Hello from Zig!"
+        \\  const metrics = ctx.measureText(txt);
+        \\  console.log("[JS] metrics: ", metrics);
+        \\  const x = (canvas.width - metrics.width) / 2;
+        \\  const y = (canvas.height ) / 2;
+        \\  ctx.fillText(txt, x,y);
+        \\  ctx.translate(0,100);
+        \\  ctx.fillText("Moved!", 25, 25);
+        // \\  confirm the image is what we expect
         \\  const result = await canvas.toBlob();
         \\  return await result.arrayBuffer();
         \\}
@@ -252,7 +267,7 @@ fn createImageToBlob(allocator: std.mem.Allocator, sbc: []const u8) !void {
     const png_bytes = try engine.evalAsyncAs(allocator, []const u8, js, "<image>");
     defer allocator.free(png_bytes);
     z.print("{s}\n", .{png_bytes[0..15]});
-    z.print("\n🎆 Example ASYNC Feetching a PNG and save ----\n\n", .{});
+    z.print("\n🎆 Example ASYNC Fetching a PNG, edit in Canvas and save ----\n\n", .{});
     try js_canvas.verifyPngStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "canvas_fetch_image_test.png", .data = png_bytes });
     std.debug.print("\nSaved 'fetch_image_blob_test.png' ({d} bytes)\n", .{png_bytes.len});

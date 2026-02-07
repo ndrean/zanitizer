@@ -5,6 +5,8 @@ const qjs = z.qjs;
 const EventLoop = @import("event_loop.zig").EventLoop;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const js_security = @import("js_security.zig");
+const Font = @import("font.zig").Font;
+const default_font_data = @embedFile("fonts/Arial.ttf");
 
 pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
@@ -17,6 +19,7 @@ pub const RuntimeContext = struct {
     worker_core: ?*anyopaque = null,
     payload: ?*anyopaque = null, // generic pointer to pass in/out of callbacks
     blob_registry: std.StringHashMap(z.qjs.JSValue), // "blob:uuid" (owned string) -> Blob Object (JSValue)
+    global_font: ?*Font = null,
 
     // Central Registry of Class IDs for this Runtime
     // Zig struct -> Opaque pointer -> QuickJS Class ID
@@ -75,7 +78,14 @@ pub const RuntimeContext = struct {
             .sandbox = sandbox,
             .sandbox_root = sandbox_root,
             .blob_registry = std.StringHashMap(z.qjs.JSValue).init(allocator),
+            .global_font = null,
         };
+
+        if (Font.init(allocator, default_font_data)) |font| {
+            self.global_font = font;
+        } else |_| {
+            std.debug.print("⚠️ Failed to load embedded default font.\n", .{});
+        }
 
         // Install into QuickJS immediately
         ctx.setContextOpaque(self);
@@ -93,6 +103,7 @@ pub const RuntimeContext = struct {
             // !!! It brings the refcount to 0 so GC can collect it.
             ctx.freeValue(entry.value_ptr.*);
         }
+
         // empty the map
         self.blob_registry.clearAndFree();
     }
@@ -106,9 +117,12 @@ pub const RuntimeContext = struct {
             // Note: We don't JS_FreeValue the values here because
             // the Runtime is usually destroyed before the RuntimeContext.
         }
+        if (self.global_font) |f| {
+            f.deinit();
+        }
         self.blob_registry.deinit();
         self.allocator.destroy(self);
-        z.print("RT destroyed --------\n", .{});
+        z.print("\n⌛️ RT destroyed --------\n\n", .{});
     }
 
     /// Retrieve this struct from the JS Context
