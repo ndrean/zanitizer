@@ -35,6 +35,7 @@ pub fn unwrapCanvas(ctx: zqjs.Context, val: zqjs.Value) ?*Canvas {
 
 pub const CanvasState = struct {
     fill_color: css_color.Color,
+    stroke_color: css_color.Color,
     font: ?*Font,
     font_size: f32,
     tx: f32,
@@ -50,6 +51,7 @@ pub const Canvas = struct {
     height: u32,
     pixels: []u8, // RGBA buffer
     fill_color: css_color.Color,
+    stroke_color: css_color.Color,
     font: ?*Font, // Reference to current font (nullable)
     font_size: f32, // e.g. 24.0
     // Transform State
@@ -78,6 +80,7 @@ pub const Canvas = struct {
         @memset(self.pixels, 0);
 
         self.fill_color = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
+        self.stroke_color = .{ .r = 0, .g = 0, .b = 0, .a = 255 };
 
         // identity transform
         self.tx = 0;
@@ -102,6 +105,7 @@ pub const Canvas = struct {
             .fill_color = self.fill_color,
             .font = self.font,
             .font_size = self.font_size,
+            .stroke_color = self.stroke_color,
             .tx = self.tx,
             .ty = self.ty,
             .sx = self.sx,
@@ -114,6 +118,7 @@ pub const Canvas = struct {
         // Pop the last state and overwrite current settings
         if (self.state_stack.pop()) |state| {
             self.fill_color = state.fill_color;
+            self.stroke_color = state.stroke_color;
             self.font = state.font;
             self.font_size = state.font_size;
             self.tx = state.tx;
@@ -310,7 +315,7 @@ pub const Canvas = struct {
         var curr_x = x0;
         var curr_y = y0;
 
-        const color = self.fill_color; // Using fillStyle as strokeStyle for MVP
+        const color = self.stroke_color;
         const cv_w = @as(i32, @intCast(self.width));
         const cv_h = @as(i32, @intCast(self.height));
 
@@ -336,6 +341,29 @@ pub const Canvas = struct {
                 curr_y += sy;
             }
         }
+    }
+
+    pub fn setStrokeStyle(self: *Canvas, style: []const u8) void {
+        self.stroke_color = css_color.parse(style);
+    }
+
+    // ctx.arc(x, y, radius, start_angle, end_angle)
+    pub fn arc(self: *Canvas, x: f32, y: f32, r: f32, start_angle: f32, end_angle: f32) void {
+        // Resolution: The larger the radius, the more steps we need for it to look round.
+        // A step of ~0.1 radians (6 degrees) is usually fine for small circles.
+        const step = 0.1;
+
+        var angle = start_angle;
+        while (angle < end_angle) : (angle += step) {
+            const px = x + std.math.cos(angle) * r;
+            const py = y + std.math.sin(angle) * r;
+            self.lineTo(px, py);
+        }
+
+        // Connect to the final point to close the gap accurately
+        const end_x = x + std.math.cos(end_angle) * r;
+        const end_y = y + std.math.sin(end_angle) * r;
+        self.lineTo(end_x, end_y);
     }
 
     /// Encodes the pixel buffer to PNG format (Raw Bytes)
@@ -635,6 +663,23 @@ fn js_canvas_set_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
     return zqjs.UNDEFINED;
 }
 
+fn js_canvas_get_strokeStyle(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    return ctx.newString("#000000"); // MVP return
+}
+
+fn js_canvas_set_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+
+    if (argc < 1) return zqjs.EXCEPTION;
+    const style_str = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
+    defer ctx.freeZString(style_str);
+
+    canvas.setStrokeStyle(style_str);
+    return zqjs.UNDEFINED;
+}
+
 // === Methods
 fn js_canvas_getContext(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -713,6 +758,27 @@ fn js_canvas_fillRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 
     canvas.fillRect(x, y, w_val, h_val);
 
+    return zqjs.UNDEFINED;
+}
+
+// ctx.arc(x, y, radius, startAngle, endAngle)
+fn js_canvas_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+
+    var x: f64 = 0;
+    var y: f64 = 0;
+    var r: f64 = 0;
+    var start: f64 = 0;
+    var end: f64 = 0;
+
+    if (argc > 0) _ = qjs.JS_ToFloat64(ctx.ptr, &x, argv[0]);
+    if (argc > 1) _ = qjs.JS_ToFloat64(ctx.ptr, &y, argv[1]);
+    if (argc > 2) _ = qjs.JS_ToFloat64(ctx.ptr, &r, argv[2]);
+    if (argc > 3) _ = qjs.JS_ToFloat64(ctx.ptr, &start, argv[3]);
+    if (argc > 4) _ = qjs.JS_ToFloat64(ctx.ptr, &end, argv[4]);
+
+    canvas.arc(@floatCast(x), @floatCast(y), @floatCast(r), @floatCast(start), @floatCast(end));
     return zqjs.UNDEFINED;
 }
 
@@ -1028,6 +1094,7 @@ pub fn install(ctx: zqjs.Context) !void {
     js_utils.defineMethod(ctx, proto, "measureText", js_canvas_measureText, 1);
     js_utils.defineMethod(ctx, proto, "save", js_canvas_save, 0);
     js_utils.defineMethod(ctx, proto, "restore", js_canvas_restore, 0);
+    js_utils.defineMethod(ctx, proto, "arc", js_canvas_arc, 5);
 
     // Add accessors
     js_utils.defineAccessor(ctx, proto, "width", js_canvas_get_width, js_canvas_set_width);
@@ -1038,6 +1105,7 @@ pub fn install(ctx: zqjs.Context) !void {
     js_utils.defineMethod(ctx, proto, "moveTo", js_canvas_moveTo, 2);
     js_utils.defineMethod(ctx, proto, "lineTo", js_canvas_lineTo, 2);
     js_utils.defineMethod(ctx, proto, "stroke", js_canvas_stroke, 0);
+    js_utils.defineAccessor(ctx, proto, "strokeStyle", js_canvas_get_strokeStyle, js_canvas_set_strokeStyle);
 
     // Create Constructor
     const ctor_val = qjs.JS_NewCFunction2(ctx.ptr, js_canvas_constructor, "Canvas", 2, qjs.JS_CFUNC_constructor, 0);

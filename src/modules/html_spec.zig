@@ -1356,6 +1356,31 @@ pub const element_specs = [_]ElementSpec{
     // Template elements
     .{ .tag_enum = .template, .allowed_attrs = &common_attrs },
 
+    // Script elements (only used when remove_scripts = false)
+    .{
+        .tag_enum = .script,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "src", .validator = validateUri },
+            .{ .name = "type" }, // For module scripts, application/json, etc.
+            .{ .name = "async", .valid_values = &[_][]const u8{""} },
+            .{ .name = "defer", .valid_values = &[_][]const u8{""} },
+            .{ .name = "nomodule", .valid_values = &[_][]const u8{""} },
+            .{ .name = "crossorigin", .valid_values = &[_][]const u8{ "", "anonymous", "use-credentials" } },
+            .{ .name = "referrerpolicy" },
+            .{ .name = "nonce" }, // For CSP
+        } ++ common_attrs),
+    },
+
+    // Style elements (only used when remove_styles = false)
+    .{
+        .tag_enum = .style,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "type" },
+            .{ .name = "media" },
+            .{ .name = "nonce" }, // For CSP
+        } ++ common_attrs),
+    },
+
     // SVG elements
     .{ .tag_enum = .svg, .allowed_attrs = &svg_attrs },
     .{ .tag_enum = .circle, .allowed_attrs = &svg_attrs },

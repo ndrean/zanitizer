@@ -8,9 +8,10 @@ pub fn main() !void {
     z.print("  REAL-WORLD SANITIZER + CSS ENGINE TEST\n", .{});
     z.print("=" ** 70 ++ "\n\n", .{});
 
-    // Run both approaches
+    // Run all three approaches
     try verboseApproach(allocator);
     try simplifiedApproach(allocator);
+    try scriptEngineApproach(allocator);
 
     z.print("\n" ++ "=" ** 70 ++ "\n", .{});
     z.print("  ALL TESTS COMPLETE\n", .{});
@@ -121,4 +122,100 @@ fn simplifiedApproach(allocator: std.mem.Allocator) !void {
     z.print("    const doc = try zan.parseHTML(html);\n", .{});
     z.print("    defer z.destroyDocument(doc);\n", .{});
     z.print("    try zan.loadStylesheet(doc, external_css);  // Optional\n\n", .{});
+}
+
+/// The NEWEST approach - ScriptEngine.loadPage() for full page with JS
+fn scriptEngineApproach(allocator: std.mem.Allocator) !void {
+    z.print("╔══════════════════════════════════════════════════════════════════╗\n", .{});
+    z.print("║  APPROACH 3: SCRIPT ENGINE (HIGHEST LEVEL - WITH JS EXECUTION)  ║\n", .{});
+    z.print("╚══════════════════════════════════════════════════════════════════╝\n\n", .{});
+
+    const html = @embedFile("test_real.html");
+
+    // Get sandbox root (current directory)
+    const sandbox_root = try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer allocator.free(sandbox_root);
+
+    z.print("━━━ Step 1: Create ScriptEngine ━━━\n", .{});
+    var engine = try z.ScriptEngine.init(allocator, sandbox_root);
+    defer engine.deinit();
+    z.print("  var engine = try z.ScriptEngine.init(allocator, sandbox_root);\n", .{});
+    z.print("  defer engine.deinit();\n", .{});
+
+    z.print("\n━━━ Step 2: loadPage (sanitize + CSS + scripts) ━━━\n", .{});
+    try engine.loadPage(html, .{
+        .sanitize = true, // Enable sanitization for untrusted content
+        .base_dir = "src/examples", // Resolve relative paths from examples dir
+        .execute_scripts = true, // Execute <script> tags
+        .load_stylesheets = true, // Load <link rel="stylesheet">
+        .sanitizer_options = .{ .remove_scripts = false }, // Keep scripts for JS execution
+        .run_loop = true, // Run event loop to process module Promises
+    });
+
+    try z.prettyPrint(allocator, z.bodyNode(engine.dom.doc).?);
+
+    z.print("  try engine.loadPage(html, .{{\n", .{});
+    z.print("      .sanitize = true,\n", .{});
+    z.print("      .base_dir = \".\",\n", .{});
+    z.print("      .execute_scripts = true,\n", .{});
+    z.print("      .load_stylesheets = true,\n", .{});
+    z.print("      .sanitizer_options = .{{ .remove_scripts = false }},\n", .{});
+    z.print("  }});\n", .{});
+
+    // Verify it worked
+    z.print("\n━━━ Verify Document ━━━\n", .{});
+    const doc = engine.dom.doc;
+
+    // Check if script tags exist
+    const scripts = try z.querySelectorAll(allocator, doc, "script");
+    defer allocator.free(scripts);
+    z.print("  Script tags found: {d}\n", .{scripts.len});
+    for (scripts) |script| {
+        const src = z.getAttribute_zc(script, "src");
+        const script_type = z.getAttribute_zc(script, "type");
+        z.print("    - src={s}, type={s}\n", .{ src orelse "(inline)", script_type orelse "(none)" });
+    }
+
+    // Check CSS from external stylesheet (.header is defined in test_real.css)
+    if (try z.querySelector(allocator, doc, ".header")) |el| {
+        const color = try z.getComputedStyle(allocator, el, "color");
+        defer if (color) |c| allocator.free(c);
+        z.print("  .header color = {s} ✓\n", .{color orelse "(none)"});
+    }
+
+    // Check CSS from <style> element (.safe { color: green; font-size: 16px; })
+    // This verifies styles apply to JS-injected content
+    if (try z.querySelector(allocator, doc, ".safe")) |el| {
+        // BEFORE attaching styles
+        const color_before = try z.getComputedStyle(allocator, el, "color");
+        defer if (color_before) |c| allocator.free(c);
+        z.print("  .safe BEFORE attachElementStyles: color = {s}\n", .{color_before orelse "(none)"});
+
+        // Attach stylesheet rules to this element (needed for dynamically inserted nodes)
+        try z.attachElementStyles(el);
+
+        // AFTER attaching styles
+        const color = try z.getComputedStyle(allocator, el, "color");
+        defer if (color) |c| allocator.free(c);
+        const font_size = try z.getComputedStyle(allocator, el, "font-size");
+        defer if (font_size) |f| allocator.free(f);
+        z.print("  .safe AFTER attachElementStyles: color = {s}, font-size = {s}\n", .{ color orelse "(none)", font_size orelse "(none)" });
+    } else {
+        z.print("  .safe element NOT found (JS injection failed?)\n", .{});
+    }
+
+    // Check inline styles on injected content
+    if (try z.querySelector(allocator, doc, "#span1")) |el| {
+        const color = try z.getComputedStyle(allocator, el, "color");
+        defer if (color) |c| allocator.free(c);
+        const padding = try z.getComputedStyle(allocator, el, "padding");
+        defer if (padding) |p| allocator.free(p);
+        z.print("  #span1 (inline) color = {s}, padding = {s}\n", .{ color orelse "(none)", padding orelse "(none)" });
+    }
+
+    z.print("\n  Total: 2 calls + 2 defers = SIMPLEST!\n", .{});
+    z.print("\n  This is the recommended API for:\n", .{});
+    z.print("    - Loading untrusted HTML with sanitization\n", .{});
+    z.print("    - Executing JavaScript after page load\n", .{});
+    z.print("    - Full page orchestration in one call\n\n", .{});
 }

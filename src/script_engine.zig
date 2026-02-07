@@ -3,6 +3,7 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const js_security = @import("js_security.zig");
+const sanitizer_mod = @import("modules/sanitizer.zig");
 
 const EventLoop = @import("event_loop.zig").EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
@@ -16,7 +17,38 @@ const FSBridge = @import("js_fs.zig").FSBridge;
 const js_console = @import("js_console.zig");
 const js_marshall = @import("js_marshall.zig");
 
+const Sanitizer = sanitizer_mod.Sanitizer;
+const SanitizeOptions = sanitizer_mod.SanitizeOptions;
+
 const TIMEOUT_MS: i64 = 5000;
+
+/// Options for `loadPage()` - the high-level page loading orchestrator.
+///
+/// Usage:
+/// ```zig
+/// try engine.loadPage(html, .{ .sanitize = true, .base_dir = "js/app" });
+/// ```
+pub const LoadPageOptions = struct {
+    /// Enable sanitization for untrusted HTML content.
+    /// When true, uses Sanitizer to clean HTML before processing.
+    sanitize: bool = false,
+
+    /// Base directory for resolving relative paths in <script src> and <link href>.
+    /// Paths are resolved relative to the sandbox root.
+    base_dir: []const u8 = ".",
+
+    /// Sanitizer options (only used when `sanitize = true`).
+    sanitizer_options: SanitizeOptions = .{},
+
+    /// Execute <script> tags after loading HTML and CSS.
+    execute_scripts: bool = true,
+
+    /// Load <link rel="stylesheet"> external stylesheets.
+    load_stylesheets: bool = true,
+
+    /// Run event loop after loading (process timers, promises, etc.).
+    run_loop: bool = false,
+};
 
 /// avoid infinte loops like `white (true) {}` by setting a deadline
 export fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
@@ -419,6 +451,20 @@ pub const ScriptEngine = struct {
     }
 
     /// Loads HTML content into the Engine, replacing the current global document.
+    ///
+    /// This is a low-level primitive for trusted content. It does NOT sanitize.
+    /// For untrusted content, use `loadPage()` with `.sanitize = true`.
+    ///
+    /// Example:
+    /// ```zig
+    /// // Low-level: trusted content, manual control
+    /// try engine.loadHTML(trusted_html);
+    /// try engine.loadExternalStylesheets(".");
+    /// try engine.executeScripts(allocator, ".");
+    ///
+    /// // High-level: automatic orchestration
+    /// try engine.loadPage(html, .{ .sanitize = true, .base_dir = "." });
+    /// ```
     pub fn loadHTML(self: *ScriptEngine, html: []const u8) !void {
         const bridge = self.dom;
 
@@ -434,7 +480,15 @@ pub const ScriptEngine = struct {
         // try z.attachStylesheet(bridge.doc, bridge.stylesheet);
     }
 
-    /// Loads an external CSS string (like a .css file)
+    /// Loads an external CSS string (like a .css file).
+    ///
+    /// This is a low-level primitive that does NOT sanitize CSS.
+    /// For untrusted CSS, use the Sanitizer directly:
+    /// ```zig
+    /// var san = try Sanitizer.init(allocator, .{});
+    /// defer san.deinit();
+    /// try san.loadStylesheet(doc, untrusted_css);
+    /// ```
     pub fn loadCSS(self: *ScriptEngine, css: []const u8) !void {
         const bridge = self.dom;
 
@@ -444,6 +498,125 @@ pub const ScriptEngine = struct {
         // Calling this again is usually safe/no-op if already attached,
         // or updates the document if Lexbor tracks versioning.
         try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+    }
+
+    // =========================================================================
+    // High-level Page Loading API
+    // =========================================================================
+
+    /// Load a complete HTML page with optional sanitization.
+    ///
+    /// This is the primary entry point for loading untrusted HTML content.
+    /// Orchestrates: parse → sanitize (optional) → load CSS → execute scripts.
+    ///
+    /// Usage:
+    /// ```zig
+    /// // Trusted content (your own templates)
+    /// try engine.loadPage(html, .{ .base_dir = "js/app" });
+    ///
+    /// // Untrusted content (user input, external sources)
+    /// try engine.loadPage(user_html, .{
+    ///     .sanitize = true,
+    ///     .base_dir = "uploads",
+    ///     .sanitizer_options = .{ .remove_scripts = true },
+    /// });
+    /// ```
+    pub fn loadPage(self: *ScriptEngine, html: []const u8, options: LoadPageOptions) !void {
+        const bridge = self.dom;
+
+        if (options.sanitize) {
+            // Create sanitizer for this operation
+            var san = try Sanitizer.init(self.allocator, options.sanitizer_options);
+            defer san.deinit();
+
+            // 1. Load HTML into engine's document
+            try z.initDocumentCSS(bridge.doc, true);
+            try z.insertHTML(bridge.doc, html);
+
+            // 2. Sanitize the document in-place (mutates the DOM)
+            try san.sanitize(bridge.doc);
+
+            // 3. Load <style> tags (content already sanitized)
+            try z.loadStyleTags(self.allocator, bridge.doc, bridge.css_style_parser);
+
+            // 4. Load external stylesheets with CSS sanitization
+            if (options.load_stylesheets) {
+                try self.loadExternalStylesheetsSanitized(options.base_dir, &san);
+            }
+        } else {
+            // Trusted content: use existing loadHTML path
+            try self.loadHTML(html);
+
+            // Load external stylesheets without sanitization
+            if (options.load_stylesheets) {
+                try self.loadExternalStylesheets(options.base_dir);
+            }
+        }
+
+        // Execute scripts if requested
+        if (options.execute_scripts) {
+            try self.executeScripts(self.allocator, options.base_dir);
+        }
+
+        // Run event loop if requested
+        if (options.run_loop) {
+            try self.run();
+        }
+    }
+
+    /// Load external stylesheets with sanitization.
+    /// Called by loadPage() when sanitize=true.
+    fn loadExternalStylesheetsSanitized(self: *ScriptEngine, base_dir: []const u8, san: *Sanitizer) !void {
+        const links = try z.querySelectorAll(self.allocator, self.dom.doc, "link");
+        defer self.allocator.free(links);
+
+        for (links) |link_el| {
+            var path_owned: ?[]u8 = null;
+            var css_owned: ?[]u8 = null;
+
+            defer {
+                if (path_owned) |ptr| {
+                    if (ptr.len > 0) self.allocator.free(ptr);
+                }
+                if (css_owned) |ptr| {
+                    if (ptr.len > 0) self.allocator.free(ptr);
+                }
+            }
+
+            const rel = z.getAttribute_zc(link_el, "rel") orelse continue;
+            if (!std.mem.eql(u8, rel, "stylesheet")) continue;
+
+            const href = z.getAttribute_zc(link_el, "href") orelse continue;
+
+            var raw_css: []const u8 = undefined;
+
+            if (isRemote(href)) {
+                z.print("[Engine] Fetching remote CSS: {s}\n", .{href});
+                const remote_css = self.get(href) catch |err| {
+                    z.print("Failed to fetch CSS '{s}': {}\n", .{ href, err });
+                    continue;
+                };
+                css_owned = remote_css;
+                raw_css = remote_css;
+            } else {
+                // Resolve & Secure Check
+                const rel_path = self.resolvePathInSandbox(base_dir, href) catch |err| {
+                    z.print("Security: Blocked CSS path '{s}' (Error: {any})\n", .{ href, err });
+                    continue;
+                };
+                path_owned = rel_path;
+
+                const css_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                    z.print("Failed to load CSS '{s}': {any}\n", .{ rel_path, err });
+                    continue;
+                };
+                css_owned = css_content;
+                raw_css = css_content;
+            }
+
+            // Sanitize and load via Sanitizer
+            try san.loadStylesheet(self.dom.doc, raw_css);
+        }
     }
 
     pub fn loadFileModule(self: *ScriptEngine, path: []const u8) !void {
@@ -582,7 +755,11 @@ pub const ScriptEngine = struct {
         // self.processJobs(); // force jobs after all scripts have been executed
     }
 
-    /// Scans the DOM for <link rel="stylesheet"> and loads them securely
+    /// Scans the DOM for <link rel="stylesheet"> and loads them.
+    ///
+    /// This is a low-level primitive that does NOT sanitize CSS.
+    /// For untrusted content, use `loadPage()` with `.sanitize = true`,
+    /// which calls `loadExternalStylesheetsSanitized()` internally.
     pub fn loadExternalStylesheets(self: *ScriptEngine, base_dir: []const u8) !void {
         const links = try z.querySelectorAll(self.allocator, self.dom.doc, "link");
         defer self.allocator.free(links);

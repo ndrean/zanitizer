@@ -27,6 +27,7 @@ pub fn main() !void {
     // try createImageToBlob(gpa, sandbox_root);
     // try scenegraph(gpa, sandbox_root);
     try salesGraph(gpa, sandbox_root);
+    try chart(gpa, sandbox_root);
 }
 
 fn testJavaScriptAPI(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
@@ -349,4 +350,54 @@ fn salesGraph(allocator: std.mem.Allocator, sbc: []const u8) !void {
     z.print("\n🎆 Example Graphic in Canvas ----\n\n", .{});
     // try js_canvas.verifyPngStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "canvas_salesgraph_test.png", .data = png_bytes });
+}
+
+fn chart(allocator: std.mem.Allocator, sbc: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbc);
+    defer engine.deinit();
+
+    const script =
+        \\async function salesGraph() {
+        \\  const canvas = document.createElement('canvas');
+        \\  canvas.width = 200;
+        \\  canvas.height = 200;
+        \\  const ctx = canvas.getContext('2d');
+        \\
+        \\  ctx.fillStyle = "white";
+        \\  ctx.fillRect(0, 0, 200, 200);
+        //  AXES (Gray)
+        \\  ctx.strokeStyle = "#888888";
+        \\  ctx.beginPath();
+        \\  ctx.moveTo(20, 20);
+        \\  ctx.lineTo(20, 180);
+        \\  ctx.lineTo(180, 180);
+        \\  ctx.stroke();
+        // DATA LINE (Blue)
+        \\  ctx.strokeStyle = "blue";
+        \\  ctx.beginPath();
+        \\  ctx.moveTo(20, 180);
+        \\  ctx.lineTo(100, 100);
+        \\  ctx.lineTo(180, 40);
+        \\  ctx.stroke();
+        //  DATA POINTS (Red Circles)
+        \\  ctx.strokeStyle = "red";
+        \\  const points = [[20, 180], [100, 100], [180, 40]];
+        \\  for (const p of points) {
+        \\    ctx.beginPath();
+        \\    ctx.arc(p[0], p[1], 5, 0, 6.28); 
+        \\    ctx.stroke();
+        \\  }
+        \\  ctx.fillText("Sales", 70, 10);
+        \\  const blob = await canvas.toBlob();
+        \\  return await blob.arrayBuffer();
+        \\  }
+        \\salesGraph();
+    ;
+
+    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, script, "<image>");
+    defer allocator.free(png_bytes);
+    z.print("{s}\n", .{png_bytes[0..15]});
+    z.print("\n🎆 Example Graph in Canvas ----\n\n", .{});
+    // try js_canvas.verifyPngStructure(png_bytes);
+    try std.fs.cwd().writeFile(.{ .sub_path = "canvas_graph_test.png", .data = png_bytes });
 }
