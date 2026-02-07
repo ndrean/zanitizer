@@ -77,7 +77,7 @@ fn makeTypeError(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
     defer ctx.freeValue(msg_val);
 
     var args = [_]qjs.JSValue{msg_val};
-    return qjs.JS_CallConstructor(ctx.ptr, ctor, 1, &args);
+    return qjs.JS_CallConstructor(ctx.ptr, ctor, 1, @ptrCast(&args));
 }
 
 // === Class properties

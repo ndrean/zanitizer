@@ -1249,6 +1249,37 @@ pub const Sanitizer = struct {
         return try self.css_sanitizer.sanitizeStylesheet(css_text);
     }
 
+    /// Load and attach an external stylesheet to the document.
+    /// Sanitizes CSS, parses it, and attaches to document in one call.
+    ///
+    /// Usage:
+    /// ```zig
+    /// var zan = try z.Sanitizer.init(allocator, .{});
+    /// defer zan.deinit();
+    /// const doc = try zan.parseHTML(html);
+    /// defer z.destroyDocument(doc);
+    /// try zan.loadStylesheet(doc, external_css);  // Sanitize + parse + attach
+    /// ```
+    pub fn loadStylesheet(self: *Self, doc: *z.HTMLDocument, css_text: []const u8) !void {
+        // 1. Sanitize CSS (removes dangerous properties, @import, etc.)
+        const clean_css = try self.css_sanitizer.sanitizeStylesheet(css_text);
+        defer self.allocator.free(clean_css);
+
+        // 2. Create temporary parser
+        const parser = try z.createCssStyleParser();
+        defer z.destroyCssStyleParser(parser);
+
+        // 3. Create stylesheet (document will take ownership on attach)
+        const sst = try z.createStylesheet();
+        errdefer z.destroyStylesheet(sst);
+
+        // 4. Parse sanitized CSS
+        try z.parseStylesheet(sst, parser, clean_css);
+
+        // 5. Attach to document (transfers ownership)
+        try z.attachStylesheet(doc, sst);
+    }
+
     /// Internal: run the sanitization walker
     fn sanitizeNodeInternal(self: *Self, root_node: *z.DomNode) !void {
         const internal_opts = self.options.toInternal();

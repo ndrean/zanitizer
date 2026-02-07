@@ -54,7 +54,9 @@ pub const DOMBridge = struct {
 
     fn styleFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
 
-    /// Custom createElement that handles canvas elements specially
+    /// Custom createElement that handles canvas and template elements specially
+    /// - canvas: Returns a native Canvas object (not a DOM element)
+    /// - template: Uses z.createTemplate() which properly creates the content DocumentFragment
     fn js_createElement_with_canvas(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
         const ctx = w.Context{ .ptr = ctx_ptr };
         const rc = RuntimeContext.get(ctx);
@@ -65,7 +67,7 @@ pub const DOMBridge = struct {
         const tag_name = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         defer ctx.freeZString(tag_name);
 
-        // Handle canvas specially
+        // Handle canvas specially - returns native Canvas object
         if (std.ascii.eqlIgnoreCase(tag_name, "canvas")) {
             // Create Canvas instance (default 300x150 per HTML spec)
             const canvas_struct = js_canvas.Canvas.init(rc.allocator, 300, 150) catch return ctx.throwOutOfMemory();
@@ -82,13 +84,21 @@ pub const DOMBridge = struct {
             return obj;
         }
 
-        // For non-canvas elements, use the standard createElement
+        // Get document from this_val
         const doc: *z.HTMLDocument = blk: {
             if (z.qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
             if (z.qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
             return ctx.throwTypeError("Method called on object that is not a Document");
         };
 
+        // Handle template specially - requires z.createTemplate for proper content DocumentFragment
+        if (std.ascii.eqlIgnoreCase(tag_name, "template")) {
+            const template = z.createTemplate(doc) catch return ctx.throwInternalError("createTemplate failed");
+            const element = z.templateToElement(template);
+            return DOMBridge.wrapElement(ctx, element) catch return ctx.throwOutOfMemory();
+        }
+
+        // For all other elements, use the standard createElement
         const result = z.createElement(doc, tag_name) catch return ctx.throwInternalError("createElement failed");
         return DOMBridge.wrapElement(ctx, result) catch return ctx.throwOutOfMemory();
     }

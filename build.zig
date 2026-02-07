@@ -270,6 +270,7 @@ pub fn build(b: *std.Build) void {
         "src/examples/test_css_sanitization.zig",
         "src/examples/test_css_pipeline.zig",
         "src/examples/test_css_complete.zig",
+        "src/examples/test_real.zig",
         "src/examples/test_all.zig",
         "src/examples/test_js_to_zig.zig",
     };

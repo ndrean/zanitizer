@@ -24,7 +24,9 @@ pub fn main() !void {
     // try testAsyncBlob(gpa, sandbox_root);
     // try canvasToDataURL(gpa, sandbox_root);
     // try canvasToBlob(gpa, sandbox_root);
-    try createImageToBlob(gpa, sandbox_root);
+    // try createImageToBlob(gpa, sandbox_root);
+    // try scenegraph(gpa, sandbox_root);
+    try salesGraph(gpa, sandbox_root);
 }
 
 fn testJavaScriptAPI(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
@@ -271,4 +273,80 @@ fn createImageToBlob(allocator: std.mem.Allocator, sbc: []const u8) !void {
     try js_canvas.verifyPngStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "canvas_fetch_image_test.png", .data = png_bytes });
     std.debug.print("\nSaved 'fetch_image_blob_test.png' ({d} bytes)\n", .{png_bytes.len});
+}
+
+fn scenegraph(allocator: std.mem.Allocator, sbc: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbc);
+    defer engine.deinit();
+
+    const script =
+        \\async function scenegraph() {
+        \\  const canvas = document.createElement('canvas');
+        \\  canvas.width = 200;
+        \\  canvas.height = 200;
+        \\  const ctx = canvas.getContext('2d');
+        \\  ctx.fillStyle = "red";
+        \\  ctx.fillRect(0, 0, 50, 50);
+        \\  ctx.save();
+        \\  ctx.translate(100, 100);
+        \\  ctx.scale(2, 2);
+        \\  ctx.fillStyle = "blue";
+        \\  ctx.fillRect(0, 0, 50, 50);
+        \\  ctx.restore();
+        \\  ctx.fillRect(60, 0, 50, 50);
+        \\  const blob = await canvas.toBlob();
+        \\  return await blob.arrayBuffer();
+        \\}
+        \\scenegraph();
+    ;
+
+    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, script, "<image>");
+    defer allocator.free(png_bytes);
+    z.print("{s}\n", .{png_bytes[0..15]});
+    z.print("\n🎆 Example scenegraph in Canvas ----\n\n", .{});
+    // try js_canvas.verifyPngStructure(png_bytes);
+    try std.fs.cwd().writeFile(.{ .sub_path = "canvas_scenegraph_test.png", .data = png_bytes });
+}
+
+fn salesGraph(allocator: std.mem.Allocator, sbc: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbc);
+    defer engine.deinit();
+
+    const script =
+        \\async function salesGraph() {
+        \\  const canvas = document.createElement('canvas');
+        \\  canvas.width = 200;
+        \\  canvas.height = 200;
+        \\  const ctx = canvas.getContext('2d');
+        \\  ctx.fillStyle = "white";
+        \\  ctx.fillRect(0, 0, 150, 150);
+
+        // Draw Axis
+        \\  ctx.fillStyle = "black"; // Used for stroke color in our MVP
+        \\  ctx.beginPath();
+        \\  ctx.moveTo(10, 10);
+        \\  ctx.lineTo(10, 140); // Y Axis
+        \\  ctx.lineTo(140, 140); // X Axis
+        \\  ctx.stroke();
+        // Draw Data
+        \\  ctx.beginPath();
+        \\  ctx.moveTo(10, 140);
+        \\  ctx.lineTo(40, 100);
+        \\  ctx.lineTo(80, 120);
+        \\  ctx.lineTo(120, 20); // Spike!
+        \\  ctx.stroke();
+        // \\  ctx.closePath();
+        \\  ctx.fillText("Sales", 70, 10);
+        \\  const blob = await canvas.toBlob();
+        \\  return await blob.arrayBuffer();
+        \\}
+        \\salesGraph();
+    ;
+
+    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, script, "<image>");
+    defer allocator.free(png_bytes);
+    z.print("{s}\n", .{png_bytes[0..15]});
+    z.print("\n🎆 Example Graphic in Canvas ----\n\n", .{});
+    // try js_canvas.verifyPngStructure(png_bytes);
+    try std.fs.cwd().writeFile(.{ .sub_path = "canvas_salesgraph_test.png", .data = png_bytes });
 }

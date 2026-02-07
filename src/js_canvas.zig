@@ -33,38 +33,17 @@ pub fn unwrapCanvas(ctx: zqjs.Context, val: zqjs.Value) ?*Canvas {
     return @ptrCast(@alignCast(ptr));
 }
 
-// pub fn defineAccessor(
-//     ctx: zqjs.Context,
-//     proto: zqjs.Value,
-//     name: [:0]const u8,
-//     getter: qjs.JSCFunction,
-//     setter: qjs.JSCFunction,
-// ) void {
-//     const atom = qjs.JS_NewAtom(ctx.ptr, name);
-//     defer qjs.JS_FreeAtom(ctx.ptr, atom);
+pub const CanvasState = struct {
+    fill_color: css_color.Color,
+    font: ?*Font,
+    font_size: f32,
+    tx: f32,
+    ty: f32,
+    sx: f32,
+    sy: f32,
+};
 
-//     const get_val = qjs.JS_NewCFunction(ctx.ptr, getter, name, 0);
-//     const set_val = qjs.JS_NewCFunction(ctx.ptr, setter, name, 1);
-
-//     // JS_DefinePropertyGetSet takes ownership of get_val and set_val
-//     _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, atom, get_val, set_val, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
-// }
-
-// pub fn defineMethod(
-//     ctx: zqjs.Context,
-//     proto: zqjs.Value,
-//     name: [:0]const u8,
-//     func: qjs.JSCFunction,
-//     len: c_int,
-// ) void {
-//     const atom = qjs.JS_NewAtom(ctx.ptr, name);
-//     defer qjs.JS_FreeAtom(ctx.ptr, atom);
-
-//     const func_val = qjs.JS_NewCFunction(ctx.ptr, func, name, len);
-
-//     // JS_DefinePropertyValue takes ownership of 'func_val'
-//     _ = qjs.JS_DefinePropertyValue(ctx.ptr, proto, atom, func_val, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_WRITABLE);
-// }
+const Point = struct { x: f32, y: f32 };
 
 pub const Canvas = struct {
     width: u32,
@@ -78,6 +57,9 @@ pub const Canvas = struct {
     ty: f32, // Translate Y
     sx: f32, // Scale X
     sy: f32, // Scale Y
+    state_stack: std.ArrayList(CanvasState),
+    path: std.ArrayList(Point),
+    has_start_point: bool,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, w: u32, h: u32) !*Canvas {
@@ -87,6 +69,8 @@ pub const Canvas = struct {
         self.allocator = allocator;
         self.font = null;
         self.font_size = 10.0; // default
+        self.path = .empty;
+        self.has_start_point = false;
 
         const size = @as(usize, @intCast(w * h * 4)); // RGBA
         self.pixels = try allocator.alloc(u8, size);
@@ -100,12 +84,43 @@ pub const Canvas = struct {
         self.ty = 0;
         self.sx = 1;
         self.sy = 1;
+
+        self.state_stack = .empty;
         return self;
     }
 
     pub fn deinit(self: *Canvas) void {
+        self.state_stack.deinit(self.allocator);
+        self.path.deinit(self.allocator);
         self.allocator.free(self.pixels);
         self.allocator.destroy(self);
+    }
+
+    pub fn save(self: *Canvas) !void {
+        // Create a copy of the current state
+        const state = CanvasState{
+            .fill_color = self.fill_color,
+            .font = self.font,
+            .font_size = self.font_size,
+            .tx = self.tx,
+            .ty = self.ty,
+            .sx = self.sx,
+            .sy = self.sy,
+        };
+        try self.state_stack.append(self.allocator, state);
+    }
+
+    pub fn restore(self: *Canvas) void {
+        // Pop the last state and overwrite current settings
+        if (self.state_stack.pop()) |state| {
+            self.fill_color = state.fill_color;
+            self.font = state.font;
+            self.font_size = state.font_size;
+            self.tx = state.tx;
+            self.ty = state.ty;
+            self.sx = state.sx;
+            self.sy = state.sy;
+        }
     }
 
     // Set the global font object, not owned, managed JS side
@@ -233,6 +248,94 @@ pub const Canvas = struct {
         const size = @as(usize, new_w) * @as(usize, new_h) * 4;
         self.pixels = try self.allocator.alloc(u8, size);
         @memset(self.pixels, 0);
+    }
+
+    pub fn beginPath(self: *Canvas) void {
+        self.path.clearRetainingCapacity();
+        self.has_start_point = false;
+    }
+
+    pub fn moveTo(self: *Canvas, x: f32, y: f32) void {
+        // Start a new sub-path (for MVP, we just add the point)
+        // In a full engine, moveTo breaks the line continuity.
+        // For simple charts, we just clear and add.
+        if (self.path.items.len > 0) {
+            // If we already have points, moveTo usually starts a new disconnected line.
+            // For MVP: We will treat 'path' as a single continuous line strip.
+            // To support multiple disconnected lines, we'd need a list of lists.
+            // Let's keep it simple: moveTo clears if called mid-stream?
+            // No, standard canvas allows multiple subpaths.
+            // Let's just add it for now, but mark it as a "jump"?
+            // EASIEST MVP: Just add it.
+        }
+        self.path.append(self.allocator, .{ .x = x, .y = y }) catch return;
+        self.has_start_point = true;
+    }
+
+    pub fn lineTo(self: *Canvas, x: f32, y: f32) void {
+        if (!self.has_start_point) {
+            self.moveTo(x, y);
+            return;
+        }
+        self.path.append(self.allocator, .{ .x = x, .y = y }) catch return;
+    }
+
+    pub fn stroke(self: *Canvas) void {
+        if (self.path.items.len < 2) return;
+
+        // Iterate through points and draw lines
+        var i: usize = 0;
+        while (i < self.path.items.len - 1) : (i += 1) {
+            const p1 = self.path.items[i];
+            const p2 = self.path.items[i + 1];
+
+            // Apply Transform to endpoints
+            const t1 = self.applyTransform(@intFromFloat(p1.x), @intFromFloat(p1.y));
+            const t2 = self.applyTransform(@intFromFloat(p2.x), @intFromFloat(p2.y));
+
+            self.bresenhamLine(t1.x, t1.y, t2.x, t2.y);
+        }
+    }
+    // --- Bresenham's Line Algorithm ---
+    // Draws a 1px line between (x0, y0) and (x1, y1)
+    fn bresenhamLine(self: *Canvas, x0: i32, y0: i32, x1: i32, y1: i32) void {
+        const dx = @abs(x1 - x0);
+        const dy = -@as(i32, @intCast(@abs(y1 - y0))); // dy is negative for the algorithm
+
+        const sx: i32 = if (x0 < x1) 1 else -1;
+        const sy: i32 = if (y0 < y1) 1 else -1;
+
+        var err: i32 = @intCast(@as(i32, @intCast(dx)) + @as(i32, @intCast(dy)));
+
+        var curr_x = x0;
+        var curr_y = y0;
+
+        const color = self.fill_color; // Using fillStyle as strokeStyle for MVP
+        const cv_w = @as(i32, @intCast(self.width));
+        const cv_h = @as(i32, @intCast(self.height));
+
+        while (true) {
+            // Plot Pixel (Clip check)
+            if (curr_x >= 0 and curr_x < cv_w and curr_y >= 0 and curr_y < cv_h) {
+                const idx = @as(usize, @intCast((curr_y * cv_w + curr_x) * 4));
+                self.pixels[idx + 0] = color.r;
+                self.pixels[idx + 1] = color.g;
+                self.pixels[idx + 2] = color.b;
+                self.pixels[idx + 3] = 255; // Full opacity
+            }
+
+            if (curr_x == x1 and curr_y == y1) break;
+
+            const e2 = 2 * err;
+            if (e2 >= dy) {
+                err += dy;
+                curr_x += sx;
+            }
+            if (e2 <= dx) {
+                err += @as(i32, @intCast(dx));
+                curr_y += sy;
+            }
+        }
     }
 
     /// Encodes the pixel buffer to PNG format (Raw Bytes)
@@ -790,6 +893,63 @@ fn js_registerFont(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: 
     return zqjs.UNDEFINED;
 }
 
+fn js_canvas_save(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+
+    canvas.save() catch return ctx.throwInternalError("Stack overflow");
+    return zqjs.UNDEFINED;
+}
+
+// Canvas.restore()
+fn js_canvas_restore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+
+    canvas.restore();
+    return zqjs.UNDEFINED;
+}
+
+fn js_canvas_beginPath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+    canvas.beginPath();
+    return zqjs.UNDEFINED;
+}
+
+fn js_canvas_moveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+
+    var x: f64 = 0;
+    var y: f64 = 0;
+    if (argc > 0) _ = qjs.JS_ToFloat64(ctx.ptr, &x, argv[0]);
+    if (argc > 1) _ = qjs.JS_ToFloat64(ctx.ptr, &y, argv[1]);
+
+    canvas.moveTo(@floatCast(x), @floatCast(y));
+    return zqjs.UNDEFINED;
+}
+
+fn js_canvas_lineTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+
+    var x: f64 = 0;
+    var y: f64 = 0;
+    if (argc > 0) _ = qjs.JS_ToFloat64(ctx.ptr, &x, argv[0]);
+    if (argc > 1) _ = qjs.JS_ToFloat64(ctx.ptr, &y, argv[1]);
+
+    canvas.lineTo(@floatCast(x), @floatCast(y));
+    return zqjs.UNDEFINED;
+}
+
+fn js_canvas_stroke(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
+    canvas.stroke();
+    return zqjs.UNDEFINED;
+}
+
 // === Liefcycle
 
 fn js_canvas_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -866,12 +1026,18 @@ pub fn install(ctx: zqjs.Context) !void {
     js_utils.defineMethod(ctx, proto, "scale", js_canvas_scale, 2);
     js_utils.defineMethod(ctx, proto, "translate", js_canvas_translate, 2);
     js_utils.defineMethod(ctx, proto, "measureText", js_canvas_measureText, 1);
+    js_utils.defineMethod(ctx, proto, "save", js_canvas_save, 0);
+    js_utils.defineMethod(ctx, proto, "restore", js_canvas_restore, 0);
 
     // Add accessors
     js_utils.defineAccessor(ctx, proto, "width", js_canvas_get_width, js_canvas_set_width);
     js_utils.defineAccessor(ctx, proto, "height", js_canvas_get_height, js_canvas_set_height);
     js_utils.defineAccessor(ctx, proto, "fillStyle", js_canvas_get_fillStyle, js_canvas_set_fillStyle);
     js_utils.defineAccessor(ctx, proto, "font", js_canvas_get_font, js_canvas_set_font);
+    js_utils.defineMethod(ctx, proto, "beginPath", js_canvas_beginPath, 0);
+    js_utils.defineMethod(ctx, proto, "moveTo", js_canvas_moveTo, 2);
+    js_utils.defineMethod(ctx, proto, "lineTo", js_canvas_lineTo, 2);
+    js_utils.defineMethod(ctx, proto, "stroke", js_canvas_stroke, 0);
 
     // Create Constructor
     const ctor_val = qjs.JS_NewCFunction2(ctx.ptr, js_canvas_constructor, "Canvas", 2, qjs.JS_CFUNC_constructor, 0);
