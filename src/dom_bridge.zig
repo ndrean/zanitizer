@@ -25,6 +25,8 @@ const js_readable_stream = @import("js_readable_stream.zig");
 const js_writable_stream = @import("js_writable_stream.zig");
 const js_range = @import("js_range.zig");
 const js_tree_walker = @import("js_tree_walker.zig");
+const js_canvas = @import("js_canvas.zig");
+const js_image = @import("js_image.zig");
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -51,6 +53,45 @@ pub const DOMBridge = struct {
     }
 
     fn styleFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
+
+    /// Custom createElement that handles canvas elements specially
+    fn js_createElement_with_canvas(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+        const ctx = w.Context{ .ptr = ctx_ptr };
+        const rc = RuntimeContext.get(ctx);
+
+        if (argc < 1) return w.EXCEPTION;
+
+        // Get tag name
+        const tag_name = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+        defer ctx.freeZString(tag_name);
+
+        // Handle canvas specially
+        if (std.ascii.eqlIgnoreCase(tag_name, "canvas")) {
+            // Create Canvas instance (default 300x150 per HTML spec)
+            const canvas_struct = js_canvas.Canvas.init(rc.allocator, 300, 150) catch return ctx.throwOutOfMemory();
+
+            // Create JS object with canvas class
+            const obj = z.qjs.JS_NewObjectClass(ctx.ptr, rc.classes.canvas);
+            if (z.qjs.JS_IsException(obj)) {
+                canvas_struct.deinit();
+                return w.EXCEPTION;
+            }
+
+            // Link opaque pointer
+            _ = z.qjs.JS_SetOpaque(obj, canvas_struct);
+            return obj;
+        }
+
+        // For non-canvas elements, use the standard createElement
+        const doc: *z.HTMLDocument = blk: {
+            if (z.qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+            if (z.qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+            return ctx.throwTypeError("Method called on object that is not a Document");
+        };
+
+        const result = z.createElement(doc, tag_name) catch return ctx.throwInternalError("createElement failed");
+        return DOMBridge.wrapElement(ctx, result) catch return ctx.throwOutOfMemory();
+    }
 
     // (Register Class & Create internal Doc)
     pub fn init(allocator: std.mem.Allocator, ctx: w.Context) !DOMBridge {
@@ -234,6 +275,11 @@ pub const DOMBridge = struct {
 
             const doc_proto = ctx.newObject();
             bindings.installDocumentBindings(ctx.ptr, doc_proto);
+
+            // Override createElement to handle canvas elements
+            const create_elem_fn = ctx.newCFunction(js_createElement_with_canvas, "createElement", 1);
+            try ctx.setPropertyStr(doc_proto, "createElement", create_elem_fn);
+
             {
                 const parent_proto = ctx.getClassProto(rc.classes.dom_node);
                 defer ctx.freeValue(parent_proto);
@@ -297,6 +343,8 @@ pub const DOMBridge = struct {
         try js_events.EventBridge.install(ctx);
         try js_classList.install(ctx);
         try js_dataset.install(ctx);
+        try js_canvas.install(ctx); // Must be before polyfills for document.createElement('canvas')
+        try js_image.install(ctx);
         try js_polyfills.install(ctx);
         try js_file.install(ctx);
         try js_filelist.install(ctx);
@@ -415,6 +463,10 @@ pub const DOMBridge = struct {
 
         const ctw_fn = ctx.newCFunction(js_tree_walker.js_createTreeWalker, "createTreeWalker", 2);
         try ctx.setPropertyStr(doc_obj, "createTreeWalker", ctw_fn);
+
+        // Sanitizer API - parseHTMLSafe(html, options?)
+        const phs_fn = ctx.newCFunction(js_parseHTMLSafe, "parseHTMLSafe", 2);
+        try ctx.setPropertyStr(doc_obj, "parseHTMLSafe", phs_fn);
 
         // Expose 'document' on global
         try ctx.setPropertyStr(global, "document", doc_obj);
@@ -1259,6 +1311,95 @@ fn js_createTextNode(
     const text_node = z.createTextNode(doc, text_content) catch return w.EXCEPTION;
 
     return DOMBridge.wrapNode(ctx, text_node) catch w.EXCEPTION;
+}
+
+/// document.parseHTMLSafe(html, options?) - Parse and sanitize HTML
+/// - argc == 1: Parse with safe defaults (.{})
+/// - argc == 2: Parse with custom options from JS object
+///
+/// Returns an OwnedDocument that the caller is responsible for.
+/// The document is fully sanitized and has CSS engine initialized.
+fn js_parseHTMLSafe(
+    ctx_ptr: ?*z.qjs.JSContext,
+    _: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const allocator = rc.allocator;
+
+    if (argc < 1) {
+        return ctx.throwTypeError("parseHTMLSafe requires at least 1 argument (html string)");
+    }
+
+    // Get HTML string
+    const html = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(html);
+
+    // Parse options from JS object (if provided)
+    const opts = if (argc >= 2)
+        jsToSanitizeOptions(ctx, argv[1])
+    else
+        z.SanitizeOptions{};
+
+    // Parse and sanitize
+    const doc = z.parseHTMLSafe(allocator, html, opts) catch {
+        return ctx.throwTypeError("parseHTMLSafe failed");
+    };
+
+    // Wrap as OwnedDocument (caller owns it, will be finalized when GC'd)
+    const doc_obj = ctx.newObjectClass(rc.classes.owned_document);
+    ctx.setOpaque(doc_obj, doc) catch {
+        z.destroyDocument(doc);
+        return w.EXCEPTION;
+    };
+
+    return doc_obj;
+}
+
+/// Convert JS options object to SanitizeOptions
+fn jsToSanitizeOptions(ctx: w.Context, opts_val: zqjs.Value) z.SanitizeOptions {
+    var opts = z.SanitizeOptions{};
+
+    // If not an object, return defaults
+    if (!z.qjs.JS_IsObject(opts_val)) return opts;
+
+    // Read boolean properties (undefined/missing = keep default)
+    opts.remove_scripts = getJsBoolProperty(ctx, opts_val, "removeScripts") orelse opts.remove_scripts;
+    opts.remove_styles = getJsBoolProperty(ctx, opts_val, "removeStyles") orelse opts.remove_styles;
+    opts.sanitize_css = getJsBoolProperty(ctx, opts_val, "sanitizeCss") orelse opts.sanitize_css;
+    opts.remove_comments = getJsBoolProperty(ctx, opts_val, "removeComments") orelse opts.remove_comments;
+    opts.strict_uri = getJsBoolProperty(ctx, opts_val, "strictUri") orelse opts.strict_uri;
+    opts.sanitize_dom_clobbering = getJsBoolProperty(ctx, opts_val, "sanitizeDomClobbering") orelse opts.sanitize_dom_clobbering;
+    opts.allow_custom_elements = getJsBoolProperty(ctx, opts_val, "allowCustomElements") orelse opts.allow_custom_elements;
+    opts.allow_embeds = getJsBoolProperty(ctx, opts_val, "allowEmbeds") orelse opts.allow_embeds;
+    opts.allow_iframes = getJsBoolProperty(ctx, opts_val, "allowIframes") orelse opts.allow_iframes;
+    opts.bypass_safety = getJsBoolProperty(ctx, opts_val, "bypassSafety") orelse opts.bypass_safety;
+
+    // Read frameworks object (if present)
+    const fw_val = ctx.getPropertyStr(opts_val, "frameworks");
+    defer ctx.freeValue(fw_val);
+    if (z.qjs.JS_IsObject(fw_val)) {
+        opts.frameworks.allow_alpine = getJsBoolProperty(ctx, fw_val, "allowAlpine") orelse opts.frameworks.allow_alpine;
+        opts.frameworks.allow_vue = getJsBoolProperty(ctx, fw_val, "allowVue") orelse opts.frameworks.allow_vue;
+        opts.frameworks.allow_htmx = getJsBoolProperty(ctx, fw_val, "allowHtmx") orelse opts.frameworks.allow_htmx;
+        opts.frameworks.allow_phoenix = getJsBoolProperty(ctx, fw_val, "allowPhoenix") orelse opts.frameworks.allow_phoenix;
+        opts.frameworks.allow_angular = getJsBoolProperty(ctx, fw_val, "allowAngular") orelse opts.frameworks.allow_angular;
+        opts.frameworks.allow_svelte = getJsBoolProperty(ctx, fw_val, "allowSvelte") orelse opts.frameworks.allow_svelte;
+        opts.frameworks.allow_data_attrs = getJsBoolProperty(ctx, fw_val, "allowDataAttrs") orelse opts.frameworks.allow_data_attrs;
+        opts.frameworks.allow_aria_attrs = getJsBoolProperty(ctx, fw_val, "allowAriaAttrs") orelse opts.frameworks.allow_aria_attrs;
+    }
+
+    return opts;
+}
+
+/// Helper to get a boolean property from a JS object, returns null if not present
+fn getJsBoolProperty(ctx: w.Context, obj: zqjs.Value, name: [*:0]const u8) ?bool {
+    const val = ctx.getPropertyStr(obj, name);
+    defer ctx.freeValue(val);
+    if (z.qjs.JS_IsUndefined(val)) return null;
+    return ctx.toBool(val) catch null;
 }
 
 /// Helper to convert a list of JS values (nodes or strings) into a single DocumentFragment

@@ -426,8 +426,13 @@ test "Styles: JS-like Getters and Setters" {
     // Test Removal <- JS: div.style.removeProperty("width");
     try z.removeInlineStyleProperty(allocator, div.?, "width");
     try std.testing.expect(z.hasAttribute(div.?, "style"));
+    // check via attributes
     const after_removal = z.getAttribute_zc(div.?, "style").?;
     try std.testing.expect(std.mem.indexOf(u8, after_removal, "color") != null);
+    // check via style parsing
+    const remaining_is_color_green = try serializeElementStyles(allocator, div.?); // should still work with the remaining color property
+    defer allocator.free(remaining_is_color_green);
+    try std.testing.expectEqualStrings("color: green", remaining_is_color_green);
 }
 
 test "Styles: Dynamic Insert (Lexbor port)" {
@@ -450,12 +455,14 @@ test "Styles: Dynamic Insert (Lexbor port)" {
     // !! ⚠️ Attach Stylesheet AFTER parsing the HTML
     try parseStylesheet(sst, parser, css);
     try attachStylesheet(doc, sst);
+    // try loadStyleTags(allocator, doc, parser);
 
     const parent_el = z.getElementById(doc, "parent").?;
 
-    // Check not attached yet
+    // Check attached style is applied
 
     const st = try serializeElementStyles(allocator, parent_el);
+    // z.print("Dynamic: {s}\n", .{st});
     defer allocator.free(st);
     try std.testing.expect(std.mem.indexOf(u8, st, "width: 30%") != null);
 
@@ -481,6 +488,7 @@ test "Styles: Attribute Style (Lexbor port)" {
     const doc = try z.createDocument();
     defer z.destroyDocument(doc);
 
+    // !! Init BEFORE parsing so styles are processed as they are parsed
     try initDocumentCSS(doc, true);
 
     const html = "<div id='d' style='width: 10px; width: 123%; height: 20pt !important; height: 10px'></div>";

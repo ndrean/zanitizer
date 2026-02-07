@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const lexbor_static_lib_path = b.path("vendor/lexbor_src_master/build/liblexbor_static.a");
     const lexbor_src_path = b.path("vendor/lexbor_src_master/source/");
+    const stb_image_src_path = b.path("src/c");
     const quickjs_src_path = b.path("vendor/quickjs-ng");
     const qjs_flags = &.{
         "-std=gnu99",
@@ -58,7 +59,16 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/minimal.c"),
         .flags = c_flags,
     });
+    zexplorer_lib.addCSourceFile(.{
+        .file = b.path("src/c/stb_image.c"),
+        .flags = &.{"-g"},
+    });
+    zexplorer_lib.addCSourceFile(.{
+        .file = b.path("src/css_shim.c"),
+        .flags = c_flags,
+    });
     zexplorer_lib.addIncludePath(lexbor_src_path);
+    zexplorer_lib.addIncludePath(stb_image_src_path);
     zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibC();
 
@@ -76,6 +86,7 @@ pub fn build(b: *std.Build) void {
     zexplorer_module.linkLibrary(qjs_lib);
     zexplorer_module.addIncludePath(quickjs_src_path);
     zexplorer_module.addIncludePath(lexbor_src_path);
+    zexplorer_module.addIncludePath(stb_image_src_path);
 
     // Link curl's C library to the module so it can find curl.h
     // The curl module depends on libcurl which needs to be linked
@@ -96,6 +107,14 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    exe.addCSourceFiles(
+        .{
+            .files = &[_][]const u8{"src/c/stb_image.c"},
+            .flags = &.{"-g"},
+        },
+    );
+    // -g adds debug info, makes it easier to debug
+    exe.addIncludePath(stb_image_src_path);
     exe.addObjectFile(lexbor_static_lib_path);
     exe.addIncludePath(lexbor_src_path);
     exe.addIncludePath(quickjs_src_path);
@@ -180,9 +199,14 @@ pub fn build(b: *std.Build) void {
     unit_tests.linkLibC();
 
     // Add dependencies to test
+    const test_c_flags = &.{ "-std=c99", "-DLEXBOR_STATIC" };
     unit_tests.addCSourceFile(.{
         .file = b.path("src/minimal.c"),
-        .flags = &.{"-std=c99"},
+        .flags = test_c_flags,
+    });
+    unit_tests.addCSourceFile(.{
+        .file = b.path("src/css_shim.c"),
+        .flags = test_c_flags,
     });
     unit_tests.addIncludePath(lexbor_src_path);
     unit_tests.addObjectFile(lexbor_static_lib_path);
@@ -243,6 +267,11 @@ pub fn build(b: *std.Build) void {
         "src/examples/h5sc-test.zig",
         "src/examples/blob_url.zig",
         "src/examples/blob_object_url.zig",
+        "src/examples/test_css_sanitization.zig",
+        "src/examples/test_css_pipeline.zig",
+        "src/examples/test_css_complete.zig",
+        "src/examples/test_all.zig",
+        "src/examples/test_js_to_zig.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

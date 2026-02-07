@@ -5,6 +5,7 @@ pub const LexborError = error{
     DocCreateFailed,
     DocumentNotFound,
     ParseFailed,
+    PropertyNotFound,
     ParserCreateFailed,
     HtmlParserNotInitialized,
     ParserInitFailed,

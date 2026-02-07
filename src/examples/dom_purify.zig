@@ -81,7 +81,7 @@ fn purifyDemo(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
-    z.print("{s}\n", .{result});
+    // z.print("{s}\n", .{result});
 
     std.debug.print("\n=== DOMPurify Benchmark -------\n\n", .{});
     std.debug.print("Input size: {} bytes\n", .{dirty.len});

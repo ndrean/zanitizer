@@ -37,6 +37,18 @@ pub fn jsToZig(allocator: std.mem.Allocator, ctx: w.Context, val: w.Value, compt
         },
         .pointer => |ptr_info| {
             if (ptr_info.size == .slice and ptr_info.child == u8) {
+                if (ctx.isArrayBuffer(val)) {
+                    const bytes = ctx.getArrayBuffer(val) catch return error.JsArrayBufferError;
+                    // COPY the bytes into Zig memory (Arena/Allocator)
+                    return allocator.dupe(u8, bytes);
+                }
+
+                // 2. Try Uint8Array (Views)
+                // getUint8Array returns error if it's not a Uint8Array, so we catch and continue
+                if (ctx.getUint8Array(val) catch null) |bytes| {
+                    return allocator.dupe(u8, bytes);
+                }
+
                 if (!ctx.isString(val)) return error.ExpectedString;
                 const str = try ctx.toCString(val);
                 defer ctx.freeCString(str);
@@ -62,7 +74,7 @@ pub fn jsToZig(allocator: std.mem.Allocator, ctx: w.Context, val: w.Value, compt
                     }
                 } else {
                     if (ctx.isUndefined(prop_val)) {
-                        // [FIX] Use default_value (pointer) correctly
+                        // Use default_value (pointer)
                         if (field.default_value_ptr) |default_ptr| {
                             const default_val = @as(*const field.type, @ptrCast(@alignCast(default_ptr))).*;
                             @field(result, field.name) = default_val;

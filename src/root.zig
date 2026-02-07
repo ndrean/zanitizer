@@ -22,6 +22,9 @@ pub const dom_bridge = @import("dom_bridge.zig");
 // Mailbox for inter-thread communication (Worker pattern)
 pub const Mailbox = @import("mailbox.zig").Mailbox;
 pub const events = @import("js_events.zig");
+pub const js_marshall = @import("js_marshall.zig");
+pub const js_canvas = @import("js_canvas.zig");
+pub const js_blob = @import("js_blob.zig");
 
 // Exports for examples
 pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;
@@ -385,10 +388,23 @@ pub const isKnownAttribute = colours.isKnownAttribute;
 pub const isDangerousAttributeValue = colours.isDangerousAttributeValue;
 
 //=========================================================================================
-// Sanitizer
+// Sanitizer - NEW UNIFIED API
 
+/// Unified Sanitizer with flat options. Use `.{}` for safe defaults.
+/// ```zig
+/// var zan = try z.Sanitizer.init(allocator, .{});
+/// defer zan.deinit();
+/// const doc = try zan.parseHTML(html);  // parse + sanitize + CSS setup
+/// defer z.destroyDocument(doc);
+/// ```
+pub const Sanitizer = sanitize.Sanitizer;
+pub const SanitizeOptions = sanitize.SanitizeOptions;
+pub const FrameworkConfig = sanitize.FrameworkConfig;
+pub const parseHTMLSafe = sanitize.parseHTMLSafe;
+
+// Legacy API (deprecated - use Sanitizer instead)
 pub const SanitizerMode = sanitize.SanitizerMode;
-pub const SanitizerOptions = sanitize.SanitizerOptions;
+pub const SanitizerOptions = sanitize.SanitizerOptions; // Note: different from SanitizeOptions
 pub const sanitizeNode = sanitize.sanitizeNode;
 pub const sanitizeWithMode = sanitize.sanitizeWithMode;
 pub const sanitizeStrict = sanitize.sanitizeStrict;
@@ -397,10 +413,9 @@ pub const sanitizePermissive = sanitize.sanitizePermissive;
 pub const isCustomElement = sanitize.isCustomElement;
 pub const sanitizeWithCss = sanitize.sanitizeWithCss;
 
-// Web API-compatible Sanitizer Configuration
+// Web API-compatible Sanitizer Configuration (deprecated - use Sanitizer instead)
 pub const SanitizerConfig = sanitizer_config.SanitizerConfig;
-pub const FrameworkConfig = sanitizer_config.FrameworkConfig;
-pub const Sanitizer = sanitizer_config.Sanitizer;
+pub const LegacySanitizer = sanitizer_config.Sanitizer; // Renamed to avoid conflict
 
 // CSS Sanitizer
 pub const CssSanitizer = sanitize_css.CssSanitizer;
@@ -463,6 +478,7 @@ pub const setStyleProperty = styles.setStyleProperty;
 pub const parseElementStyle = styles.parseElementStyle;
 pub const removeInlineStyleProperty = styles.removeInlineStyleProperty;
 pub const loadStyleTags = styles.loadStyleTags;
+pub const serializeElementStyles = styles.serializeElementStyles;
 
 //============================================================================
 // CSS selectors

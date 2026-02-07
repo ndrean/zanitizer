@@ -33,6 +33,8 @@ fn testRun(gpa: std.mem.Allocator, _: []const u8) !void {
     std.debug.print("\n=== H5SC Security Check ---------------\n\n", .{});
     std.debug.print("Vectors Loaded: {d} bytes\n", .{html_content.len});
 
+    var timer = try std.time.Timer.start();
+
     const doc = try z.parseHTML(gpa, html_content);
     defer z.destroyDocument(doc);
 
@@ -62,6 +64,11 @@ fn testRun(gpa: std.mem.Allocator, _: []const u8) !void {
         custom_mode,
         &css_sanitizer,
     );
+
+    const elapsed_ns = timer.read();
+    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+    const elapsed_ms = elapsed_us / 1000.0;
+    z.print("Processing time: {} ms\n", .{elapsed_ms});
 
     // try z.prettyPrint(gpa, body_node);
 

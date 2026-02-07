@@ -41,6 +41,7 @@ pub const BlobObject = struct {
     }
 };
 
+// === Liefcycle
 pub fn js_Blob_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
@@ -119,10 +120,6 @@ pub fn js_Blob_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int
     return obj;
 }
 
-// ============================================================================
-// Methods
-// ============================================================================
-
 pub fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
     const obj_class_id = qjs.JS_GetClassID(val);
     const ptr = qjs.JS_GetOpaque(val, obj_class_id);
@@ -132,6 +129,9 @@ pub fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
     }
 }
 
+// === Methods
+
+/// Blob.text()
 pub fn js_Blob_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
@@ -165,6 +165,7 @@ pub fn js_Blob_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*
     return promise;
 }
 
+/// Blob.arrayBuffer()
 pub fn js_Blob_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
@@ -195,6 +196,9 @@ pub fn js_Blob_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int
     return promise;
 }
 
+// === Properties
+
+/// Accessor Blob.size
 pub fn js_Blob_get_size(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
@@ -204,6 +208,7 @@ pub fn js_Blob_get_size(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _
     return ctx.newInt64(@intCast(self.data.len));
 }
 
+/// Accessor Blob.type
 pub fn js_Blob_get_type(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
@@ -212,10 +217,6 @@ pub fn js_Blob_get_type(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _
     const self: *BlobObject = @ptrCast(@alignCast(ptr));
     return ctx.newString(self.mime_type);
 }
-
-// ============================================================================
-// Installation
-// ============================================================================
 
 pub const BlobBridge = struct {
     pub fn install(ctx: zqjs.Context) !void {

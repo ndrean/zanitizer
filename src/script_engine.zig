@@ -14,6 +14,8 @@ const AsyncBridge = @import("async_bridge.zig");
 const FormDataBridge = @import("js_formData.zig").FormDataBridge;
 const FSBridge = @import("js_fs.zig").FSBridge;
 const js_console = @import("js_console.zig");
+const js_marshall = @import("js_marshall.zig");
+
 const TIMEOUT_MS: i64 = 5000;
 
 /// avoid infinte loops like `white (true) {}` by setting a deadline
@@ -328,6 +330,63 @@ pub const ScriptEngine = struct {
             return error.JSException;
         }
         return val;
+    }
+
+    /// Evaluates a script and marshals the returned value directly into a Zig struct.
+    ///
+    /// ⚠️ The script must return a value (not a Promise), evaluated with `.global`.
+    pub fn evalAs(self: *ScriptEngine, comptime T: type, code: []const u8, filename: []const u8) !T {
+        // 1. Evaluate in global scope to get the result of the last expression
+        const val = try self.eval(code, filename, .global);
+
+        // own the handle 'val', so we must free it after marshalling
+        defer self.ctx.freeValue(val);
+
+        // (Assumes T is a struct matching the JS object)
+        return js_marshall.jsToZig(self.allocator, self.ctx, val, T);
+    }
+
+    /// Evaluates JS code that might return a Promise
+    ///
+    /// Runs the event loop until completion, checks for rejections, and marshals the result with the given type `T` that must match the type returned from JS.
+    pub fn evalAsyncAs(self: *ScriptEngine, allocator: std.mem.Allocator, comptime T: type, code: []const u8, name: []const u8) !T {
+        const val = try self.eval(code, name, .global);
+        defer self.ctx.freeValue(val);
+
+        // Handle the "Sync" case
+        if (!self.ctx.isPromise(val)) {
+            return js_marshall.jsToZig(allocator, self.ctx, val, T);
+        }
+
+        //  executes pending jobs (microtasks) and timers.
+        try self.run();
+
+        const state = self.ctx.promiseState(val);
+        switch (state) {
+            .Pending => {
+                // deadlock
+                std.debug.print("⚠️  Script finished but Promise is still PENDING.\n", .{});
+                return error.JSPromiseStuck;
+            },
+            .Rejected => {
+                const reason = self.ctx.promiseResult(val);
+                defer self.ctx.freeValue(reason);
+
+                const reason_str = self.ctx.toCString(reason) catch "Unknown Rejection";
+                defer self.ctx.freeCString(reason_str);
+
+                std.debug.print("❌ JS Promise Rejected: {s}\n", .{reason_str});
+                return error.JSPromiseRejected;
+            },
+            .Fulfilled => {
+                // 5. Success! Extract the value.
+                const result = self.ctx.promiseResult(val);
+                defer self.ctx.freeValue(result);
+
+                // 6. Marshal the inner result to Zig
+                return js_marshall.jsToZig(allocator, self.ctx, result, T);
+            },
+        }
     }
 
     // Helper to expose C functions easily

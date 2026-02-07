@@ -103,8 +103,10 @@ Ref: browser Vanilla
 | --               | --   | --        | --           | --        | --    |
 | Total Engine     | --   | 76        | 70           | 75        | 68    | 524             | 1087             | 2096      | 2167      |
 
-() compiled JSX->JS with `bun`
+(*) compiled JSX->JS with `bun`
+
 (**) templated with `html` and using `map` instead of `For`
+
 (***) templated
 
 ### zexplorer vs jsdom

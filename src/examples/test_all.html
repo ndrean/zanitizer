@@ -1,0 +1,14 @@
+<html>
+  <head>
+    <link href="test_all.css" rel="stylesheet" />
+    <script type="module" src="test_all.js"></script>
+    <style>
+       .safe { color: green; font-size: 16px; }
+       .dangerous { behavior: url(evil.htc); -moz-binding: url(xss.xml); }
+      .mixed { padding: 10px; expression(alert('xss')); margin: 5px; }
+    </style>
+  </head>
+  <body>
+    <div id="main"></div>
+  </body>
+</html>

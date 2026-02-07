@@ -50,6 +50,8 @@ pub const RuntimeContext = struct {
         writable_stream_writer: zqjs.ClassID = 0,
         range: zqjs.ClassID = 0,
         tree_walker: zqjs.ClassID = 0,
+        canvas: zqjs.ClassID = 0,
+        image: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,
