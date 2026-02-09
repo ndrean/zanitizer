@@ -55,7 +55,7 @@ pub const DOMBridge = struct {
     fn styleFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
 
     /// Custom createElement that handles canvas and template elements specially
-    /// - canvas: Returns a native Canvas object (not a DOM element)
+    /// - canvas: Returns a native Canvas object with a backing DOM <canvas> element
     /// - template: Uses z.createTemplate() which properly creates the content DocumentFragment
     fn js_createElement_with_canvas(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
         const ctx = w.Context{ .ptr = ctx_ptr };
@@ -67,10 +67,23 @@ pub const DOMBridge = struct {
         const tag_name = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         defer ctx.freeZString(tag_name);
 
-        // Handle canvas specially - returns native Canvas object
+        // Get document from this_val (needed for all element types)
+        const doc: *z.HTMLDocument = blk: {
+            if (z.qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+            if (z.qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+            return ctx.throwTypeError("Method called on object that is not a Document");
+        };
+
+        // Handle canvas specially - native Canvas with backing DOM element
         if (std.ascii.eqlIgnoreCase(tag_name, "canvas")) {
             // Create Canvas instance (default 300x150 per HTML spec)
             const canvas_struct = js_canvas.Canvas.init(rc.allocator, 300, 150) catch return ctx.throwOutOfMemory();
+
+            // Create backing DOM <canvas> element for DOM tree participation
+            canvas_struct.element = z.createElement(doc, "canvas") catch {
+                canvas_struct.deinit();
+                return ctx.throwInternalError("createElement canvas failed");
+            };
 
             // Create JS object with canvas class
             const obj = z.qjs.JS_NewObjectClass(ctx.ptr, rc.classes.canvas);
@@ -83,13 +96,6 @@ pub const DOMBridge = struct {
             _ = z.qjs.JS_SetOpaque(obj, canvas_struct);
             return obj;
         }
-
-        // Get document from this_val
-        const doc: *z.HTMLDocument = blk: {
-            if (z.qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-            if (z.qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-            return ctx.throwTypeError("Method called on object that is not a Document");
-        };
 
         // Handle template specially - requires z.createTemplate for proper content DocumentFragment
         if (std.ascii.eqlIgnoreCase(tag_name, "template")) {
@@ -265,6 +271,12 @@ pub const DOMBridge = struct {
                 try ctx.setPropertyStr(el_proto, "insertAdjacentHTML", iah_fn);
             }
 
+            // Element.insertAdjacentElement(position, newElement)
+            {
+                const iae_fn = ctx.newCFunction(js_insertAdjacentElement, "insertAdjacentElement", 2);
+                try ctx.setPropertyStr(el_proto, "insertAdjacentElement", iae_fn);
+            }
+
             // Element.focus() - no-op in headless environment
             {
                 const focus_fn = ctx.newCFunction(js_focus, "focus", 0);
@@ -369,7 +381,10 @@ pub const DOMBridge = struct {
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);
 
-        try z.initDocumentCSS(doc, true);
+        // NOTE: Do NOT call initDocumentCSS here - it will be called by
+        // loadHTML/loadPage after the actual HTML is parsed and sanitized.
+        // Calling it here on the empty doc causes corruption when the doc
+        // is later re-parsed by insertHTML (lxb_html_document_parse).
         try z.insertHTML(doc, "<html><head></head><body></body></html>");
         const parser = try z.createCssStyleParser();
         errdefer z.destroyCssStyleParser(parser);
@@ -763,6 +778,12 @@ pub const DOMBridge = struct {
                 const doc: *z.HTMLDocument = @ptrCast(@alignCast(ptr));
                 return z.documentRoot(doc); // Cast *HTMLDocument -> *DomNode
             }
+        }
+
+        // 5. Is it a Canvas with a backing DOM element?
+        if (ctx.getOpaque(val, rc.classes.canvas)) |ptr| {
+            const canvas: *js_canvas.Canvas = @ptrCast(@alignCast(ptr));
+            if (canvas.element) |el| return z.elementToNode(el);
         }
 
         return null;
@@ -1529,6 +1550,15 @@ fn js_splitText(
 }
 
 /// Element.insertAdjacentHTML(position, html) - inserts parsed HTML relative to element
+///
+/// Strategy: Instead of DOMParser (creates elements in a separate document with wrong
+/// owner_document and no CSS structures), we use setInnerHTML on a temp <div> in the
+/// MAIN document. This ensures:
+/// 1. Elements have correct owner_document (main doc with CSS initialized)
+/// 2. CSS event watchers fire during parsing (lxb_style_event_insert)
+/// 3. Stylesheet rules are applied immediately to new elements
+///
+/// When sanitization is enabled, HTML is first sanitized via temp doc roundtrip.
 fn js_insertAdjacentHTML(
     ctx_ptr: ?*z.qjs.JSContext,
     this_val: zqjs.Value,
@@ -1549,14 +1579,154 @@ fn js_insertAdjacentHTML(
     const html_str = ctx.toZString(argv[1]) catch return w.EXCEPTION;
     defer ctx.freeZString(html_str);
 
-    z.insertAdjacentHTML(rc.allocator, el, position_str, html_str) catch |err| {
+    // Step 1: Determine the final HTML (sanitized or raw)
+    var clean_html_alloc: ?[]const u8 = null;
+    defer if (clean_html_alloc) |ch| rc.allocator.free(ch);
+
+    if (rc.sanitize_enabled) {
+        const sanitizer_mod = @import("modules/sanitizer.zig");
+        const strict_options = sanitizer_mod.SanitizeOptions{
+            .remove_scripts = true,
+            .remove_styles = false,
+            .sanitize_css = true,
+            .remove_comments = rc.sanitize_options.remove_comments,
+            .strict_uri = rc.sanitize_options.strict_uri,
+            .sanitize_dom_clobbering = true,
+            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
+            .allow_embeds = false,
+            .allow_iframes = false,
+            .frameworks = rc.sanitize_options.frameworks,
+        };
+        var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch {
+            return ctx.throwTypeError("Failed to initialize sanitizer");
+        };
+        defer san.deinit();
+
+        const temp_doc = z.parseHTML(rc.allocator, html_str) catch {
+            return ctx.throwTypeError("insertAdjacentHTML: failed to parse HTML");
+        };
+        defer z.destroyDocument(temp_doc);
+
+        const temp_body = z.bodyElement(temp_doc) orelse {
+            return ctx.throwTypeError("insertAdjacentHTML: no body in parsed HTML");
+        };
+        san.sanitizeNodeInternal(z.elementToNode(temp_body)) catch {
+            return ctx.throwTypeError("insertAdjacentHTML: sanitization failed");
+        };
+
+        clean_html_alloc = z.innerHTML(rc.allocator, temp_body) catch {
+            return ctx.throwTypeError("insertAdjacentHTML: serialization failed");
+        };
+    }
+
+    const final_html = clean_html_alloc orelse html_str;
+
+    // Step 2: Parse via setInnerHTML on a temp element in the MAIN document.
+    // This uses lxb_html_element_inner_html_set which internally calls
+    // lxb_html_document_parse_fragment(doc, &element->element, ...) so the
+    // context element determines HTML5 parsing rules (table context, select, etc.)
+    // We use the SAME TAG as the target for correct parsing context (spec-compliant).
+    const target_node = z.elementToNode(el);
+    const doc = z.ownerDocument(target_node);
+    const tag = z.tagName_zc(el);
+
+    const temp_el = z.createElement(doc, tag) catch {
+        return ctx.throwInternalError("insertAdjacentHTML: createElement failed");
+    };
+    z.setInnerHTML(temp_el, final_html) catch {
+        return ctx.throwInternalError("insertAdjacentHTML: setInnerHTML failed");
+    };
+
+    const temp_node = z.elementToNode(temp_el);
+
+    // Step 3: Move children from temp element to the correct position
+    if (std.ascii.eqlIgnoreCase(position_str, "beforeend")) {
+        var child = z.firstChild(temp_node);
+        while (child) |c| {
+            const next = z.nextSibling(c);
+            z.appendChild(target_node, c);
+            child = next;
+        }
+    } else if (std.ascii.eqlIgnoreCase(position_str, "afterbegin")) {
+        const first = z.firstChild(target_node);
+        var child = z.firstChild(temp_node);
+        while (child) |c| {
+            const next = z.nextSibling(c);
+            if (first) |f| {
+                z.insertBefore(f, c);
+            } else {
+                z.appendChild(target_node, c);
+            }
+            child = next;
+        }
+    } else if (std.ascii.eqlIgnoreCase(position_str, "beforebegin")) {
+        const parent = z.parentNode(target_node) orelse {
+            return ctx.throwTypeError("insertAdjacentHTML beforebegin: no parent node");
+        };
+        _ = parent;
+        var child = z.firstChild(temp_node);
+        while (child) |c| {
+            const next = z.nextSibling(c);
+            z.insertBefore(target_node, c);
+            child = next;
+        }
+    } else if (std.ascii.eqlIgnoreCase(position_str, "afterend")) {
+        var insert_after = target_node;
+        var child = z.firstChild(temp_node);
+        while (child) |c| {
+            const next = z.nextSibling(c);
+            if (z.nextSibling(insert_after)) |sibling| {
+                z.insertBefore(sibling, c);
+            } else if (z.parentNode(insert_after)) |parent| {
+                z.appendChild(parent, c);
+            }
+            insert_after = c;
+            child = next;
+        }
+    } else {
+        return ctx.throwTypeError("Invalid position for insertAdjacentHTML");
+    }
+
+    return w.UNDEFINED;
+}
+
+/// Element.insertAdjacentElement(position, newElement) - inserts element relative to target
+fn js_insertAdjacentElement(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 2) return ctx.throwTypeError("insertAdjacentElement requires 2 arguments");
+
+    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("insertAdjacentElement called on non-Element");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+
+    const position_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(position_str);
+
+    // Unwrap second argument as HTMLElement (also supports Canvas via backing element)
+    const new_el: *z.HTMLElement = blk: {
+        if (z.qjs.JS_GetOpaque(argv[1], rc.classes.html_element)) |p|
+            break :blk @ptrCast(@alignCast(p));
+        if (z.qjs.JS_GetOpaque(argv[1], rc.classes.canvas)) |p| {
+            const canvas: *js_canvas.Canvas = @ptrCast(@alignCast(p));
+            if (canvas.element) |backing| break :blk backing;
+        }
+        return ctx.throwTypeError("Second argument must be an Element");
+    };
+
+    z.insertAdjacentElement(el, position_str, new_el) catch |err| {
         return switch (err) {
-            z.Err.InvalidPosition => ctx.throwTypeError("Invalid position for insertAdjacentHTML"),
-            else => ctx.throwTypeError("insertAdjacentHTML failed"),
+            z.Err.InvalidPosition => ctx.throwTypeError("Invalid position for insertAdjacentElement"),
+            else => ctx.throwTypeError("insertAdjacentElement failed"),
         };
     };
 
-    return w.UNDEFINED;
+    return ctx.dupValue(argv[1]);
 }
 
 fn js_replaceWith(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {

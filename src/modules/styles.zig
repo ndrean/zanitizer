@@ -116,6 +116,23 @@ pub fn attachElementStyles(element: *z.HTMLElement) !void {
     }
 }
 
+/// Attach stylesheet rules to all elements in a subtree.
+/// Call this after dynamically inserting content (innerHTML, appendChild, etc.)
+/// to ensure CSS rules are applied to newly inserted elements.
+pub fn attachSubtreeStyles(node: *z.DomNode) !void {
+    // Attach styles to this node if it's an element
+    if (z.nodeToElement(node)) |element| {
+        try attachElementStyles(element);
+    }
+
+    // Recursively process children
+    var child = z.firstChild(node);
+    while (child) |c| {
+        try attachSubtreeStyles(c);
+        child = z.nextSibling(c);
+    }
+}
+
 // ----------------------------------------------------------------------------
 // INLINE STYLE HELPERS
 // ----------------------------------------------------------------------------
@@ -205,7 +222,7 @@ pub fn parseElementStyle(element: *z.HTMLElement) !void {
 
 // INTERNAL HELPER: Syncs the CSSOM state back to the string attribute `style="..."`
 // Should ONLY be called when modifying inline styles directly.
-fn syncStyleAttribute(allocator: std.mem.Allocator, element: *z.HTMLElement) !void {
+pub fn syncStyleAttribute(allocator: std.mem.Allocator, element: *z.HTMLElement) !void {
     const new_attr_str = try serializeElementStyles(allocator, element);
     defer allocator.free(new_attr_str);
 
@@ -247,6 +264,19 @@ pub fn loadStyleTags(
 
             try z.attachStylesheet(doc, tag_sst);
         }
+    }
+}
+
+/// Parse inline `style=""` attributes into lexbor's CSSOM for all elements.
+/// Use this in the sanitize path where `initDocumentCSS` is called AFTER parsing,
+/// so lexbor's event watchers missed the inline styles during the parse.
+/// In the trusted path (`initDocumentCSS` BEFORE parsing), this is NOT needed.
+pub fn loadInlineStyles(allocator: std.mem.Allocator, doc: *z.HTMLDocument) !void {
+    const elements = try z.querySelectorAll(allocator, z.documentRoot(doc).?, "[style]");
+    defer allocator.free(elements);
+
+    for (elements) |el| {
+        try parseElementStyle(el);
     }
 }
 

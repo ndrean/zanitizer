@@ -20,7 +20,7 @@ console.log("  Babel transform done -> " + compiledPath);
 // Step 2: Bundle the compiled (plain JS) output with Bun
 const result = await Bun.build({
   entrypoints: [compiledPath],
-  outdir: "dist",
+  outdir: "../vendor",
   naming: "bench-solid.js",
   target: "browser",
   minify: false,

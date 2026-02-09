@@ -12,7 +12,6 @@ const HtmlTag = html_tags.HtmlTag;
 const Err = z.Err;
 
 pub const print = std.debug.print;
-
 const testing = std.testing;
 
 const LXB_HTML_SERIALIZE_OPT_UNDEF: c_int = 0x00;
@@ -27,7 +26,6 @@ const lxbString = extern struct {
 extern "c" fn lxb_html_serialize_deep_str(node: *z.DomNode, str: *lxbString) c_int;
 //outerHTML
 extern "c" fn lxb_html_serialize_tree_str(node: *z.DomNode, str: *lxbString) usize;
-
 extern "c" fn lxb_html_serialize_pretty_tree_cb(
     node: *z.DomNode,
     opt: usize,
@@ -45,7 +43,6 @@ pub fn outerNodeHTML(allocator: std.mem.Allocator, node: *z.DomNode) ![]u8 {
         .length = 0,
         .size = 0,
     };
-
     if (lxb_html_serialize_tree_str(node, &str) != z._OK) {
         return Err.SerializeFailed;
     }
@@ -68,7 +65,6 @@ pub fn outerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
         .length = 0,
         .size = 0,
     };
-
     if (lxb_html_serialize_tree_str(z.elementToNode(element), &str) != z._OK) {
         return Err.SerializeFailed;
     }
@@ -96,7 +92,6 @@ pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
         z.templateContent(template)
     else
         z.elementToNode(element);
-
     // Return empty string for elements with no children (matches browser behavior)
     if (z.firstChild(serialize_node) == null) {
         return try allocator.alloc(u8, 0);
@@ -107,7 +102,6 @@ pub fn innerHTML(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
         .length = 0,
         .size = 0,
     };
-
     if (lxb_html_serialize_deep_str(serialize_node, &str) != z._OK) {
         return Err.SerializeFailed;
     }
@@ -129,38 +123,38 @@ test "inner/outerHTML" {
     const outer = try z.outerHTML(allocator, body);
     defer allocator.free(outer);
     try testing.expectEqualStrings("<body><p>hi</p></body>", outer);
-
     const inner = try z.innerHTML(allocator, body);
     defer allocator.free(inner);
     try testing.expectEqualStrings("<p>hi</p>", inner);
 }
 
-pub fn setOuterHTML(allocator: std.mem.Allocator, element: *z.HTMLElement, html: []const u8) !void {
+pub fn setOuterHTML(_: std.mem.Allocator, element: *z.HTMLElement, html: []const u8) !void {
     const node = z.elementToNode(element);
     const parent = z.parentNode(node) orelse return error.NoParentNode;
 
-    // 1. Parse the HTML string into a Document Fragment
-    // We use the existing Parser wrapper you have in parsing.zig
-    var parser = try z.DOMParser.init(allocator);
-    defer parser.deinit();
+    // Parse via setInnerHTML on a temp element in the MAIN document.
+    // Uses the PARENT's tag for correct parsing context (outerHTML replaces
+    // the element, so new content is parsed as children of the parent).
+    const doc = z.ownerDocument(node);
+    const parent_el = z.nodeToElement(parent) orelse return error.NoParentNode;
+    const parent_tag = z.tagName_zc(parent_el);
+    const temp = try z.createElement(doc, parent_tag);
 
-    // Context is important! Parsing <td> needs a <tr> context, etc.
-    // We use the element itself or body as context.
-    const fragment = try parser.parseFromStringInContext(html, z.ownerDocument(node), .body, // Fallback context
-        .permissive);
-    // fragment is now a populated DocumentFragment node
+    // Parse through document's parser (fires CSS events, correct owner_document)
+    try z.setInnerHTML(temp, html);
 
-    // 2. BULK INSERT (No Iteration!)
-    // Lexbor's insertBefore detects that 'fragment' is a DocumentFragment
-    // and automatically moves all its children into 'parent' before 'node'.
-    z.insertBefore(parent, fragment);
+    // Move children from temp before the target element
+    const temp_node = z.elementToNode(temp);
+    var child = z.firstChild(temp_node);
+    while (child) |c| {
+        const next = z.nextSibling(c);
+        z.insertBefore(node, c);
+        child = next;
+    }
 
-    // 3. Remove & Destroy the old element
+    // Remove & destroy the old element
     z.removeNode(node);
     z.destroyNode(node);
-
-    // 4. Clean up the (now empty) fragment shell
-    z.destroyNode(fragment);
 }
 
 /// [serializer] Set outerHTML wrapper for JS bindings (uses page allocator)
@@ -179,9 +173,14 @@ const ProcessCtx = struct {
     expect_attr_value: bool,
     found_equal: bool,
     current_element_tag: ?[]const u8 = null,
-    current_element_enum: ?z.HtmlTag = null, // Store enum for faster attribute validation
+    current_element_enum: ?z.HtmlTag = null,
     current_attribute: ?[]const u8 = null,
-    expect_element_next: bool = false, // Next token after < should be element name
+    expect_element_next: bool = false,
+
+    // New 0.15.2+ Writer Pattern
+    // We store a pointer to the Writer struct because the interface is intrusive
+    // and we must not copy it.
+    file_writer: ?*std.fs.File.Writer = null,
 
     pub fn init(
         indent: usize,
@@ -195,6 +194,7 @@ const ProcessCtx = struct {
             .current_element_enum = null,
             .current_attribute = null,
             .expect_element_next = false,
+            .file_writer = null,
         };
     }
 };
@@ -202,17 +202,7 @@ const ProcessCtx = struct {
 /// [serializer] Prints the current node in a pretty format. No deallocation needed.
 ///
 /// The styling is defined in the "colours.zig" module.
-///
-/// It defaults to print to the TTY with `z.Writer.z.print()`. You can also `log()` into a file.
-/// ```
-/// try z.Writer.initLog("logfile.log");
-/// defer z.Writer.deinitLog();
-///
-/// const print = z.Writer.log;
-/// try z.prettyPrint(body);
-///
-/// ---
-///```
+/// It defaults to print to the TTY with `z.print()`.
 pub fn prettyPrint(allocator: std.mem.Allocator, node: *z.DomNode) !void {
     // First, apply aggressive minification for clean TTY display
     if (z.nodeToElement(node)) |element| {
@@ -247,27 +237,61 @@ fn prettyPrintOpt(
     );
 }
 
-/// debug function to apply a \t between each token to visualize them
-fn debugTabber(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv(.c) c_int {
-    _ = context;
-    _ = len;
-    z.print("{s}|\t", .{data});
-    return 0;
+/// [serializer] Saves the DOM structure to a clean text file
+/// Uses the new 0.15.2+ buffered writer pattern with intrusive interface.
+pub fn saveDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, filename: []const u8) !void {
+    _ = allocator;
+    // 1. Create File
+    var file = try std.fs.cwd().createFile(filename, .{});
+    defer file.close();
+
+    // 2. Setup Buffered Writer (Stack Allocated)
+    // NOTE: Zig 0.15.2+ API pattern
+    var buffer: [4096]u8 = undefined;
+    var fw = file.writer(&buffer);
+
+    // 3. Setup Context
+    var ctx = ProcessCtx.init(0);
+    // Pass pointer to fw (DO NOT COPY fw)
+    ctx.file_writer = &fw;
+
+    // 4. Serialize
+    const root = z.documentRoot(doc) orelse return error.NoRoot;
+
+    const res = lxb_html_serialize_pretty_tree_cb(
+        root,
+        ctx.opt,
+        ctx.indent,
+        defaultStyler,
+        &ctx,
+    );
+
+    if (res != z._OK) return error.SerializeFailed;
+
+    // 5. FLUSH (Required!)
+    try fw.interface.flush();
 }
 
-/// [serializer] Default styling function for serialized output in TTY
+/// [serializer] Default styling function for serialized output in TTY or File
 fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv(.c) c_int {
     const ctx_ptr: *ProcessCtx = @ptrCast(@alignCast(context.?));
     if (len == 0) return 0;
 
     const text = data[0..len];
-
     if (z.isWhitespaceOnlyText(text)) {
-        z.print("{s}", .{text});
+        if (ctx_ptr.file_writer) |fw| {
+            // New IO Interface access
+            fw.interface.print("{s}", .{text}) catch {};
+        } else {
+            z.print("{s}", .{text});
+        }
         return 0;
     }
     if (len == 1 and std.mem.eql(u8, text, "\"")) {
-        applyStyle(z.Style.DIM_WHITE, text);
+        if (ctx_ptr.file_writer == null) {
+            applyStyle(ctx_ptr, z.Style.DIM_WHITE, text);
+        }
+        // If file_writer exists, we do nothing (suppress the quote)
         return 0;
     }
 
@@ -277,7 +301,7 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
         ctx_ptr.expect_element_next = true;
         ctx_ptr.expect_attr_value = false;
         ctx_ptr.found_equal = false;
-        applyStyle(z.SyntaxStyle.brackets, text);
+        applyStyle(ctx_ptr, z.SyntaxStyle.brackets, text);
         return 0;
     }
 
@@ -288,7 +312,7 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
         ctx_ptr.current_element_enum = null;
         ctx_ptr.expect_attr_value = false;
         ctx_ptr.found_equal = false;
-        applyStyle(z.SyntaxStyle.brackets, text);
+        applyStyle(ctx_ptr, z.SyntaxStyle.brackets, text);
         return z._CONTINUE;
     }
 
@@ -301,44 +325,40 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
             const tag_style = z.getStyleForElementEnum(tag);
             if (tag_style) |style| {
                 ctx_ptr.expect_element_next = false;
-                ctx_ptr.current_element_tag = text; // Track current element for attribute validation
-                ctx_ptr.current_element_enum = tag; // Store enum for faster attribute validation
-                applyStyle(style, text);
+                ctx_ptr.current_element_tag = text;
+                ctx_ptr.current_element_enum = tag;
+                applyStyle(ctx_ptr, style, text);
                 return z._CONTINUE;
             }
         }
     }
 
-    // Handle attributes using optimized enum-based validation (with fallbacks)
+    // Handle attributes using optimized enum-based validation
     const isAttr = if (ctx_ptr.current_element_enum) |element_enum|
-        html_spec.isAttributeAllowedEnum(element_enum, text) // O(1) enum-based lookup
+        html_spec.isAttributeAllowedEnum(element_enum, text)
     else if (ctx_ptr.current_element_tag) |element_tag|
-        html_spec.isAttributeAllowed(element_tag, text) // String-based fallback for custom elements
+        html_spec.isAttributeAllowed(element_tag, text)
     else
-        z.isKnownAttribute(text); // General attribute validation
+        z.isKnownAttribute(text);
 
     if (isAttr) {
-        ctx_ptr.current_attribute = text; // Track current attribute for value validation
-        ctx_ptr.expect_attr_value = true; // Set flag for potential attr_value
-        applyStyle(z.SyntaxStyle.attribute, text);
+        ctx_ptr.current_attribute = text;
+        ctx_ptr.expect_attr_value = true;
+        applyStyle(ctx_ptr, z.SyntaxStyle.attribute, text);
         return z._CONTINUE;
     }
 
-    // Handle the tricky =" sign to signal a potential following attribute value
     const containsEqualSign = std.mem.endsWith(u8, text, "=\"");
-
     if (containsEqualSign) {
         ctx_ptr.found_equal = true;
-        applyStyle(z.Style.DIM_WHITE, text);
+        applyStyle(ctx_ptr, z.Style.DIM_WHITE, text);
         return z._CONTINUE;
     }
 
-    // text following the =" token with whitelisted attribute
     if (ctx_ptr.expect_attr_value and ctx_ptr.found_equal) {
         ctx_ptr.found_equal = false;
         ctx_ptr.expect_attr_value = false;
 
-        // Enhanced attribute value validation using unified specification
         const is_dangerous = z.isDangerousAttributeValue(text);
         var is_valid = true;
 
@@ -349,60 +369,95 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
         }
 
         if (is_dangerous) {
-            applyStyle(z.SyntaxStyle.danger, text);
+            applyStyle(ctx_ptr, z.SyntaxStyle.danger, text);
         } else if (!is_valid) {
-            // Invalid attribute value - use warning style (yellow)
-            applyStyle(z.Style.YELLOW, text);
+            applyStyle(ctx_ptr, z.Style.YELLOW, text);
         } else {
-            applyStyle(z.SyntaxStyle.attr_value, text); // Normal styling
+            applyStyle(ctx_ptr, z.SyntaxStyle.attr_value, text);
         }
 
-        // Reset attribute context
         ctx_ptr.current_attribute = null;
         return z._CONTINUE;
     }
 
-    // text following the =" token without whitelisted attribute: suspicious attribute case
     if (!ctx_ptr.expect_attr_value and ctx_ptr.found_equal) {
         ctx_ptr.expect_attr_value = false;
         ctx_ptr.found_equal = false;
-        applyStyle(z.SyntaxStyle.danger, text);
+        applyStyle(ctx_ptr, z.SyntaxStyle.danger, text);
         return z._CONTINUE;
     }
 
-    ctx_ptr.expect_attr_value = false; // Reset state as attributes may have no value
-    applyStyle(z.SyntaxStyle.text, text);
+    ctx_ptr.expect_attr_value = false;
+    applyStyle(ctx_ptr, z.SyntaxStyle.text, text);
     return z._CONTINUE;
 }
 
-fn applyStyle(style: []const u8, text: []const u8) void {
-    z.print("{s}", .{style});
-    z.print("{s}", .{text});
-    z.print("{s}", .{z.Style.RESET});
+fn applyStyle(ctx: *ProcessCtx, style: []const u8, text: []const u8) void {
+    if (ctx.file_writer) |fw| {
+        // FILE MODE: Use the intrusive interface to print cleanly
+        fw.interface.print("{s}", .{text}) catch {};
+    } else {
+        // TTY MODE: Print with ANSI colors
+        z.print("{s}", .{style});
+        z.print("{s}", .{text});
+        z.print("{s}", .{z.Style.RESET});
+    }
 }
 
-test "what does std.mem.endsWith, std.mem.eql find?" {
-    const t1 = "onclick=\"";
-    const t2 = "=\"";
-    try testing.expect(std.mem.endsWith(u8, t1, "=\""));
-    try testing.expect(std.mem.eql(u8, t2, "=\""));
+/// [tree] Debug: Walk and print DOM tree
+fn walkTree(node: *z.DomNode, depth: u8) void {
+    var child = z.firstChild(node);
+    while (child != null) {
+        const name = if (z.isTypeElement(child.?)) z.qualifiedName_zc(z.nodeToElement(child.?).?) else z.nodeName_zc(child.?);
+
+        // Convert string to enum and use fast lookup
+        const tag_enum = z.stringToEnum(z.HtmlTag, name);
+        const ansi_colour = if (tag_enum) |tag| z.getStyleForElementEnum(tag) orelse z.Style.DIM_WHITE else z.Style.DIM_WHITE;
+        const ansi_reset = z.Style.RESET;
+        const indent = switch (@min(depth, 10)) {
+            0 => "",
+            1 => "  ",
+            2 => "    ",
+            3 => "      ",
+            4 => "        ",
+            5 => "          ",
+            else => "            ",
+        };
+        z.print("{s}{s}{s}{s}\n", .{ indent, ansi_colour, name, ansi_reset });
+
+        walkTree(child.?, depth + 1);
+        child = z.nextSibling(child.?);
+    }
 }
 
-test "outerNodeHTML" {
-    const allocator = testing.allocator;
-    const doc = try z.parseHTML(allocator, "<p>test</p>");
-    defer z.destroyDocument(doc);
-
-    const body = z.bodyElement(doc).?;
-    const body_node = z.elementToNode(body);
-
-    const outer = try outerNodeHTML(allocator, body_node);
-    defer allocator.free(outer);
-
-    try testing.expectEqualStrings("<body><p>test</p></body>", outer);
+/// [tree] Debug: print document structure (for debugging)
+pub fn printDocStruct(doc: *z.HTMLDocument) !void {
+    const root = z.documentRoot(doc).?;
+    walkTree(root, 0);
 }
 
-// --[TODO]---
+/// [serializer] Pretty print entire document with syntax highlighting
+///
+/// Convenience wrapper that gets the document root and calls prettyPrint.
+/// Uses ANSI colors for different HTML elements, attributes, and values.
+///
+/// ## Example
+/// ```zig
+/// const doc = try z.parseHTML(allocator, "<html>...</html>");
+/// defer z.destroyDocument(doc);
+/// try z.printDOM(allocator, doc);
+/// ```
+pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
+    if (title.len > 0) {
+        try z.documentSetTitle(doc, title);
+    }
+    const root = z.documentRoot(doc) orelse return;
+    try prettyPrint(allocator, root);
+}
+
+/// Alias for backwards compatibility
+pub const ppDoc = printDOM;
+
 test "web component" {
     const html =
         \\<!DOCTYPE html>
@@ -470,59 +525,13 @@ test "web component" {
         \\  </body>
         \\</html>
     ;
-    _ = html;
+
+    const allocator = std.testing.allocator;
+    const doc = try z.parseHTML(allocator, html);
+    defer z.destroyDocument(doc);
+    try z.printDOM(allocator, doc, "TEST");
+    z.print("\n\n", .{});
+    try printDocStruct(doc);
+    z.print("\n\n", .{});
+    try saveDOM(allocator, doc, "test.txt");
 }
-
-/// [tree] Debug: Walk and print DOM tree
-fn walkTree(node: *z.DomNode, depth: u8) void {
-    var child = z.firstChild(node);
-    while (child != null) {
-        const name = if (z.isTypeElement(child.?)) z.qualifiedName_zc(z.nodeToElement(child.?).?) else z.nodeName_zc(child.?);
-
-        // Convert string to enum and use fast lookup
-        const tag_enum = z.stringToEnum(z.HtmlTag, name);
-        const ansi_colour = if (tag_enum) |tag| z.getStyleForElementEnum(tag) orelse z.Style.DIM_WHITE else z.Style.DIM_WHITE;
-        const ansi_reset = z.Style.RESET;
-        const indent = switch (@min(depth, 10)) {
-            0 => "",
-            1 => "  ",
-            2 => "    ",
-            3 => "      ",
-            4 => "        ",
-            5 => "          ",
-            else => "            ",
-        };
-        z.print("{s}{s}{s}{s}\n", .{ indent, ansi_colour, name, ansi_reset });
-
-        walkTree(child.?, depth + 1);
-        child = z.nextSibling(child.?);
-    }
-}
-
-/// [tree] Debug: print document structure (for debugging)
-pub fn printDocStruct(doc: *z.HTMLDocument) !void {
-    const root = z.documentRoot(doc).?;
-    walkTree(root, 0);
-}
-
-/// [serializer] Pretty print entire document with syntax highlighting
-///
-/// Convenience wrapper that gets the document root and calls prettyPrint.
-/// Uses ANSI colors for different HTML elements, attributes, and values.
-///
-/// ## Example
-/// ```zig
-/// const doc = try z.parseHTML(allocator, "<html>...</html>");
-/// defer z.destroyDocument(doc);
-/// try z.printDOM(allocator, doc);
-/// ```
-pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
-    if (title.len > 0) {
-        try z.documentSetTitle(doc, title);
-    }
-    const root = z.documentRoot(doc) orelse return;
-    try prettyPrint(allocator, root);
-}
-
-/// Alias for backwards compatibility
-pub const ppDoc = printDOM;

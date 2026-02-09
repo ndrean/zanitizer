@@ -258,6 +258,7 @@ pub fn js_secure_module_normalize(
                 _ = qjs.JS_ThrowReferenceError(ctx, "Failed to resolve relative URL");
                 return null;
             };
+            std.debug.print("{s}\n", .{resolved_url});
             defer allocator.free(resolved_url);
             return qjs.js_strndup(ctx, resolved_url.ptr, resolved_url.len);
         }

@@ -10,6 +10,8 @@ pub const qjs = @cImport({
     @cInclude("quickjs.h");
 });
 
+pub const MAX_WORKERS = 8;
+
 pub const curl = @import("curl");
 // Import wrapper for cleaner QuickJS API
 pub const wrapper = @import("wrapper.zig");
@@ -28,6 +30,7 @@ pub const js_blob = @import("js_blob.zig");
 
 // Exports for examples
 pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;
+pub const LoadPageOptions = @import("script_engine.zig").LoadPageOptions;
 pub const native_bridge = @import("js_native_bridge.zig");
 pub const js_httpbin = @import("js_httpbin.zig");
 pub const runtime_context = @import("runtime_context.zig");
@@ -471,6 +474,7 @@ pub const destroyStylesheet = styles.destroyStylesheet;
 pub const parseStylesheet = styles.parseStylesheet;
 pub const attachStylesheet = styles.attachStylesheet;
 pub const attachElementStyles = styles.attachElementStyles;
+pub const attachSubtreeStyles = styles.attachSubtreeStyles;
 pub const getComputedStyle = styles.getComputedStyle;
 pub const createCssStyleParser = styles.createCssStyleParser;
 pub const destroyCssStyleParser = styles.destroyCssStyleParser;
@@ -478,6 +482,7 @@ pub const setStyleProperty = styles.setStyleProperty;
 pub const parseElementStyle = styles.parseElementStyle;
 pub const removeInlineStyleProperty = styles.removeInlineStyleProperty;
 pub const loadStyleTags = styles.loadStyleTags;
+pub const loadInlineStyles = styles.loadInlineStyles;
 pub const serializeElementStyles = styles.serializeElementStyles;
 
 //============================================================================

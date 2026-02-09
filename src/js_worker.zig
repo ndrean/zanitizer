@@ -148,6 +148,10 @@ const WorkerThread = struct {
         const rt = zqjs.Runtime.init(allocator) catch return;
         defer rt.deinit();
 
+        rt.setMemoryLimit(64 * 1024 * 1024); // 64 MB
+        rt.setGCThreshold(16 * 1024 * 1024); // 16MB before GC (avoid mid-render collection)
+        rt.setMaxStackSize(2 * 1024 * 1024); // 2 MB stack for deep vnode trees
+
         rt.setInterruptHandler(js_interrupt_handler, @ptrCast(core));
         rt.setModuleLoader(
             js_security.js_secure_module_normalize,
@@ -562,6 +566,10 @@ pub fn js_Worker_constructor(
     // const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
     const rc = RuntimeContext.get(ctx);
     const loop = rc.loop;
+    if (loop.active_worker_count.load(.monotonic) >= loop.max_workers) {
+        return ctx.throwInternalError("Worker quota exceeded");
+    }
+    _ = loop.active_worker_count.fetchAdd(1, .monotonic);
     const sandbox_root = rc.sandbox_root;
 
     const path_cstr = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
@@ -679,7 +687,10 @@ fn workerFinalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
     const ptr = qjs.JS_GetOpaque(val, worker_class_id);
     if (ptr) |p| {
         const w: *JSWorker = @ptrCast(@alignCast(p));
-        if (w.loop) |l| l.unregisterWorker(w);
+        if (w.loop) |l| {
+            _ = l.active_worker_count.fetchSub(1, .monotonic);
+            l.unregisterWorker(w);
+        }
         w.destroy();
     }
 }

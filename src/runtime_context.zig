@@ -7,6 +7,8 @@ const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const js_security = @import("js_security.zig");
 const Font = @import("font.zig").Font;
 const default_font_data = @embedFile("fonts/Arial.ttf");
+const sanitizer_mod = @import("modules/sanitizer.zig");
+pub const SanitizeOptions = sanitizer_mod.SanitizeOptions;
 
 pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
@@ -20,6 +22,11 @@ pub const RuntimeContext = struct {
     payload: ?*anyopaque = null, // generic pointer to pass in/out of callbacks
     blob_registry: std.StringHashMap(z.qjs.JSValue), // "blob:uuid" (owned string) -> Blob Object (JSValue)
     global_font: ?*Font = null,
+
+    // Sanitization settings (set by loadPage when sanitize=true)
+    // When enabled, innerHTML/outerHTML will sanitize content before insertion
+    sanitize_enabled: bool = false,
+    sanitize_options: SanitizeOptions = .{},
 
     // Central Registry of Class IDs for this Runtime
     // Zig struct -> Opaque pointer -> QuickJS Class ID

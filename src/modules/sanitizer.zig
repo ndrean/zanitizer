@@ -1228,6 +1228,9 @@ pub const Sanitizer = struct {
         defer z.destroyCssStyleParser(temp_parser);
         try z.loadStyleTags(self.allocator, doc, temp_parser);
 
+        // 5. Parse inline style="" attributes (watchers missed them)
+        try z.loadInlineStyles(self.allocator, doc);
+
         return doc;
     }
 
@@ -1280,8 +1283,9 @@ pub const Sanitizer = struct {
         try z.attachStylesheet(doc, sst);
     }
 
-    /// Internal: run the sanitization walker
-    fn sanitizeNodeInternal(self: *Self, root_node: *z.DomNode) !void {
+    /// Run the sanitization walker on a subtree.
+    /// Used by setInnerHTMLSanitized and insertAdjacentHTML sanitized paths.
+    pub fn sanitizeNodeInternal(self: *Self, root_node: *z.DomNode) !void {
         const internal_opts = self.options.toInternal();
         var context = SanitizeContext.initWithCss(self.allocator, internal_opts, &self.css_sanitizer);
         defer context.deinit();
@@ -1294,6 +1298,29 @@ pub const Sanitizer = struct {
             internal_opts,
             &self.css_sanitizer,
         );
+    }
+
+    /// Set innerHTML with sanitization.
+    /// Parses HTML, sanitizes it, then replaces element's children.
+    /// Used by innerHTML setter when sanitization is enabled in RuntimeContext.
+    pub fn setInnerHTMLSanitized(self: *Self, element: *z.HTMLElement, html: []const u8) !void {
+        // 1. Parse HTML into a temporary document (isolated from live DOM)
+        const temp_doc = try z.parseHTML(self.allocator, html);
+        defer z.destroyDocument(temp_doc);
+
+        // 2. Get the body element which contains the parsed content
+        const temp_body = z.bodyElement(temp_doc) orelse return error.NoBodyElement;
+
+        // 3. Sanitize the temporary document's body (safe - not in live DOM)
+        const temp_body_node = z.elementToNode(temp_body);
+        try self.sanitizeNodeInternal(temp_body_node);
+
+        // 4. Serialize the sanitized content to a clean HTML string
+        const clean_html = try z.innerHTML(self.allocator, temp_body);
+        defer self.allocator.free(clean_html);
+
+        // 5. Insert the clean content into the target element
+        try z.setInnerHTML(element, clean_html);
     }
 };
 

@@ -378,7 +378,7 @@ pub const ScriptEngine = struct {
         return js_marshall.jsToZig(self.allocator, self.ctx, val, T);
     }
 
-    /// Evaluates JS code that might return a Promise
+    /// Evaluates JS code that might return a Promise as .global
     ///
     /// Runs the event loop until completion, checks for rejections, and marshals the result with the given type `T` that must match the type returned from JS.
     pub fn evalAsyncAs(self: *ScriptEngine, allocator: std.mem.Allocator, comptime T: type, code: []const u8, name: []const u8) !T {
@@ -468,8 +468,10 @@ pub const ScriptEngine = struct {
     pub fn loadHTML(self: *ScriptEngine, html: []const u8) !void {
         const bridge = self.dom;
 
+        // Trusted content: init CSS BEFORE parsing so lexbor's event
+        // watchers automatically pick up <style> and inline style=""
+        // as elements are created during the parse.
         try z.initDocumentCSS(bridge.doc, true);
-
         try z.insertHTML(bridge.doc, html);
         // try z.applySanitization(
         //     self.allocator,
@@ -524,30 +526,33 @@ pub const ScriptEngine = struct {
     pub fn loadPage(self: *ScriptEngine, html: []const u8, options: LoadPageOptions) !void {
         const bridge = self.dom;
 
+        // Store sanitization settings in RuntimeContext for use by innerHTML/outerHTML setters
+        self.rc.sanitize_enabled = options.sanitize;
+        self.rc.sanitize_options = options.sanitizer_options;
+
         if (options.sanitize) {
             // Create sanitizer for this operation
             var san = try Sanitizer.init(self.allocator, options.sanitizer_options);
             defer san.deinit();
 
-            // 1. Load HTML into engine's document
-            try z.initDocumentCSS(bridge.doc, true);
+            // 1. Parse HTML
             try z.insertHTML(bridge.doc, html);
 
-            // 2. Sanitize the document in-place (mutates the DOM)
+            // 2. Sanitize the static DOM
             try san.sanitize(bridge.doc);
 
-            // 3. Load <style> tags (content already sanitized)
-            try z.loadStyleTags(self.allocator, bridge.doc, bridge.css_style_parser);
-
-            // 4. Load external stylesheets with CSS sanitization
+            // 3. Init CSS engine + load all styles from static DOM
+            try z.initDocumentCSS(bridge.doc, true);
             if (options.load_stylesheets) {
                 try self.loadExternalStylesheetsSanitized(options.base_dir, &san);
             }
+            try z.loadStyleTags(self.allocator, bridge.doc, bridge.css_style_parser);
+            try z.loadInlineStyles(self.allocator, bridge.doc);
         } else {
-            // Trusted content: use existing loadHTML path
+            // Trusted content: initDocumentCSS BEFORE parsing (watchers handle everything)
             try self.loadHTML(html);
 
-            // Load external stylesheets without sanitization
+            // Load external stylesheets
             if (options.load_stylesheets) {
                 try self.loadExternalStylesheets(options.base_dir);
             }

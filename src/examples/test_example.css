@@ -1,0 +1,4 @@
+.untrusted {
+  color: red;
+  background-image: url("evil.com");
+}

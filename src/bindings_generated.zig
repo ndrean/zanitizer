@@ -600,10 +600,52 @@ pub fn js_set_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    z.setInnerHTML(el, val_str) catch |err| {
-        std.debug.print("JS Setter Error (innerHTML): {}\n", .{err});
-        return ctx.throwTypeError("Native Zig Error in Setter");
+
+    if (rc.sanitize_enabled) {
+        // Sanitized path: parse, sanitize, then insert
+        // For dynamically injected content, ALWAYS enforce strict settings:
+        // - remove_scripts = true (prevent script injection attacks)
+        // - remove_styles = true (prevent CSS injection via <style> tags)
+        // This is stricter than loadPage options because dynamic content is higher risk
+        const sanitizer_mod = @import("modules/sanitizer.zig");
+        const strict_options = sanitizer_mod.SanitizeOptions{
+            .remove_scripts = true, // ALWAYS remove scripts in dynamic content
+            .remove_styles = false, // Keep inline styles (sanitized by sanitize_css)
+            .sanitize_css = true, // Sanitize inline CSS (remove expression(), url(js:), etc.)
+            .remove_comments = rc.sanitize_options.remove_comments,
+            .strict_uri = rc.sanitize_options.strict_uri,
+            .sanitize_dom_clobbering = true, // Always sanitize DOM clobbering
+            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
+            .allow_embeds = false, // Never allow embeds in dynamic content
+            .allow_iframes = false, // Never allow iframes in dynamic content
+            .frameworks = rc.sanitize_options.frameworks,
+        };
+        var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch |err| {
+            std.debug.print("JS Setter Error (innerHTML sanitizer init): {}\n", .{err});
+            return ctx.throwTypeError("Failed to initialize sanitizer");
+        };
+        defer san.deinit();
+
+        // Use sanitized innerHTML insertion
+        san.setInnerHTMLSanitized(el, val_str) catch |err| {
+            std.debug.print("JS Setter Error (innerHTML sanitized): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    } else {
+        // Trusted path: direct insertion
+        z.setInnerHTML(el, val_str) catch |err| {
+            std.debug.print("JS Setter Error (innerHTML): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    }
+
+    // Always attach styles to newly inserted nodes
+    const node = z.elementToNode(el);
+    z.attachSubtreeStyles(node) catch |err| {
+        std.debug.print("JS Setter Warning (innerHTML styles): {}\n", .{err});
+        // Don't fail on style attachment errors
     };
+
     return w.UNDEFINED;
 }
 // Property Getter for content
@@ -1017,10 +1059,66 @@ pub fn js_set_outerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
     const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-    z.setOuterHTMLSimple(el, val_str) catch |err| {
-        std.debug.print("JS Setter Error (outerHTML): {}\n", .{err});
-        return ctx.throwTypeError("Native Zig Error in Setter");
-    };
+
+    // Get parent before replacement (for style attachment)
+    const parent_node = z.parentNode(z.elementToNode(el));
+
+    if (rc.sanitize_enabled) {
+        // Sanitized path: parse in temp doc, sanitize, serialize, then replace
+        const sanitizer_mod = @import("modules/sanitizer.zig");
+        const strict_options = sanitizer_mod.SanitizeOptions{
+            .remove_scripts = true,
+            .remove_styles = false,
+            .sanitize_css = true,
+            .remove_comments = rc.sanitize_options.remove_comments,
+            .strict_uri = rc.sanitize_options.strict_uri,
+            .sanitize_dom_clobbering = true,
+            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
+            .allow_embeds = false,
+            .allow_iframes = false,
+            .frameworks = rc.sanitize_options.frameworks,
+        };
+        var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML sanitizer init): {}\n", .{err});
+            return ctx.throwTypeError("Failed to initialize sanitizer");
+        };
+        defer san.deinit();
+
+        // Parse and sanitize using Sanitizer.parseHTML (sanitizes during parse)
+        const temp_doc = san.parseHTML(val_str) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML parse/sanitize): {}\n", .{err});
+            return ctx.throwTypeError("Failed to parse HTML");
+        };
+        defer z.destroyDocument(temp_doc);
+
+        const temp_body = z.bodyElement(temp_doc) orelse return ctx.throwTypeError("No body in parsed HTML");
+
+        // Serialize and replace
+        const clean_html = z.innerHTML(rc.allocator, temp_body) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML serialize): {}\n", .{err});
+            return ctx.throwTypeError("Failed to serialize HTML");
+        };
+        defer rc.allocator.free(clean_html);
+
+        z.setOuterHTMLSimple(el, clean_html) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    } else {
+        // Trusted path: direct replacement
+        z.setOuterHTMLSimple(el, val_str) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    }
+
+    // Attach styles to newly inserted content
+    if (parent_node) |parent| {
+        z.attachSubtreeStyles(parent) catch |err| {
+            std.debug.print("JS Setter Warning (outerHTML styles): {}\n", .{err});
+        };
+    }
+
     return w.UNDEFINED;
 }
 

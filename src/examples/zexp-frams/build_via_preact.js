@@ -3,7 +3,7 @@ console.log("🚀 Starting Bun Build for Zexplorer...");
 
 const result = await Bun.build({
   entrypoints: ["App.jsx"],
-  outdir: "dist",
+  outdir: "../vendor",
   naming: "app.js", // Force output filename
   target: "browser",
   minify: true, // Optional: keep it small for your 1ms boot

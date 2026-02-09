@@ -35,6 +35,7 @@ pub const ImportMap = struct {
     }
 
     /// Initialize from embedded JSON config
+    ///
     /// Returns empty ImportMap if json is null or empty
     pub fn fromJson(allocator: std.mem.Allocator, json: ?[]const u8) !ImportMap {
         var self = empty(allocator);
@@ -112,6 +113,7 @@ pub const ImportMap = struct {
     }
 
     /// Verify content against SRI hash
+    ///
     /// Returns true if no integrity requirement OR hash matches
     pub fn verifyIntegrity(self: *const ImportMap, url: []const u8, content: []const u8) bool {
         const expected = self.getIntegrity(url) orelse return true; // No requirement = pass
@@ -137,9 +139,7 @@ pub const ImportMap = struct {
     }
 };
 
-// =============================================================================
-// SRI Hash Verification
-// =============================================================================
+// === SRI Hash Verification
 
 fn verifySha256(data: []const u8, expected_b64: []const u8) bool {
     var hash: [32]u8 = undefined;
@@ -173,9 +173,7 @@ fn compareBase64(hash: []const u8, expected_b64: []const u8) bool {
     return std.mem.eql(u8, encoded, expected_b64);
 }
 
-// =============================================================================
-// Utility: Generate hash for a URL (for building config)
-// =============================================================================
+// === Utility: Generate hash for a URL (for building config)
 
 /// Compute SHA-384 hash of content and return as SRI string
 /// Caller owns returned memory

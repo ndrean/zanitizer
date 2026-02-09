@@ -12,7 +12,8 @@
     "solid-js": "https://unpkg.com/solid-js@1.8.0/dist/solid.js",
     "solid-js/web": "https://unpkg.com/solid-js@1.8.0/web/dist/web.js",
     "solid-js/html": "https://unpkg.com/solid-js@1.8.0/html/dist/html.js",
-    "vue": "https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.esm-browser.prod.min.js"
+    "vue": "https://cdn.jsdelivr.net/npm/vue@3.4.21/dist/vue.esm-browser.prod.min.js",
+    "chartjs": "https://cdn.jsdelivr.net/npm/chart.js"
   },
   "integrity": {
     "https://cdn.jsdelivr.net/npm/es-toolkit@1.44.0/+esm": "sha384-NazkyE0ijhuqnw0EJS+308qKNJe9vokaDTKxqPevkXbdWlKZtNIwnHXPwyUe4IBU"

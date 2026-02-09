@@ -60,7 +60,9 @@ pub const EventLoop = struct {
     external_quit_flag: ?*std.atomic.Value(bool) = null,
     workers: std.ArrayList(*JSWorker) = .{},
     worker_class_id: zqjs.ClassID = 0,
+    active_worker_count: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     worker_core: ?*anyopaque = null,
+    max_workers: usize = z.MAX_WORKERS,
     on_error_handler: qjs.JSValue = zqjs.UNDEFINED,
     pending_background_jobs: std.atomic.Value(usize) = .init(0),
     /// Curl Multi handle for non-blocking HTTP requests

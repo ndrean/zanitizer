@@ -12,6 +12,7 @@ pub fn main() !void {
     try verboseApproach(allocator);
     try simplifiedApproach(allocator);
     try scriptEngineApproach(allocator);
+    try example(allocator);
 
     z.print("\n" ++ "=" ** 70 ++ "\n", .{});
     z.print("  ALL TESTS COMPLETE\n", .{});
@@ -218,4 +219,52 @@ fn scriptEngineApproach(allocator: std.mem.Allocator) !void {
     z.print("    - Loading untrusted HTML with sanitization\n", .{});
     z.print("    - Executing JavaScript after page load\n", .{});
     z.print("    - Full page orchestration in one call\n\n", .{});
+}
+
+fn example(ta: std.mem.Allocator) !void {
+    const dirty =
+        \\ <html>
+        \\   <head>
+        \\    <style>
+        \\      .untrusted {
+        \\        color: red;
+        \\        background-image: url("evil.com");
+        \\      }
+        \\    </style>
+        \\   </head>
+        \\   <body>
+        \\      <div class="untrusted" onclick='alert(1)' style="font-size:16px;">
+        \\          Click me
+        \\      </div>"
+        \\   </body>
+        \\</html>
+    ;
+
+    const sbr = try std.fs.cwd().realpathAlloc(ta, ".");
+    defer ta.free(sbr);
+    var engine = try z.ScriptEngine.init(ta, sbr);
+    defer engine.deinit();
+
+    const options = z.LoadPageOptions{
+        .sanitize = true, // Enable sanitization for untrusted content
+        .base_dir = "src/examples", // Resolve relative paths from examples dir
+        .execute_scripts = true, // Execute <script> tags
+        .load_stylesheets = true, // Load <link rel="stylesheet">
+        .sanitizer_options = .{ .remove_scripts = false }, // Keep scripts for JS execution
+        .run_loop = true, // Run event loop to process module Promises
+    };
+
+    try engine.loadPage(dirty, options);
+    try z.prettyPrint(ta, z.bodyNode(engine.dom.doc).?);
+
+    const div = try z.querySelector(ta, engine.dom.doc, ".untrusted");
+    const styles = try z.serializeElementStyles(ta, div.?);
+    std.debug.print("Serialized style of DIV: {s}\n", .{styles});
+
+    std.debug.print("Check DIV by attributes\n", .{});
+    var iter = z.iterateDomAttributes(div.?);
+    while (iter.next()) |domAttr| {
+        std.debug.print("  {s}: \t", .{z.getAttributeName_zc(domAttr)});
+        std.debug.print("{s}: \n", .{z.getAttributeValue_zc(domAttr)});
+    }
 }

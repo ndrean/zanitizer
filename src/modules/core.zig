@@ -40,6 +40,8 @@ extern "c" fn lxb_dom_document_create_text_node(doc: *z.HTMLDocument, text: [*]c
 
 extern "c" fn lxb_dom_node_insert_before_wo_events(to: *z.DomNode, node: *z.DomNode) void;
 extern "c" fn lxb_dom_node_insert_after_wo_events(to: *z.DomNode, node: *z.DomNode) void;
+extern "c" fn lxb_dom_node_insert_before(to: *z.DomNode, node: *z.DomNode) void;
+extern "c" fn lxb_dom_node_insert_after(to: *z.DomNode, node: *z.DomNode) void;
 extern "c" fn lxb_dom_document_create_comment(doc: *z.HTMLDocument, data: [*]const u8, len: usize) ?*z.Comment;
 extern "c" fn lxb_dom_comment_interface_destroy(doc: *z.Comment) *z.Comment;
 extern "c" fn lxb_dom_node_insert_child(parent: *z.DomNode, child: *z.DomNode) void;
@@ -57,6 +59,7 @@ extern "c" fn lxb_dom_node_name(node: *z.DomNode, len: ?*usize) [*:0]const u8;
 extern "c" fn lxb_dom_element_tag_name(element: *z.HTMLElement, len: ?*usize) [*:0]const u8;
 extern "c" fn lxb_dom_element_qualified_name(element: *z.HTMLElement, len: *usize) [*:0]const u8;
 extern "c" fn lxb_dom_node_remove_wo_events(node: *z.DomNode) void;
+extern "c" fn lxb_dom_node_remove(node: *z.DomNode) void;
 extern "c" fn lxb_dom_node_destroy(node: *z.DomNode) void;
 extern "c" fn lxb_dom_document_destroy_text_noi(node: *z.DomNode, text: []const u8) void;
 
@@ -969,9 +972,10 @@ pub fn qualifiedName_zc(element: *z.HTMLElement) []const u8 {
 //     _ = lxb_dom_comment_interface_destroy(comment);
 // }
 
-/// [core] Remove a node from its parent
+/// [core] Remove a node from its parent.
+/// Uses the with-events version so CSS watchers fire (lxb_style_event_remove).
 pub fn removeNode(node: *z.DomNode) void {
-    lxb_dom_node_remove_wo_events(node);
+    lxb_dom_node_remove(node);
 }
 
 /// [core] Remove a child node from a parent
@@ -1581,13 +1585,15 @@ test "replaceAll" {
 }
 
 /// [core] Insert a node after a reference node.
+/// Uses the with-events version so CSS watchers fire (lxb_style_event_insert).
 pub fn insertAfter(reference_node: *z.DomNode, new_node: *z.DomNode) void {
-    lxb_dom_node_insert_after_wo_events(reference_node, new_node);
+    lxb_dom_node_insert_after(reference_node, new_node);
 }
 
 /// [core] Insert a node before a reference node (low-level)
+/// Uses the with-events version so CSS watchers fire (lxb_style_event_insert).
 pub fn insertBefore(reference_node: *z.DomNode, new_node: *z.DomNode) void {
-    lxb_dom_node_insert_before_wo_events(reference_node, new_node);
+    lxb_dom_node_insert_before(reference_node, new_node);
 }
 
 /// [core] JavaScript-compatible insertBefore

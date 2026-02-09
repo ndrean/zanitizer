@@ -61,7 +61,11 @@ pub fn build(b: *std.Build) void {
     });
     zexplorer_lib.addCSourceFile(.{
         .file = b.path("src/c/stb_image.c"),
-        .flags = &.{"-g"},
+        .flags = &.{
+            "-g",
+            // "-std=c99",
+            "-fno-sanitize=undefined",
+        },
     });
     zexplorer_lib.addCSourceFile(.{
         .file = b.path("src/css_shim.c"),
@@ -272,7 +276,8 @@ pub fn build(b: *std.Build) void {
         "src/examples/test_css_complete.zig",
         "src/examples/test_real.zig",
         "src/examples/test_all.zig",
-        "src/examples/test_js_to_zig.zig",
+        "src/examples/test_canvas.zig",
+        "src/examples/test_example.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

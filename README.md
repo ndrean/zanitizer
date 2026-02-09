@@ -1,53 +1,136 @@
-# zexplorer: a native serverless DOM & JS execution engine with a sanitization pipeline
+# zexplorer: native lightweight serverless DOM & JS execution engine with builtin  sanitization pipeline
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 [WIP]
+zexplorer is designed for content pipelines, not general-purpose application runtimes.
 
 This engine parses HTML into a real DOM and executes JavaScript against it — with an event loop, timers, fetch, and workers — without a browser.
-It includes a built-in DOM+CSS sanitizer and can run native Zig computations alongside JS. a
+It includes a built-in DOM+CSS optional sanitizer and can run native Zig computations alongside JS.
 It outputs a cleaned structured HTML or extracted data, without a browser.
 
-Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, it embeds enough Web API surface to run client framework code.
+Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, and [stb_image](https://github.com/nothings/stb), it embeds enough Web API surface to run client framework code.
 
-By providing a DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold bootand sandboxed filesystem, at the cost of a much thiner coverage of the Web API.
-
-## Project description
-
-What it has:
-
-- real DOM + CSS parsing into a native DOM tree
-- DOM + CSS mutations allowed with JavaScript or native execution
-- runs most DOM primitives and executes ES6 JavaScript
-- built-in deterministic sanitization (DOM & CSS aware cleaning)
-- sandboxed file system (upload directory only),
-- event loop,
-- Web primitives integrated: Timers, fetch, workers (OS threads), document-fragment, templates, URL, ULRSearchParams, Headers, Event, DOMParser, Blob, FormData, File, FileReaderSync, FileReader integrated.
-
-What it does not have: async I/O
-
-This is not:
-
-- a headless browser,
-- not `Node.js` nor `bun`,
-- not for streaming/async I/O workloads
-- does not process JSX code.
+By providing a minimal DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold bootand sandboxed filesystem, at the cost of a much thiner coverage of the Web API.
 
 **Security**:
 
+This engine aims to be lightweight and fast. If you plan to use untrusted code, consider the following:
+
+> [!IMPORTANT]
+> zexplorer is not a secure execution boundary for untrusted tenants; it is a deterministic content-processing engine designed to run and it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
+
+> [!WARNING]
+> `zexplorer` provides "best-effort" content-level safety with the optional sanitization step. Trusted code can by-pass this step for performance.
+
+**TLTR**:
+It is designed to safely parse, transform, and sanitize untrusted HTML and short-lived JavaScript inside an isolated environment.
+
+## Project description
+
+**What it has**:
+
+- real DOM + CSS parsing into a native DOM tree
+- DOM + CSS mutations allowed with JavaScript or native execution
+- runs enough WebDOM primitives with an evetn loop to execute modern frameworks using ES6 JavaScript
+- built-in **best-effort** sanitization (DOM & CSS aware cleaning)
+- targets a microVM one-shot usage with a sandboxed file system (upload directory only),
+
+**What it does not have or is not**
+
+- no event I/O
+- not a `Node.js` or `bun` alternative,
+- not a streaming or long-running async runtime,
+- a full Web API implementation,
+- a secure multi-tenant execution platform.
+- a headless browser replacement: not a real browser automation tool.
+
+**Other characteritics**:
+
+It has:
+
 - Runtime limits (memory, stack size, interruptible) for DoS.
 - Downloads limited to HTTPS and declared in _import_map.json_,
-- sandboxed File system limited to current directory and beyond, and no loading if symlink for LFI.
-- Load sanitized and sandboxed HTML, CSS and scripts
+- File system restricted by policy, limited to current directory and beyond, and no loading if symlink for LFI.
+- A "best effort" sanitization. Load sanitized and sandboxed HTML, CSS and scripts
   - The `Zanitizer` module is fast and integrated in the `Sanitizerconfig`.
-  - It is based on a declarative security policy (_html_specs.zig_) and is "context aware": it is executed in a virtual _DomFragment_ before being merged into the active _Document_.
-  - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with _ZERO_ exploitable vulnerabilities among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>).
+  - It is based on a declarative security policy (_html_specs.zig_) and is "context aware". Templates aree processed in there own documentFragment.
+  - if sanitization is set, everye call to `inner|outerHTML` will process through the sanitizer.
+  - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with no exploitable vulnerabilities found among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>) at the time of writing.
 
-The main characteristic of the engine is:
+Worker Mitigation:
+
+- max workers
+- total worker memory budget
+- global execution quotas
+- no DOM API
+
+Fetch Mitigation: (redirect not allowed or yes, max response size, timeout behaviour, IP range filtering)
+
+- DNS rebinding?
+- IP literal blocking?
+- redirect chains?
+- response size limits?
+- compression bombs?
+- timing side channels?
+  
+CSS attacks:
+
+- url() leaks
+- font loading
+- attribute selectors for data exfiltration
+- extreme selector complexity → CPU bombs
+
+**Main characteristics**:
+
+This engine has:
 
 - fast cold boot: 1ms,
 - fast sanitization: 24kB of the DOMPurify HTML test is processed in 1ms and H5SC tests compliant
-- runs real client-framework code; tested against a few frameworks made on the js-framework-benchmark (React, Vue, SolidJS, vanilla, bau).
+- can execute framework-generated JavaScript againt a minimal DOM. Frameworks are supported insofar as their runtime code does not rely on browser-only APIs, streaming I/O, or layout engines. It runs real client-framework code; tested against a few frameworks made on the js-framework-benchmark (React, Vue, SolidJS, vanilla, bau).
+  
+<details><summary>List of implemented server and Web API</summary>
+
+**TODO**: link each to a src/example/*. If example is missing, TODO!
+
+- TODO: `alert`, `prompt`, `confirm` : implement dumb versions
+- TODO: `crypto` via Zig
+- TODO: Storage (simple HashMap)
+- TODO `Stream` API,  ???: needs event I/O.... Zig no ready yet?
+
+- async Timers: `setTimeout`, `setInterval`
+- EventLoop.
+- `Event`: with bubbling
+- `Worker` (OS thread). With `onmessage` (`data`) , `postMessage`, `terminate`,  
+- `URL`, `URLPattern`, `URLSearchParams`. With `url.createObjectURL(blob)` and `url.revokeObjectURL`. TODO: check what is missing. `
+- `Blob`: `arrayBuffer`, `text`. With `size` and `type`. TODO `slice`, `bytes` (promise -> Unit8Array)
+- `HTMLCanvasElement`  with `width`, `height`, `canvas`, `fillStyle` and `font`. Drawing methods `drawImage`, `beginPath`, `closePath`, `moveTo`, `stroke`, `strokeStyle`, `lineWidth`, `fillText`, `fillRect`, `scale`, `translate`, `measureText`, `save`, `restore`, `arc`. Methods `getContext`, `getPngData`, `getJpegData`, `toDataURL()`, `toBlob()` (promise based but support for callback based), support 'image:PNG/JPEG via `stb_image`.
+- `HTMLImageElement` : via `createImageBitmap`, to add property `src` to be able to do : `image.src = URL.createObjectURL(blob)`
+- `File`, inherits from `Blob`,with `size`, `path`, `lastModified`, `name`; `fromPath()`.
+- `FileList` with `length` and `item()`.
+- `FomrData` with `append`, `serializeFormData` for Fetch/multi-part. TODO (?) `delete`, `entries`, 
+- `fetch` API (async `CurlMulti`), with `Headers` and `body` (-> `ReadableStream` via OS thread), `status`, `url`. `Reponse` methods `text()`, `json()`, `arryBuffer()`, `blob()`. TODO ? `Request`.
+- `fs`: sandboxed file system with: `readFile`, `readFileBuffer`, `writeFile`, `appendFile`, `stat`, `exists`, `readDir`, `mkdir`, `rm`, `copyFile`, `rename`, `fileFromPath`, `createReadStream`, `createWriteStream`.
+- `ReadableStream` (via `fs` and Worker thread, not event I/O): `read`, `releaseLock`, `cancel`.
+- `WritableStream` (via `fs` and Worker thread, not event I/O): 
+- async `FileReader` (Worker based): `readAsText`, `readAsArrayBuffer`, `'readAsDataURL`
+- `FileReaderSync`: readAsArrayBuffer readAsText readAsDataURL
+- `DocumentFragment`
+- `Template`
+- `CSSStyleDeclaration`, with `style`, `window.getComputedStyle`, `setProperty`, `getPropertyValue`
+- `Classlist` and `DomTokenList` with `add`, `remove`, `contains`, `toggle`, `replace`, `item`, `toString`.
+- `Dataset` and `DOMStringMap`.
+- `console`
+- `Range` with `setStartBefore`, `setEndAfter`, `deleteContents`. **TODO**  `window.getSelection()`, `selection.addRange()`
+- `DOMParser` with `parseFromString()`.
+- `addEventListener`, `dispatchEventListener`, `removeEventListener`, `reportResult` (helper->Zig)
+- `querySelector(All)`, `matches`, `getElementById`, `getElementByTagName`, `childNodes`, `children`, `append`, `preprend`, `before`, `after`, `insertAdjacentHTML`, `insertAdjacentElement`, `replaceWith`, `replaceChildren`,
+- `TreeWalker`,
+- DOM: `document` with createElement|commment|header|TextNode,  `parseHTML`, siblings, etc
+- `Sanitizer`. TODO: check how to mnge Web PI with current. TODO: `setHTML` as 'innerHTMLUnsafe'?, ro things like this.
+- log and printing helpers: `prettyPrint`, `printDOM`, `printDocStruct`, `saveDOM` (to file).
+
+</details>
 
 ## What for?
 
@@ -60,6 +143,51 @@ This program can be used for:
 - Testing frameworks - Fast and sandboxed
 - Templating & Static Site Generation - (can use template components): no async needed, pure speed.
 - Web scraping on steroids.
+
+## Quick start
+
+### Sanitize HTML
+
+```zig
+const z = @import("zexplorer");
+const std = @import("std");
+const ta = std.testing.allocator;
+
+pub fn main() !void {
+  const dirty = 
+    \\ <html>
+    \\   <head>
+    \\    <style>
+    \\      .untrusted {
+    \\        color: red;
+    \\        background-image: url("evil.com");
+    \\      }
+    \\    </style>
+    \\   </head>
+    \\   <body>
+    \\      <div class="untrusted" onclick='alert(1)'>Click me</div>"
+    \\   </body>
+    \\</html>
+    ;
+    
+
+  const sbr = try std.fs.cwd().realpathAlloc(ta, ".");
+  defer ta.free(sbr);
+  var engine = try ScriptEngine.init(ta,sbr);
+  defer engine.deinit();
+
+  const options = .{
+    .sanitize = true, // Enable sanitization for untrusted content
+        .base_dir = "src/examples", // Resolve relative paths from examples dir
+        .execute_scripts = true, // Execute <script> tags
+        .load_stylesheets = true, // Load <link rel="stylesheet">
+        .sanitizer_options = .{ .remove_scripts = false }, // Keep scripts for JS execution
+        .run_loop = true, // Run event loop to process module Promises
+  }
+
+  try engine.loadPage(html, options); 
+}
+```
 
 ## Tests
 

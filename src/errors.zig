@@ -4,6 +4,8 @@ pub const LexborError = error{
     AttributeSetFailed,
     DocCreateFailed,
     DocumentNotFound,
+    EncodingFailed,
+    ImageEncodingFailed,
     ParseFailed,
     PropertyNotFound,
     ParserCreateFailed,
