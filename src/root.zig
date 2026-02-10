@@ -376,6 +376,7 @@ pub const innerTemplateHTML = frag_temp.innerTemplateHTML;
 pub const templateContentFirstElementChild = frag_temp.templateContentFirstElementChild;
 
 // Debug printing utilities
+pub const saveDOM = serialize.saveDOM;
 pub const printDocStruct = serialize.printDocStruct;
 pub const prettyPrint = serialize.prettyPrint;
 pub const printDOM = serialize.printDOM;

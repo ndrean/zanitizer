@@ -61,7 +61,9 @@ pub const RuntimeContext = struct {
         range: zqjs.ClassID = 0,
         tree_walker: zqjs.ClassID = 0,
         canvas: zqjs.ClassID = 0,
+        html_canvas: zqjs.ClassID = 0,
         image: zqjs.ClassID = 0,
+        html_image: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

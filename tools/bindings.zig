@@ -169,15 +169,8 @@ pub const bindings = [_]BindingSpec{
         .prop_this = .this_node,
     },
 
-    .{
-        .name = "appendChild",
-        .zig_func_name = "z.appendChild",
-        .kind = .method,
-        .args = &.{ .this_node, .node },
-        .return_type = .void_type,
-    },
-    // insertBefore is manually implemented in dom_bridge.zig
-    // because it needs special handling for optional refChild parameter
+    // appendChild: manual binding in dom_bridge.zig (uses with-events lexbor functions for CSS watchers)
+    // insertBefore: manual binding in dom_bridge.zig (optional refChild parameter)
 
     .{
         .name = "remove",
@@ -214,14 +207,7 @@ pub const bindings = [_]BindingSpec{
         .args = &.{ .this_node, .node },
         .return_type = .uint32, // u16 fits in uint32
     },
-    .{
-        .name = "setAttribute",
-        .zig_func_name = "z.setAttribute",
-        .kind = .method,
-        .args = &.{ .this_element, .string, .string },
-        .return_type = .void_with_error,
-        .prop_this = .this_element,
-    },
+    // setAttribute: manual binding in dom_bridge.zig (js_setAttribute_sanitized)
     .{
         .name = "getAttribute",
         .zig_func_name = "z.getAttribute_zc",
@@ -321,14 +307,7 @@ pub const bindings = [_]BindingSpec{
         .prop_this = .this_node,
     },
 
-    .{
-        .name = "innerHTML",
-        .kind = .property,
-        .getter = "z.innerHTML",
-        .setter = "z.setInnerHTML",
-        .prop_type = .error_string, // returns ![]u8
-        .prop_this = .this_element,
-    },
+    // innerHTML: manual binding in dom_bridge.zig (sanitization + style attachment)
 
     .{
         .name = "content",
@@ -463,13 +442,6 @@ pub const bindings = [_]BindingSpec{
     .{ .name = "dir", .kind = .string_attribute },
     .{ .name = "role", .kind = .string_attribute },
     .{ .name = "nonce", .kind = .string_attribute },
-    .{
-        .name = "outerHTML",
-        .kind = .property,
-        .getter = "z.outerHTML",
-        .setter = "z.setOuterHTMLSimple",
-        .prop_type = .error_string,
-        .prop_this = .this_element,
-    },
+    // outerHTML: manual binding in dom_bridge.zig (sanitization + style attachment)
     // Add more bindings: 'id', 'className', 'children', etc.
 };

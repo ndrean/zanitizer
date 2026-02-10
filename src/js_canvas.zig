@@ -58,9 +58,17 @@ fn stbiw_free(ptr: ?*anyopaque) void {
 /// 2. Helper to unwrap using RuntimeContext
 pub fn unwrapCanvas(ctx: zqjs.Context, val: zqjs.Value) ?*Canvas {
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(val, rc.classes.canvas);
-    if (ptr == null) return null;
-    return @ptrCast(@alignCast(ptr));
+    // headless Canvas
+    if (qjs.JS_GetOpaque(val, rc.classes.canvas)) |ptr| {
+        return @ptrCast(@alignCast(ptr));
+    }
+    // HTMLCanvasElement
+    if (rc.classes.html_canvas != 0) {
+        if (qjs.JS_GetOpaque(val, rc.classes.html_canvas)) |ptr| {
+            return @ptrCast(@alignCast(ptr));
+        }
+    }
+    return null;
 }
 
 pub const CanvasState = struct {
@@ -526,59 +534,141 @@ pub const Canvas = struct {
     //     return result;
     // }
 
-    pub fn drawImage(self: *Canvas, img: *js_image.Image, dx: i32, dy: i32, dw: i32, dh: i32) void {
-        // 1. Transform Coords
-        const p1 = self.applyTransform(dx, dy);
-        const p2 = self.applyTransform(dx + dw, dy + dh);
+    pub fn drawImage(self: *Canvas, img: *js_image.Image, sx: i32, sy: i32, sw: i32, sh: i32, dx: i32, dy: i32, dw: i32, dh: i32) void {
+        // 1. Safety & Degenerate Cases
+        if (sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0) return;
 
-        const final_x = @min(p1.x, p2.x);
-        const final_y = @min(p1.y, p2.y);
-        const final_w = @as(i32, @intCast(@abs(p2.x - p1.x)));
-        const final_h = @as(i32, @intCast(@abs(p2.y - p1.y)));
+        // 2. Clip Destination against Canvas Boundaries
+        // We calculate the intersection of the Destination Rect and the Canvas
+        const dest_rect_x: i32 = @max(0, dx);
+        const dest_rect_y: i32 = @max(0, dy);
+        const dest_rect_r: i32 = @min(@as(i32, @intCast(self.width)), dx + dw);
+        const dest_rect_b: i32 = @min(@as(i32, @intCast(self.height)), dy + dh);
 
-        if (final_w == 0 or final_h == 0) return;
+        if (dest_rect_x >= dest_rect_r or dest_rect_y >= dest_rect_b) return;
 
-        // 2. Clipping
-        const cv_w = @as(i32, @intCast(self.width));
-        const cv_h = @as(i32, @intCast(self.height));
+        // 3. Pre-calculate strides (bytes per row)
+        const dest_stride = @as(usize, @intCast(self.width)) * 4;
+        const src_stride = @as(usize, @intCast(img.width)) * 4;
 
-        const x_start = @max(0, final_x);
-        const y_start = @max(0, final_y);
-        const x_end = @min(cv_w, final_x + final_w);
-        const y_end = @min(cv_h, final_y + final_h);
+        // 4. Render Loop
+        var d_y = dest_rect_y;
+        while (d_y < dest_rect_b) : (d_y += 1) {
 
-        if (x_start >= x_end or y_start >= y_end) return;
+            // Map Dest Y -> Source Y
+            // Formula: s_y = sy + (d_y - dy) * (sh / dh)
+            const progress_y = d_y - dy;
+            // Float math for scaling accuracy
+            const s_y_float = @as(f32, @floatFromInt(sy)) + (@as(f32, @floatFromInt(progress_y)) * @as(f32, @floatFromInt(sh)) / @as(f32, @floatFromInt(dh)));
+            const s_y = @as(usize, @intFromFloat(s_y_float));
 
-        const dest_stride = @as(usize, @intCast(self.width));
-        const src_stride = @as(usize, @intCast(img.width));
+            if (s_y >= img.height) continue;
 
-        // 3. Render Loop (Nearest Neighbor with Transforms)
-        var dest_y = y_start;
-        while (dest_y < y_end) : (dest_y += 1) {
+            // Pre-calculate row offsets and Cast to usizez for indexing
+            const dest_row_offset = @as(usize, @intCast(d_y)) * dest_stride;
+            const src_row_offset = s_y * src_stride;
 
-            // Map Screen Pixel -> Source Pixel
-            const row_progress = dest_y - final_y;
-            // (progress / total_height) * src_height
-            const s_y = @as(usize, @intCast(@divFloor(row_progress * img.height, final_h)));
-            const d_y = @as(usize, @intCast(dest_y));
+            var d_x = dest_rect_x;
+            while (d_x < dest_rect_r) : (d_x += 1) {
 
-            var dest_x = x_start;
-            while (dest_x < x_end) : (dest_x += 1) {
-                const col_progress = dest_x - final_x;
-                const s_x = @as(usize, @intCast(@divFloor(col_progress * img.width, final_w)));
-                const d_x = @as(usize, @intCast(dest_x));
+                // Map Dest X -> Source X
+                const progress_x = d_x - dx;
+                const s_x_float = @as(f32, @floatFromInt(sx)) + (@as(f32, @floatFromInt(progress_x)) * @as(f32, @floatFromInt(sw)) / @as(f32, @floatFromInt(dw)));
+                const s_x = @as(usize, @intFromFloat(s_x_float));
 
-                const dest_idx = (d_y * dest_stride + d_x) * 4;
-                const src_idx = (s_y * src_stride + s_x) * 4;
+                if (s_x >= img.width) continue;
 
-                // Simple Copy (Add Alpha Blending logic here later!)
-                self.pixels[dest_idx + 0] = img.pixels[src_idx + 0];
-                self.pixels[dest_idx + 1] = img.pixels[src_idx + 1];
-                self.pixels[dest_idx + 2] = img.pixels[src_idx + 2];
-                self.pixels[dest_idx + 3] = img.pixels[src_idx + 3];
+                // Pixel Copy using Strides
+                const ud_x = @as(usize, @intCast(d_x));
+                const dest_idx = dest_row_offset + (ud_x * 4); // ERROR WAS HERE (fixed)
+                const src_idx = src_row_offset + (s_x * 4);
+
+                const s_r = img.pixels[src_idx + 0];
+                const s_g = img.pixels[src_idx + 1];
+                const s_b = img.pixels[src_idx + 2];
+                const s_a = img.pixels[src_idx + 3];
+
+                // transparent, do nothing
+                if (s_a == 0) continue;
+
+                // Blending Formula: Out = (Src * Sa + Dst * Da * (1 - Sa)) / OutA
+                const d_r = self.pixels[dest_idx + 0];
+                const d_g = self.pixels[dest_idx + 1];
+                const d_b = self.pixels[dest_idx + 2];
+                const d_a = self.pixels[dest_idx + 3];
+
+                const inv_s_a = 255 - s_a;
+
+                // Calculate Output Alpha first
+                // out_a = s_a + (d_a * (255 - s_a) / 255)
+                // We use u32 to prevent overflow during multiply
+                const d_factor = (@as(u32, d_a) * inv_s_a) / 255;
+                const out_a = @as(u32, s_a) + d_factor;
+
+                if (out_a == 0) continue;
+
+                // Copy RGBA
+                self.pixels[dest_idx + 0] = @intCast((@as(u32, s_r) * s_a + @as(u32, d_r) * d_factor) / out_a);
+                self.pixels[dest_idx + 1] = @intCast((@as(u32, s_g) * s_a + @as(u32, d_g) * d_factor) / out_a);
+                self.pixels[dest_idx + 2] = @intCast((@as(u32, s_b) * s_a + @as(u32, d_b) * d_factor) / out_a);
+                self.pixels[dest_idx + 3] = @intCast(out_a);
             }
         }
     }
+    // pub fn drawImage(self: *Canvas, img: *js_image.Image, dx: i32, dy: i32, dw: i32, dh: i32) void {
+    //     if (dw <= 0 or dh <= 0 or dx <= 0 or dy <= 0) return;
+    //     // 1. Transform Coords
+    //     const p1 = self.applyTransform(dx, dy);
+    //     const p2 = self.applyTransform(dx + dw, dy + dh);
+
+    //     const final_x = @min(p1.x, p2.x);
+    //     const final_y = @min(p1.y, p2.y);
+    //     const final_w = @as(i32, @intCast(@abs(p2.x - p1.x)));
+    //     const final_h = @as(i32, @intCast(@abs(p2.y - p1.y)));
+
+    //     if (final_w == 0 or final_h == 0) return;
+
+    //     // 2. Clipping
+    //     const cv_w = @as(i32, @intCast(self.width));
+    //     const cv_h = @as(i32, @intCast(self.height));
+
+    //     const x_start = @max(0, final_x);
+    //     const y_start = @max(0, final_y);
+    //     const x_end = @min(cv_w, final_x + final_w);
+    //     const y_end = @min(cv_h, final_y + final_h);
+
+    //     if (x_start >= x_end or y_start >= y_end) return;
+
+    //     const dest_stride = @as(usize, @intCast(self.width));
+    //     const src_stride = @as(usize, @intCast(img.width));
+
+    //     // 3. Render Loop (Nearest Neighbor with Transforms)
+    //     var dest_y = y_start;
+    //     while (dest_y < y_end) : (dest_y += 1) {
+
+    //         // Map Screen Pixel -> Source Pixel
+    //         const row_progress = dest_y - final_y;
+    //         // (progress / total_height) * src_height
+    //         const s_y = @as(usize, @intCast(@divFloor(row_progress * img.height, final_h)));
+    //         const d_y = @as(usize, @intCast(dest_y));
+
+    //         var dest_x = x_start;
+    //         while (dest_x < x_end) : (dest_x += 1) {
+    //             const col_progress = dest_x - final_x;
+    //             const s_x = @as(usize, @intCast(@divFloor(col_progress * img.width, final_w)));
+    //             const d_x = @as(usize, @intCast(dest_x));
+
+    //             const dest_idx = (d_y * dest_stride + d_x) * 4;
+    //             const src_idx = (s_y * src_stride + s_x) * 4;
+
+    //             // Simple Copy (Add Alpha Blending logic here later!)
+    //             self.pixels[dest_idx + 0] = img.pixels[src_idx + 0];
+    //             self.pixels[dest_idx + 1] = img.pixels[src_idx + 1];
+    //             self.pixels[dest_idx + 2] = img.pixels[src_idx + 2];
+    //             self.pixels[dest_idx + 3] = img.pixels[src_idx + 3];
+    //         }
+    //     }
+    // }
 
     pub fn translate(self: *Canvas, x: f32, y: f32) void {
         self.tx += x;
@@ -1037,26 +1127,48 @@ fn js_canvas_getContext(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 
 fn js_canvas_drawImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-    const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
-    const args = argv[0..@intCast(argc)];
+    const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
-    if (args.len < 3) return ctx.throwTypeError("Syntax: drawImage(image, dx, dy, [dw, dh])");
+    if (argc < 3) return zqjs.UNDEFINED;
 
-    // 1. Unwrap ImageBitmap
-    const img = js_image.unwrapImage(ctx, args[0]) orelse return ctx.throwTypeError("Arg 1 must be ImageBitmap");
+    // FIX: Use the polymorphic unwrapper!
+    const img = js_image.unwrapImage(ctx, argv[0]) orelse return ctx.throwTypeError("Expected Image or ImageBitmap");
 
-    // 2. Parse Coords
-    var dx: i32 = 0;
-    var dy: i32 = 0;
-    var dw: i32 = img.width;
-    var dh: i32 = img.height;
+    // Defaults: Source = Full Image
+    var sx: f64 = 0;
+    var sy: f64 = 0;
+    var sw: f64 = @floatFromInt(img.width);
+    var sh: f64 = @floatFromInt(img.height);
 
-    if (args.len > 1) _ = qjs.JS_ToInt32(ctx.ptr, &dx, args[1]);
-    if (args.len > 2) _ = qjs.JS_ToInt32(ctx.ptr, &dy, args[2]);
-    if (args.len > 3) _ = qjs.JS_ToInt32(ctx.ptr, &dw, args[3]);
-    if (args.len > 4) _ = qjs.JS_ToInt32(ctx.ptr, &dh, args[4]);
+    // Defaults: Dest = Full Image (unless overridden)
+    var dx: f64 = 0;
+    var dy: f64 = 0;
+    var dw: f64 = @floatFromInt(img.width);
+    var dh: f64 = @floatFromInt(img.height);
 
-    canvas.drawImage(img, dx, dy, dw, dh);
+    if (argc == 3) {
+        // drawImage(img, dx, dy) -> Copies full image to dx,dy at original size
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dx, argv[1]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dy, argv[2]);
+    } else if (argc == 5) {
+        // drawImage(img, dx, dy, dw, dh) -> Copies full image to dest rect (Scaling)
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dx, argv[1]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dy, argv[2]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dw, argv[3]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dh, argv[4]);
+    } else if (argc >= 9) {
+        // drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) -> Cropping + Scaling
+        _ = qjs.JS_ToFloat64(ctx.ptr, &sx, argv[1]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &sy, argv[2]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &sw, argv[3]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &sh, argv[4]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dx, argv[5]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dy, argv[6]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dw, argv[7]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &dh, argv[8]);
+    }
+
+    canvas.drawImage(img, @intFromFloat(sx), @intFromFloat(sy), @intFromFloat(sw), @intFromFloat(sh), @intFromFloat(dx), @intFromFloat(dy), @intFromFloat(dw), @intFromFloat(dh));
 
     return zqjs.UNDEFINED;
 }
@@ -1235,31 +1347,6 @@ fn js_canvas_toDataURL(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 
     return qjs.JS_NewStringLen(ctx.ptr, temp_buf.ptr, temp_buf.len);
 }
-// fn js_canvas_toDataURL(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-//     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
-
-//     const png_data = canvas.getPngData() catch return ctx.throwInternalError("PNG Encoding failed");
-//     defer canvas.allocator.free(png_data); // getPngData returns owned slice
-
-//     // Base64 Encode
-//     const encoder = std.base64.standard.Encoder;
-//     const b64_len = encoder.calcSize(png_data.len);
-//     const prefix = "data:image/png;base64,";
-
-//     // Create string buffer
-//     // JS_NewStringLen expects a buffer we don't own, it copies.
-//     // So we alloc in Zig, encode, create JS string, then free Zig buffer.
-//     const rc = RuntimeContext.get(ctx);
-//     const total_len = prefix.len + b64_len;
-//     const temp_buf = rc.allocator.alloc(u8, total_len) catch return zqjs.EXCEPTION;
-//     defer rc.allocator.free(temp_buf);
-
-//     @memcpy(temp_buf[0..prefix.len], prefix);
-//     _ = encoder.encode(temp_buf[prefix.len..], png_data);
-
-//     return qjs.JS_NewStringLen(ctx.ptr, temp_buf.ptr, temp_buf.len);
-// }
 
 // canvas(callback, type, quality) or canvas.toBlob() -> Promise
 /// PNG or JPEG
@@ -1335,68 +1422,6 @@ fn js_canvas_toBlob(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
         return result;
     }
 }
-// fn js_canvas_toBlob(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
-//     const rc = RuntimeContext.get(ctx);
-//     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
-
-//     // Generate the Data (PNG for now, effectively ignoring 'type' and 'quality' args)
-//     const png_data = canvas.getPngData() catch return zqjs.NULL;
-//     defer canvas.allocator.free(png_data);
-
-//     // Create Blob Object
-//     const blob_obj = BlobObject.init(rc.allocator, png_data, "image/png") catch return zqjs.NULL;
-
-//     // Wrap in JS Value
-//     const blob_val = qjs.JS_NewObjectClass(ctx.ptr, rc.classes.blob);
-//     if (qjs.JS_IsException(blob_val)) {
-//         blob_obj.deinit();
-//         return zqjs.EXCEPTION;
-//     }
-//     _ = qjs.JS_SetOpaque(blob_val, blob_obj);
-
-//     // Polymorphism with Web callback-based or zexplorer promised-based
-
-//     const args = argv[0..@intCast(argc)];
-
-//     // Check if the first argument is a Callback Function
-//     if (args.len > 0 and qjs.JS_IsFunction(ctx.ptr, args[0])) {
-//         // [canvas.toBlob(callback, type, quality)]
-
-//         const callback_func = args[0];
-//         var cb_args = [_]qjs.JSValue{blob_val};
-
-//         // Invoke the callback: callback(blob)
-//         const ret = qjs.JS_Call(ctx.ptr, callback_func, zqjs.UNDEFINED, 1, &cb_args);
-//         ctx.freeValue(ret);
-//         // qjs.JS_FreeValue(ctx.ptr, ret); // We don't care what the callback returns
-
-//         // Callback mode returns undefined
-//         ctx.freeValue(blob_val); // The callback was passed the value, now we are done with our ref
-//         return zqjs.UNDEFINED;
-//     } else {
-//         // [await canvas.toBlob() -> Promise
-
-//         const global = ctx.getGlobalObject();
-//         defer ctx.freeValue(global);
-//         const promise_ctor = ctx.getPropertyStr(global, "Promise");
-//         defer ctx.freeValue(promise_ctor);
-//         const resolve_fn = ctx.getPropertyStr(promise_ctor, "resolve");
-//         defer ctx.freeValue(resolve_fn);
-
-//         var resolve_args = [_]qjs.JSValue{blob_val};
-//         const result = qjs.JS_Call(
-//             ctx.ptr,
-//             resolve_fn,
-//             promise_ctor,
-//             1,
-//             &resolve_args,
-//         );
-
-//         ctx.freeValue(blob_val);
-//         return result;
-//     }
-// }
 
 fn js_canvas_fillText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -1991,85 +2016,143 @@ fn finalizer(
     }
 }
 
-// === Installer
+// === getImageData: reads RGBA pixels from the canvas buffer
+fn js_canvas_getImageData(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
 
-pub fn install(ctx: zqjs.Context) !void {
+    if (argc < 4) return ctx.throwTypeError("getImageData requires 4 arguments");
+
+    var sx: f64 = 0;
+    var sy: f64 = 0;
+    var sw: f64 = 0;
+    var sh: f64 = 0;
+    _ = qjs.JS_ToFloat64(ctx.ptr, &sx, argv[0]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &sy, argv[1]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &sw, argv[2]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &sh, argv[3]);
+
+    const ix: i32 = @intFromFloat(sx);
+    const iy: i32 = @intFromFloat(sy);
+    const iw: u32 = @intFromFloat(@max(sw, 0));
+    const ih: u32 = @intFromFloat(@max(sh, 0));
+
+    if (iw == 0 or ih == 0) return ctx.throwTypeError("Invalid dimensions for getImageData");
+
+    // Allocate output buffer (always iw * ih * 4 RGBA bytes)
+    const out_size = @as(usize, iw) * @as(usize, ih) * 4;
     const rc = RuntimeContext.get(ctx);
-    const rt = ctx.getRuntime();
+    const out_buf = rc.allocator.alloc(u8, out_size) catch return ctx.throwTypeError("Out of memory");
+    defer rc.allocator.free(out_buf);
+    @memset(out_buf, 0); // default transparent black
 
-    if (rc.classes.canvas == 0) {
-        rc.classes.canvas = rt.newClassID();
+    // Copy pixels from canvas buffer, clamping to canvas bounds
+    const cw = canvas.width;
+    const ch = canvas.height;
+    var dy: u32 = 0;
+    while (dy < ih) : (dy += 1) {
+        const src_y = @as(i32, @intCast(dy)) + iy;
+        if (src_y < 0 or src_y >= @as(i32, @intCast(ch))) continue;
+        var dx: u32 = 0;
+        while (dx < iw) : (dx += 1) {
+            const src_x = @as(i32, @intCast(dx)) + ix;
+            if (src_x < 0 or src_x >= @as(i32, @intCast(cw))) continue;
+
+            const src_off = (@as(usize, @intCast(src_y)) * @as(usize, cw) + @as(usize, @intCast(src_x))) * 4;
+            const dst_off = (@as(usize, dy) * @as(usize, iw) + @as(usize, dx)) * 4;
+            @memcpy(out_buf[dst_off..][0..4], canvas.pixels[src_off..][0..4]);
+        }
     }
 
-    try rt.newClass(rc.classes.canvas, .{
-        .class_name = "HTMLCanvasElement",
-        .finalizer = finalizer,
-    });
+    // Create ImageData JS object: { width, height, data: Uint8Array }
+    const result = ctx.newObject();
+    const w_val = qjs.JS_NewInt32(ctx.ptr, @intCast(iw));
+    const h_val = qjs.JS_NewInt32(ctx.ptr, @intCast(ih));
+    const data_val = ctx.newUint8ArrayCopy(out_buf);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, result, "width", w_val);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, result, "height", h_val);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, result, "data", data_val);
+    return result;
+}
 
-    // Create prototype - DO NOT defer free, setClassProto takes ownership
-    const proto = ctx.newObject();
-
-    // Add methods to proto
+// === Shared prototype installer for Canvas and HTMLCanvasElement
+fn installCanvasPrototype(ctx: zqjs.Context, proto: zqjs.Value) void {
+    // Core canvas methods
     js_utils.defineMethod(ctx, proto, "getContext", js_canvas_getContext, 1);
     js_utils.defineMethod(ctx, proto, "toDataURL", js_canvas_toDataURL, 2);
     js_utils.defineMethod(ctx, proto, "toBlob", js_canvas_toBlob, 3);
+    js_utils.defineMethod(ctx, proto, "getImageData", js_canvas_getImageData, 4);
+
+    // Drawing methods
     js_utils.defineMethod(ctx, proto, "fillRect", js_canvas_fillRect, 4);
     js_utils.defineMethod(ctx, proto, "drawImage", js_canvas_drawImage, 5);
     js_utils.defineMethod(ctx, proto, "fillText", js_canvas_fillText, 3);
-    js_utils.defineMethod(ctx, proto, "scale", js_canvas_scale, 2);
-    js_utils.defineMethod(ctx, proto, "translate", js_canvas_translate, 2);
-    js_utils.defineMethod(ctx, proto, "measureText", js_canvas_measureText, 1);
-    js_utils.defineMethod(ctx, proto, "save", js_canvas_save, 0);
-    js_utils.defineMethod(ctx, proto, "restore", js_canvas_restore, 0);
-    js_utils.defineMethod(ctx, proto, "arc", js_canvas_arc, 5);
-    js_utils.defineMethod(ctx, proto, "closePath", js_canvas_closePath, 0);
+    js_utils.defineMethod(ctx, proto, "strokeText", js_canvas_strokeText, 3);
+    js_utils.defineMethod(ctx, proto, "strokeRect", js_canvas_strokeRect, 4);
+    js_utils.defineMethod(ctx, proto, "clearRect", js_canvas_clearRect, 4);
+    js_utils.defineMethod(ctx, proto, "fill", js_canvas_fill, 0);
+    js_utils.defineMethod(ctx, proto, "rect", js_canvas_rect, 4);
+    js_utils.defineMethod(ctx, proto, "clip", js_canvas_clip, 0);
 
-    // Add accessors
-    js_utils.defineGetter(ctx, proto, "canvas", js_canvas_get_canvas); // self-ref for Chart.js
-    js_utils.defineAccessor(ctx, proto, "width", js_canvas_get_width, js_canvas_set_width);
-    js_utils.defineAccessor(ctx, proto, "height", js_canvas_get_height, js_canvas_set_height);
-    js_utils.defineAccessor(ctx, proto, "fillStyle", js_canvas_get_fillStyle, js_canvas_set_fillStyle);
-    js_utils.defineAccessor(ctx, proto, "font", js_canvas_get_font, js_canvas_set_font);
+    // Path methods
     js_utils.defineMethod(ctx, proto, "beginPath", js_canvas_beginPath, 0);
     js_utils.defineMethod(ctx, proto, "moveTo", js_canvas_moveTo, 2);
     js_utils.defineMethod(ctx, proto, "lineTo", js_canvas_lineTo, 2);
     js_utils.defineMethod(ctx, proto, "stroke", js_canvas_stroke, 0);
-    js_utils.defineAccessor(ctx, proto, "strokeStyle", js_canvas_get_strokeStyle, js_canvas_set_strokeStyle);
-    js_utils.defineAccessor(ctx, proto, "lineWidth", js_canvas_get_lineWidth, js_canvas_set_lineWidth);
+    js_utils.defineMethod(ctx, proto, "closePath", js_canvas_closePath, 0);
+    js_utils.defineMethod(ctx, proto, "arc", js_canvas_arc, 5);
+    js_utils.defineMethod(ctx, proto, "bezierCurveTo", js_canvas_bezierCurveTo, 6);
+    js_utils.defineMethod(ctx, proto, "quadraticCurveTo", js_canvas_quadraticCurveTo, 4);
+    js_utils.defineMethod(ctx, proto, "ellipse", js_canvas_ellipse, 7);
 
-    // DOM compatibility (needed by Chart.js DOM platform)
+    // Transform methods
+    js_utils.defineMethod(ctx, proto, "scale", js_canvas_scale, 2);
+    js_utils.defineMethod(ctx, proto, "translate", js_canvas_translate, 2);
+    js_utils.defineMethod(ctx, proto, "rotate", js_canvas_rotate, 1);
+    js_utils.defineMethod(ctx, proto, "setTransform", js_canvas_setTransform, 6);
+    js_utils.defineMethod(ctx, proto, "resetTransform", js_canvas_resetTransformJS, 0);
+
+    // State methods
+    js_utils.defineMethod(ctx, proto, "save", js_canvas_save, 0);
+    js_utils.defineMethod(ctx, proto, "restore", js_canvas_restore, 0);
+
+    // Text & measurement
+    js_utils.defineMethod(ctx, proto, "measureText", js_canvas_measureText, 1);
+
+    // Line dash
+    js_utils.defineMethod(ctx, proto, "setLineDash", js_canvas_setLineDash, 1);
+    js_utils.defineMethod(ctx, proto, "getLineDash", js_canvas_getLineDash, 0);
+
+    // Gradient & pattern
+    js_utils.defineMethod(ctx, proto, "createLinearGradient", js_canvas_createLinearGradient, 4);
+    js_utils.defineMethod(ctx, proto, "createRadialGradient", js_canvas_createRadialGradient, 6);
+    js_utils.defineMethod(ctx, proto, "createPattern", js_canvas_createPattern, 2);
+    js_utils.defineMethod(ctx, proto, "isPointInPath", js_canvas_isPointInPath, 2);
+
+    // DOM compatibility
     js_utils.defineMethod(ctx, proto, "getAttribute", js_canvas_getAttribute, 1);
     js_utils.defineMethod(ctx, proto, "setAttribute", js_canvas_setAttribute, 2);
     js_utils.defineMethod(ctx, proto, "removeAttribute", js_canvas_removeAttribute, 1);
+    js_utils.defineMethod(ctx, proto, "addEventListener", js_canvas_addEventListener, 3);
+    js_utils.defineMethod(ctx, proto, "removeEventListener", js_canvas_removeEventListener, 3);
+
+    // Canvas element accessors
+    js_utils.defineGetter(ctx, proto, "canvas", js_canvas_get_canvas); // self-ref for Chart.js
+    js_utils.defineAccessor(ctx, proto, "width", js_canvas_get_width, js_canvas_set_width);
+    js_utils.defineAccessor(ctx, proto, "height", js_canvas_get_height, js_canvas_set_height);
+
+    // DOM getters
     js_utils.defineGetter(ctx, proto, "style", js_canvas_get_style);
     js_utils.defineGetter(ctx, proto, "tagName", js_canvas_get_tagName);
     js_utils.defineGetter(ctx, proto, "nodeName", js_canvas_get_tagName);
     js_utils.defineGetter(ctx, proto, "isConnected", js_canvas_get_isConnected);
     js_utils.defineGetter(ctx, proto, "parentNode", js_canvas_get_parentNode);
-    js_utils.defineMethod(ctx, proto, "addEventListener", js_canvas_addEventListener, 3);
-    js_utils.defineMethod(ctx, proto, "removeEventListener", js_canvas_removeEventListener, 3);
 
-    // Canvas2D context methods (needed by Chart.js rendering)
-    js_utils.defineMethod(ctx, proto, "setTransform", js_canvas_setTransform, 6);
-    js_utils.defineMethod(ctx, proto, "resetTransform", js_canvas_resetTransformJS, 0);
-    js_utils.defineMethod(ctx, proto, "clearRect", js_canvas_clearRect, 4);
-    js_utils.defineMethod(ctx, proto, "fill", js_canvas_fill, 0);
-    js_utils.defineMethod(ctx, proto, "rect", js_canvas_rect, 4);
-    js_utils.defineMethod(ctx, proto, "strokeRect", js_canvas_strokeRect, 4);
-    js_utils.defineMethod(ctx, proto, "strokeText", js_canvas_strokeText, 3);
-    js_utils.defineMethod(ctx, proto, "clip", js_canvas_clip, 0);
-    js_utils.defineMethod(ctx, proto, "setLineDash", js_canvas_setLineDash, 1);
-    js_utils.defineMethod(ctx, proto, "getLineDash", js_canvas_getLineDash, 0);
-    js_utils.defineMethod(ctx, proto, "createLinearGradient", js_canvas_createLinearGradient, 4);
-    js_utils.defineMethod(ctx, proto, "createRadialGradient", js_canvas_createRadialGradient, 6);
-    js_utils.defineMethod(ctx, proto, "createPattern", js_canvas_createPattern, 2);
-    js_utils.defineMethod(ctx, proto, "isPointInPath", js_canvas_isPointInPath, 2);
-    js_utils.defineMethod(ctx, proto, "rotate", js_canvas_rotate, 1);
-    js_utils.defineMethod(ctx, proto, "bezierCurveTo", js_canvas_bezierCurveTo, 6);
-    js_utils.defineMethod(ctx, proto, "quadraticCurveTo", js_canvas_quadraticCurveTo, 4);
-    js_utils.defineMethod(ctx, proto, "ellipse", js_canvas_ellipse, 7);
-
-    // Canvas2D context properties (get/set with cached backing)
+    // Rendering state accessors
+    js_utils.defineAccessor(ctx, proto, "fillStyle", js_canvas_get_fillStyle, js_canvas_set_fillStyle);
+    js_utils.defineAccessor(ctx, proto, "font", js_canvas_get_font, js_canvas_set_font);
+    js_utils.defineAccessor(ctx, proto, "strokeStyle", js_canvas_get_strokeStyle, js_canvas_set_strokeStyle);
+    js_utils.defineAccessor(ctx, proto, "lineWidth", js_canvas_get_lineWidth, js_canvas_set_lineWidth);
     js_utils.defineAccessor(ctx, proto, "textAlign", js_canvas_get_textAlign, js_canvas_set_textAlign);
     js_utils.defineAccessor(ctx, proto, "textBaseline", js_canvas_get_textBaseline, js_canvas_set_textBaseline);
     js_utils.defineAccessor(ctx, proto, "globalAlpha", js_canvas_get_globalAlpha, js_canvas_set_globalAlpha);
@@ -2083,233 +2166,221 @@ pub fn install(ctx: zqjs.Context) !void {
     js_utils.defineAccessor(ctx, proto, "direction", js_canvas_get_direction, js_canvas_set_direction);
     js_utils.defineAccessor(ctx, proto, "lineDashOffset", js_canvas_get_lineDashOffset, js_canvas_set_lineDashOffset);
     js_utils.defineAccessor(ctx, proto, "miterLimit", js_canvas_get_miterLimit, js_canvas_set_miterLimit);
-    // Create Constructor
-    const ctor_val = qjs.JS_NewCFunction2(ctx.ptr, js_canvas_constructor, "Canvas", 2, qjs.JS_CFUNC_constructor, 0);
+}
 
-    // Link Constructor and Prototype (using wrapper methods for cleaner code)
-    try ctx.setPropertyStr(ctor_val, "prototype", ctx.dupValue(proto));
-    try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor_val));
+// === Installer
 
-    // Set class prototype LAST - this takes ownership of proto
-    ctx.setClassProto(rc.classes.canvas, proto);
+pub fn install(ctx: zqjs.Context) !void {
+    const rc = RuntimeContext.get(ctx);
+    const rt = ctx.getRuntime();
 
-    // Expose globally
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
+    // Headless Canvas class
+    if (rc.classes.canvas == 0) {
+        rc.classes.canvas = rt.newClassID();
+        try rt.newClass(rc.classes.canvas, .{
+            .class_name = "Canvas",
+            .finalizer = finalizer,
+        });
+        const proto = ctx.newObject();
+        installCanvasPrototype(ctx, proto);
+        ctx.setClassProto(rc.classes.canvas, proto);
 
-    const reg_font_fn = ctx.newCFunction(js_registerFont, "registerFont", 1);
-    try ctx.setPropertyStr(global, "registerFont", reg_font_fn);
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
 
-    // Duplicate before setting, since setPropertyStr consumes the value
-    const ctor_for_alias = ctx.dupValue(ctor_val);
-    try ctx.setPropertyStr(global, "Canvas", ctor_val);
-    try ctx.setPropertyStr(global, "HTMLCanvasElement", ctor_for_alias);
+        const ctor = qjs.JS_NewCFunction2(ctx.ptr, js_canvas_constructor, "Canvas", 2, qjs.JS_CFUNC_constructor, 0);
+        try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
+        try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor));
+        try ctx.setPropertyStr(global, "Canvas", ctor);
+    }
+
+    // DOM-backed HTMLCanvasElement class (same Canvas struct, same prototype)
+    if (rc.classes.html_canvas == 0) {
+        rc.classes.html_canvas = rt.newClassID();
+        try rt.newClass(rc.classes.html_canvas, .{
+            .class_name = "HTMLCanvasElement",
+            .finalizer = finalizer,
+        });
+        const proto = ctx.newObject();
+        installCanvasPrototype(ctx, proto);
+        ctx.setClassProto(rc.classes.html_canvas, proto);
+
+        const ctor_val = qjs.JS_NewCFunction2(ctx.ptr, js_canvas_constructor, "Canvas", 2, qjs.JS_CFUNC_constructor, 0);
+        try ctx.setPropertyStr(ctor_val, "prototype", ctx.dupValue(proto));
+        try ctx.setPropertyStr(proto, "constructor", ctx.dupValue(ctor_val));
+
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
+
+        const reg_font_fn = ctx.newCFunction(js_registerFont, "registerFont", 1);
+        try ctx.setPropertyStr(global, "registerFont", reg_font_fn);
+
+        // ctor_val consumed here (no alias needed — avoids refcount leak)
+        try ctx.setPropertyStr(global, "HTMLCanvasElement", ctor_val);
+    }
 }
 
 /// Check if data structure is PNG
+/// Verify that bytes represent a valid PNG structure.
+/// Checks magic bytes, IHDR-first ordering, required chunks, and segment bounds.
 pub fn verifyPngStructure(bytes: []const u8) !void {
-    // Check Magic Bytes
     const magic = "\x89PNG\r\n\x1a\n";
-    if (!std.mem.startsWith(u8, bytes, magic)) {
+    if (bytes.len < 8 or !std.mem.startsWith(u8, bytes, magic)) {
         std.debug.print("❌ Invalid PNG Header\n", .{});
         return error.InvalidPng;
     }
 
-    // Scan for Chunks (IHDR, IDAT, IEND)
     // Chunk structure: Length (4) | Type (4) | Data (Len) | CRC (4)
     var has_ihdr = false;
     var has_idat = false;
     var has_iend = false;
+    var is_first_chunk = true;
 
-    var pos: usize = 8; // Skip magic
-    while (pos < bytes.len) {
-        if (pos + 8 > bytes.len) break;
-
-        // Read Length (Big Endian)
+    var pos: usize = 8; // skip magic
+    while (pos + 8 <= bytes.len) {
         const len = std.mem.readInt(u32, bytes[pos..][0..4], .big);
         const type_code = bytes[pos + 4 ..][0..4];
 
-        // Check Type
+        // IHDR must be the first chunk
+        if (is_first_chunk) {
+            if (!std.mem.eql(u8, type_code, "IHDR")) {
+                std.debug.print("❌ Invalid PNG: First chunk is not IHDR\n", .{});
+                return error.InvalidPng;
+            }
+            is_first_chunk = false;
+        }
+
         if (std.mem.eql(u8, type_code, "IHDR")) has_ihdr = true;
         if (std.mem.eql(u8, type_code, "IDAT")) has_idat = true;
         if (std.mem.eql(u8, type_code, "IEND")) has_iend = true;
 
-        // Move to next chunk (Length + 4(Len) + 4(Type) + 4(CRC))
-        pos += len + 12;
+        // Bounds check: 4(len) + 4(type) + data + 4(crc)
+        const chunk_total = @as(u64, len) + 12;
+        if (pos + chunk_total > bytes.len) {
+            std.debug.print("❌ Invalid PNG: Chunk length exceeds file size at pos {d}\n", .{pos});
+            return error.InvalidPng;
+        }
+
+        pos += @intCast(chunk_total);
     }
 
     if (has_ihdr and has_idat and has_iend) {
         std.debug.print("🟢 Valid PNG: IHDR, IDAT, IEND found.\n", .{});
     } else {
-        std.debug.print("⚠️  Corrupt PNG: Missing chunks (IHDR:{}, IDAT:{}, IEND:{})\n", .{ has_ihdr, has_idat, has_iend });
+        std.debug.print("❌ Corrupt PNG: Missing chunks (IHDR:{}, IDAT:{}, IEND:{})\n", .{ has_ihdr, has_idat, has_iend });
         return error.InvalidPng;
     }
 }
 
-// Check if data structure is JPEG
-// pub fn verifyJpegStructure(bytes: []const u8) !void {
-//     // JPEG must start with SOI (Start of Image) marker
-//     if (bytes.len < 2 or bytes[0] != 0xFF or bytes[1] != 0xD8) {
-//         std.debug.print("❌ Invalid JPEG Header (missing SOI marker)\n", .{});
-//         return error.InvalidJpeg;
-//     }
+/// Verify that bytes represent a valid JPEG structure.
+/// Checks for SOI, SOF, SOS, EOI markers and basic segment integrity.
+pub fn verifyJpegStructure(bytes: []const u8) !void {
+    // JPEG must start with SOI (Start of Image) marker: FF D8
+    if (bytes.len < 2 or bytes[0] != 0xFF or bytes[1] != 0xD8) {
+        std.debug.print("❌ Invalid JPEG Header (missing SOI marker)\n", .{});
+        return error.InvalidJpeg;
+    }
 
-//     var pos: usize = 0;
-//     var has_sof = false; // Start of Frame (baseline DCT, progressive, etc.)
-//     var has_sos = false; // Start of Scan
-//     var has_dqt = false; // Quantization Table (at least one)
-//     var has_dht = false; // Huffman Table (at least one)
-//     var has_eoi = false; // End of Image
+    var pos: usize = 2; // skip SOI
+    var has_sof = false;
+    var has_sos = false;
+    var has_dqt = false;
+    var has_dht = false;
+    var has_eoi = false;
 
-//     // Scan through markers
-//     while (pos < bytes.len) {
-//         // Check for marker (starts with 0xFF)
-//         if (bytes[pos] != 0xFF) {
-//             std.debug.print("❌ Invalid JPEG: Expected marker (0xFF) at position {}\n", .{pos});
-//             return error.InvalidJpeg;
-//         }
+    while (pos + 1 < bytes.len) {
+        // Every marker starts with 0xFF
+        if (bytes[pos] != 0xFF) {
+            std.debug.print("❌ Invalid JPEG: Expected 0xFF at position {d}\n", .{pos});
+            return error.InvalidJpeg;
+        }
 
-//         const marker = bytes[pos + 1];
+        // Skip fill bytes (consecutive 0xFF padding)
+        while (pos + 1 < bytes.len and bytes[pos + 1] == 0xFF) {
+            pos += 1;
+        }
+        if (pos + 1 >= bytes.len) break;
 
-//         // Skip padding bytes (0xFF followed by 0x00)
-//         if (marker == 0x00) {
-//             pos += 2;
-//             continue;
-//         }
+        const marker = bytes[pos + 1];
+        pos += 2; // advance past FF + marker byte
 
-//         // Handle standalone markers (no length field)
-//         const standalone_markers = [_]u8{ 0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9 };
-//         for (standalone_markers) |m| {
-//             if (marker == m) {
-//                 if (marker == 0xD8) {
-//                     // SOI - already checked at start
-//                     pos += 2;
-//                     continue;
-//                 } else if (marker == 0xD9) {
-//                     has_eoi = true;
-//                     pos += 2;
-//                     // Check if EOI is at the end: optional but good practice
-//                     if (pos != bytes.len) {
-//                         std.debug.print("⚠️  JPEG has data after EOI marker\n", .{});
-//                     }
-//                     break;
-//                 }
-//                 pos += 2;
-//                 continue;
-//             }
-//         }
+        // Byte stuffing (FF 00) — shouldn't appear outside entropy data
+        if (marker == 0x00) continue;
 
-//         // For markers with length field
-//         if (pos + 3 >= bytes.len) {
-//             std.debug.print("❌ Invalid JPEG: Truncated marker at position {}\n", .{pos});
-//             return error.InvalidJpeg;
-//         }
+        // EOI (End of Image) — standalone, terminates scan
+        if (marker == 0xD9) {
+            has_eoi = true;
+            break;
+        }
 
-//         // Read length (big-endian, includes length field itself)
-//         const segment_len = std.mem.readInt(u16, bytes[pos + 2 ..][0..2], .big);
+        // RST markers (D0-D7) — standalone, no length field
+        if (marker >= 0xD0 and marker <= 0xD7) continue;
 
-//         if (pos + segment_len > bytes.len) {
-//             std.debug.print("❌ Invalid JPEG: Segment length exceeds file size\n", .{});
-//             return error.InvalidJpeg;
-//         }
+        // All remaining markers have a 2-byte length field
+        if (pos + 2 > bytes.len) {
+            std.debug.print("❌ Invalid JPEG: Truncated marker at position {d}\n", .{pos});
+            return error.InvalidJpeg;
+        }
 
-//         // Check for required markers
-//         switch (marker) {
-//             0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF => {
-//                 // SOF (Start of Frame) markers
-//                 has_sof = true;
+        // Length is big-endian and includes the 2 length bytes themselves
+        const segment_len = std.mem.readInt(u16, bytes[pos..][0..2], .big);
+        if (segment_len < 2 or pos + segment_len > bytes.len) {
+            std.debug.print("❌ Invalid JPEG: Segment length {d} invalid at pos {d}\n", .{ segment_len, pos });
+            return error.InvalidJpeg;
+        }
 
-//                 // SOF0 (baseline DCT) is the most common
-//                 if (marker == 0xC0) {
-//                     std.debug.print("Found Baseline DCT (SOF0)\n", .{});
-//                 }
-//             },
-//             0xDA => { // SOS (Start of Scan)
-//                 has_sos = true;
+        switch (marker) {
+            // SOF markers (Start of Frame)
+            0xC0,
+            0xC1,
+            0xC2,
+            0xC3,
+            0xC5,
+            0xC6,
+            0xC7,
+            0xC9,
+            0xCA,
+            0xCB,
+            0xCD,
+            0xCE,
+            0xCF,
+            => {
+                has_sof = true;
+                if (marker == 0xC0) std.debug.print("Found Baseline DCT (SOF0)\n", .{});
+            },
+            0xDA => { // SOS (Start of Scan)
+                has_sos = true;
+                // Skip past SOS header
+                pos += segment_len;
+                // Scan entropy-coded data: look for FF xx where xx != 00
+                while (pos + 1 < bytes.len) {
+                    if (bytes[pos] == 0xFF and bytes[pos + 1] != 0x00) break;
+                    pos += 1;
+                }
+                continue; // pos is already at the next marker's 0xFF
+            },
+            0xDB => has_dqt = true, // DQT (Quantization Table)
+            0xC4 => has_dht = true, // DHT (Huffman Table)
+            0xE0 => { // APP0 — check for JFIF
+                if (segment_len >= 7 and std.mem.eql(u8, bytes[pos + 2 ..][0..5], "JFIF\x00")) {
+                    std.debug.print("Found JFIF marker\n", .{});
+                }
+            },
+            else => {}, // APPn, COM, DRI, etc. — skip
+        }
 
-//                 // SOS has variable length depending on components
-//                 if (segment_len < 8) {
-//                     std.debug.print("❌ Invalid JPEG: SOS segment too short\n", .{});
-//                     return error.InvalidJpeg;
-//                 }
+        pos += segment_len;
+    }
 
-//                 const num_components = bytes[pos + 4];
-//                 if (num_components < 1 or num_components > 4) {
-//                     std.debug.print("❌ Invalid JPEG: Invalid number of components in SOS\n", .{});
-//                     return error.InvalidJpeg;
-//                 }
-//             },
-//             0xDB => { // DQT (Define Quantization Table)
-//                 has_dqt = true;
-//             },
-//             0xC4 => { // DHT (Define Huffman Table)
-//                 has_dht = true;
-//             },
-//             0xDD => { // DRI (Define Restart Interval)
-//                 // Valid marker, but doesn't affect structure validity
-//             },
-//             0xE0...0xEF => { // APPn markers (application data)
-//                 // Valid marker, often contains metadata like JFIF/EXIF
-//                 if (marker == 0xE0) {
-//                     // Check for JFIF identifier
-//                     if (segment_len >= 7 and std.mem.eql(u8, bytes[pos + 4 ..][0..5], "JFIF\0")) {
-//                         std.debug.print("Found JFIF marker\n", .{});
-//                     }
-//                 }
-//             },
-//             0xFE => { // COM (Comment)
-//                 // Valid marker, contains comments
-//             },
-//             else => {
-//                 // Check if marker is reserved or unknown
-//                 if (marker >= 0xC0 and marker <= 0xFE) {
-//                     // Valid marker in reserved range
-//                 } else {
-//                     std.debug.print("❌ Invalid JPEG: Unknown marker 0x{X:0>2}\n", .{marker});
-//                     return error.InvalidJpeg;
-//                 }
-//             },
-//         }
+    if (has_sof and has_sos and has_eoi) {
+        std.debug.print("🟢 Valid JPEG structure\n", .{});
+    } else {
+        if (!has_sof) std.debug.print("❌ Invalid JPEG: Missing SOF marker\n", .{});
+        if (!has_sos) std.debug.print("❌ Invalid JPEG: Missing SOS marker\n", .{});
+        if (!has_eoi) std.debug.print("❌ Invalid JPEG: Missing EOI marker\n", .{});
+        return error.InvalidJpeg;
+    }
 
-//         // Move to next marker
-//         pos += segment_len;
-
-//         // Skip any entropy-coded data after SOS
-//         if (marker == 0xDA) {
-//             // Scan for next marker (0xFF not followed by 0x00)
-//             while (pos + 1 < bytes.len) {
-//                 if (bytes[pos] == 0xFF and bytes[pos + 1] != 0x00) {
-//                     break;
-//                 }
-//                 pos += 1;
-//             }
-//         }
-//     }
-
-//     // Check required markers
-//     if (!has_sof) {
-//         std.debug.print("❌ Invalid JPEG: Missing Start of Frame (SOF) marker\n", .{});
-//         return error.InvalidJpeg;
-//     }
-
-//     if (!has_sos) {
-//         std.debug.print("❌ Invalid JPEG: Missing Start of Scan (SOS) marker\n", .{});
-//         return error.InvalidJpeg;
-//     }
-
-//     if (!has_eoi) {
-//         std.debug.print("❌ Invalid JPEG: Missing End of Image (EOI) marker\n", .{});
-//         return error.InvalidJpeg;
-//     }
-
-//     // DQT and DHT are technically required but some JPEGs might have them embedded differently
-//     if (!has_dqt) {
-//         std.debug.print("⚠️  Warning: No quantization tables (DQT) found\n", .{});
-//     }
-
-//     if (!has_dht) {
-//         std.debug.print("⚠️  Warning: No Huffman tables (DHT) found\n", .{});
-//     }
-
-//     std.debug.print("🟢 Valid JPEG structure\n", .{});
-// }
+    if (!has_dqt) std.debug.print("⚠️  Warning: No quantization tables (DQT) found\n", .{});
+    if (!has_dht) std.debug.print("⚠️  Warning: No Huffman tables (DHT) found\n", .{});
+}

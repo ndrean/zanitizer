@@ -31,7 +31,9 @@ pub fn main() !void {
     // try salesGraph(gpa, sandbox_root);
     // try chart(gpa, sandbox_root);
     // try boldTriangle(gpa, sandbox_root);
-    try chartJS2(gpa, sandbox_root);
+    try canvasToDataURL_PNG(gpa, sandbox_root);
+    try canvasToBlobJPEG(gpa, sandbox_root);
+    try createImageToBlob(gpa, sandbox_root);
 }
 
 fn testJavaScriptAPI(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
@@ -322,7 +324,7 @@ fn canvasToBlobJPEG(allocator: std.mem.Allocator, sbc: []const u8) !void {
     defer allocator.free(png_bytes);
 
     z.print("\n🎆 Example ASYNC Building a simple dummy PNG ----\n\n", .{});
-    // try js_canvas.verifyPngStructure(png_bytes);
+    try js_canvas.verifyJpegStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "canvas_from_blob_to_jepg_test.jpeg", .data = png_bytes });
     std.debug.print("\nSaved 'canvas_from_blob_to_jepg_test.jpeg' ({d} bytes)\n", .{png_bytes.len});
 }

@@ -314,6 +314,15 @@ pub fn js_cloneNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
     if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
     return w.NULL;
 }
+/// Generated wrapper for z.appendChild
+pub fn js_appendChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    if (argc < 1) return w.EXCEPTION;
+    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
+    const child = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument must be a Node");
+    z.appendChild(node, child);
+    return w.UNDEFINED;
+}
 /// Generated wrapper for z.removeNode
 pub fn js_remove(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
@@ -361,6 +370,25 @@ pub fn js_compareDocumentPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
     const other = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument must be a Node");
     const result = z.compareDocumentPosition(node, other);
     return qjs.JS_NewInt32(ctx_ptr, @as(i32, result));
+}
+/// Generated wrapper for z.setAttribute
+pub fn js_setAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 2) return w.EXCEPTION;
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return w.EXCEPTION;
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const arg1 = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg1);
+    const arg2 = ctx.toZString(argv[1]) catch return w.EXCEPTION;
+    defer ctx.freeZString(arg2);
+    z.setAttribute(el, arg1, arg2) catch |err| {
+        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
+        std.debug.print("JS Binding Error: {}\n", .{err});
+        return ctx.throwTypeError("Native Zig Error");
+    };
+    return w.UNDEFINED;
 }
 /// Generated wrapper for z.getAttribute_zc
 pub fn js_getAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -548,6 +576,76 @@ pub fn js_set_innerText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
         std.debug.print("JS Setter Error (innerText): {}\n", .{err});
         return ctx.throwTypeError("Native Zig Error in Setter");
     };
+    return w.UNDEFINED;
+}
+// Property Getter for innerHTML
+pub fn js_get_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.innerHTML(rc.allocator, el) catch return w.EXCEPTION;
+    defer rc.allocator.free(result);
+    return ctx.newString(result);
+}
+// Property Setter for innerHTML
+pub fn js_set_innerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    if (rc.sanitize_enabled) {
+        // Sanitized path: parse, sanitize, then insert
+        // For dynamically injected content, ALWAYS enforce strict settings:
+        // - remove_scripts = true (prevent script injection attacks)
+        // - remove_styles = true (prevent CSS injection via <style> tags)
+        // This is stricter than loadPage options because dynamic content is higher risk
+        const sanitizer_mod = @import("modules/sanitizer.zig");
+        const strict_options = sanitizer_mod.SanitizeOptions{
+            .remove_scripts = true, // ALWAYS remove scripts in dynamic content
+            .remove_styles = false, // Keep inline styles (sanitized by sanitize_css)
+            .sanitize_css = true, // Sanitize inline CSS (remove expression(), url(js:), etc.)
+            .remove_comments = rc.sanitize_options.remove_comments,
+            .strict_uri = rc.sanitize_options.strict_uri,
+            .sanitize_dom_clobbering = true, // Always sanitize DOM clobbering
+            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
+            .allow_embeds = false, // Never allow embeds in dynamic content
+            .allow_iframes = false, // Never allow iframes in dynamic content
+            .frameworks = rc.sanitize_options.frameworks,
+        };
+        var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch |err| {
+            std.debug.print("JS Setter Error (innerHTML sanitizer init): {}\n", .{err});
+            return ctx.throwTypeError("Failed to initialize sanitizer");
+        };
+        defer san.deinit();
+
+        // Use sanitized innerHTML insertion
+        san.setInnerHTMLSanitized(el, val_str) catch |err| {
+            std.debug.print("JS Setter Error (innerHTML sanitized): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    } else {
+        // Trusted path: direct insertion
+        z.setInnerHTML(el, val_str) catch |err| {
+            std.debug.print("JS Setter Error (innerHTML): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    }
+
+    // Always attach styles to newly inserted nodes
+    const node = z.elementToNode(el);
+    z.attachSubtreeStyles(node) catch |err| {
+        std.debug.print("JS Setter Warning (innerHTML styles): {}\n", .{err});
+        // Don't fail on style attachment errors
+    };
+
     return w.UNDEFINED;
 }
 // Property Getter for content
@@ -937,6 +1035,90 @@ pub fn js_set_nonce(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
     z.setAttribute(el, "nonce", val_str) catch return w.EXCEPTION;
+    return w.UNDEFINED;
+}
+// Property Getter for outerHTML
+pub fn js_get_outerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.outerHTML(rc.allocator, el) catch return w.EXCEPTION;
+    defer rc.allocator.free(result);
+    return ctx.newString(result);
+}
+// Property Setter for outerHTML
+pub fn js_set_outerHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val_str);
+
+    // Get parent before replacement (for style attachment)
+    const parent_node = z.parentNode(z.elementToNode(el));
+
+    if (rc.sanitize_enabled) {
+        // Sanitized path: parse in temp doc, sanitize, serialize, then replace
+        const sanitizer_mod = @import("modules/sanitizer.zig");
+        const strict_options = sanitizer_mod.SanitizeOptions{
+            .remove_scripts = true,
+            .remove_styles = false,
+            .sanitize_css = true,
+            .remove_comments = rc.sanitize_options.remove_comments,
+            .strict_uri = rc.sanitize_options.strict_uri,
+            .sanitize_dom_clobbering = true,
+            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
+            .allow_embeds = false,
+            .allow_iframes = false,
+            .frameworks = rc.sanitize_options.frameworks,
+        };
+        var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML sanitizer init): {}\n", .{err});
+            return ctx.throwTypeError("Failed to initialize sanitizer");
+        };
+        defer san.deinit();
+
+        // Parse and sanitize using Sanitizer.parseHTML (sanitizes during parse)
+        const temp_doc = san.parseHTML(val_str) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML parse/sanitize): {}\n", .{err});
+            return ctx.throwTypeError("Failed to parse HTML");
+        };
+        defer z.destroyDocument(temp_doc);
+
+        const temp_body = z.bodyElement(temp_doc) orelse return ctx.throwTypeError("No body in parsed HTML");
+
+        // Serialize and replace
+        const clean_html = z.innerHTML(rc.allocator, temp_body) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML serialize): {}\n", .{err});
+            return ctx.throwTypeError("Failed to serialize HTML");
+        };
+        defer rc.allocator.free(clean_html);
+
+        z.setOuterHTMLSimple(el, clean_html) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    } else {
+        // Trusted path: direct replacement
+        z.setOuterHTMLSimple(el, val_str) catch |err| {
+            std.debug.print("JS Setter Error (outerHTML): {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error in Setter");
+        };
+    }
+
+    // Attach styles to newly inserted content
+    if (parent_node) |parent| {
+        z.attachSubtreeStyles(parent) catch |err| {
+            std.debug.print("JS Setter Warning (outerHTML styles): {}\n", .{err});
+        };
+    }
+
     return w.UNDEFINED;
 }
 
@@ -11108,6 +11290,7 @@ pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "removeEventListener", qjs.JS_NewCFunction(ctx, js_removeEventListener, "removeEventListener", 2));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "dispatchEvent", qjs.JS_NewCFunction(ctx, js_dispatchEvent, "dispatchEvent", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "cloneNode", qjs.JS_NewCFunction(ctx, js_cloneNode, "cloneNode", 1));
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "appendChild", qjs.JS_NewCFunction(ctx, js_appendChild, "appendChild", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "remove", qjs.JS_NewCFunction(ctx, js_remove, "remove", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "removeChild", qjs.JS_NewCFunction(ctx, js_removeChild, "removeChild", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "replaceChild", qjs.JS_NewCFunction(ctx, js_replaceChild, "replaceChild", 2));
@@ -11193,10 +11376,18 @@ pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
 }
 
 pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
+    _ = qjs.JS_SetPropertyStr(ctx, proto, "setAttribute", qjs.JS_NewCFunction(ctx, js_setAttribute, "setAttribute", 2));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "getAttribute", qjs.JS_NewCFunction(ctx, js_getAttribute, "getAttribute", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "removeAttribute", qjs.JS_NewCFunction(ctx, js_removeAttribute, "removeAttribute", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "setHTML", qjs.JS_NewCFunction(ctx, js_setHTML, "setHTML", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "getHTML", qjs.JS_NewCFunction(ctx, js_getHTML, "getHTML", 0));
+    {
+        const atom = qjs.JS_NewAtom(ctx, "innerHTML");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_innerHTML, "get_innerHTML", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_innerHTML, "set_innerHTML", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
     {
         const atom = qjs.JS_NewAtom(ctx, "content");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_content, "get_content", 0, qjs.JS_CFUNC_generic, 0);
@@ -11306,6 +11497,13 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
         const atom = qjs.JS_NewAtom(ctx, "nonce");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nonce, "get_nonce", 0, qjs.JS_CFUNC_generic, 0);
         const set_fn = qjs.JS_NewCFunction2(ctx, js_set_nonce, "set_nonce", 1, qjs.JS_CFUNC_generic, 0);
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "outerHTML");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_outerHTML, "get_outerHTML", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = qjs.JS_NewCFunction2(ctx, js_set_outerHTML, "set_outerHTML", 1, qjs.JS_CFUNC_generic, 0);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }

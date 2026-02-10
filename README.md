@@ -18,7 +18,7 @@ By providing a minimal DOM environment for running JS outside of a browser, it c
 This engine aims to be lightweight and fast. If you plan to use untrusted code, consider the following:
 
 > [!IMPORTANT]
-> zexplorer is not a secure execution boundary for untrusted tenants; it is a deterministic content-processing engine designed to run and it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
+> zexplorer does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
 
 > [!WARNING]
 > `zexplorer` provides "best-effort" content-level safety with the optional sanitization step. Trusted code can by-pass this step for performance.
@@ -49,23 +49,17 @@ It is designed to safely parse, transform, and sanitize untrusted HTML and short
 
 It has:
 
+- fast cold boot: 1ms,
+- runs ES6 JavaScript and is equipped with a significant number of functionalities of the Web DOM API. It can execute some framework-generated JavaScript insofar as their runtime code does not rely on browser-only APIs, streaming I/O, or layout engines. Real client-framework code tests made on the js-framework-benchmark (React, Vue, SolidJS, vanilla, bau).
+- sanitization: it is a **best effort** sanitization by testing. It can process 24kB of the [DOMPurify HTML test]((<https://cure53.de/purify>)) in 1.5ms. It is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with no exploitable vulnerabilities found among the 139 tests.
+  - It is based on a declarative security policy (_html_specs.zig_) and is "context aware". Templates are processed in there own DocumentFragment.
+  - sanitization is optional. If sanitization is set, every call to `inner|outerHTML` and insertion primitives will be processed through the sanitizer.
+  - selector complexity attack. TODO. Font: TODO
 - Runtime limits (memory, stack size, interruptible) for DoS.
 - Downloads limited to HTTPS and declared in _import_map.json_,
 - File system restricted by policy, limited to current directory and beyond, and no loading if symlink for LFI.
-- A "best effort" sanitization. Load sanitized and sandboxed HTML, CSS and scripts
-  - The `Zanitizer` module is fast and integrated in the `Sanitizerconfig`.
-  - It is based on a declarative security policy (_html_specs.zig_) and is "context aware". Templates aree processed in there own documentFragment.
-  - if sanitization is set, everye call to `inner|outerHTML` will process through the sanitizer.
-  - it is tested against the HTML5 Security Cheatsheet  Test  (<https://github.com/cure53/H5SC>) with no exploitable vulnerabilities found among the 139 tests, and against the DOMPurify  test (<https://cure53.de/purify>) at the time of writing.
-
-Worker Mitigation:
-
-- max workers
-- total worker memory budget
-- global execution quotas
-- no DOM API
-
-Fetch Mitigation: (redirect not allowed or yes, max response size, timeout behaviour, IP range filtering)
+- Worker Mitigation: a max number of allowed workers (OS thread pool) is set to 8, with constrained memory and stack limits. Workers are not equipped with DOM APIs and are interruptible
+- Fetch Mitigation: (redirect not allowed or yes, max response size, timeout behaviour, IP range filtering)
 
 - DNS rebinding?
 - IP literal blocking?
@@ -74,29 +68,9 @@ Fetch Mitigation: (redirect not allowed or yes, max response size, timeout behav
 - compression bombs?
 - timing side channels?
   
-CSS attacks:
-
-- url() leaks
-- font loading
-- attribute selectors for data exfiltration
-- extreme selector complexity → CPU bombs
-
-**Main characteristics**:
-
-This engine has:
-
-- fast cold boot: 1ms,
-- fast sanitization: 24kB of the DOMPurify HTML test is processed in 1ms and H5SC tests compliant
-- can execute framework-generated JavaScript againt a minimal DOM. Frameworks are supported insofar as their runtime code does not rely on browser-only APIs, streaming I/O, or layout engines. It runs real client-framework code; tested against a few frameworks made on the js-framework-benchmark (React, Vue, SolidJS, vanilla, bau).
-  
 <details><summary>List of implemented server and Web API</summary>
 
-**TODO**: link each to a src/example/*. If example is missing, TODO!
-
-- TODO: `alert`, `prompt`, `confirm` : implement dumb versions
-- TODO: `crypto` via Zig
-- TODO: Storage (simple HashMap)
-- TODO `Stream` API,  ???: needs event I/O.... Zig no ready yet?
+**TODO**: link each to a src/example/*.
 
 - async Timers: `setTimeout`, `setInterval`
 - EventLoop.
@@ -114,9 +88,8 @@ This engine has:
 - `ReadableStream` (via `fs` and Worker thread, not event I/O): `read`, `releaseLock`, `cancel`.
 - `WritableStream` (via `fs` and Worker thread, not event I/O): 
 - async `FileReader` (Worker based): `readAsText`, `readAsArrayBuffer`, `'readAsDataURL`
-- `FileReaderSync`: readAsArrayBuffer readAsText readAsDataURL
-- `DocumentFragment`
-- `Template`
+- `FileReaderSync`: `readAsArrayBuffer`,  `readAsText`,  `readAsDataURL`,
+- `DocumentFragment` and `Template`.
 - `CSSStyleDeclaration`, with `style`, `window.getComputedStyle`, `setProperty`, `getPropertyValue`
 - `Classlist` and `DomTokenList` with `add`, `remove`, `contains`, `toggle`, `replace`, `item`, `toString`.
 - `Dataset` and `DOMStringMap`.
@@ -127,8 +100,12 @@ This engine has:
 - `querySelector(All)`, `matches`, `getElementById`, `getElementByTagName`, `childNodes`, `children`, `append`, `preprend`, `before`, `after`, `insertAdjacentHTML`, `insertAdjacentElement`, `replaceWith`, `replaceChildren`,
 - `TreeWalker`,
 - DOM: `document` with createElement|commment|header|TextNode,  `parseHTML`, siblings, etc
-- `Sanitizer`. TODO: check how to mnge Web PI with current. TODO: `setHTML` as 'innerHTMLUnsafe'?, ro things like this.
+- `Sanitizer`. (`setHTML` or parseHTMLUnsafe to be aliased?)
 - log and printing helpers: `prettyPrint`, `printDOM`, `printDocStruct`, `saveDOM` (to file).
+
+- TODO: `alert`, `prompt`, `confirm` : implement dumb versions
+- TODO: `crypto` via Zig
+- TODO: Storage (simple HashMap)
 
 </details>
 
@@ -148,45 +125,109 @@ This program can be used for:
 
 ### Sanitize HTML
 
+We want to sanitize the following untrusted HTML file. It loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some styles.
+
+```html
+<!-- src/examples/test_examples.html -->
+<html>
+  <head>
+    <link rel="stylesheet" href="test_example.css" />
+    <style>
+      body {
+        margin: 10px;
+        padding: 5px;
+        background: url(javascript:alert("xss"));
+      }
+    </style>
+    <script src="test_example.js"></script>
+  </head>
+  <body>
+    <div class="untrusted" onclick="alert(1)" style="font-size: 16px">
+      Click me
+    </div>
+    <p class="untrusted" style="font-size: 12px">Follow me</p>
+  </body>
+</html>
+```
+
+with the following stylesheet:
+
+```css
+/* src/examples/test_example.css */
+body {
+.untrusted {
+  color: red;
+  background-image: url("evil.com");
+}
+```
+
+and the script:
+
+```js
+// src/examples/test_example.js
+const html1 = `<p id="js1" class="untrusted" style="padding: 8px; behavior: url(evil.htc);">insertAdjacentHTML</p>`;
+document.body.insertAdjacentHTML("beforeend", html1);
+```
+
+We want to sanitize it and output the new DOM. We run the following `Zig` code:
+
 ```zig
-const z = @import("zexplorer");
+// src/examples/test_example.zig
+
 const std = @import("std");
+const z = @import("zexplorer");
 const ta = std.testing.allocator;
 
 pub fn main() !void {
-  const dirty = 
-    \\ <html>
-    \\   <head>
-    \\    <style>
-    \\      .untrusted {
-    \\        color: red;
-    \\        background-image: url("evil.com");
-    \\      }
-    \\    </style>
-    \\   </head>
-    \\   <body>
-    \\      <div class="untrusted" onclick='alert(1)'>Click me</div>"
-    \\   </body>
-    \\</html>
-    ;
+  const c_alloc = std.heap.c_allocator;
+    const sbr = try std.fs.cwd().realpathAlloc(allocator, ".");
+    defer allocator.free(sbr);
     
-
-  const sbr = try std.fs.cwd().realpathAlloc(ta, ".");
-  defer ta.free(sbr);
-  var engine = try ScriptEngine.init(ta,sbr);
+  var engine = try ScriptEngine.init(ca_alloc,sbr);
   defer engine.deinit();
 
-  const options = .{
-    .sanitize = true, // Enable sanitization for untrusted content
-        .base_dir = "src/examples", // Resolve relative paths from examples dir
-        .execute_scripts = true, // Execute <script> tags
-        .load_stylesheets = true, // Load <link rel="stylesheet">
-        .sanitizer_options = .{ .remove_scripts = false }, // Keep scripts for JS execution
-        .run_loop = true, // Run event loop to process module Promises
+  const cfg = z.LoadPageOptions{
+      .sanitize = sanitize,
+      .base_dir = "src/examples",
+      .execute_scripts = true,
+      .load_stylesheets = true,
+      .sanitizer_options = .{ .remove_scripts = false },
+      .run_loop = false, // no async code
+  };
+
+  // parse the HTML, the external stylesheet, run the script, and sync th CSS styles to the DOM
+  try engine.loadPage(@embedFile("test_example.html"), cfg);
+
+  // print DOM to terminal
+  if (z.bodyElement(engine.dom.doc)) |body| {
+    const html = try z.outerHTML(c_alloc, body);
+    defer c_alloc.free(html);
+    std.debug.print("{s}\n\n", .{ html });
+  }
+    
+  // test to see if P has the color "red" coming the class
+  if (z.getElementById(doc, "js1")) |p| {
+      const color = try z.getComputedStyle(ta, p, "color");
+      defer if (color) |c| ta.free(c);
+      std.debug.print("Confirm style set by class .untrusted on #js1: color={s} \n", .{color orelse "(none)"});
   }
 
-  try engine.loadPage(html, options); 
+  // save into a file
+  try saveDOM(c_alloc, "example_cleaned.html")
 }
+```
+
+The output confirms that the whole page is sanitized and can be used:
+
+```txt
+<body>
+  <div class="untrusted" style="font-size: 16px">
+    Click me
+  </div>
+  <p id="js1" class="untrusted" style="padding: 8px">insertAdjacentHTML</p>
+</body>
+
+Confirm style set by class .untrusted on #js1: color= red
 ```
 
 ## Tests

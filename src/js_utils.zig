@@ -20,6 +20,11 @@ pub fn defineMethod(
     _ = qjs.JS_DefinePropertyValue(ctx.ptr, proto, atom, func_val, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_WRITABLE);
 }
 
+fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {
+    const named_fn = ctx.newCFunction(func, name, len);
+    try ctx.setPropertyStr(obj, prop, named_fn);
+}
+
 pub fn defineGetter(
     ctx: zqjs.Context,
     proto: zqjs.Value,
