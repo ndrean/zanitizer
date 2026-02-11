@@ -230,6 +230,9 @@ pub const EventLoop = struct {
 
     pub fn enqueueTask(self: *EventLoop, task: AsyncTask) void {
         std.debug.print("[EvtLoop] Enqueuing task\n", .{});
+        // [CRITICAL] Decrement background job counter — every spawnWorker eventually
+        // calls enqueueTask, so this is the centralized decrement point.
+        _ = self.pending_background_jobs.fetchSub(1, .monotonic);
         self.mutex.lock();
         defer self.mutex.unlock();
         self.task_queue.append(self.allocator, task) catch {

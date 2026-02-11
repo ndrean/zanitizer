@@ -110,10 +110,7 @@ fn workReadAndCallback(task: ReaderTask) void {
     if (task.blob_data) |d| allocator.free(d);
     allocator.free(task.mime_type);
 
-    // [CRITICAL] Decrement background job counter
-    _ = task.loop.pending_background_jobs.fetchSub(1, .monotonic);
-
-    // 3. Enqueue Callback
+    // 3. Enqueue Callback (pending_background_jobs decremented centrally in enqueueTask)
     if (success) {
         const res = allocator.create(ReaderResult) catch return;
         res.* = .{ .data = result_data, .read_type = task.read_type };

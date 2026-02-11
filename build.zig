@@ -278,7 +278,10 @@ pub fn build(b: *std.Build) void {
         "src/examples/test_all.zig",
         "src/examples/test_canvas.zig",
         "src/examples/test_example.zig",
-        "src/examples/test_image.zig",
+        "src/examples/test_image1.zig",
+        "src/examples/test_image2.zig",
+        "src/examples/test_image3.zig",
+        "src/examples/test_image4.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

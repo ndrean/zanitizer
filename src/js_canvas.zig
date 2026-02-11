@@ -231,8 +231,6 @@ pub const Canvas = struct {
 
                 // Simple implementation: Overwrite (assuming color.a=255)
                 // Real implementation: Alpha blend
-
-                // Let's just do a "Tinted Add" or simple overwrite for MVP
                 // If the font pixel is 255 (solid), we paint our fill color.
                 // If 128 (50%), we should blend.
 
@@ -308,13 +306,7 @@ pub const Canvas = struct {
         // In a full engine, moveTo breaks the line continuity.
         // For simple charts, we just clear and add.
         if (self.path.items.len > 0) {
-            // If we already have points, moveTo usually starts a new disconnected line.
-            // For MVP: We will treat 'path' as a single continuous line strip.
-            // To support multiple disconnected lines, we'd need a list of lists.
-            // Let's keep it simple: moveTo clears if called mid-stream?
-            // No, standard canvas allows multiple subpaths.
-            // Let's just add it for now, but mark it as a "jump"?
-            // EASIEST MVP: Just add it.
+            // TODO ??
         }
         self.path.append(self.allocator, .{ .x = x, .y = y }) catch return;
         self.has_start_point = true;
@@ -351,7 +343,7 @@ pub const Canvas = struct {
             self.bresenhamLine(t1.x, t1.y, t2.x, t2.y);
         }
     }
-    // --- Bresenham's Line Algorithm ---
+    // --- Bresenham's Line Algorithm
     // Draws a 1px line between (x0, y0) and (x1, y1)
     fn bresenhamLine(self: *Canvas, x0: i32, y0: i32, x1: i32, y1: i32) void {
         const dx = @abs(x1 - x0);
@@ -373,7 +365,7 @@ pub const Canvas = struct {
 
         while (true) {
 
-            // "The Marker Pen": Draw a block of pixels around the center
+            // Draw a block of pixels around the center
             if (radius == 0) {
                 // Fast path for 1px lines
                 if (curr_x >= 0 and curr_x < cv_w and curr_y >= 0 and curr_y < cv_h) {
@@ -423,7 +415,7 @@ pub const Canvas = struct {
     // ctx.arc(x, y, radius, start_angle, end_angle)
     pub fn arc(self: *Canvas, x: f32, y: f32, r: f32, start_angle: f32, end_angle: f32) void {
         // Resolution: The larger the radius, the more steps we need for it to look round.
-        // A step of ~0.1 radians (6 degrees) is usually fine for small circles.
+        // A step of ~0.1 radians (6 degrees) is fine for small circles.
         const step = 0.1;
 
         var angle = start_angle;
@@ -538,7 +530,7 @@ pub const Canvas = struct {
         // 1. Safety & Degenerate Cases
         if (sw <= 0 or sh <= 0 or dw <= 0 or dh <= 0) return;
 
-        // 2. Clip Destination against Canvas Boundaries
+        // Clip Destination against Canvas Boundaries
         // We calculate the intersection of the Destination Rect and the Canvas
         const dest_rect_x: i32 = @max(0, dx);
         const dest_rect_y: i32 = @max(0, dy);
@@ -547,11 +539,11 @@ pub const Canvas = struct {
 
         if (dest_rect_x >= dest_rect_r or dest_rect_y >= dest_rect_b) return;
 
-        // 3. Pre-calculate strides (bytes per row)
+        // Pre-calculate strides (bytes per row) and Cast to usize for indexing
         const dest_stride = @as(usize, @intCast(self.width)) * 4;
         const src_stride = @as(usize, @intCast(img.width)) * 4;
 
-        // 4. Render Loop
+        // Render Loop
         var d_y = dest_rect_y;
         while (d_y < dest_rect_b) : (d_y += 1) {
 
@@ -615,60 +607,6 @@ pub const Canvas = struct {
             }
         }
     }
-    // pub fn drawImage(self: *Canvas, img: *js_image.Image, dx: i32, dy: i32, dw: i32, dh: i32) void {
-    //     if (dw <= 0 or dh <= 0 or dx <= 0 or dy <= 0) return;
-    //     // 1. Transform Coords
-    //     const p1 = self.applyTransform(dx, dy);
-    //     const p2 = self.applyTransform(dx + dw, dy + dh);
-
-    //     const final_x = @min(p1.x, p2.x);
-    //     const final_y = @min(p1.y, p2.y);
-    //     const final_w = @as(i32, @intCast(@abs(p2.x - p1.x)));
-    //     const final_h = @as(i32, @intCast(@abs(p2.y - p1.y)));
-
-    //     if (final_w == 0 or final_h == 0) return;
-
-    //     // 2. Clipping
-    //     const cv_w = @as(i32, @intCast(self.width));
-    //     const cv_h = @as(i32, @intCast(self.height));
-
-    //     const x_start = @max(0, final_x);
-    //     const y_start = @max(0, final_y);
-    //     const x_end = @min(cv_w, final_x + final_w);
-    //     const y_end = @min(cv_h, final_y + final_h);
-
-    //     if (x_start >= x_end or y_start >= y_end) return;
-
-    //     const dest_stride = @as(usize, @intCast(self.width));
-    //     const src_stride = @as(usize, @intCast(img.width));
-
-    //     // 3. Render Loop (Nearest Neighbor with Transforms)
-    //     var dest_y = y_start;
-    //     while (dest_y < y_end) : (dest_y += 1) {
-
-    //         // Map Screen Pixel -> Source Pixel
-    //         const row_progress = dest_y - final_y;
-    //         // (progress / total_height) * src_height
-    //         const s_y = @as(usize, @intCast(@divFloor(row_progress * img.height, final_h)));
-    //         const d_y = @as(usize, @intCast(dest_y));
-
-    //         var dest_x = x_start;
-    //         while (dest_x < x_end) : (dest_x += 1) {
-    //             const col_progress = dest_x - final_x;
-    //             const s_x = @as(usize, @intCast(@divFloor(col_progress * img.width, final_w)));
-    //             const d_x = @as(usize, @intCast(dest_x));
-
-    //             const dest_idx = (d_y * dest_stride + d_x) * 4;
-    //             const src_idx = (s_y * src_stride + s_x) * 4;
-
-    //             // Simple Copy (Add Alpha Blending logic here later!)
-    //             self.pixels[dest_idx + 0] = img.pixels[src_idx + 0];
-    //             self.pixels[dest_idx + 1] = img.pixels[src_idx + 1];
-    //             self.pixels[dest_idx + 2] = img.pixels[src_idx + 2];
-    //             self.pixels[dest_idx + 3] = img.pixels[src_idx + 3];
-    //         }
-    //     }
-    // }
 
     pub fn translate(self: *Canvas, x: f32, y: f32) void {
         self.tx += x;

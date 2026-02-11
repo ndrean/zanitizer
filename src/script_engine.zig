@@ -193,10 +193,12 @@ pub const ScriptEngine = struct {
         self.rc.destroy();
         // Loop (stops threads, frees tasks)
         self.loop.destroy();
+        // GC before context deinit to collect cycles (e.g. img.onload → closure → img)
+        self.rt.runGC();
         // Context
         self.ctx.deinit();
         std.Thread.sleep(10 * std.time.ns_per_ms);
-        // Runtime (GC and destroy)
+        // Runtime (final GC and destroy)
         self.rt.runGC();
         self.rt.deinit();
         self.allocator.destroy(self);

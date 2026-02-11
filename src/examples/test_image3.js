@@ -11,15 +11,11 @@ async function draw() {
 
   const img = await new Promise(async (resolve, reject) => {
     try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      console.log("Blob size:", blob.size);
       const img = new Image();
-
       img.onload = () => resolve(img);
       img.onerror = (e) => reject(new Error("Image failed to load"));
 
-      img.src = URL.createObjectURL(blob);
+      img.src = url;
     } catch (e) {
       reject(new Error(`Failed to fetch image: ${e.message}`));
     }

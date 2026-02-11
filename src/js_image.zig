@@ -37,6 +37,7 @@ pub const Image = struct {
         // Structural validation gate — reject malformed images before C decoder
         if (buffer.len >= 2) {
             if (std.mem.startsWith(u8, buffer, "\x89PNG")) {
+                std.debug.print("CHECK\n", .{});
                 try js_canvas.verifyPngStructure(buffer);
             } else if (buffer[0] == 0xFF and buffer[1] == 0xD8) {
                 try js_canvas.verifyJpegStructure(buffer);
@@ -131,17 +132,10 @@ pub fn unwrapImage(ctx: zqjs.Context, val: qjs.JSValue) ?*Image {
 
     return null;
 }
-// pub fn unwrapImage(ctx: zqjs.Context, val: zqjs.Value) ?*Image {
-//     const rc = RuntimeContext.get(ctx);
-//     if (rc.classes.image == 0) return null;
-//     const ptr = qjs.JS_GetOpaque(val, rc.classes.image);
-//     if (ptr == null) return null;
-//     return @ptrCast(@alignCast(ptr));
-// }
 
 // === ImageBitmap ----------------------------
 /// Helper to create a TypeError object (value) for Promise rejection.
-/// We cannot use ctx.throwTypeError() because that throws synchronously!
+/// We cannot use ctx.throwTypeError() because that throws synchronously
 fn makeTypeError(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
@@ -243,14 +237,12 @@ pub fn finalizer(_: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void {
     }
 }
 
-// ============================================================================
 // HTTP Image Fetch (async via worker thread)
-// ============================================================================
 
 const ImageFetchWorkerArgs = struct {
     loop: *EventLoop,
     ctx: zqjs.Context,
-    this_val: zqjs.Value, // HTMLImageElement JS handle (dup'd)
+    this_val: zqjs.Value, // HTMLImageElement JS handle (duped)
     url: []u8,
     allocator: std.mem.Allocator,
     sandbox: *js_security.Sandbox,
@@ -332,6 +324,7 @@ fn imageFetchWorker(args: ImageFetchWorkerArgs) void {
 fn enqueueImageResult(loop: *EventLoop, args: ImageFetchWorkerArgs, body: []const u8, ok: bool) void {
     const allocator = args.allocator;
 
+    // pending_background_jobs decremented centrally in enqueueTask
     const cb_ctx = allocator.create(ImageFetchCallbackCtx) catch {
         allocator.free(args.url);
         return;
@@ -438,6 +431,7 @@ pub fn install(ctx: zqjs.Context) !void {
         try rt.newClass(rc.classes.html_image, .{
             .class_name = "HTMLImageElement",
             .finalizer = html_image_finalizer,
+            .gc_mark = html_image_gc_mark,
         });
 
         const proto = ctx.newObject();
@@ -473,9 +467,17 @@ pub fn install(ctx: zqjs.Context) !void {
     try ctx.setPropertyStr(global, "createImageBitmap", func);
 }
 
-// ============================================================================
-// HTMLImageElement Methods (New)
-// ============================================================================
+// === HTMLImageElement Methods (New)
+
+fn html_image_gc_mark(rt: ?*qjs.JSRuntime, val: qjs.JSValue, mark_func: ?*const qjs.JS_MarkFunc) callconv(.c) void {
+    const class_id = qjs.JS_GetClassID(val);
+    const ptr = qjs.JS_GetOpaque2(null, val, class_id);
+    if (ptr) |p| {
+        const self: *HTMLImageElement = @ptrCast(@alignCast(p));
+        qjs.JS_MarkValue(rt, self.onload, mark_func);
+        qjs.JS_MarkValue(rt, self.onerror, mark_func);
+    }
+}
 
 fn html_image_finalizer(rt: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void {
     const class_id = qjs.JS_GetClassID(val);
@@ -488,8 +490,7 @@ fn html_image_finalizer(rt: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void 
         // For MVP, simple allocator free is safe for the Zig struct.
         // JS_FreeValue on rt is possible if we cast.
         const self: *HTMLImageElement = @ptrCast(@alignCast(p));
-        // Note: We can't safely free JSValues here without a Context in some versions of QJS,
-        // but JS_FreeValueRT exists.
+        // Note: We can't safely free JSValues here without a Context but JS_FreeValueRT exists.
         qjs.JS_FreeValueRT(rt, self.onload);
         qjs.JS_FreeValueRT(rt, self.onerror);
         if (self.bitmap) |b| b.deinit();
@@ -543,9 +544,6 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
     // Update internal src
     if (self.src) |s| self.allocator.free(s);
     const c_src_str = rc.allocator.dupeZ(u8, src_str) catch return zqjs.EXCEPTION;
-
-    // defer c_src_str.free();
-    // const c_src_str = src_str[0..src_str.len :0];
     self.src = c_src_str; // We take ownership of the ZString copy? No, toZString returns copy we must free.
     // Actually, let's duplicate it for long-term storage or just parse it now.
     // For safety, let's keep a copy in the struct if we implemented getter.
@@ -586,6 +584,31 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
                 // Decode failed
                 // TODO: Enqueue onerror
             }
+        }
+    } else if (std.mem.startsWith(u8, src_str, "blob:")) {
+        // Look up blob URL in registry
+        if (rc.blob_registry.get(src_str)) |blob_val| {
+            const blob_ptr = qjs.JS_GetOpaque(blob_val, rc.classes.blob);
+            if (blob_ptr) |p| {
+                const blob: *js_blob.BlobObject = @ptrCast(@alignCast(p));
+
+                if (self.bitmap) |b| b.deinit();
+
+                if (Image.initFromMemory(self.allocator, blob.data)) |new_img| {
+                    self.bitmap = new_img;
+                    self.natural_width = @intCast(new_img.width);
+                    self.natural_height = @intCast(new_img.height);
+                    self.complete = true;
+
+                    var args = [_]qjs.JSValue{this_val};
+                    _ = qjs.JS_EnqueueJob(ctx.ptr, js_image_onload_job, 1, &args);
+                } else |_| {
+                    fireImageError(ctx, rc, this_val);
+                }
+            }
+        } else {
+            std.debug.print("⚠️ Image.src: blob URL not found in registry\n", .{});
+            fireImageError(ctx, rc, this_val);
         }
     } else if (std.mem.startsWith(u8, src_str, "http://") or std.mem.startsWith(u8, src_str, "https://")) {
         // Async fetch via worker thread
