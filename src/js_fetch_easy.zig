@@ -395,6 +395,7 @@ fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocat
 
     const url_z = arena.dupeZ(u8, task.url) catch return;
     easy.setUrl(url_z) catch return;
+    z.hardenEasy(easy);
 
     // --- UPDATED METHOD HANDLING ---
     if (std.mem.eql(u8, task.method, "POST")) {

@@ -102,5 +102,5 @@ fn runTest(ta: std.mem.Allocator, sbr: []const u8, sanitize: bool) !void {
         }
     }
     try z.prettyPrint(ta, z.bodyNode(doc).?);
-    // try z.saveDOM(ta, doc, "out.html");
+    try z.printDOM(ta, doc, "out.html");
 }

@@ -363,6 +363,7 @@ pub fn js_secure_module_loader(
             _ = qjs.JS_ThrowInternalError(ctx, "Failed to set URL");
             return null;
         };
+        z.hardenEasy(easy);
 
         // GET method (default)
         easy.setMethod(.GET) catch {};
@@ -385,6 +386,8 @@ pub fn js_secure_module_loader(
             ) callconv(.c) c_uint {
                 const total = size * nmemb;
                 const wctx: *WriteCtx = @ptrCast(@alignCast(user_data));
+                // Early abort: 5MB limit for remote modules (don't wait until post-download check)
+                if (wctx.list.items.len + total > 5 * 1024 * 1024) return 0;
                 const data: [*]const u8 = @ptrCast(ptr);
                 wctx.list.appendSlice(wctx.alloc, data[0..total]) catch return 0;
                 return total;

@@ -292,6 +292,7 @@ fn imageFetchWorker(args: ImageFetchWorkerArgs) void {
             enqueueImageResult(loop, args, &.{}, false);
             return;
         };
+        z.hardenEasy(easy);
         easy.setMethod(.GET) catch {
             enqueueImageResult(loop, args, &.{}, false);
             return;
@@ -444,8 +445,9 @@ pub fn install(ctx: zqjs.Context) !void {
         js_utils.defineGetter(ctx, proto, "naturalWidth", js_html_image_get_width_prop);
         js_utils.defineGetter(ctx, proto, "naturalHeight", js_html_image_get_height_prop);
         js_utils.defineGetter(ctx, proto, "complete", js_html_image_get_complete);
-
-        // Note: Add 'width', 'height', 'complete' getters here too for fullness
+        js_utils.defineMethod(ctx, proto, "addEventListener", js_html_image_addEventListener, 2);
+        js_utils.defineMethod(ctx, proto, "removeEventListener", js_html_image_removeEventListener, 2);
+        js_utils.defineMethod(ctx, proto, "decode", js_html_image_decode, 0);
 
         ctx.setClassProto(rc.classes.html_image, proto);
 
@@ -483,14 +485,8 @@ fn html_image_finalizer(rt: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void 
     const class_id = qjs.JS_GetClassID(val);
     const ptr = qjs.JS_GetOpaque2(null, val, class_id);
     if (ptr) |p| {
-        // We need a context to free the JSValues (onload/onerror)
-        // Since finalizer only gives Runtime, we technically leak the JSValue refs
-        // if we don't manage them carefully.
-        // Ideally, we free the native struct.
-        // For MVP, simple allocator free is safe for the Zig struct.
-        // JS_FreeValue on rt is possible if we cast.
         const self: *HTMLImageElement = @ptrCast(@alignCast(p));
-        // Note: We can't safely free JSValues here without a Context but JS_FreeValueRT exists.
+        // Finalizer receives Runtime, not Context — use JS_FreeValueRT
         qjs.JS_FreeValueRT(rt, self.onload);
         qjs.JS_FreeValueRT(rt, self.onerror);
         if (self.bitmap) |b| b.deinit();
@@ -513,6 +509,20 @@ fn js_html_image_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int,
     }
     _ = qjs.JS_SetOpaque(obj, img);
     return obj;
+}
+
+/// img.decode() — no-op stub, resolves immediately (image already decoded in src setter)
+fn js_html_image_decode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    var resolvers: [2]qjs.JSValue = undefined;
+    const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
+    if (qjs.JS_IsException(promise)) return zqjs.EXCEPTION;
+    // Resolve immediately with undefined
+    const ret = qjs.JS_Call(ctx.ptr, resolvers[0], zqjs.UNDEFINED, 0, null);
+    qjs.JS_FreeValue(ctx.ptr, ret);
+    qjs.JS_FreeValue(ctx.ptr, resolvers[0]);
+    qjs.JS_FreeValue(ctx.ptr, resolvers[1]);
+    return promise;
 }
 
 /// The Job called by the Event Loop to trigger 'onload'
@@ -541,34 +551,30 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
 
     const src_str = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
-    // Update internal src
+    // Store a copy for the getter (toZString returns a temp view)
     if (self.src) |s| self.allocator.free(s);
-    const c_src_str = rc.allocator.dupeZ(u8, src_str) catch return zqjs.EXCEPTION;
-    self.src = c_src_str; // We take ownership of the ZString copy? No, toZString returns copy we must free.
-    // Actually, let's duplicate it for long-term storage or just parse it now.
-    // For safety, let's keep a copy in the struct if we implemented getter.
-    // For now, we process immediately.
+    self.src = rc.allocator.dupeZ(u8, src_str) catch return zqjs.EXCEPTION;
 
-    // 1. Check for Data URL
+    // Dispatch by URL scheme: data: (sync), blob: (sync), http(s): (async worker)
     if (std.mem.startsWith(u8, src_str, "data:")) {
-        // "data:image/png;base64,....."
         if (std.mem.indexOf(u8, src_str, "base64,")) |idx| {
-            const b64_data = src_str[idx + 7 ..]; // Skip "base64,"
+            const b64_data = src_str[idx + 7 ..];
 
-            // Decode
             const decoder = std.base64.standard.Decoder;
             const size = decoder.calcSizeForSlice(b64_data) catch {
-                // TODO: Fire onerror
+                fireImageError(ctx, rc, this_val);
                 return zqjs.UNDEFINED;
             };
 
             const buffer = self.allocator.alloc(u8, size) catch return zqjs.EXCEPTION;
             defer self.allocator.free(buffer);
 
-            decoder.decode(buffer, b64_data) catch return zqjs.UNDEFINED;
+            decoder.decode(buffer, b64_data) catch {
+                fireImageError(ctx, rc, this_val);
+                return zqjs.UNDEFINED;
+            };
 
-            // Load via STB
-            if (self.bitmap) |b| b.deinit(); // Free old
+            if (self.bitmap) |b| b.deinit();
 
             if (Image.initFromMemory(self.allocator, buffer)) |new_img| {
                 self.bitmap = new_img;
@@ -576,17 +582,13 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
                 self.natural_height = @intCast(new_img.height);
                 self.complete = true;
 
-                // Enqueue Load Event (Async)
-                // We pass 'this' (the image object) to the job
                 var args = [_]qjs.JSValue{this_val};
                 _ = qjs.JS_EnqueueJob(ctx.ptr, js_image_onload_job, 1, &args);
             } else |_| {
-                // Decode failed
-                // TODO: Enqueue onerror
+                fireImageError(ctx, rc, this_val);
             }
         }
     } else if (std.mem.startsWith(u8, src_str, "blob:")) {
-        // Look up blob URL in registry
         if (rc.blob_registry.get(src_str)) |blob_val| {
             const blob_ptr = qjs.JS_GetOpaque(blob_val, rc.classes.blob);
             if (blob_ptr) |p| {
@@ -709,6 +711,51 @@ fn js_html_image_get_complete(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
-    // return qjs.JS_NewBool(ctx.ptr, self.complete);
     return ctx.newBool(self.complete);
+}
+
+/// img.addEventListener('load'|'error', callback) — maps to onload/onerror
+fn js_html_image_addEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
+    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+
+    if (argc < 2) return zqjs.UNDEFINED;
+
+    const event_name = ctx.toZString(argv[0]) catch return zqjs.UNDEFINED;
+    defer ctx.freeZString(event_name);
+
+    if (std.mem.eql(u8, event_name, "load")) {
+        qjs.JS_FreeValue(ctx.ptr, self.onload);
+        self.onload = qjs.JS_DupValue(ctx.ptr, argv[1]);
+    } else if (std.mem.eql(u8, event_name, "error")) {
+        qjs.JS_FreeValue(ctx.ptr, self.onerror);
+        self.onerror = qjs.JS_DupValue(ctx.ptr, argv[1]);
+    }
+
+    return zqjs.UNDEFINED;
+}
+
+/// img.removeEventListener('load'|'error', callback) — clears onload/onerror
+fn js_html_image_removeEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
+    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+
+    if (argc < 2) return zqjs.UNDEFINED;
+
+    const event_name = ctx.toZString(argv[0]) catch return zqjs.UNDEFINED;
+    defer ctx.freeZString(event_name);
+
+    if (std.mem.eql(u8, event_name, "load")) {
+        qjs.JS_FreeValue(ctx.ptr, self.onload);
+        self.onload = zqjs.UNDEFINED;
+    } else if (std.mem.eql(u8, event_name, "error")) {
+        qjs.JS_FreeValue(ctx.ptr, self.onerror);
+        self.onerror = zqjs.UNDEFINED;
+    }
+
+    return zqjs.UNDEFINED;
 }

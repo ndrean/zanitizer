@@ -793,7 +793,7 @@ fn stylesheet_txt(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try std.testing.expectEqualStrings("red", computed_color.?);
     try std.testing.expectEqualStrings("30px", computed_font_size.?);
 
-    try z.printDOM(allocator, engine.dom.doc, "CSS external");
+    try z.printDoc(allocator, engine.dom.doc, "CSS external");
 }
 
 fn stylesheet_style_tag(allocator: std.mem.Allocator, sbx: []const u8) !void {
@@ -846,7 +846,7 @@ fn stylesheet_style_tag(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try std.testing.expectEqualStrings("green", computed_color.?);
     try std.testing.expectEqualStrings("20px", computed_font_size.?);
     try std.testing.expectEqualStrings("New text", z.textContent_zc(z.elementToNode(p_el)));
-    try z.printDOM(allocator, engine.dom.doc, "CSS with <style> element");
+    try z.printDoc(allocator, engine.dom.doc, "CSS with <style> element");
 }
 
 fn link_and_script(allocator: std.mem.Allocator, sbx: []const u8) !void {
@@ -888,7 +888,7 @@ fn link_and_script(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
 
-    try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
+    try z.printDoc(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
 
 fn js_framework_2_bench(allocator: std.mem.Allocator, sbx: []const u8) !void {

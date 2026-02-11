@@ -1532,12 +1532,18 @@ fn js_canvas_clearRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 
 /// ctx.fill() - fill current path (simplified: fill enclosed polygon)
-fn js_canvas_fill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+fn js_canvas_fill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
-    // For bars, Chart.js uses fillRect directly. fill() is for path-based shapes.
-    // Simplified scanline fill for closed paths
     if (canvas.path.items.len < 3) return zqjs.UNDEFINED;
+
+    // Parse optional fill rule: "nonzero" (default) or "evenodd"
+    var use_evenodd = false;
+    if (argc >= 1) {
+        const rule = ctx.toZString(argv[0]) catch "";
+        if (std.mem.eql(u8, rule, "evenodd")) use_evenodd = true;
+        if (rule.len > 0) ctx.freeZString(rule);
+    }
 
     const color = canvas.fill_color;
     const points = canvas.path.items;
@@ -1555,12 +1561,13 @@ fn js_canvas_fill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: 
     const start_y = @max(0, @as(i32, @intFromFloat(min_y)));
     const end_y = @min(@as(i32, @intCast(cv_h)), @as(i32, @intFromFloat(max_y)) + 1);
 
-    // Scanline fill
+    // Scanline fill with winding rule support
     var scan_y = start_y;
     while (scan_y < end_y) : (scan_y += 1) {
         const fy: f32 = @floatFromInt(scan_y);
-        // Find intersections with polygon edges
+        // Find intersections + winding directions
         var x_ints: [64]f32 = undefined;
+        var winds: [64]i8 = undefined; // +1 upward, -1 downward
         var n_ints: usize = 0;
 
         var i: usize = 0;
@@ -1572,39 +1579,72 @@ fn js_canvas_fill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: 
             if ((p0.y <= fy and p1.y > fy) or (p1.y <= fy and p0.y > fy)) {
                 const t = (fy - p0.y) / (p1.y - p0.y);
                 x_ints[n_ints] = p0.x + t * (p1.x - p0.x);
+                winds[n_ints] = if (p1.y > p0.y) @as(i8, 1) else @as(i8, -1);
                 n_ints += 1;
             }
         }
 
-        // Sort intersections
+        // Sort intersections (carry winding with them)
         var s: usize = 0;
         while (s < n_ints) : (s += 1) {
             var k = s + 1;
             while (k < n_ints) : (k += 1) {
                 if (x_ints[k] < x_ints[s]) {
-                    const tmp = x_ints[s];
+                    const tmp_x = x_ints[s];
                     x_ints[s] = x_ints[k];
-                    x_ints[k] = tmp;
+                    x_ints[k] = tmp_x;
+                    const tmp_w = winds[s];
+                    winds[s] = winds[k];
+                    winds[k] = tmp_w;
                 }
             }
         }
 
-        // Fill between pairs
-        var p: usize = 0;
-        while (p + 1 < n_ints) : (p += 2) {
-            const x0 = @max(0, @as(i32, @intFromFloat(x_ints[p])));
-            const x1 = @min(@as(i32, @intCast(cv_w)), @as(i32, @intFromFloat(x_ints[p + 1])));
-            var col = x0;
-            while (col < x1) : (col += 1) {
-                const idx: usize = (@as(usize, @intCast(scan_y)) * cv_w + @as(usize, @intCast(col))) * 4;
-                canvas.pixels[idx + 0] = color.r;
-                canvas.pixels[idx + 1] = color.g;
-                canvas.pixels[idx + 2] = color.b;
-                canvas.pixels[idx + 3] = color.a;
+        if (use_evenodd) {
+            // Evenodd: fill between pairs of intersections
+            var p: usize = 0;
+            while (p + 1 < n_ints) : (p += 2) {
+                fillScanSpan(canvas.pixels, cv_w, scan_y, x_ints[p], x_ints[p + 1], color);
+            }
+        } else {
+            // Nonzero: fill where winding number != 0
+            var winding: i32 = 0;
+            var p: usize = 0;
+            while (p < n_ints) : (p += 1) {
+                const prev_winding = winding;
+                winding += winds[p];
+                // Transition: outside→inside or inside→outside
+                if (prev_winding == 0 and winding != 0) {
+                    // Start of filled span — find end
+                } else if (prev_winding != 0 and winding == 0 and p > 0) {
+                    // End of filled span — fill from previous transition start
+                    // Find the start: walk back to where winding went from 0 to non-0
+                    var start_idx: usize = p;
+                    var w2: i32 = 0;
+                    var q: usize = 0;
+                    while (q <= p) : (q += 1) {
+                        if (w2 == 0 and w2 + winds[q] != 0) start_idx = q;
+                        w2 += winds[q];
+                    }
+                    fillScanSpan(canvas.pixels, cv_w, scan_y, x_ints[start_idx], x_ints[p], color);
+                }
             }
         }
     }
     return zqjs.UNDEFINED;
+}
+
+fn fillScanSpan(pixels: []u8, cv_w: u32, scan_y: i32, x_start: f32, x_end: f32, color: css_color.Color) void {
+    const x0 = @max(0, @as(i32, @intFromFloat(x_start)));
+    const x1 = @min(@as(i32, @intCast(cv_w)), @as(i32, @intFromFloat(x_end)));
+    var col = x0;
+    while (col < x1) : (col += 1) {
+        const idx: usize = (@as(usize, @intCast(scan_y)) * cv_w + @as(usize, @intCast(col))) * 4;
+        pixels[idx + 0] = color.r;
+        pixels[idx + 1] = color.g;
+        pixels[idx + 2] = color.b;
+        pixels[idx + 3] = color.a;
+    }
 }
 
 /// ctx.rect(x, y, w, h) - add rectangle sub-path
@@ -2013,6 +2053,93 @@ fn js_canvas_getImageData(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
     return result;
 }
 
+/// ctx.putImageData(imageData, dx, dy [, dirtyX, dirtyY, dirtyWidth, dirtyHeight])
+fn js_canvas_putImageData(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
+
+    if (argc < 3) return ctx.throwTypeError("putImageData requires at least 3 arguments");
+
+    // argv[0] = ImageData { width, height, data: Uint8Array }
+    const image_data = argv[0];
+
+    const w_val = qjs.JS_GetPropertyStr(ctx.ptr, image_data, "width");
+    defer qjs.JS_FreeValue(ctx.ptr, w_val);
+    const h_val = qjs.JS_GetPropertyStr(ctx.ptr, image_data, "height");
+    defer qjs.JS_FreeValue(ctx.ptr, h_val);
+
+    var img_w: i32 = 0;
+    var img_h: i32 = 0;
+    _ = qjs.JS_ToInt32(ctx.ptr, &img_w, w_val);
+    _ = qjs.JS_ToInt32(ctx.ptr, &img_h, h_val);
+
+    if (img_w <= 0 or img_h <= 0) return ctx.throwTypeError("Invalid ImageData dimensions");
+
+    const data_val = qjs.JS_GetPropertyStr(ctx.ptr, image_data, "data");
+    defer qjs.JS_FreeValue(ctx.ptr, data_val);
+
+    const src_pixels = ctx.getUint8Array(data_val) catch return ctx.throwTypeError("ImageData.data must be a Uint8Array");
+
+    const expected = @as(usize, @intCast(img_w)) * @as(usize, @intCast(img_h)) * 4;
+    if (src_pixels.len < expected) return ctx.throwTypeError("ImageData.data too small");
+
+    // Destination offset on canvas
+    var dx: f64 = 0;
+    var dy: f64 = 0;
+    _ = qjs.JS_ToFloat64(ctx.ptr, &dx, argv[1]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &dy, argv[2]);
+
+    // Optional dirty rect (defaults to full ImageData)
+    var dirty_x: i32 = 0;
+    var dirty_y: i32 = 0;
+    var dirty_w: i32 = img_w;
+    var dirty_h: i32 = img_h;
+
+    if (argc >= 7) {
+        _ = qjs.JS_ToInt32(ctx.ptr, &dirty_x, argv[3]);
+        _ = qjs.JS_ToInt32(ctx.ptr, &dirty_y, argv[4]);
+        _ = qjs.JS_ToInt32(ctx.ptr, &dirty_w, argv[5]);
+        _ = qjs.JS_ToInt32(ctx.ptr, &dirty_h, argv[6]);
+    }
+
+    // Clamp dirty rect to ImageData bounds
+    if (dirty_x < 0) {
+        dirty_w += dirty_x;
+        dirty_x = 0;
+    }
+    if (dirty_y < 0) {
+        dirty_h += dirty_y;
+        dirty_y = 0;
+    }
+    if (dirty_x + dirty_w > img_w) dirty_w = img_w - dirty_x;
+    if (dirty_y + dirty_h > img_h) dirty_h = img_h - dirty_y;
+    if (dirty_w <= 0 or dirty_h <= 0) return zqjs.UNDEFINED;
+
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const dest_x: i32 = @intFromFloat(dx);
+    const dest_y: i32 = @intFromFloat(dy);
+
+    // Copy pixels from ImageData to canvas buffer
+    var sy: i32 = 0;
+    while (sy < dirty_h) : (sy += 1) {
+        const canvas_y = dest_y + dirty_y + sy;
+        if (canvas_y < 0 or canvas_y >= @as(i32, @intCast(ch))) continue;
+
+        var sx: i32 = 0;
+        while (sx < dirty_w) : (sx += 1) {
+            const canvas_x = dest_x + dirty_x + sx;
+            if (canvas_x < 0 or canvas_x >= @as(i32, @intCast(cw))) continue;
+
+            const src_off = (@as(usize, @intCast(dirty_y + sy)) * @as(usize, @intCast(img_w)) + @as(usize, @intCast(dirty_x + sx))) * 4;
+            const dst_off = (@as(usize, @intCast(canvas_y)) * @as(usize, cw) + @as(usize, @intCast(canvas_x))) * 4;
+            @memcpy(canvas.pixels[dst_off..][0..4], src_pixels[src_off..][0..4]);
+        }
+    }
+
+    return zqjs.UNDEFINED;
+}
+
 // === Shared prototype installer for Canvas and HTMLCanvasElement
 fn installCanvasPrototype(ctx: zqjs.Context, proto: zqjs.Value) void {
     // Core canvas methods
@@ -2020,6 +2147,7 @@ fn installCanvasPrototype(ctx: zqjs.Context, proto: zqjs.Value) void {
     js_utils.defineMethod(ctx, proto, "toDataURL", js_canvas_toDataURL, 2);
     js_utils.defineMethod(ctx, proto, "toBlob", js_canvas_toBlob, 3);
     js_utils.defineMethod(ctx, proto, "getImageData", js_canvas_getImageData, 4);
+    js_utils.defineMethod(ctx, proto, "putImageData", js_canvas_putImageData, 7);
 
     // Drawing methods
     js_utils.defineMethod(ctx, proto, "fillRect", js_canvas_fillRect, 4);
@@ -2028,7 +2156,7 @@ fn installCanvasPrototype(ctx: zqjs.Context, proto: zqjs.Value) void {
     js_utils.defineMethod(ctx, proto, "strokeText", js_canvas_strokeText, 3);
     js_utils.defineMethod(ctx, proto, "strokeRect", js_canvas_strokeRect, 4);
     js_utils.defineMethod(ctx, proto, "clearRect", js_canvas_clearRect, 4);
-    js_utils.defineMethod(ctx, proto, "fill", js_canvas_fill, 0);
+    js_utils.defineMethod(ctx, proto, "fill", js_canvas_fill, 1);
     js_utils.defineMethod(ctx, proto, "rect", js_canvas_rect, 4);
     js_utils.defineMethod(ctx, proto, "clip", js_canvas_clip, 0);
 

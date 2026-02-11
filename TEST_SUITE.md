@@ -1,9 +1,67 @@
 
 # Test suite
 
-To add more and more...
+## File System
 
-## DOM 
+Source: js_security.zig
+
+File system restricted by policy, limited to current directory and beyond:
+
+- Symlink blocking,
+- traversal rejection, 
+- TOCTOU-safe with no_follow,
+- hardlink device-ID check,
+- 16-level directory stack.
+
+## Worker Mitigation
+
+Source: js_workers.zig
+
+- MAX_WORKERS=8,
+- constrainted memory & stack linits: 64MB heap/2MB stack per worker,
+- no DOM API,
+- interrupt handler with termination flag.
+
+## Main thread MEMORY
+
+Main thread 256MB / 32MB GC threshold, stack limits enforced.
+
+## Module loading
+
+- HTTPS-only for remote,
+- SRI hash verification,
+- 5MB remote
+- 10MB local limits.
+
+## FETCH Mitigation
+
+CA bunble validation
+Stream unlimited data until OOM (response size limit)
+Infinite redirect (redirect cap needed)
+no timeout
+internal services via SSRF
+
+`isBlockedUrl()` if sanitization, SSRF pre-flight check
+
+- FETCH_TIMEOUT_MS: 30,000, 30s total, prevents slow-loris
+- FETCH_CONNECT_TIMEOUT_MS: 10,000, 10s connect, fails fast on unreachable hosts
+- FETCH_MAX_REDIRECTS: 5 Standard browser limit
+- FETCH_MAX_RESPONSE_SIZE: 50 MB, General fetch limit (modules already have 5MB)
+- CURLOPT_PROTOCOLS_STR: "http,https", Blocks file://, ftp://, dict://, etc.
+
+- compression bombs?
+- timing side channels?
+  
+## DOM
+
+### Sanitizer
+
+- iframe sandboxing,
+- SVG/MathML isolation,
+- DOM clobbering prevention,
+- URI scheme validation.
+- XSS
+
 
 ### Deep nesting
 
@@ -13,7 +71,6 @@ Mode	Expected
 Hostile	Fail at ~1k
 Trusted	Allow up to ~10k
 Both	No crash, clear error
-
 
 ### Wide tree
 

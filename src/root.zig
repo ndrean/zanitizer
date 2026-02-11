@@ -13,6 +13,13 @@ pub const qjs = @cImport({
 pub const MAX_WORKERS = 8;
 
 pub const curl = @import("curl");
+const curl_multi = @import("curl_multi.zig");
+pub const hardenEasy = curl_multi.hardenEasy;
+pub const isBlockedUrl = curl_multi.isBlockedUrl;
+pub const FETCH_TIMEOUT_MS = curl_multi.FETCH_TIMEOUT_MS;
+pub const FETCH_CONNECT_TIMEOUT_MS = curl_multi.FETCH_CONNECT_TIMEOUT_MS;
+pub const FETCH_MAX_REDIRECTS = curl_multi.FETCH_MAX_REDIRECTS;
+pub const FETCH_MAX_RESPONSE_SIZE = curl_multi.FETCH_MAX_RESPONSE_SIZE;
 // Import wrapper for cleaner QuickJS API
 pub const wrapper = @import("wrapper.zig");
 pub const dom_bridge = @import("dom_bridge.zig");
@@ -376,11 +383,12 @@ pub const innerTemplateHTML = frag_temp.innerTemplateHTML;
 pub const templateContentFirstElementChild = frag_temp.templateContentFirstElementChild;
 
 // Debug printing utilities
-pub const saveDOM = serialize.saveDOM;
+pub const saveDOM = serialize.printDOM;
+pub const printDOM = serialize.printDOM;
 pub const printDocStruct = serialize.printDocStruct;
 pub const prettyPrint = serialize.prettyPrint;
-pub const printDOM = serialize.printDOM;
-pub const ppDoc = serialize.ppDoc; // Alias for printDOM
+pub const printDoc = serialize.printDoc;
+pub const ppDoc = serialize.ppDoc; // Alias for printDoc
 //======================================================================================
 // Colouring and syntax highlighting
 pub const ElementStyles = colours.ElementStyles;

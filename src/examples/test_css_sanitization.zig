@@ -207,5 +207,5 @@ fn stylesheet(allocator: std.mem.Allocator) !void {
     }
 
     z.print("\n=== Full final DOM ===\n", .{});
-    try z.printDOM(allocator, doc, "Cleaned CSS");
+    try z.printDoc(allocator, doc, "Cleaned CSS");
 }

@@ -83,7 +83,7 @@ fn extractScript(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
     try engine.loadHTML(html);
     const doc = engine.dom.doc;
     const div_elt = try z.querySelector(allocator, doc, "div#ignore");
-    try z.printDOM(allocator, doc, "Before execution");
+    try z.printDoc(allocator, doc, "Before execution");
 
     try engine.executeScripts(allocator, sandbox_root);
 
@@ -91,5 +91,5 @@ fn extractScript(allocator: std.mem.Allocator, sandbox_root: []const u8) !void {
     const content = z.textContent_zc(z.elementToNode(div_elt.?));
     z.print("[Zig] DIV content has been changed to: {s}\n", .{content});
 
-    try z.printDOM(allocator, doc, "After execution");
+    try z.printDoc(allocator, doc, "After execution");
 }

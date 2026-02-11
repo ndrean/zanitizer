@@ -472,9 +472,9 @@ pub fn printDocStruct(doc: *z.HTMLDocument) !void {
 /// ```zig
 /// const doc = try z.parseHTML(allocator, "<html>...</html>");
 /// defer z.destroyDocument(doc);
-/// try z.printDOM(allocator, doc);
+/// try z.printDoc(allocator, doc);
 /// ```
-pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
+pub fn printDoc(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
     if (title.len > 0) {
         try z.documentSetTitle(doc, title);
     }
@@ -483,7 +483,7 @@ pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []con
 }
 
 /// Alias for backwards compatibility
-pub const ppDoc = printDOM;
+pub const ppDoc = printDoc;
 
 // --[TODO]---
 test "web component" {

@@ -21,6 +21,77 @@ const js_response = @import("js_response.zig");
 const c = curl.libcurl;
 
 // ============================================================================
+// Fetch Security Limits (exported via root.zig)
+// ============================================================================
+
+pub const FETCH_TIMEOUT_MS: c_long = 30_000; // 30s total request timeout
+pub const FETCH_CONNECT_TIMEOUT_MS: c_long = 10_000; // 10s connection timeout
+pub const FETCH_MAX_REDIRECTS: c_long = 5; // max redirect hops
+pub const FETCH_MAX_RESPONSE_SIZE: usize = 50 * 1024 * 1024; // 50 MB
+
+/// Apply security limits to any curl Easy handle: timeout, redirect cap,
+/// response size, protocol restriction. Call after setUrl() on every handle.
+pub fn hardenEasy(easy: curl.Easy) void {
+    const handle = easy.handle;
+    _ = c.curl_easy_setopt(handle, c.CURLOPT_TIMEOUT_MS, FETCH_TIMEOUT_MS);
+    _ = c.curl_easy_setopt(handle, c.CURLOPT_CONNECTTIMEOUT_MS, FETCH_CONNECT_TIMEOUT_MS);
+    _ = c.curl_easy_setopt(handle, c.CURLOPT_MAXREDIRS, FETCH_MAX_REDIRECTS);
+    _ = c.curl_easy_setopt(handle, c.CURLOPT_FOLLOWLOCATION, @as(c_long, 1));
+    _ = c.curl_easy_setopt(handle, c.CURLOPT_PROTOCOLS_STR, "http,https");
+}
+
+/// SSRF pre-flight check: returns true if the URL targets localhost, private
+/// IP ranges, or cloud metadata endpoints. Only enforced in sanitize mode
+/// (untrusted content) — trusted code / local dev can fetch localhost freely.
+pub fn isBlockedUrl(url: []const u8) bool {
+    const host = extractHost(url) orelse return false;
+
+    // Exact matches
+    if (std.mem.eql(u8, host, "localhost")) return true;
+    if (std.mem.eql(u8, host, "0.0.0.0")) return true;
+    if (std.mem.eql(u8, host, "[::1]")) return true;
+    if (std.mem.eql(u8, host, "::1")) return true;
+
+    // IPv4 prefix checks
+    if (std.mem.startsWith(u8, host, "127.")) return true; // loopback
+    if (std.mem.startsWith(u8, host, "10.")) return true; // private class A
+    if (std.mem.startsWith(u8, host, "192.168.")) return true; // private class C
+    if (std.mem.startsWith(u8, host, "169.254.")) return true; // link-local + cloud metadata
+
+    // 172.16.0.0 – 172.31.255.255
+    if (std.mem.startsWith(u8, host, "172.")) {
+        // Parse second octet
+        const rest = host[4..];
+        const dot = std.mem.indexOfScalar(u8, rest, '.') orelse return false;
+        const second = std.fmt.parseInt(u8, rest[0..dot], 10) catch return false;
+        if (second >= 16 and second <= 31) return true;
+    }
+
+    return false;
+}
+
+/// Extract hostname from a URL like "http://host:port/path" or "https://host/path"
+fn extractHost(url: []const u8) ?[]const u8 {
+    // Skip scheme
+    const after_scheme = if (std.mem.indexOf(u8, url, "://")) |i| url[i + 3 ..] else return null;
+    if (after_scheme.len == 0) return null;
+
+    // Handle IPv6 bracket notation [::1]
+    if (after_scheme[0] == '[') {
+        const close = std.mem.indexOfScalar(u8, after_scheme, ']') orelse return null;
+        return after_scheme[0 .. close + 1]; // include brackets
+    }
+
+    // Find end of host (port separator or path separator)
+    var end = after_scheme.len;
+    if (std.mem.indexOfScalar(u8, after_scheme, ':')) |i| end = @min(end, i);
+    if (std.mem.indexOfScalar(u8, after_scheme, '/')) |i| end = @min(end, i);
+    if (std.mem.indexOfScalar(u8, after_scheme, '?')) |i| end = @min(end, i);
+
+    return if (end > 0) after_scheme[0..end] else null;
+}
+
+// ============================================================================
 // Internal Helpers
 // ============================================================================
 
@@ -39,6 +110,11 @@ fn writeCallback(
 ) callconv(.c) c_uint {
     const total_size = size * nmemb;
     const buf: *WriteBuffer = @ptrCast(@alignCast(user_data));
+
+    // Abort transfer if response exceeds size limit
+    if (buf.list.items.len + total_size > FETCH_MAX_RESPONSE_SIZE) {
+        return 0; // Signal error to curl, stops transfer
+    }
 
     const data: [*]const u8 = @ptrCast(ptr);
     buf.list.appendSlice(buf.allocator, data[0..total_size]) catch {
@@ -153,9 +229,10 @@ pub const CurlMulti = struct {
         var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch return error.EasyInit;
         errdefer easy.deinit();
 
-        // Set URL
+        // Set URL + apply security limits
         const url_z = try arena.dupeZ(u8, url);
         try easy.setUrl(url_z);
+        hardenEasy(easy);
 
         // Copy body to arena if present (curl doesn't copy, just stores pointer)
         const body_copy: ?[]const u8 = if (body) |b| try arena.dupe(u8, b) else null;
@@ -323,9 +400,10 @@ pub const CurlMulti = struct {
         var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch return error.EasyInit;
         errdefer easy.deinit();
 
-        // Set URL
+        // Set URL + apply security limits
         const url_z = try arena.dupeZ(u8, url);
         try easy.setUrl(url_z);
+        hardenEasy(easy);
 
         // Method is always POST for multipart
         try easy.setMethod(.POST);

@@ -15,13 +15,19 @@ By providing a minimal DOM environment for running JS outside of a browser, it c
 
 **Security**:
 
-This engine aims to be lightweight and fast. If you plan to use untrusted code, consider the following:
+This engine aims to be lightweight and fast. Care has been taken to make it safe. However, if you plan to use untrusted code, consider the following:
 
 > [!IMPORTANT]
 > zexplorer does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
 
-> [!WARNING]
-> `zexplorer` provides "best-effort" content-level safety with the optional sanitization step. Trusted code can by-pass this step for performance.
+> [!NOTE]
+> 
+> - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS. Trusted code can by-pass this step for performance.
+> - `zexplorer` provides _best-effort_ for the FilesSystem access (no "/" or "..", symlink blocking, traversal rejection, no-follow, hardlink device-ID check, 16-level directory stack).
+> - `zexplorer` provides _best-effort_ for safe HTTP requests (max redirects, max size, timeout, protocol restrictions, SSRF pre-flight check). Dev environment can by-pass this and access localhost.
+> - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction and size limits (remote and local)
+> - `zexplorer` provides _best-effort_ for the main thread and Workers fan-out, busy-loop, and memory mitigation (interruptible, max stack, max GC, constrained memory, wall-clock deadline per worker)
+> - `zexplorer` provides _best-effort_ for DOM excessive nesting, selectors depth.
 
 **TLTR**:
 It is designed to safely parse, transform, and sanitize untrusted HTML and short-lived JavaScript inside an isolated environment.
@@ -101,7 +107,7 @@ It has:
 - `TreeWalker`,
 - DOM: `document` with createElement|commment|header|TextNode,  `parseHTML`, siblings, etc
 - `Sanitizer`. (`setHTML` or parseHTMLUnsafe to be aliased?)
-- log and printing helpers: `prettyPrint`, `printDOM`, `printDocStruct`, `saveDOM` (to file).
+- log and printing helpers: `prettyPrint`, `printDoc`, `printDocStruct`, `saveDOM` (to file).
 
 - TODO: `alert`, `prompt`, `confirm` : implement dumb versions
 - TODO: `crypto` via Zig
@@ -1286,7 +1292,7 @@ fn css_js_external_file(allocator: std.mem.Allocator, sandbox_root: []const u8) 
 
   z.print("[Zig] p_color: {s}, p_font_size: {s}\n", .{ computed_color.?, computed_font_size.? });
 
-  try z.printDOM(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
+  try z.printDoc(allocator, engine.dom.doc, "link-stylesheet and Script with 'external' file");
 }
 ```
 

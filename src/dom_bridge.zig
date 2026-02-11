@@ -97,6 +97,20 @@ pub const DOMBridge = struct {
             return obj;
         }
 
+        // Handle img specially - native HTMLImageElement with backing DOM element
+        if (std.ascii.eqlIgnoreCase(tag_name, "img")) {
+            const img_struct = js_image.HTMLImageElement.init(rc.allocator) catch return ctx.throwOutOfMemory();
+
+            const obj = z.qjs.JS_NewObjectClass(ctx.ptr, rc.classes.html_image);
+            if (z.qjs.JS_IsException(obj)) {
+                if (ctx.ptr) |p| img_struct.deinit(p);
+                return w.EXCEPTION;
+            }
+
+            _ = z.qjs.JS_SetOpaque(obj, img_struct);
+            return obj;
+        }
+
         // Handle template specially - requires z.createTemplate for proper content DocumentFragment
         if (std.ascii.eqlIgnoreCase(tag_name, "template")) {
             const template = z.createTemplate(doc) catch return ctx.throwInternalError("createTemplate failed");

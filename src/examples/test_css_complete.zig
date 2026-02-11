@@ -187,7 +187,7 @@ fn pathway2_untrusted_full_sanitize(allocator: std.mem.Allocator) !void {
     try std.testing.expect(color == null);
     z.print("  Computed color on .evil: {s}\n", .{color orelse "(none)"});
 
-    // try z.printDOM(allocator, doc, "");
+    // try z.printDoc(allocator, doc, "");
     z.print("  ✓ Full sanitization: all dangerous content removed\n", .{});
 }
 

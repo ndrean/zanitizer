@@ -451,7 +451,7 @@ test "meta" {
     const content = z.getAttribute_zc(meta.?, "content");
     try std.testing.expectEqualStrings("test", content.?);
 
-    // try z.printDOM(allocator, doc, "meta test   ");
+    // try z.printDoc(allocator, doc, "meta test   ");
 }
 
 test "headElement - DOMParser.parseFromString creates full document" {

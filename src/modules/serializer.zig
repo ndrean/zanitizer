@@ -237,39 +237,55 @@ fn prettyPrintOpt(
     );
 }
 
-/// [serializer] Saves the DOM structure to a clean text file
-/// Uses the new 0.15.2+ buffered writer pattern with intrusive interface.
-pub fn saveDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, filename: []const u8) !void {
-    _ = allocator;
-    // 1. Create File
+/// [serializer] Saves the DOM structure to a clean HTML file.
+/// Fast path: no tag parsing or style lookups, just writes bytes directly.
+pub fn printDOM(_: std.mem.Allocator, doc: *z.HTMLDocument, filename: []const u8) !void {
     var file = try std.fs.cwd().createFile(filename, .{});
     defer file.close();
 
-    // 2. Setup Buffered Writer (Stack Allocated)
-    // NOTE: Zig 0.15.2+ API pattern
     var buffer: [4096]u8 = undefined;
     var fw = file.writer(&buffer);
 
-    // 3. Setup Context
-    var ctx = ProcessCtx.init(0);
-    // Pass pointer to fw (DO NOT COPY fw)
-    ctx.file_writer = &fw;
-
-    // 4. Serialize
     const root = z.documentRoot(doc) orelse return error.NoRoot;
+
+    var fctx = FileWriteCtx{ .fw = &fw };
 
     const res = lxb_html_serialize_pretty_tree_cb(
         root,
-        ctx.opt,
-        ctx.indent,
-        defaultStyler,
-        &ctx,
+        LXB_HTML_SERIALIZE_OPT_UNDEF,
+        0,
+        fileWriteCallback,
+        @ptrCast(&fctx),
     );
 
     if (res != z._OK) return error.SerializeFailed;
-
-    // 5. FLUSH (Required!)
     try fw.interface.flush();
+}
+
+const FileWriteCtx = struct {
+    fw: *std.fs.File.Writer,
+    in_tag: bool = false,
+};
+
+/// Callback for file serialization — writes bytes directly, skips text node quotes.
+/// Lexbor's pretty serializer wraps text nodes in `"` decorations. We track
+/// tag state to distinguish these from attribute closing quotes (both are len==1 `"`).
+fn fileWriteCallback(data: [*:0]const u8, len: usize, ctx: ?*anyopaque) callconv(.c) c_int {
+    if (len == 0) return 0;
+    const fctx: *FileWriteCtx = @ptrCast(@alignCast(ctx.?));
+    const slice = data[0..len];
+
+    // Entering a tag
+    if (slice[0] == '<') fctx.in_tag = true;
+
+    // Skip text node decoration quotes (only appear outside tags)
+    if (len == 1 and slice[0] == '"' and !fctx.in_tag) return 0;
+
+    // Exiting a tag
+    if (std.mem.indexOfScalar(u8, slice, '>') != null) fctx.in_tag = false;
+
+    fctx.fw.interface.print("{s}", .{slice}) catch return 1;
+    return z._CONTINUE;
 }
 
 /// [serializer] Default styling function for serialized output in TTY or File
@@ -445,9 +461,9 @@ pub fn printDocStruct(doc: *z.HTMLDocument) !void {
 /// ```zig
 /// const doc = try z.parseHTML(allocator, "<html>...</html>");
 /// defer z.destroyDocument(doc);
-/// try z.printDOM(allocator, doc);
+/// try z.printDoc(allocator, doc);
 /// ```
-pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
+pub fn printDoc(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []const u8) !void {
     if (title.len > 0) {
         try z.documentSetTitle(doc, title);
     }
@@ -456,7 +472,7 @@ pub fn printDOM(allocator: std.mem.Allocator, doc: *z.HTMLDocument, title: []con
 }
 
 /// Alias for backwards compatibility
-pub const ppDoc = printDOM;
+pub const ppDoc = printDoc;
 
 test "web component" {
     const html =
@@ -529,9 +545,9 @@ test "web component" {
     const allocator = std.testing.allocator;
     const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
-    try z.printDOM(allocator, doc, "TEST");
+    try z.printDoc(allocator, doc, "TEST");
     z.print("\n\n", .{});
     try printDocStruct(doc);
     z.print("\n\n", .{});
-    try saveDOM(allocator, doc, "test.txt");
+    try printDOM(allocator, doc, "test.html");
 }

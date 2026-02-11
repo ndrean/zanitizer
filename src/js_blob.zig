@@ -1,8 +1,8 @@
 //! new Blob()
 //!
-//! ✅ blob.text(), blob.arrayBuffer(), blob.size(); blob.json()
+//! ✅ blob.text(), blob.arrayBuffer(), blob.slice(), blob.stream(), blob.size, blob.type
 //!
-//! ⚠️ Missing blob.slice(), blob.bytes(), blob.stream()
+//! ⚠️ Missing blob.bytes()
 
 const std = @import("std");
 const z = @import("root.zig");
@@ -196,6 +196,72 @@ pub fn js_Blob_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int
     return promise;
 }
 
+/// Blob.stream() — returns a ReadableStream backed by the blob's data
+pub fn js_Blob_stream(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
+    if (ptr == null) return ctx.throwTypeError("Not a Blob object");
+    const self: *BlobObject = @ptrCast(@alignCast(ptr));
+
+    const js_readable_stream = @import("js_readable_stream.zig");
+    return js_readable_stream.createStreamFromBuffer(ctx, self.data) catch return ctx.throwOutOfMemory();
+}
+
+/// Blob.slice(start?, end?, contentType?)
+pub fn js_Blob_slice(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
+    if (ptr == null) return ctx.throwTypeError("Not a Blob object");
+    const self: *BlobObject = @ptrCast(@alignCast(ptr));
+
+    const blob_size: i64 = @intCast(self.data.len);
+
+    // Parse start (default 0)
+    var start: i64 = 0;
+    if (argc > 0 and !ctx.isUndefined(argv[0])) {
+        _ = qjs.JS_ToInt64(ctx.ptr, &start, argv[0]);
+        if (start < 0) start = @max(blob_size + start, 0);
+        if (start > blob_size) start = blob_size;
+    }
+
+    // Parse end (default size)
+    var end: i64 = blob_size;
+    if (argc > 1 and !ctx.isUndefined(argv[1])) {
+        _ = qjs.JS_ToInt64(ctx.ptr, &end, argv[1]);
+        if (end < 0) end = @max(blob_size + end, 0);
+        if (end > blob_size) end = blob_size;
+    }
+
+    if (end < start) end = start;
+
+    // Parse contentType (default "")
+    var content_type: []const u8 = "";
+    if (argc > 2 and !ctx.isUndefined(argv[2])) {
+        content_type = ctx.toZString(argv[2]) catch "";
+    }
+    defer if (content_type.len > 0) ctx.freeZString(content_type);
+
+    const slice_data = self.data[@intCast(start)..@intCast(end)];
+
+    // Create new Blob with sliced data
+    const new_blob = BlobObject.init(rc.allocator, slice_data, content_type) catch return ctx.throwOutOfMemory();
+
+    const proto = ctx.getClassProto(rc.classes.blob);
+    defer ctx.freeValue(proto);
+
+    const obj = ctx.newObjectProtoClass(proto, rc.classes.blob);
+    if (qjs.JS_IsException(obj)) {
+        new_blob.deinit();
+        return zqjs.EXCEPTION;
+    }
+    _ = qjs.JS_SetOpaque(obj, new_blob);
+    return obj;
+}
+
 // === Properties
 
 /// Accessor Blob.size
@@ -236,6 +302,8 @@ pub const BlobBridge = struct {
         // 1. Methods
         try ctx.setPropertyStr(proto, "text", ctx.newCFunction(js_Blob_text, "text", 0));
         try ctx.setPropertyStr(proto, "arrayBuffer", ctx.newCFunction(js_Blob_arrayBuffer, "arrayBuffer", 0));
+        try ctx.setPropertyStr(proto, "slice", ctx.newCFunction(js_Blob_slice, "slice", 3));
+        try ctx.setPropertyStr(proto, "stream", ctx.newCFunction(js_Blob_stream, "stream", 0));
 
         // 2. Getters
         {
