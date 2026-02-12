@@ -27,14 +27,14 @@ This engine aims to be lightweight and fast. Use it when you need to:
 
 If you plan to use your own code, you can by-pass the sanitization.
 
-Care has been taken to make it safe. However, if you plan to use untrusted code, consider the following:
+Care has been taken to make this engine safe. However, if you plan to use untrusted code, consider the following:
 
 > [!IMPORTANT]
 > zexplorer does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
 
 > [!NOTE]
 > 
-> - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: stylesheet, HTMLStyleElement, inline style, iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS. Tested against the [HTML5 Security Cheatsheet  Test](https://github.com/cure53/H5SC). Trusted code can by-pass this step for performance.
+> - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: stylesheet, HTMLStyleElement, inline style, iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS, mXSS. Tested successfully against the [HTML5 Security Cheatsheet  Test](https://github.com/cure53/H5SC), [OWASP CheaatSheets](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [Portswigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet) and [DOMPurity tests](https://github.com/cure53/DOMPurify). Trusted code can by-pass this step for performance.
 > - `zexplorer` provides _best-effort_ for the FilesSystem access (no "/" or "..", symlink blocking, traversal rejection, no-follow, hardlink device-ID check, 16-level directory stack).
 > - `zexplorer` provides _best-effort_ for safe HTTP requests (max redirects, max size, timeout, protocol restrictions, SSRF pre-flight check). Dev environment can by-pass this and access localhost.
 > - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction and size limits (remote and local)
