@@ -343,8 +343,8 @@ fn handleSvgElement(context_ptr: *SanitizeContext, node: *z.DomNode, element: *z
     // Check if it's in the SVG allowlist
     if (z.isSvgElementAllowed(tag_name)) {
         // For SVG elements, we need to filter dangerous attributes
-        // Use a generic attribute filtering since most SVG elements don't have HtmlTag enums
-        filterSvgAttributes(context_ptr, element) catch return z._STOP;
+        // Pass tag_name so href validation can differ per element type
+        filterSvgAttributes(context_ptr, element, tag_name) catch return z._STOP;
         return z._CONTINUE;
     }
 
@@ -368,7 +368,7 @@ fn handleMathMLElement(context_ptr: *SanitizeContext, node: *z.DomNode, element:
     return z._CONTINUE;
 }
 
-fn filterSvgAttributes(context: *SanitizeContext, element: *z.HTMLElement) !void {
+fn filterSvgAttributes(context: *SanitizeContext, element: *z.HTMLElement, tag_name: []const u8) !void {
     var iter = z.iterateAttributes(element);
 
     while (iter.next()) |attr_pair| {
@@ -379,11 +379,23 @@ fn filterSvgAttributes(context: *SanitizeContext, element: *z.HTMLElement) !void
             should_remove = true;
         }
 
-        // Validate href and xlink:href with strict SVG URI rules
+        // Validate href and xlink:href — validation strategy depends on element type
         if (!should_remove and z.isSvgUrlAttribute(attr_pair.name)) {
-            // SVG URIs must be fragment-only (#id) for security
-            if (!z.validateSvgUri(attr_pair.value)) {
-                should_remove = true;
+            if (std.mem.eql(u8, tag_name, "use")) {
+                // <use> must be fragment-only (#id) — no external resources
+                if (!z.validateSvgUri(attr_pair.value)) {
+                    should_remove = true;
+                }
+            } else if (std.mem.eql(u8, tag_name, "image") or std.mem.eql(u8, tag_name, "a")) {
+                // <image> and <a> use standard URI validation (allows data:image/*, http, etc.)
+                if (!z.validateUri(attr_pair.value)) {
+                    should_remove = true;
+                }
+            } else {
+                // All other SVG elements: fragment-only
+                if (!z.validateSvgUri(attr_pair.value)) {
+                    should_remove = true;
+                }
             }
         }
 
@@ -2322,15 +2334,17 @@ test "svg element safety" {
     try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
     try testing.expect(std.mem.indexOf(u8, result, "<animate") == null);
 
-    // SVG <a> elements are blocked (can contain javascript: URLs)
-    try testing.expect(std.mem.indexOf(u8, result, "<a ") == null);
-    try testing.expect(std.mem.indexOf(u8, result, "<a>") == null);
+    // SVG <a> with javascript: href — element kept, href stripped
+    try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
+    // SVG <a> with safe href — element and href both kept
+    try testing.expect(std.mem.indexOf(u8, result, "https://example.com") != null);
 
-    // SVG <use> elements are blocked (external resource loading / XSS)
-    try testing.expect(std.mem.indexOf(u8, result, "<use") == null);
+    // SVG <use> with external href — element kept, href stripped (fragment-only policy)
+    try testing.expect(std.mem.indexOf(u8, result, "<use") != null);
+    try testing.expect(std.mem.indexOf(u8, result, "external.svg") == null);
 
-    // SVG <image> elements are blocked (external resource loading / SSRF)
-    try testing.expect(std.mem.indexOf(u8, result, "<image") == null);
+    // SVG <image> with external href — element kept, href kept (validateUri allows http)
+    try testing.expect(std.mem.indexOf(u8, result, "<image") != null);
 
     // Should keep safe SVG content
     try testing.expect(std.mem.indexOf(u8, result, "<svg") != null);

@@ -196,7 +196,139 @@ pub const CssSanitizerOptions = struct {
     // Whitelist/blacklist approach
     use_property_whitelist: bool = true, // Use whitelist instead of blacklist
     allow_dangerous_hacks: bool = false, // Allow IE-specific CSS hacks
+
+    // Configurable CSS functions (runtime toggles for comptime ruleset's configurable_* entries)
+    allow_calc: bool = true, // calc() is standard CSS, safe by default
+    allow_css_variables: bool = false, // var() blocked by default (data exfiltration risk)
+    allow_env: bool = false, // env() blocked by default
 };
+
+// ============================================================================
+// CSS Value Scanner — Comptime-generic structural CSS value analysis
+// ============================================================================
+
+/// Creates a CSS value scanner parameterized by a compile-time function ruleset.
+/// The scanner uses a state machine to distinguish function calls from string
+/// literal content, avoiding false positives from patterns inside CSS strings.
+pub fn CssValueScanner(comptime ruleset: specs.CssFunctionRuleset) type {
+    return struct {
+        sanitizer: *CssSanitizer,
+
+        const Self = @This();
+
+        // Build comptime lookup map from ruleset
+        const function_map = blk: {
+            var entries: [ruleset.functions.len]struct { []const u8, specs.CssFunctionClass } = undefined;
+            for (ruleset.functions, 0..) |entry, i| {
+                entries[i] = .{ entry[0], entry[1] };
+            }
+            break :blk std.StaticStringMap(specs.CssFunctionClass).initComptime(entries);
+        };
+
+        /// Scan a CSS value string for dangerous function calls.
+        /// Returns true if the value is safe, false if it contains blocked functions.
+        pub fn isValueSafe(self: Self, value: []const u8) bool {
+            const State = enum { normal, in_string };
+            var state: State = .normal;
+            var quote_char: u8 = 0;
+            var i: usize = 0;
+
+            while (i < value.len) {
+                switch (state) {
+                    .normal => {
+                        const ch = value[i];
+                        if (ch == '"' or ch == '\'') {
+                            state = .in_string;
+                            quote_char = ch;
+                            i += 1;
+                        } else if (ch == '(') {
+                            // Extract and classify the function name
+                            if (extractFunctionName(value, i)) |func_name| {
+                                const class = classifyFunction(func_name);
+                                switch (class) {
+                                    .blocked => return false,
+                                    .url_validate => {
+                                        if (!self.validateUrlArgument(value, i + 1)) {
+                                            return false;
+                                        }
+                                    },
+                                    .configurable_calc => {
+                                        if (!self.sanitizer.options.allow_calc) return false;
+                                    },
+                                    .configurable_var => {
+                                        if (!self.sanitizer.options.allow_css_variables) return false;
+                                    },
+                                    .configurable_env => {
+                                        if (!self.sanitizer.options.allow_env) return false;
+                                    },
+                                    .allowed => {},
+                                }
+                            }
+                            // No function name before ( means it's a grouping paren, which is fine
+                            i += 1;
+                        } else {
+                            i += 1;
+                        }
+                    },
+                    .in_string => {
+                        const ch = value[i];
+                        if (ch == '\\' and i + 1 < value.len) {
+                            // Skip escaped character
+                            i += 2;
+                        } else if (ch == quote_char) {
+                            state = .normal;
+                            i += 1;
+                        } else {
+                            i += 1;
+                        }
+                    },
+                }
+            }
+            return true;
+        }
+
+        /// Extract function name by scanning backwards from the opening paren.
+        fn extractFunctionName(value: []const u8, paren_pos: usize) ?[]const u8 {
+            if (paren_pos == 0) return null;
+            const end = paren_pos;
+            var start = paren_pos;
+            while (start > 0) {
+                const ch = value[start - 1];
+                if (std.ascii.isAlphanumeric(ch) or ch == '-' or ch == '_') {
+                    start -= 1;
+                } else {
+                    break;
+                }
+            }
+            if (start == end) return null;
+            return value[start..end];
+        }
+
+        /// Classify a function name using the comptime ruleset map.
+        fn classifyFunction(name: []const u8) specs.CssFunctionClass {
+            // Lowercase the function name for case-insensitive lookup
+            var lower_buf: [128]u8 = undefined;
+            if (name.len > lower_buf.len) return ruleset.unknown_function_policy;
+            for (name, 0..) |ch, idx| {
+                lower_buf[idx] = std.ascii.toLower(ch);
+            }
+            const lower = lower_buf[0..name.len];
+
+            if (function_map.get(lower)) |class| {
+                return class;
+            }
+            return ruleset.unknown_function_policy;
+        }
+
+        /// Validate the URL argument inside a url() function call.
+        fn validateUrlArgument(self: Self, value: []const u8, start: usize) bool {
+            // Find matching closing paren
+            const end = findMatchingParen(value, start) orelse return false;
+            const url_content = value[start .. end - 1];
+            return self.sanitizer.isCssUrlSafe(url_content);
+        }
+    };
+}
 
 /// CSS Sanitizer module
 pub const CssSanitizer = struct {
@@ -285,9 +417,9 @@ pub const CssSanitizer = struct {
         }
     }
 
-    /// Check if CSS contains dangerous patterns
+    /// Check if CSS contains dangerous at-rule patterns
     fn containsDangerousPatterns(_: *@This(), css: []const u8) bool {
-        for (specs.DANGEROUS_CSS_PATTERNS) |pattern| {
+        for (specs.DANGEROUS_CSS_AT_RULES) |pattern| {
             if (containsCaseInsensitive(css, pattern)) {
                 return true;
             }
@@ -504,32 +636,14 @@ pub const CssSanitizer = struct {
         return true;
     }
 
-    /// Check if a CSS value is safe
+    /// Check if a CSS value is safe using the structural CssValueScanner.
+    /// The scanner distinguishes function calls from string literal content,
+    /// avoiding false positives from patterns inside CSS strings like
+    /// `content: "expression() is not dangerous here"`.
     fn isValueSafe(self: *@This(), value: []const u8) bool {
-        // Check for dangerous value patterns
-        for (specs.DANGEROUS_CSS_VALUES) |pattern| {
-            if (containsCaseInsensitive(value, pattern)) {
-                return false;
-            }
-        }
-
-        // Check for url() - handle separately
-        if (containsCaseInsensitive(value, "url(")) {
-            // Find and validate the URL
-            const url_start = std.mem.indexOf(u8, value, "url(") orelse
-                std.mem.indexOf(u8, value, "URL(") orelse return false;
-            const url_end = findMatchingParen(value, url_start + 4);
-            if (url_end) |end| {
-                const url_content = value[url_start + 4 .. end - 1];
-                if (!self.isCssUrlSafe(url_content)) {
-                    return false;
-                }
-            } else {
-                return false; // Malformed url()
-            }
-        }
-
-        return true;
+        const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+        const scanner = Scanner{ .sanitizer = self };
+        return scanner.isValueSafe(value);
     }
 
     /// Validate URL in CSS url() function
@@ -1157,7 +1271,7 @@ test "CSS sanitizer - @import blocked" {
     var sanitizer = try CssSanitizer.init(testing.allocator, .{});
     defer sanitizer.deinit();
 
-    // @import is in DANGEROUS_CSS_PATTERNS
+    // @import is in DANGEROUS_CSS_AT_RULES
     const input = "@import url('evil.css'); color: red";
     const result = try sanitizer.sanitizeStyleString(input);
     defer testing.allocator.free(result);
@@ -1225,19 +1339,21 @@ test "CSS sanitizer - stylesheet @import blocked" {
 //     try testing.expect(std.mem.indexOf(u8, result, "color: blue") != null);
 // }
 
-test "csrf" {
-    const allocator = testing.allocator;
-    const html =
-        \\<body>
-        \\<form action='http://example.com/record.php?'<textarea><input type="hidden" name="anti_xsrf" value="eW91J3JlIGN1cmlvdXMsIGFyZW4ndCB5b3U/">
-        \\</form>
-        \\<img src='http://example.com/record.php?<input type="hidden" name="anti_xsrf" value="eW91J3JlIGN1cmlvdXMsIGFyZW4ndCB5b3U/">
-        \\</body>
-    ;
-    const doc = try z.parseHTML(allocator, html);
+// TODO
+// test "csrf" {
+//     const allocator = testing.allocator;
+//     const html =
+//         \\<body>
+//         \\<form action='http://example.com/record.php?'<textarea><input type="hidden" name="anti_xsrf" value="eW91J3JlIGN1cmlvdXMsIGFyZW4ndCB5b3U/">
+//         \\</form>
+//         \\<img src='http://example.com/record.php?<input type="hidden" name="anti_xsrf" value="eW91J3JlIGN1cmlvdXMsIGFyZW4ndCB5b3U/">
+//         \\</body>
+//     ;
+//     const doc = try z.parseHTML(allocator, html);
 
-    try z.prettyPrint(allocator, z.bodyNode(doc).?);
-}
+//     try z.prettyPrint(allocator, z.bodyNode(doc).?);
+// }
+
 test "CSS sanitizer - Lexbor AST-based stylesheet sanitization" {
     var sanitizer = try CssSanitizer.init(testing.allocator, .{});
     defer sanitizer.deinit();
@@ -1261,4 +1377,215 @@ test "CSS sanitizer - Lexbor AST-based stylesheet sanitization" {
 
     // Second safe selector should be preserved
     try testing.expect(std.mem.indexOf(u8, lexbor_result, ".also-safe") != null);
+}
+
+// ============================================================================
+// CssValueScanner Tests
+// ============================================================================
+
+test "CSS scanner - expression() inside string literal is safe" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    // expression() inside a string is NOT a function call — should be safe
+    try testing.expect(scanner.isValueSafe("\"use expression() carefully\""));
+    try testing.expect(scanner.isValueSafe("'expression(alert(1))'"));
+    try testing.expect(scanner.isValueSafe("\"eval(something)\""));
+}
+
+test "CSS scanner - expression() as function call is blocked" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(!scanner.isValueSafe("expression(alert(1))"));
+    try testing.expect(!scanner.isValueSafe("Expression(alert(1))"));
+    try testing.expect(!scanner.isValueSafe("EXPRESSION(alert(1))"));
+}
+
+test "CSS scanner - eval() always blocked" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(!scanner.isValueSafe("eval(something)"));
+}
+
+test "CSS scanner - calc() allowed by default" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(scanner.isValueSafe("calc(100% - 20px)"));
+    try testing.expect(scanner.isValueSafe("calc(50vh - 2rem)"));
+}
+
+test "CSS scanner - var() blocked by default, allowed when configured" {
+    // Default: var() blocked
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    var scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(!scanner.isValueSafe("var(--main-color)"));
+
+    // With allow_css_variables=true: var() allowed
+    var sanitizer2 = try CssSanitizer.init(testing.allocator, .{ .allow_css_variables = true });
+    defer sanitizer2.deinit();
+
+    scanner = Scanner{ .sanitizer = &sanitizer2 };
+    try testing.expect(scanner.isValueSafe("var(--main-color)"));
+}
+
+test "CSS scanner - standard CSS functions allowed" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(scanner.isValueSafe("rgb(255, 0, 0)"));
+    try testing.expect(scanner.isValueSafe("rgba(255, 0, 0, 0.5)"));
+    try testing.expect(scanner.isValueSafe("hsl(120, 100%, 50%)"));
+    try testing.expect(scanner.isValueSafe("linear-gradient(to right, red, blue)"));
+    try testing.expect(scanner.isValueSafe("rotate(45deg)"));
+    try testing.expect(scanner.isValueSafe("scale(1.5)"));
+    try testing.expect(scanner.isValueSafe("translate(10px, 20px)"));
+    try testing.expect(scanner.isValueSafe("blur(5px)"));
+    try testing.expect(scanner.isValueSafe("cubic-bezier(0.4, 0, 0.2, 1)"));
+    try testing.expect(scanner.isValueSafe("clamp(1rem, 2vw, 3rem)"));
+    try testing.expect(scanner.isValueSafe("min(100px, 50%)"));
+    try testing.expect(scanner.isValueSafe("max(200px, 30vw)"));
+}
+
+test "CSS scanner - url() with javascript: blocked" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{ .allow_css_urls = true });
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(!scanner.isValueSafe("url(javascript:alert(1))"));
+    try testing.expect(!scanner.isValueSafe("url(vbscript:alert(1))"));
+    try testing.expect(!scanner.isValueSafe("url(data:text/html,<script>alert(1)</script>)"));
+}
+
+test "CSS scanner - url() with safe URL allowed when configured" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{ .allow_css_urls = true });
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(scanner.isValueSafe("url(https://example.com/image.png)"));
+}
+
+test "CSS scanner - url() blocked when allow_css_urls is false" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(!scanner.isValueSafe("url(https://example.com/image.png)"));
+}
+
+test "CSS scanner - unknown function blocked with DEFAULT_RULESET" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(!scanner.isValueSafe("unknownfunc(something)"));
+    try testing.expect(!scanner.isValueSafe("malicious(payload)"));
+}
+
+test "CSS scanner - unknown function allowed with PERMISSIVE_RULESET" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.PERMISSIVE_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    // Unknown functions are allowed in permissive mode
+    try testing.expect(scanner.isValueSafe("somefunc(whatever)"));
+    // But expression/eval are still blocked
+    try testing.expect(!scanner.isValueSafe("expression(alert(1))"));
+    try testing.expect(!scanner.isValueSafe("eval(something)"));
+}
+
+test "CSS scanner - nested functions" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(scanner.isValueSafe("calc(min(10px, 5vw))"));
+    try testing.expect(scanner.isValueSafe("clamp(1rem, calc(2vw + 1rem), 3rem)"));
+}
+
+test "CSS scanner - custom comptime ruleset" {
+    const custom_ruleset = specs.CssFunctionRuleset{
+        .functions = &[_]specs.CssFunctionEntry{
+            .{ "expression", .blocked },
+            .{ "rgb", .allowed },
+            .{ "url", .url_validate },
+        },
+        .unknown_function_policy = .allowed, // blocklist approach
+    };
+
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{ .allow_css_urls = true });
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(custom_ruleset);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    // Blocked functions still blocked
+    try testing.expect(!scanner.isValueSafe("expression(alert(1))"));
+    // Known safe
+    try testing.expect(scanner.isValueSafe("rgb(255, 0, 0)"));
+    // Unknown functions allowed (blocklist approach)
+    try testing.expect(scanner.isValueSafe("anything(here)"));
+    // URL still validated
+    try testing.expect(!scanner.isValueSafe("url(javascript:alert(1))"));
+    try testing.expect(scanner.isValueSafe("url(https://example.com/img.png)"));
+}
+
+test "CSS scanner - escaped quotes in strings" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    // Escaped quote inside string should not exit string state
+    try testing.expect(scanner.isValueSafe("\"expression\\\"(still string)\""));
+    try testing.expect(scanner.isValueSafe("'eval\\'(still string)'"));
+}
+
+test "CSS scanner - plain values without functions" {
+    var sanitizer = try CssSanitizer.init(testing.allocator, .{});
+    defer sanitizer.deinit();
+
+    const Scanner = CssValueScanner(specs.DEFAULT_RULESET);
+    const scanner = Scanner{ .sanitizer = &sanitizer };
+
+    try testing.expect(scanner.isValueSafe("red"));
+    try testing.expect(scanner.isValueSafe("#ff0000"));
+    try testing.expect(scanner.isValueSafe("14px"));
+    try testing.expect(scanner.isValueSafe("10px 20px 30px"));
+    try testing.expect(scanner.isValueSafe("solid 1px black"));
+    try testing.expect(scanner.isValueSafe("\"some string\""));
 }

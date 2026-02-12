@@ -282,6 +282,7 @@ pub fn build(b: *std.Build) void {
         "src/examples/test_image2.zig",
         "src/examples/test_image3.zig",
         "src/examples/test_image4.zig",
+        "src/examples/dompurify_tests.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

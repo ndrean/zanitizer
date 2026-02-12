@@ -90,6 +90,7 @@ const text = @import("modules/text_content.zig");
 const sanitize = @import("modules/sanitizer.zig");
 const sanitize_css = @import("modules/sanitizer_css.zig");
 const sanitizer_config = @import("sanitizer_config.zig");
+const sanitizer_test_vectors = @import("modules/sanitizer_test_vectors.zig");
 const parse = @import("modules/parsing.zig");
 const colours = @import("modules/colours.zig");
 const html_spec = @import("modules/html_spec.zig");
@@ -652,5 +653,11 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
 // Simple conditional print - always use debug print for reliability
 pub const print = switch (builtin.mode) {
     .Debug => std.debug.print,
-    else => std.debug.print,
+    else => {
+        const out = std.fs.File.stdout();
+        var buf: [1024]u8 = undefined;
+        var writer = out.writer(&buf);
+        writer.interface.print() catch {};
+        writer.interface.flush() catch {};
+    },
 };

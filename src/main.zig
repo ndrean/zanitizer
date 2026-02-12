@@ -2231,7 +2231,7 @@ fn parseSizeArgs(_: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value) !us
 }
 
 // ----------------------------------------------------------------
-// A Zig struct to represente a User object
+// A Zig struct to represent a User object
 const User = struct {
     id: i32,
     username: []const u8,

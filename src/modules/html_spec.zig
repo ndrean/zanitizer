@@ -180,16 +180,10 @@ pub fn containsMxssPattern(content: []const u8) bool {
     return false;
 }
 
-/// Patterns that indicate the entire CSS should be rejected (not per-property filtering)
-/// For example, @import means external CSS loading which is always dangerous
-/// Note: Property-level patterns like expression() are handled in DANGEROUS_CSS_VALUES
-pub const DANGEROUS_CSS_PATTERNS = [_][]const u8{
-    "-moz-binding:", // Firefox XBL binding - always dangerous
-    "javascript:",
-    "vbscript:",
-    "data:text/html",
-    "data:text/javascript",
-    "data:application/xhtml",
+/// At-rule patterns that indicate the entire CSS should be rejected (not per-property filtering).
+/// Value-level patterns (javascript:, expression(), etc.) are now handled structurally
+/// by the CssValueScanner which distinguishes function calls from string literal content.
+pub const DANGEROUS_CSS_AT_RULES = [_][]const u8{
     "@import", // External CSS loading
     "@charset", // Can be used to bypass sanitization
     "@namespace", // Can enable SVG/XLink attacks
@@ -204,15 +198,222 @@ pub const DANGEROUS_CSS_PROPERTIES = std.StaticStringMap(void).initComptime(.{
     .{ "filter", {} }, // when used with progid:
 });
 
-pub const DANGEROUS_CSS_VALUES = [_][]const u8{
-    "url(javascript:",
-    "url(vbscript:",
-    "url(data:text/html",
-    "url(data:text/javascript",
-    "expression(",
-    "eval(",
-    "calc(",
-    "var(",
+//=========================================================================================================
+// CSS FUNCTION RULESET: Compile-time configurable CSS value scanning
+//=========================================================================================================
+
+/// Classification for CSS functions in a ruleset.
+/// The CssValueScanner uses this to determine how to handle each function call.
+pub const CssFunctionClass = enum {
+    allowed, // Safe CSS function (rgb, hsl, linear-gradient, etc.)
+    blocked, // Always dangerous (expression, eval, etc.)
+    url_validate, // Needs URL content validation (url)
+    configurable_calc, // calc() — allowed via runtime option
+    configurable_var, // var() — allowed via runtime option
+    configurable_env, // env() — allowed via runtime option
+};
+
+/// Entry type for function ruleset definitions
+pub const CssFunctionEntry = struct { []const u8, CssFunctionClass };
+
+/// Compile-time ruleset for CSS function classification.
+/// Users can define custom rulesets to tune what CSS functions are allowed/blocked.
+/// The scanner provides structural understanding (string literals vs function calls),
+/// while the ruleset defines the policy.
+pub const CssFunctionRuleset = struct {
+    /// Functions and their classifications.
+    /// The scanner looks up each function name here.
+    /// Unknown functions (not in this list) follow `unknown_function_policy`.
+    functions: []const CssFunctionEntry,
+
+    /// What to do with functions not found in the `functions` list.
+    /// `.blocked` = allowlist approach (safe default, recommended for untrusted content)
+    /// `.allowed` = blocklist approach (permissive, use with caution)
+    unknown_function_policy: CssFunctionClass = .blocked,
+};
+
+/// Default ruleset — recommended for untrusted content (allowlist approach).
+/// Unknown functions are blocked. Standard CSS functions are allowed.
+pub const DEFAULT_RULESET = CssFunctionRuleset{
+    .functions = &[_]CssFunctionEntry{
+        // === Always blocked (XSS vectors) ===
+        .{ "expression", .blocked },
+        .{ "eval", .blocked },
+        .{ "-webkit-calc", .blocked },
+        .{ "progid", .blocked },
+
+        // === URL validation required ===
+        .{ "url", .url_validate },
+
+        // === Configurable (runtime toggle) ===
+        .{ "calc", .configurable_calc },
+        .{ "var", .configurable_var },
+        .{ "env", .configurable_env },
+
+        // === Color functions ===
+        .{ "rgb", .allowed },
+        .{ "rgba", .allowed },
+        .{ "hsl", .allowed },
+        .{ "hsla", .allowed },
+        .{ "hwb", .allowed },
+        .{ "lab", .allowed },
+        .{ "lch", .allowed },
+        .{ "oklch", .allowed },
+        .{ "oklab", .allowed },
+        .{ "color", .allowed },
+        .{ "color-mix", .allowed },
+        .{ "light-dark", .allowed },
+
+        // === Gradient functions ===
+        .{ "linear-gradient", .allowed },
+        .{ "radial-gradient", .allowed },
+        .{ "conic-gradient", .allowed },
+        .{ "repeating-linear-gradient", .allowed },
+        .{ "repeating-radial-gradient", .allowed },
+        .{ "repeating-conic-gradient", .allowed },
+
+        // === Transform functions ===
+        .{ "rotate", .allowed },
+        .{ "rotateX", .allowed },
+        .{ "rotateY", .allowed },
+        .{ "rotateZ", .allowed },
+        .{ "rotate3d", .allowed },
+        .{ "scale", .allowed },
+        .{ "scaleX", .allowed },
+        .{ "scaleY", .allowed },
+        .{ "scaleZ", .allowed },
+        .{ "scale3d", .allowed },
+        .{ "translate", .allowed },
+        .{ "translateX", .allowed },
+        .{ "translateY", .allowed },
+        .{ "translateZ", .allowed },
+        .{ "translate3d", .allowed },
+        .{ "skew", .allowed },
+        .{ "skewX", .allowed },
+        .{ "skewY", .allowed },
+        .{ "matrix", .allowed },
+        .{ "matrix3d", .allowed },
+        .{ "perspective", .allowed },
+
+        // === Filter functions ===
+        .{ "blur", .allowed },
+        .{ "brightness", .allowed },
+        .{ "contrast", .allowed },
+        .{ "drop-shadow", .allowed },
+        .{ "grayscale", .allowed },
+        .{ "hue-rotate", .allowed },
+        .{ "invert", .allowed },
+        .{ "opacity", .allowed },
+        .{ "saturate", .allowed },
+        .{ "sepia", .allowed },
+
+        // === Math functions ===
+        .{ "min", .allowed },
+        .{ "max", .allowed },
+        .{ "clamp", .allowed },
+        .{ "abs", .allowed },
+        .{ "sign", .allowed },
+        .{ "round", .allowed },
+        .{ "mod", .allowed },
+        .{ "rem", .allowed },
+        .{ "sin", .allowed },
+        .{ "cos", .allowed },
+        .{ "tan", .allowed },
+        .{ "asin", .allowed },
+        .{ "acos", .allowed },
+        .{ "atan", .allowed },
+        .{ "atan2", .allowed },
+        .{ "pow", .allowed },
+        .{ "sqrt", .allowed },
+        .{ "hypot", .allowed },
+        .{ "log", .allowed },
+        .{ "exp", .allowed },
+
+        // === Shape functions ===
+        .{ "circle", .allowed },
+        .{ "ellipse", .allowed },
+        .{ "inset", .allowed },
+        .{ "polygon", .allowed },
+        .{ "path", .allowed },
+
+        // === Grid/layout functions ===
+        .{ "fit-content", .allowed },
+        .{ "minmax", .allowed },
+        .{ "repeat", .allowed },
+
+        // === Timing/animation functions ===
+        .{ "cubic-bezier", .allowed },
+        .{ "steps", .allowed },
+        .{ "linear", .allowed },
+
+        // === Counter functions ===
+        .{ "counter", .allowed },
+        .{ "counters", .allowed },
+
+        // === Image functions ===
+        .{ "image-set", .allowed },
+        .{ "cross-fade", .allowed },
+
+        // === Other standard functions ===
+        .{ "attr", .allowed },
+        .{ "format", .allowed },
+        .{ "local", .allowed },
+    },
+    .unknown_function_policy = .blocked,
+};
+
+/// Strict ruleset — maximum security, calc also configurable (blocked by default).
+pub const STRICT_RULESET = CssFunctionRuleset{
+    .functions = &[_]CssFunctionEntry{
+        // === Always blocked ===
+        .{ "expression", .blocked },
+        .{ "eval", .blocked },
+        .{ "-webkit-calc", .blocked },
+        .{ "progid", .blocked },
+
+        // === URL validation ===
+        .{ "url", .url_validate },
+
+        // === All configurable (blocked by default in strict) ===
+        .{ "calc", .configurable_calc },
+        .{ "var", .configurable_var },
+        .{ "env", .configurable_env },
+
+        // === Only core visual functions ===
+        .{ "rgb", .allowed },
+        .{ "rgba", .allowed },
+        .{ "hsl", .allowed },
+        .{ "hsla", .allowed },
+        .{ "linear-gradient", .allowed },
+        .{ "radial-gradient", .allowed },
+        .{ "rotate", .allowed },
+        .{ "scale", .allowed },
+        .{ "translate", .allowed },
+        .{ "cubic-bezier", .allowed },
+        .{ "steps", .allowed },
+    },
+    .unknown_function_policy = .blocked,
+};
+
+/// Permissive ruleset — for trusted content (blocklist approach).
+/// Unknown functions are allowed. Only known-dangerous functions are blocked.
+pub const PERMISSIVE_RULESET = CssFunctionRuleset{
+    .functions = &[_]CssFunctionEntry{
+        // === Still always blocked (XSS vectors) ===
+        .{ "expression", .blocked },
+        .{ "eval", .blocked },
+        .{ "-webkit-calc", .blocked },
+        .{ "progid", .blocked },
+
+        // === URL still needs validation ===
+        .{ "url", .url_validate },
+
+        // === These are allowed in permissive mode ===
+        .{ "calc", .allowed },
+        .{ "var", .allowed },
+        .{ "env", .allowed },
+    },
+    .unknown_function_policy = .allowed,
 };
 
 //=========================================================================================================
@@ -281,6 +482,11 @@ pub const SVG_ALLOWED_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     .{ "title", {} },
     .{ "desc", {} },
     .{ "metadata", {} },
+
+    // Resource elements (allowed with href/xlink:href validation)
+    .{ "image", {} }, // href validated by filterSvgAttributes
+    .{ "use", {} }, // href validated (fragment-only)
+    .{ "a", {} }, // href validated via validateUri (blocks javascript:, etc.)
 });
 
 /// SVG elements that are dangerous and must be blocked
@@ -289,9 +495,7 @@ pub const SVG_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     // Script execution
     .{ "script", {} },
 
-    // External resource loading (SSRF, XSS via external SVG)
-    .{ "image", {} }, // Can load external images/SVG via href
-    .{ "use", {} }, // Can reference external SVG fragments via href
+    // External resource loading (SSRF via external SVG)
     .{ "feImage", {} }, // Filter that loads external images
 
     // HTML embedding (escapes SVG context)
@@ -303,9 +507,6 @@ pub const SVG_DANGEROUS_ELEMENTS = std.StaticStringMap(void).initComptime(.{
     .{ "animateTransform", {} },
     .{ "set", {} },
     .{ "animateColor", {} }, // Deprecated but still dangerous
-
-    // Links (can contain javascript: URLs)
-    .{ "a", {} },
 
     // Other potentially dangerous
     .{ "switch", {} }, // Can be used for conditional content loading
@@ -495,7 +696,39 @@ pub const DOM_CLOBBERING_NAMES = std.StaticStringMap(void).initComptime(.{
     .{ "URL", {} },
     .{ "documentElement", {} },
     .{ "defaultView", {} },
-    // Common methods that get clobbered
+    // Node/Element interface properties (form.parentNode, form.children, etc.)
+    .{ "parentNode", {} },
+    .{ "parentElement", {} },
+    .{ "childNodes", {} },
+    .{ "children", {} },
+    .{ "firstChild", {} },
+    .{ "lastChild", {} },
+    .{ "firstElementChild", {} },
+    .{ "lastElementChild", {} },
+    .{ "nextSibling", {} },
+    .{ "previousSibling", {} },
+    .{ "nextElementSibling", {} },
+    .{ "previousElementSibling", {} },
+    .{ "nodeName", {} },
+    .{ "nodeType", {} },
+    .{ "nodeValue", {} },
+    .{ "textContent", {} },
+    .{ "innerHTML", {} },
+    .{ "outerHTML", {} },
+    .{ "attributes", {} },
+    .{ "ownerDocument", {} },
+    // DOM methods that get clobbered
+    .{ "appendChild", {} },
+    .{ "removeChild", {} },
+    .{ "replaceChild", {} },
+    .{ "insertBefore", {} },
+    .{ "cloneNode", {} },
+    .{ "hasChildNodes", {} },
+    .{ "setAttribute", {} },
+    .{ "getAttribute", {} },
+    .{ "removeAttribute", {} },
+    .{ "removeAttributeNode", {} },
+    .{ "hasAttribute", {} },
     .{ "createElement", {} },
     .{ "getElementById", {} },
     .{ "getElementsByTagName", {} },
@@ -551,8 +784,9 @@ pub const FRAMEWORK_SPECS = [_]FrameworkSpec{
     .{ .prefix = "v-", .name = "Vue.js", .description = "Vue.js directives" }, // v-on: checked separately
     .{ .prefix = "@", .name = "Vue.js Events", .description = "Vue.js event handlers (@click, etc.)", .safe = false }, // Contains JS!
     .{ .prefix = ":", .name = "Vue.js/Phoenix Directives", .description = "Directive syntax (:if, :for, etc.)" },
-    .{ .prefix = "data-", .name = "HTML Data", .description = "Standard HTML data attributes" },
-    .{ .prefix = "aria-", .name = "ARIA", .description = "Accessibility attributes" },
+    // NOTE: aria-* and data-* are standard HTML attributes, NOT framework-specific.
+    // They are handled by the attribute spec engine via prefix matching in findAttributeSpecEnum.
+    // Do NOT add them here — they must not be gated by allow_framework_attrs.
     .{ .prefix = "*ng", .name = "Angular", .description = "Angular structural directives (*ngFor, *ngIf)" },
     .{ .prefix = "[", .name = "Angular Property", .description = "Angular property binding" },
     .{ .prefix = "(", .name = "Angular Event", .description = "Angular event binding", .safe = false }, // Contains JS!
@@ -778,7 +1012,14 @@ fn normalizeUri(buf: []u8, value: []const u8) ![]const u8 {
                 i += 1;
             }
         } else {
-            buf[len] = value[i];
+            // Strip control characters (0x00-0x1F, 0x7F) that can obfuscate
+            // protocol schemes (e.g. \x01java\x03script: → javascript:)
+            const ch = value[i];
+            if (ch <= 0x1F or ch == 0x7F) {
+                i += 1;
+                continue;
+            }
+            buf[len] = ch;
             len += 1;
             i += 1;
         }
@@ -975,11 +1216,19 @@ const common_attrs = [_]AttrSpec{
     .{ .name = "aria" }, // prefix match for aria-* attributes
     .{ .name = "data" }, // prefix match for data-* attributes
     .{ .name = "hidden", .valid_values = &[_][]const u8{""} }, // boolean attribute
+    .{ .name = "inert", .valid_values = &[_][]const u8{""} }, // boolean attribute
     .{ .name = "role" },
     .{ .name = "tabindex" },
     .{ .name = "contenteditable", .valid_values = &[_][]const u8{ "true", "false", "" } },
     .{ .name = "draggable", .valid_values = &[_][]const u8{ "true", "false", "auto" } },
     .{ .name = "spellcheck", .valid_values = &[_][]const u8{ "true", "false" } },
+    // OWASP safe presentational attributes (deprecated but harmless, used in legacy HTML/email)
+    .{ .name = "align" },
+    .{ .name = "bgcolor" },
+    .{ .name = "border" },
+    .{ .name = "color" },
+    .{ .name = "valign" },
+    .{ .name = "nowrap", .valid_values = &[_][]const u8{""} }, // boolean attribute
 };
 
 /// Table-specific attributes
@@ -987,6 +1236,9 @@ const table_attrs = [_]AttrSpec{
     .{ .name = "scope", .valid_values = &[_][]const u8{ "col", "row", "colgroup", "rowgroup" } },
     .{ .name = "colspan" },
     .{ .name = "rowspan" },
+    .{ .name = "cellpadding" }, // deprecated but safe (OWASP)
+    .{ .name = "cellspacing" }, // deprecated but safe (OWASP)
+    .{ .name = "summary" }, // deprecated accessibility attr (OWASP)
 } ++ common_attrs;
 
 /// Form-specific attributes
@@ -1053,6 +1305,8 @@ const img_attrs = [_]AttrSpec{
     .{ .name = "referrerpolicy" },
     .{ .name = "usemap" },
     .{ .name = "ismap", .valid_values = &[_][]const u8{""} }, // boolean
+    .{ .name = "hspace" }, // deprecated but safe (OWASP)
+    .{ .name = "vspace" }, // deprecated but safe (OWASP)
 } ++ common_attrs;
 
 const iframe_attrs = [_]AttrSpec{
@@ -1061,6 +1315,9 @@ const iframe_attrs = [_]AttrSpec{
     .{ .name = "srcdoc" },
     .{ .name = "name" },
     .{ .name = "loading" },
+    .{ .name = "marginheight" }, // deprecated but safe (OWASP)
+    .{ .name = "marginwidth" }, // deprecated but safe (OWASP)
+    .{ .name = "scrolling", .valid_values = &[_][]const u8{ "yes", "no", "auto" } }, // deprecated but safe (OWASP)
 } ++ common_attrs;
 
 /// Anchor-specific attributes
@@ -1068,6 +1325,7 @@ const anchor_attrs = [_]AttrSpec{
     .{ .name = "href", .validator = validateUri },
     .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },
     .{ .name = "rel" },
+    .{ .name = "rev" }, // deprecated reverse relationship (OWASP safe)
     .{ .name = "type" },
     .{ .name = "download" },
     .{ .name = "hreflang" },
@@ -1153,7 +1411,10 @@ const custom_element_spec = ElementSpec{
 /// HTML element specifications
 pub const element_specs = [_]ElementSpec{
     // Text elements (commonly used with frameworks)
-    .{ .tag_enum = .body, .allowed_attrs = &common_attrs },
+    .{ .tag_enum = .body, .allowed_attrs = &([_]AttrSpec{
+        .{ .name = "alink" }, // deprecated active link color (OWASP safe)
+        .{ .name = "vlink" }, // deprecated visited link color (OWASP safe)
+    } ++ common_attrs) },
     .{ .tag_enum = .p, .allowed_attrs = &framework_attrs },
     .{ .tag_enum = .span, .allowed_attrs = &framework_attrs },
     .{ .tag_enum = .div, .allowed_attrs = &framework_attrs },
@@ -1284,6 +1545,7 @@ pub const element_specs = [_]ElementSpec{
     .{ .tag_enum = .section, .allowed_attrs = &common_attrs },
     .{ .tag_enum = .article, .allowed_attrs = &common_attrs },
     .{ .tag_enum = .aside, .allowed_attrs = &common_attrs },
+    .{ .tag_enum = .search, .allowed_attrs = &common_attrs },
 
     // Interactive elements
     .{ .tag_enum = .details, .allowed_attrs = &([_]AttrSpec{
@@ -1306,6 +1568,7 @@ pub const element_specs = [_]ElementSpec{
         .{ .name = "shape", .valid_values = &[_][]const u8{ "default", "rect", "circle", "poly" } },
         .{ .name = "href" },
         .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },
+        .{ .name = "nohref", .valid_values = &[_][]const u8{""} }, // deprecated boolean (OWASP safe)
     } ++ common_attrs), .void_element = true },
 
     // Document elements
@@ -1351,7 +1614,9 @@ pub const element_specs = [_]ElementSpec{
 
     // Void elements
     .{ .tag_enum = .br, .allowed_attrs = &common_attrs, .void_element = true },
-    .{ .tag_enum = .hr, .allowed_attrs = &common_attrs, .void_element = true },
+    .{ .tag_enum = .hr, .allowed_attrs = &([_]AttrSpec{
+        .{ .name = "noshade", .valid_values = &[_][]const u8{""} }, // deprecated boolean (OWASP safe)
+    } ++ common_attrs), .void_element = true },
 
     // Template elements
     .{ .tag_enum = .template, .allowed_attrs = &common_attrs },
@@ -1423,7 +1688,14 @@ pub fn isAttributeAllowed(element_tag: []const u8, attr_name: []const u8) bool {
     const spec = getElementSpec(element_tag) orelse return false;
 
     for (spec.allowed_attrs) |attr_spec| {
+        // Exact match
         if (std.mem.eql(u8, attr_spec.name, attr_name)) {
+            return attr_spec.safe;
+        }
+        // Prefix matches for aria-*, data-* (standard HTML, not framework)
+        if ((std.mem.eql(u8, attr_spec.name, "aria") and std.mem.startsWith(u8, attr_name, "aria-")) or
+            (std.mem.eql(u8, attr_spec.name, "data") and std.mem.startsWith(u8, attr_name, "data-")))
+        {
             return attr_spec.safe;
         }
     }
@@ -1441,7 +1713,10 @@ pub fn isAttributeValueValid(element_tag: []const u8, attr_name: []const u8, att
     const spec = getElementSpec(element_tag) orelse return false;
 
     for (spec.allowed_attrs) |attr_spec| {
-        if (std.mem.eql(u8, attr_spec.name, attr_name)) {
+        const matches = std.mem.eql(u8, attr_spec.name, attr_name) or
+            (std.mem.eql(u8, attr_spec.name, "aria") and std.mem.startsWith(u8, attr_name, "aria-")) or
+            (std.mem.eql(u8, attr_spec.name, "data") and std.mem.startsWith(u8, attr_name, "data-"));
+        if (matches) {
             if (attr_spec.valid_values) |valid_values| {
                 for (valid_values) |valid_value| {
                     if (std.mem.eql(u8, valid_value, attr_value)) {
@@ -1936,8 +2211,12 @@ test "framework event handlers are blocked (XSS prevention)" {
 
     // Safe framework attributes should pass
     try testing.expect(isFrameworkAttributeSafe("x-show"));
-    try testing.expect(isFrameworkAttributeSafe("data-id"));
-    try testing.expect(isFrameworkAttributeSafe("aria-label"));
+    // data-* and aria-* are standard HTML, not framework attrs — handled by spec engine
+    try testing.expect(!isFrameworkAttributeSafe("data-id"));
+    try testing.expect(!isFrameworkAttributeSafe("aria-label"));
+    // But they ARE allowed via the standard attribute spec:
+    try testing.expect(isAttributeAllowed("div", "data-id"));
+    try testing.expect(isAttributeAllowed("div", "aria-label"));
 
     // Test isAttributeAllowedEnum blocks event handlers on elements
     try testing.expect(!isAttributeAllowedEnum(.button, "x-on:click"));
@@ -1990,12 +2269,14 @@ test "SVG element allowlist and blocklist" {
     try testing.expect(isSvgElementAllowed("filter"));
     try testing.expect(isSvgElementAllowed("feGaussianBlur"));
 
+    // SVG resource elements — allowed with href validation in filterSvgAttributes
+    try testing.expect(isSvgElementAllowed("image"));
+    try testing.expect(isSvgElementAllowed("use"));
+    try testing.expect(isSvgElementAllowed("a"));
+
     // Dangerous SVG elements should be blocked
     try testing.expect(isSvgElementDangerous("script"));
     try testing.expect(isSvgElementDangerous("foreignObject"));
-    try testing.expect(isSvgElementDangerous("a"));
-    try testing.expect(isSvgElementDangerous("use"));
-    try testing.expect(isSvgElementDangerous("image"));
     try testing.expect(isSvgElementDangerous("animate"));
     try testing.expect(isSvgElementDangerous("animateMotion"));
     try testing.expect(isSvgElementDangerous("animateTransform"));
@@ -2075,9 +2356,14 @@ test "regression: data:image/* URIs allowed, data:image/svg blocked" {
     try testing.expect(!validateUri("data:text/plain,hello"));
 }
 
-test "regression: SVG image element is blocked (security)" {
-    // SVG <image> element should be blocked as dangerous
-    // It can load external SVGs containing scripts via href/xlink:href
-    try testing.expect(isSvgElementDangerous("image"));
-    try testing.expect(!isSvgElementAllowed("image"));
+test "regression: SVG image element is allowed with href validation" {
+    // SVG <image> is allowed — dangerous hrefs are stripped by filterSvgAttributes
+    try testing.expect(isSvgElementAllowed("image"));
+    try testing.expect(!isSvgElementDangerous("image"));
+    // <image> uses validateUri (allows data:image/*, blocks javascript:)
+    try testing.expect(validateUri("data:image/png;base64,abc"));
+    try testing.expect(!validateUri("javascript:alert(1)"));
+    // <use> uses validateSvgUri (fragment-only)
+    try testing.expect(validateSvgUri("#myid"));
+    try testing.expect(!validateSvgUri("http://evil.com/sprite.svg#icon"));
 }
