@@ -280,7 +280,7 @@ fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
 
 The result is:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/svg_read_raster_opengraph_blob.png" alt="SVG via Blob + createImageBitmap" width="300">
+<img src="https://github.com/ndrean/zexplorer/blob/main/svg_read_raster_opengraph_blob.png" alt="SVG via Blob + createImageBitmap" width="400" height="200">
 
 [TODO] CLI...
 
