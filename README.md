@@ -347,7 +347,7 @@ fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
 }
 ```
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example>
+<img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example" width="300">
 
 ### Run React bundled code
 
