@@ -280,7 +280,7 @@ fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
 
 The result is:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/svg_template_opengraph.png" alt="SVG via Blob + createImageBitmap" width="400" height="200">
+<img src="https://github.com/ndrean/zexplorer/blob/main/svg_template_opengraph.png" alt="SVG via Blob + createImageBitmap" width="600" height="300">
 
 [TODO] CLI...
 
@@ -389,7 +389,7 @@ fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
 }
 ```
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example" width="300">
+<img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example" width="600" height="400">
 
 ---
 
