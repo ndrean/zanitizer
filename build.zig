@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     const lexbor_static_lib_path = b.path("vendor/lexbor_src_master/build/liblexbor_static.a");
     const lexbor_src_path = b.path("vendor/lexbor_src_master/source/");
     const stb_image_src_path = b.path("src/c");
+    const nanosvg_src_path = b.path("src/c");
     const quickjs_src_path = b.path("vendor/quickjs-ng");
     const qjs_flags = &.{
         "-std=gnu99",
@@ -67,12 +68,22 @@ pub fn build(b: *std.Build) void {
             "-fno-sanitize=undefined",
         },
     });
+
+    zexplorer_lib.addCSourceFile(.{
+        .file = b.path("src/c/nanosvg.c"),
+        .flags = &.{
+            "-std=c99",
+            "-fno-sanitize=undefined",
+        },
+    });
+
     zexplorer_lib.addCSourceFile(.{
         .file = b.path("src/css_shim.c"),
         .flags = c_flags,
     });
     zexplorer_lib.addIncludePath(lexbor_src_path);
     zexplorer_lib.addIncludePath(stb_image_src_path);
+    zexplorer_lib.addIncludePath(nanosvg_src_path);
     zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibC();
 
@@ -91,6 +102,7 @@ pub fn build(b: *std.Build) void {
     zexplorer_module.addIncludePath(quickjs_src_path);
     zexplorer_module.addIncludePath(lexbor_src_path);
     zexplorer_module.addIncludePath(stb_image_src_path);
+    zexplorer_module.addIncludePath(nanosvg_src_path);
 
     // Link curl's C library to the module so it can find curl.h
     // The curl module depends on libcurl which needs to be linked
@@ -117,11 +129,18 @@ pub fn build(b: *std.Build) void {
             .flags = &.{"-g"},
         },
     );
+    exe.addCSourceFiles(
+        .{
+            .files = &[_][]const u8{"src/c/nanosvg.c"},
+            .flags = &.{"-std=c99"},
+        },
+    );
     // -g adds debug info, makes it easier to debug
     exe.addIncludePath(stb_image_src_path);
     exe.addObjectFile(lexbor_static_lib_path);
     exe.addIncludePath(lexbor_src_path);
     exe.addIncludePath(quickjs_src_path);
+    exe.addIncludePath(nanosvg_src_path);
     exe.linkLibC();
     exe.linkLibrary(zexplorer_lib);
     exe.linkLibrary(qjs_lib);
@@ -199,6 +218,9 @@ pub fn build(b: *std.Build) void {
     });
 
     unit_tests.addIncludePath(quickjs_src_path);
+    unit_tests.addIncludePath(lexbor_src_path);
+    unit_tests.addIncludePath(stb_image_src_path);
+    unit_tests.addIncludePath(nanosvg_src_path);
     unit_tests.linkLibrary(qjs_lib);
     unit_tests.linkLibC();
 
@@ -283,6 +305,7 @@ pub fn build(b: *std.Build) void {
         "src/examples/test_image3.zig",
         "src/examples/test_image4.zig",
         "src/examples/dompurify_tests.zig",
+        "src/examples/test_svg_raster.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{

@@ -10,6 +10,14 @@ const js_canvas = @import("js_canvas.zig");
 const js_security = @import("js_security.zig");
 const curl = @import("curl");
 
+// nanosvg C bindings
+
+extern fn nsvgParse(input: [*:0]u8, units: [*:0]const u8, dpi: f32) ?*z.NSVGimage;
+extern fn nsvgCreateRasterizer() ?*z.NSVGrasterizer;
+extern fn nsvgRasterize(r: *z.NSVGrasterizer, image: *z.NSVGimage, tx: f32, ty: f32, scale: f32, dst: [*]u8, w: c_int, h: c_int, stride: c_int) void;
+extern fn nsvgDeleteRasterizer(r: *z.NSVGrasterizer) void;
+extern fn nsvgDelete(image: *z.NSVGimage) void;
+
 // stb_image_load C bindings - manual declaration
 
 extern fn stbi_load_from_memory(
@@ -23,21 +31,30 @@ extern fn stbi_load_from_memory(
 
 extern fn stbi_image_free(retval_from_stbi_load: ?*anyopaque) void;
 
+/// Pixel buffer ownership — STB uses malloc, SVG rasterization uses Zig allocator
+const PixelOwner = enum { stb, zig };
+
 /// Raw Pixel Data (ImageBitmap)
 pub const Image = struct {
     width: i32,
     height: i32,
     channels: i32,
-    pixels: [*]u8, // Owned by STB (malloc), must free with stbi_image_free
+    pixels: [*]u8,
     allocator: std.mem.Allocator,
+    pixel_owner: PixelOwner = .stb, // default preserves existing STB behavior
 
-    /// Decodes an image from memory (PNG, JPEG, GIF, etc.)
-    /// We force 4 channels (RGBA) to match Canvas format.
+    /// Decodes an image from memory (PNG, JPEG, GIF, SVG, etc.)
+    /// SVG content is detected and rasterized via nanosvg.
+    /// Raster formats are decoded via stb_image, forced to 4 channels (RGBA).
     pub fn initFromMemory(allocator: std.mem.Allocator, buffer: []const u8) !*Image {
+        // SVG detection — route to nanosvg rasterizer
+        if (isSvgContent(buffer)) {
+            return initFromSvgAutoScale(allocator, buffer);
+        }
+
         // Structural validation gate — reject malformed images before C decoder
         if (buffer.len >= 2) {
             if (std.mem.startsWith(u8, buffer, "\x89PNG")) {
-                std.debug.print("CHECK\n", .{});
                 try js_canvas.verifyPngStructure(buffer);
             } else if (buffer[0] == 0xFF and buffer[1] == 0xD8) {
                 try js_canvas.verifyJpegStructure(buffer);
@@ -56,10 +73,10 @@ pub const Image = struct {
 
         if (w > 8192 or h > 8192) {
             stbi_image_free(pixels);
-            return error.ImageTooLarge; // <--- The check you asked for
+            return error.ImageTooLarge;
         }
 
-        const self = try allocator.create(Image); // heap
+        const self = try allocator.create(Image);
         self.* = Image{
             .width = w,
             .height = h,
@@ -70,11 +87,147 @@ pub const Image = struct {
         return self;
     }
 
+    /// Rasterizes SVG content to RGBA pixels via nanosvg.
+    /// nsvgParse requires a mutable, null-terminated copy of the input.
+    /// Uses auto-scaling: small SVGs are rasterized at higher resolution
+    /// (min 800px on longest side) for better canvas drawing quality.
+    pub fn initFromSvgAutoScale(allocator: std.mem.Allocator, svg_data: []const u8) !*Image {
+        return initFromSvg(allocator, svg_data, 0);
+    }
+
+    /// Rasterizes SVG at a specific scale (1.0 = native SVG dimensions).
+    /// Pass 0 for auto-scale (minimum 800px on longest side).
+    pub fn initFromSvg(allocator: std.mem.Allocator, svg_data: []const u8, requested_scale: f32) !*Image {
+        // nsvgParse mutates its input — make a null-terminated copy
+        const svg_copy = try allocator.alloc(u8, svg_data.len + 1);
+        defer allocator.free(svg_copy);
+        @memcpy(svg_copy[0..svg_data.len], svg_data);
+        svg_copy[svg_data.len] = 0;
+
+        // Strip `transform` from root <svg> — browsers ignore it on the root element,
+        // but nanosvg applies it as a group transform which breaks viewBox mapping.
+        stripRootSvgTransform(svg_copy[0..svg_data.len]);
+
+        // Parse SVG to path data
+        const svg_image: *z.NSVGimage = nsvgParse(
+            @ptrCast(svg_copy.ptr),
+            "px",
+            96.0,
+        ) orelse return error.SvgParseFailed;
+        defer nsvgDelete(svg_image);
+
+        // Compute pixel dimensions. scale=0 → auto-scale small SVGs to min 800px.
+        const fw = svg_image.width;
+        const fh = svg_image.height;
+        if (fw < 1 or fh < 1 or fw > 8192 or fh > 8192)
+            return error.ImageTooLarge;
+
+        const scale: f32 = if (requested_scale > 0) requested_scale else blk: {
+            const min_dim: f32 = 800;
+            const max_side = @max(fw, fh);
+            break :blk if (max_side < min_dim) min_dim / max_side else 1.0;
+        };
+
+        const w: i32 = @intFromFloat(@ceil(fw * scale));
+        const h: i32 = @intFromFloat(@ceil(fh * scale));
+
+        // Allocate RGBA output buffer
+        const stride = w * 4;
+        const pixel_count: usize = @intCast(stride * h);
+        const pixels = try allocator.alloc(u8, pixel_count);
+        errdefer allocator.free(pixels);
+
+        // Rasterize SVG paths to pixels
+        const rasterizer = nsvgCreateRasterizer() orelse return error.SvgRasterizerFailed;
+        defer nsvgDeleteRasterizer(rasterizer);
+        nsvgRasterize(rasterizer, svg_image, 0, 0, scale, pixels.ptr, w, h, stride);
+
+        const self = try allocator.create(Image);
+        self.* = .{
+            .width = w,
+            .height = h,
+            .channels = 4,
+            .pixels = pixels.ptr,
+            .allocator = allocator,
+            .pixel_owner = .zig,
+        };
+        return self;
+    }
+
     pub fn deinit(self: *Image) void {
-        stbi_image_free(self.pixels);
+        switch (self.pixel_owner) {
+            .stb => stbi_image_free(self.pixels),
+            .zig => {
+                const len: usize = @intCast(self.width * self.height * self.channels);
+                self.allocator.free(self.pixels[0..len]);
+            },
+        }
         self.allocator.destroy(self);
     }
 };
+
+/// Detect SVG content by checking for <svg or <?xml after skipping whitespace/BOM.
+fn isSvgContent(buf: []const u8) bool {
+    var i: usize = 0;
+    // Skip UTF-8 BOM
+    if (buf.len >= 3 and buf[0] == 0xEF and buf[1] == 0xBB and buf[2] == 0xBF) i = 3;
+    // Skip preamble: whitespace, <!DOCTYPE ...>, <?xml ...?>, <!-- ... -->
+    // then check if we reach <svg
+    while (i < buf.len) {
+        // Skip whitespace
+        while (i < buf.len and (buf[i] == ' ' or buf[i] == '\t' or buf[i] == '\n' or buf[i] == '\r')) : (i += 1) {}
+        if (i + 4 > buf.len) return false;
+        if (std.mem.startsWith(u8, buf[i..], "<svg")) return true;
+        // Skip <?xml ... ?>
+        if (std.mem.startsWith(u8, buf[i..], "<?")) {
+            const off = std.mem.indexOf(u8, buf[i..], "?>") orelse return false;
+            i += off + 2;
+            continue;
+        }
+        // Skip <!-- ... -->
+        if (i + 4 <= buf.len and std.mem.startsWith(u8, buf[i..], "<!--")) {
+            const off = std.mem.indexOf(u8, buf[i..], "-->") orelse return false;
+            i += off + 3;
+            continue;
+        }
+        // Skip <!DOCTYPE ... >
+        if (std.mem.startsWith(u8, buf[i..], "<!DOCTYPE") or std.mem.startsWith(u8, buf[i..], "<!doctype")) {
+            while (i < buf.len and buf[i] != '>') : (i += 1) {}
+            if (i < buf.len) i += 1; // skip '>'
+            continue;
+        }
+        return false;
+    }
+    return false;
+}
+
+/// Blank out the `transform="..."` attribute from the root <svg> tag.
+/// Browsers ignore `transform` on the root <svg> element, but nanosvg applies it
+/// as a group transform which misinteracts with viewBox mapping.
+/// Operates in-place on the mutable SVG buffer.
+fn stripRootSvgTransform(buf: []u8) void {
+    // Find the opening <svg tag
+    const svg_start = std.mem.indexOf(u8, buf, "<svg") orelse return;
+    // Find the end of the opening tag
+    const tag_end = std.mem.indexOfScalarPos(u8, buf, svg_start, '>') orelse return;
+    const tag = buf[svg_start..tag_end];
+
+    // Find transform= within the <svg ...> tag (check both quote styles)
+    const attr_pos = std.mem.indexOf(u8, tag, "transform=") orelse return;
+    const abs_pos = svg_start + attr_pos;
+
+    // Determine the quote character and find the closing quote
+    const eq_pos = abs_pos + "transform=".len;
+    if (eq_pos >= tag_end) return;
+    const quote = buf[eq_pos];
+    if (quote != '"' and quote != '\'') return;
+
+    const val_start = eq_pos + 1;
+    const val_end = std.mem.indexOfScalarPos(u8, buf, val_start, quote) orelse return;
+
+    // Blank the entire attribute (name + = + quotes + value) with spaces
+    @memset(buf[abs_pos .. val_end + 1], ' ');
+}
 
 /// The DOM Wrapper (HTMLImageElement)
 /// Represents 'new Image()'
@@ -577,6 +730,22 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
             if (self.bitmap) |b| b.deinit();
 
             if (Image.initFromMemory(self.allocator, buffer)) |new_img| {
+                self.bitmap = new_img;
+                self.natural_width = @intCast(new_img.width);
+                self.natural_height = @intCast(new_img.height);
+                self.complete = true;
+
+                var args = [_]qjs.JSValue{this_val};
+                _ = qjs.JS_EnqueueJob(ctx.ptr, js_image_onload_job, 1, &args);
+            } else |_| {
+                fireImageError(ctx, rc, this_val);
+            }
+        } else if (std.mem.startsWith(u8, src_str, "data:image/svg+xml,")) {
+            // Plain (non-base64) SVG data URL
+            const svg_data = src_str["data:image/svg+xml,".len..];
+            if (self.bitmap) |b| b.deinit();
+
+            if (Image.initFromSvgAutoScale(self.allocator, svg_data)) |new_img| {
                 self.bitmap = new_img;
                 self.natural_width = @intCast(new_img.width);
                 self.natural_height = @intCast(new_img.height);

@@ -37,7 +37,7 @@ Care has been taken to make this engine safe. However, if you plan to use untrus
 > - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: stylesheet, HTMLStyleElement, inline style, iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS, mXSS. Tested successfully against the [HTML5 Security Cheatsheet  Test](https://github.com/cure53/H5SC), [OWASP CheaatSheets](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [Portswigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet) and [DOMPurity tests](https://github.com/cure53/DOMPurify). Trusted code can by-pass this step for performance.
 > - `zexplorer` provides _best-effort_ for the FilesSystem access (no "/" or "..", symlink blocking, traversal rejection, no-follow, hardlink device-ID check, 16-level directory stack).
 > - `zexplorer` provides _best-effort_ for safe HTTP requests (max redirects, max size, timeout, protocol restrictions, SSRF pre-flight check). Dev environment can by-pass this and access localhost.
-> - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction and size limits (remote and local)
+> - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction (you cannot reference paths outside the handle) and size limits (remote and local); directory tranversal, symlink breakout, cwd confusion, absolute path access, descriptor-based walking
 > - `zexplorer` provides _best-effort_ for the main thread and Workers fan-out, busy-loop, and memory mitigation (interruptible, max stack, max GC, constrained memory, wall-clock deadline per worker)
 > - `zexplorer` provides _best-effort_ for DOM excessive nesting, selectors depth.
 
@@ -66,9 +66,9 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
 
 ## Quick start
 
-### Sanitize HTML
+### Sanitize HTML & CSS
 
-We want to sanitize the following untrusted HTML file. It loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some styles.
+We want to sanitize the following untrusted HTML that loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some styles. All three CSS vectors are sanitized and properly synchronized.
 
 ```html
 <!-- src/examples/test_examples.html -->
@@ -172,6 +172,78 @@ The output confirms that the whole page is sanitized and can be used:
 
 Confirm style set by class .untrusted on #js1: color= red
 ```
+
+### Draw CSV in a Canvas and render into a file
+
+It overlaps partially `node-canvas` but is very lightweight and limited.
+
+You can run JavaScript code that loads SVG into a Canvas and output the result into a file.
+
+It supports only a _subset of SVG_ (it uses `nanosvg` under the hood), meaning no animations, no text.
+
+Text can be added into the Canvas thought (support via `stb_image`) using the preloaded `Arial` font and `fillText`, `measureText` related functions.
+
+```js
+// src/examples/test_svg_read_render.js
+
+async function renderSVG(svg_text_buffer) {
+  const blob = new Blob([svg_text_buffer], {type: 'image/svg+xml'});
+  const img = await createImageBitmap(blob);
+  
+  console.log('[JS] SVG from Blob:', img.width, 'x', img.height);
+  
+  const canvas = document.createElement('canvas');
+  const w = 800;
+  const h = w * img.height / img.width;
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  
+  ctx.fillStyle = 'white';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
+  
+  ctx.fillStyle = 'blue';
+  ctx.font = '20px';
+  ctx.fillText('SVG via Blob', 10, 390);
+
+  // return value to Zig
+  const result = await canvas.toBlob();
+  return await result.arrayBuffer();
+}
+```
+
+```zig
+fn testSvgBlobFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbr);
+    defer engine.deinit();
+
+    const svg_text = @embedFile("test_opengraph-me.svg");
+    const script = @embedFile("test_svg_read_render.js");
+
+    const val = try engine.eval(script, "<function>", .globa);
+    defer engine.ctx.freeValue(val);
+
+    {
+        const global = engine.ctx.getGlobalObject();
+        defer engine.ctx.freeValue(global);
+        const svg_val = engine.ctx.newString(opengraph_svg2);
+        try engine.ctx.setPropertyStr(global, "MY_SVG_DATA", svg_val);
+    }
+
+
+    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, "renderSVG(MY_SVG_DATA)", "<svg-blob>");
+    defer allocator.free(png_bytes);
+
+    try std.fs.cwd().writeFile(.{ .sub_path = "svg_read_raster_opengraph_blob.png", .data = png_bytes });
+
+    std.debug.print("  [6] Saved 'svg_read_raster_opengraph_blob.png' ({d} bytes) — SVG via Blob + createImageBitmap\n", .{png_bytes.len});
+}
+```
+
+The result is:
+
+<img src="https://github.com/ndrean/zexplorer/svg_read_raster_opengraph_blob.png" alt="SVG via Blob + createImageBitmap" width="200">
 
 ## Tests & performance
 

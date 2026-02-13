@@ -3,6 +3,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// NanoSVG — extern struct to access width/height without C shim
+pub const NSVGimage = extern struct {
+    width: f32,
+    height: f32,
+    shapes: ?*anyopaque, // NSVGshape linked list (opaque — we only read dimensions)
+};
+pub const NSVGrasterizer = opaque {};
 // ============================================================================
 // QuickJS-ng bindings
 // ============================================================================
@@ -34,6 +41,7 @@ pub const events = @import("js_events.zig");
 pub const js_marshall = @import("js_marshall.zig");
 pub const js_canvas = @import("js_canvas.zig");
 pub const js_blob = @import("js_blob.zig");
+pub const js_image = @import("js_image.zig");
 
 // Exports for examples
 pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;

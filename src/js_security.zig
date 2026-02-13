@@ -5,6 +5,7 @@ const qjs = z.qjs;
 const posix = std.posix;
 const curl = @import("curl");
 const ImportMap = @import("js_import_map.zig").ImportMap;
+const ScriptEngine = @import("script_engine.zig").ScriptEngine;
 
 // pub fn openFileNoSymlinkEscape(sandbox: *Sandbox, rel_path: []const u8) !std.fs.File {
 //     var it = std.mem.splitScalar(u8, rel_path, '/');
@@ -520,3 +521,42 @@ pub fn isSafePath(allocator: std.mem.Allocator, resolved_path: []const u8) bool 
     // Note: 'resolve' usually collapses inner "..", so checking the prefix is sufficient.
     return !std.mem.startsWith(u8, resolved_path, "..");
 }
+
+// test "safe paths" {
+//     const alloc = std.testing.allocator;
+
+//     const TestPath = struct {
+//         path: []const u8,
+//         expected: bool,
+//     };
+
+//     const testPaths = [_]TestPath{
+//         .{ .path = "./../file.js", .expected = false }, // traversal
+//         .{ .path = "subdir/../../file.js", .expected = false }, // double traversal
+//         .{ .path = "simlnik/evil.js", .expected = true }, // symlink-like
+//         .{ .path = ".././.././evil.js", .expected = false }, // mixed traversal
+//         .{ .path = "normal/../other/../file.js", .expected = true }, // normalized nested traversal
+//         .{ .path = "/absolute/path.js", .expected = false }, // absolute path
+//         .{ .path = "subdir/./file.js", .expected = true }, // allowed
+//     };
+//     for (testPaths) |test_path| {
+//         try std.testing.expect(isSafePath(alloc, test_path.path) == test_path.expected);
+//     }
+// }
+
+// test "module normalize" {
+//     const alloc = std.testing.allocator;
+//     var engine = try z.ScriptEngine.init(alloc, ".");
+//     defer engine.deinit();
+
+//     const paths = [_][]const u8{
+//         "./../evil.js", // blocked
+//         "../../etc/passwd.js", // blocked
+//         "/absolute.js", // blocked
+//         "./safe.js", // allowed
+//         "bare/module", // allowed only if import map present
+//         "a/b/../../c.js", // normalized to c.js
+//         "././d/e/../f.js", // normalized to d/f.js
+//     };
+//     _ = paths;
+// }
