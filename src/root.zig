@@ -42,6 +42,7 @@ pub const js_marshall = @import("js_marshall.zig");
 pub const js_canvas = @import("js_canvas.zig");
 pub const js_blob = @import("js_blob.zig");
 pub const js_image = @import("js_image.zig");
+pub const js_security = @import("js_security.zig");
 
 // Exports for examples
 pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;

@@ -9,9 +9,9 @@ This engine parses HTML into a real DOM and executes JavaScript against it — w
 It includes a built-in DOM+CSS optional sanitizer and can run native Zig computations alongside JS.
 It outputs a cleaned structured HTML or extracted data, without a browser.
 
-Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, and [stb_image](https://github.com/nothings/stb), it embeds enough Web API surface to run client framework code.
+Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb) and [nanosvg](https://github.com/memononen/nanosvg), it embeds enough Web API surface to run client framework code.
 
-By providing a minimal DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold bootand sandboxed filesystem, at the cost of a much thiner coverage of the Web API.
+By providing a minimal DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold boot and sandboxed filesystem, at the cost of a much thinner coverage of the Web API.
 
 ## What Problem Does This Solve?
 
@@ -34,14 +34,14 @@ Care has been taken to make this engine safe. However, if you plan to use untrus
 
 > [!NOTE]
 > 
-> - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: stylesheet, HTMLStyleElement, inline style, iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS, mXSS. Tested successfully against the [HTML5 Security Cheatsheet  Test](https://github.com/cure53/H5SC), [OWASP CheaatSheets](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [Portswigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet) and [DOMPurity tests](https://github.com/cure53/DOMPurify). Trusted code can by-pass this step for performance.
+> - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: stylesheet, HTMLStyleElement, inline style, iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS, mXSS. Tested successfully against the [HTML5 Security Cheatsheet  Test](https://github.com/cure53/H5SC), [OWASP CheatSheets](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [Portswigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet) and [DOMPurity tests](https://github.com/cure53/DOMPurify). Trusted code can by-pass this step for performance.
 > - `zexplorer` provides _best-effort_ for the FilesSystem access (no "/" or "..", symlink blocking, traversal rejection, no-follow, hardlink device-ID check, 16-level directory stack).
 > - `zexplorer` provides _best-effort_ for safe HTTP requests (max redirects, max size, timeout, protocol restrictions, SSRF pre-flight check). Dev environment can by-pass this and access localhost.
-> - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction (you cannot reference paths outside the handle) and size limits (remote and local); directory tranversal, symlink breakout, cwd confusion, absolute path access, descriptor-based walking
+> - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction (you cannot reference paths outside the handle) and size limits (remote and local); directory traversal, symlink breakout, cwd confusion, absolute path access, descriptor-based walking
 > - `zexplorer` provides _best-effort_ for the main thread and Workers fan-out, busy-loop, and memory mitigation (interruptible, max stack, max GC, constrained memory, wall-clock deadline per worker)
 > - `zexplorer` provides _best-effort_ for DOM excessive nesting, selectors depth.
 
-**TLTR**:
+**TL;DR**:
 It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and short-lived JavaScript inside an isolated environment.
 
 ## What it does not have or is not
@@ -173,7 +173,7 @@ The output confirms that the whole page is sanitized and can be used:
 Confirm style set by class .untrusted on #js1: color= red
 ```
 
-### Draw CSV in a Canvas and render into a file
+### Generate OG images from SVG templates
 
 It overlaps partially `node-canvas` but is very lightweight and limited.
 
@@ -181,7 +181,7 @@ You can run JavaScript code that loads SVG into a Canvas and output the result i
 
 It supports only a _subset of SVG_ (it uses `nanosvg` under the hood), meaning no animations, no text.
 
-Text can be added into the Canvas thought (support via `stb_image`) using the preloaded `Arial` font and `fillText`, `measureText` related functions.
+Text can be added into the Canvas though (support via `stb_truetype`) using the preloaded `Arial` font and `fillText`, `measureText` related functions.
 
 ```js
 // src/examples/test_svg_read_render.js
@@ -214,36 +214,180 @@ async function renderSVG(svg_text_buffer) {
 ```
 
 ```zig
-fn testSvgBlobFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
+fn testReadSvgBlobFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbr);
     defer engine.deinit();
 
     const svg_text = @embedFile("test_opengraph-me.svg");
-    const script = @embedFile("test_svg_read_render.js");
+    const js = @embedFile("test_svg_read_render.js");
 
-    const val = try engine.eval(script, "<function>", .globa);
+    const val = try engine.eval(js, "<init>", .global);
     defer engine.ctx.freeValue(val);
 
-    {
-        const global = engine.ctx.getGlobalObject();
-        defer engine.ctx.freeValue(global);
-        const svg_val = engine.ctx.newString(opengraph_svg2);
-        try engine.ctx.setPropertyStr(global, "MY_SVG_DATA", svg_val);
-    }
-
+    const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
+    defer scope.deinit();
+    try scope.setString("MY_SVG_DATA", svg_text);
 
     const png_bytes = try engine.evalAsyncAs(allocator, []const u8, "renderSVG(MY_SVG_DATA)", "<svg-blob>");
     defer allocator.free(png_bytes);
 
+    try js_canvas.verifyPngStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "svg_read_raster_opengraph_blob.png", .data = png_bytes });
-
-    std.debug.print("  [6] Saved 'svg_read_raster_opengraph_blob.png' ({d} bytes) — SVG via Blob + createImageBitmap\n", .{png_bytes.len});
+    std.debug.print("  Saved 'svg_read_raster_opengraph_blob.png' ({d} bytes)\n", .{png_bytes.len});
 }
 ```
 
 The result is:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/svg_read_raster_opengraph_blob.png" alt="SVG via Blob + createImageBitmap" width="200">
+<img src="https://github.com/ndrean/zexplorer/blob/main/svg_read_raster_opengraph_blob.png" alt="SVG via Blob + createImageBitmap" width="300">
+
+### Render Chart.js to PNG
+
+You can run [Chart.js](https://www.chartjs.org/) server-side and export the result as a PNG file. The Chart.js bundle is pre-built with Bun and embedded at compile time.
+
+```sh
+cd src/examples/zexp-frams && bun run build_chartjs.js
+zig build example -Dname=test_canvas -Doptimize=ReleaseFast
+```
+
+The HTML file defines the chart configuration and uses the `Chart` constructor:
+
+```html
+<!-- src/examples/test_canvas.html -->
+<html>
+  <body>
+    <script>
+      globalThis.window = globalThis;
+      if (typeof Intl === "undefined") {
+        globalThis.Intl = {
+          NumberFormat: function(locale, opts) {
+            return { format: function(n) { return String(n); } };
+          }
+        };
+      }
+      window.devicePixelRatio = 1;
+      window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = 800;
+      canvas.height = 600;
+      document.body.insertAdjacentElement("afterbegin", canvas);
+
+      async function render() {
+        const config = {
+          type: "bar",
+          data: {
+            labels: ["Zig", "Rust", "C++", "Go", "Python"],
+            datasets: [{
+              label: "Performance (Imaginary Units)",
+              data: [150, 145, 140, 120, 80],
+              backgroundColor: [
+                "rgba(255, 99, 132, 0.8)", "rgba(54, 162, 235, 0.8)",
+                "rgba(255, 206, 86, 0.8)", "rgba(75, 192, 192, 0.8)",
+                "rgba(153, 102, 255, 0.8)",
+              ],
+              borderColor: "black",
+              borderWidth: 2,
+            }],
+          },
+          options: {
+            animation: false,  // CRITICAL: disable animation for SSR
+            responsive: false,
+            plugins: {
+              title: { display: true, text: "Language Speed Test", font: { size: 30 } },
+            },
+          },
+        };
+
+        new globalThis.Chart(canvas, config);
+
+        // Since animation is false, it renders synchronously!
+        const blob = await canvas.toBlob();
+        return await blob.arrayBuffer();
+      }
+      render();
+    </script>
+  </body>
+</html>
+```
+
+The Zig runner loads the Chart.js bundle, then evaluates the HTML with its inline script:
+
+```zig
+fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    // Load Chart.js bundle (pre-built IIFE, embedded at compile time)
+    const chartjs = @embedFile("vendor/chart.js");
+    const chartjs_val = try engine.eval(chartjs, "<chartjs>", .global);
+    engine.ctx.freeValue(chartjs_val);
+
+    // Load the HTML with chart config, extract and run the <script>
+    const html = @embedFile("test_canvas.html");
+    try engine.loadHTML(html);
+
+    const body = z.bodyNode(engine.dom.doc);
+    const script_elt = z.getElementByTag(body.?, .script).?;
+    const script = z.textContent_zc(z.elementToNode(script_elt));
+
+    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, script, "<chart>");
+    defer allocator.free(png_bytes);
+
+    try std.fs.cwd().writeFile(.{ .sub_path = "canvas_chartjs.png", .data = png_bytes });
+}
+```
+
+### Run React bundled code
+
+You can run bundled JSX code in zexplorer. It is a two-step process.
+
+<details><summary>React code + test</summary>
+
+```sh
+bun run build_react.js   # produces dist/app.js
+zig build example -Dname=test_react -Doptimize=ReleaseFast
+```
+
+The test simulates clicks via `dispatchEvent` and verifies that `useMemo` works correctly: filtering triggers a recalculation, but a force re-render does not.
+
+</details>
+
+### Preact with `html` template strings
+
+```sh
+zig build example -Dname=test_htm -Doptimize=ReleaseFast
+```
+
+<details><summary>Preact/htm imports via CDN, compiled to bytecode at startup</summary>
+
+Uses `htm/preact/standalone` with `useState` and `dispatchEvent` for click simulation. The engine pre-compiles CDN imports to bytecode.
+
+</details>
+
+### SolidJS templated with `html`
+
+```sh
+zig build example -Dname=test_solidjs --release=fast
+```
+
+<details><summary>SolidJS with createSignal, createEffect, and setInterval</summary>
+
+Imports `solid-js` and `solid-js/web` from CDN. Uses `createSignal` for reactive state and `setInterval` to simulate periodic clicks. The signal-triggered DOM updates are verified in the output.
+
+</details>
+
+### Vue with template strings
+
+```sh
+zig build example -Dname=test_vue --release=fast
+```
+
+<details><summary>Vue 3 with ref, template compiler, and dispatchEvent</summary>
+
+Uses Vue 3's template compiler with `ref()` for reactive state. Simulates clicks via `setInterval` + `dispatchEvent`. Requires `SVGElement` and `Element` polyfills for Vue's mount detection.
+
+</details>
 
 ## Tests & performance
 
@@ -512,9 +656,9 @@ The DOM operations are externalized from the JavaScript runtime and these result
 
 The goal is to be as performant as [DOMPurify](https://github.com/cure53/DOMPurify) in terms of sanitization. It's a DOM-level sanitizer, not a string filter. It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure. It can allow framework attributes.
 
-This is a two phase process. We firstly parse the input into a real DocumentFragment. It walks the tree DOM and attributes, URIs and CSS (parsed & sanitized). It applies whitelist and [html_specs rules](https://github.com/ndrean/zexplorer/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
+This is a two phase process. We firstly parse the input into a real DocumentFragment. It walks the tree DOM and attributes, URIs and CSS (parsed & sanitized). It applies whitelist and [html_specs rules](https://github.com/ndrean/zexplorer/blob/main/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
 
-There are settings for the sanitizer (remove commemnts, remove/keep <script>, <style>, custom elements, allow framework attributes, embedded media with attributes in context...). Preset built-in modes are proposed but can be customized per run 
+There are settings for the sanitizer (remove comments, remove/keep <script>, <style>, custom elements, allow framework attributes, embedded media with attributes in context...). Preset built-in modes are proposed but can be customized per run 
 
 **TODO**: CL-args to run sanitization only with args
 
@@ -529,9 +673,9 @@ It is tested against collected tests from:
 
 Tests:
 
-- 139 real-world XSS attack vectors from [html5sec.org](https://html5sec.org/) with output in <https://github.com/ndrean/zexplorer/src/examples/h5sc-test_output.html>
-- sanitization of the "dirty" HTML:  <https://cure53.de/purify> in <https://github.com/ndrean/src/examples/dom_purify.zig>
-- tests in [Zanitizer module](https://github.com/ndrean/zexplorer/src/modules/sanitizer.zig) and [Zanitizer-css module](https://github.com/ndrean/zexplorer/src/modules/sanitizer_css.zig)
+- 139 real-world XSS attack vectors from [html5sec.org](https://html5sec.org/) with output in <https://github.com/ndrean/zexplorer/blob/main/src/examples/h5sc-test_output.html>
+- sanitization of the "dirty" HTML:  <https://cure53.de/purify> in <https://github.com/ndrean/zexplorer/blob/main/src/examples/dom_purify.zig>
+- tests in [Zanitizer module](https://github.com/ndrean/zexplorer/blob/main/src/modules/sanitizer.zig) and [Zanitizer-css module](https://github.com/ndrean/zexplorer/blob/main/src/modules/sanitizer_css.zig)
 
 ```sh
 zig build test
@@ -570,12 +714,12 @@ List of implemented server and Web API and examples
 - `Worker` (OS thread). With `onmessage` (`data`) , `postMessage`, `terminate`,  
 - `URL`, `URLPattern`, `URLSearchParams`. With `url.createObjectURL(blob)` and `url.revokeObjectURL`. TODO: check what is missing. `
 - `Blob`: `arrayBuffer`, `text`. With `size` and `type`. TODO `slice`, `bytes` (promise -> Unit8Array)
-- `HTMLCanvasElement`  with `width`, `height`, `canvas`, `fillStyle` and `font`. Drawing methods `drawImage`, `beginPath`, `closePath`, `moveTo`, `stroke`, `strokeStyle`, `lineWidth`, `fillText`, `fillRect`, `scale`, `translate`, `measureText`, `save`, `restore`, `arc`. Methods `getContext`, `getPngData`, `getJpegData`, `toDataURL()`, `toBlob()` (promise based but support for callback based), support 'image:PNG/JPEG via `stb_image`.
+- `HTMLCanvasElement`  with `width`, `height`, `canvas`, `fillStyle` and `font`. Drawing methods `drawImage`, `beginPath`, `closePath`, `moveTo`, `stroke`, `strokeStyle`, `lineWidth`, `fillText`, `fillRect`, `scale`, `translate`, `measureText`, `save`, `restore`, `arc`. Methods `getContext`, `getPngData`, `getJpegData`, `toDataURL()`, `toBlob()` (promise based but support for callback based), support image PNG/JPEG via `stb_image_write`.
 - `HTMLImageElement` : via `createImageBitmap`, to add property `src` to be able to do : `image.src = URL.createObjectURL(blob)`
 - `File`, inherits from `Blob`,with `size`, `path`, `lastModified`, `name`; `fromPath()`.
 - `FileList` with `length` and `item()`.
-- `FomrData` with `append`, `serializeFormData` for Fetch/multi-part. TODO (?) `delete`, `entries`, 
-- `fetch` API (async `CurlMulti`), with `Headers` and `body` (-> `ReadableStream` via OS thread), `status`, `url`. `Reponse` methods `text()`, `json()`, `arryBuffer()`, `blob()`. TODO ? `Request`.
+- `FormData` with `append`, `serializeFormData` for Fetch/multi-part. TODO (?) `delete`, `entries`,
+- `fetch` API (async `CurlMulti`), with `Headers` and `body` (-> `ReadableStream` via OS thread), `status`, `url`. `Response` methods `text()`, `json()`, `arrayBuffer()`, `blob()`. TODO ? `Request`.
 - `fs`: sandboxed file system with: `readFile`, `readFileBuffer`, `writeFile`, `appendFile`, `stat`, `exists`, `readDir`, `mkdir`, `rm`, `copyFile`, `rename`, `fileFromPath`, `createReadStream`, `createWriteStream`.
 - `ReadableStream` (via `fs` and Worker thread, not event I/O): `read`, `releaseLock`, `cancel`.
 - `WritableStream` (via `fs` and Worker thread, not event I/O): 
@@ -590,9 +734,9 @@ List of implemented server and Web API and examples
 - `DOMParser` with `parseFromString()`.
 - `Canvas` and `Image`
 - `addEventListener`, `dispatchEventListener`, `removeEventListener`, `reportResult` (helper->Zig)
-- `querySelector(All)`, `matches`, `getElementById`, `getElementByTagName`, `childNodes`, `children`, `append`, `preprend`, `before`, `after`, `insertAdjacentHTML`, `insertAdjacentElement`, `replaceWith`, `replaceChildren`,
+- `querySelector(All)`, `matches`, `getElementById`, `getElementByTagName`, `childNodes`, `children`, `append`, `prepend`, `before`, `after`, `insertAdjacentHTML`, `insertAdjacentElement`, `replaceWith`, `replaceChildren`,
 - `TreeWalker`,
-- DOM: `document` with createElement|commment|header|TextNode,  `parseHTML`, siblings, etc
+- DOM: `document` with createElement|comment|header|TextNode, `parseHTML`, siblings, etc
 - `Sanitizer`. (`setHTML` or parseHTMLUnsafe to be aliased?)
 - log and printing helpers: `prettyPrint`, `printDoc`, `printDocStruct`, `saveDOM` (to file).
 
@@ -604,610 +748,6 @@ List of implemented server and Web API and examples
 
 > [!IMPORTANT] 
  > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
-
-### Run React bundled code
-
-You run can bundled JSX code in zexplorer. It is a two-step process.
-
-<details><summary>This code below is React code:</summary>
-
-```jsx
-// App.jsx
-
-import React, { useState, useMemo, useEffect } from 'react';
-import { createRoot } from 'react-dom/client';
-
-const Item = ({ value }) => {
-  return <li className="item">Value: <strong>{value}</strong></li>;
-};
-
-const List = ({ onlyEven }) => {
-  const allNumbers = [1, 2, 3, 4, 5, 6, 7];
-
-  // useMemo ensures we only filter when 'onlyEven' changes
-  const displayedNumbers = useMemo(() => {
-    console.log(`[React] Calculating filter (Even: ${onlyEven})`);
-    if (onlyEven) {
-      return allNumbers.filter(n => n % 2 === 0);
-    }
-    return allNumbers;
-  }, [onlyEven]);
-
-  return (
-    <ul id="list-container">
-      {displayedNumbers.map(n => <Item key={n} value={n} />)}
-    </ul>
-  );
-};
-
-const App = () => {
-  const [onlyEven, setOnlyEven] = useState(false);
-  const [renderCount, setRenderCount] = useState(1);
-
-  useEffect(() => {
-    console.log("[React] 👍 App Mounted");
-  }, []);
-
-  return (
-    <div style={{ padding: 20, fontFamily: 'sans-serif' }}>
-      <h1>Zexplorer Memo Test</h1>
-
-      {/* Control Panel */}
-      <div style={{ marginBottom: 15 }}>
-        <button
-          id="btn-toggle"
-          onClick={() => setOnlyEven(prev => !prev)}
-        >
-          {onlyEven ? "Show All" : "Show Even Only"}
-        </button>
-
-        <button
-          id="btn-force"
-          onClick={() => setRenderCount(c => c + 1)}
-          style={{ marginLeft: 10 }}
-        >
-          Force Re-render ({renderCount})
-        </button>
-      </div>
-
-      <p>Status: {onlyEven ? "Filtering Active" : "Showing All"}</p>
-
-      {/* Nested List */}
-      <List onlyEven={onlyEven} />
-    </div>
-  );
-};
-
-const rootNode = document.getElementById('root');
-if (rootNode) {
-  const root = createRoot(rootNode);
-  root.render(<App />);
-}
-```
-
-</details>
-
-We will bundle it into a single JS file using `bun`.
-
-```js
-// build_react.js
-const result = await Bun.build({
-  entrypoints: ["App.jsx"],
-  outdir: "dist",
-  naming: "app.js",
-  target: "browser",
-  minify: true,
-});
-
-if (!result.success) {
-  console.error("❌ Build Failed:");
-  for (const msg of result.logs) console.error(msg);
-  process.exit(1);
-}
-
-console.log("🟢 Build Complete: dist/app.js");
-```
-
-To bundle _App.jsx_, you need to do:
-
-```sh
-bun add react react-dom
-bun build_react.js
-```
-
-This produces a file in _dist/app.js_.
-
-Now, you may test your React code. Here we test how `useMemo` works by producing clicks on the button via ``dispatchEvent`.
-
-<details><summary>JS code to test the React snippet</summary>
-
-```html
-<html>
-  <body>
-    <div id="root"><!-- REACT root div --></div>
-    <script type="module" src="zexp-react/dist/app.js"></script>
-    <script type="module">
-   
-      async function runTest() {
-        console.log("[Test] Waiting for mount...");
-        __flush(); // Drain React's async scheduler
-        // temporary fix: wait for React to finish the async mount
-
-        const list = document.getElementById("list-container");
-        const btn = document.getElementById("btn-toggle");
-        const btnForce = document.getElementById("btn-force");
-
-        // Initial State
-        console.log(`[Test] Items initially: ${list.children.length}`);
-
-        if (list.children.length !== 7)
-          console.error("❌ Initial render failed");
-
-        //Tset Trigger useMemo (Click Filter)
-        console.log("[Test] Clicking 'Show Even Only'");
-        btn.dispatchEvent(new Event("click", { bubbles: true }));
-        __flush();
-        console.log(`[Test] Items after filter: ${list.children.length}`); // Should be 3
-        if (list.children.length !== 3) console.error("❌ Filter failed");
-
-        // Force Re-render to check Memo
-        // If Memo works, "Calculating filter..." should NOT print in console for this step === Should NOT trigger Memo
-        console.log("[Test] Clicking 'Force Re-render'");
-        btnForce.dispatchEvent(new Event("click", { bubbles: true }));
-      }
-
-      runTest();
-    </script>
-  </body>
-</html>
-```
-
-</details>
-
-You run this JS test code with the engine. The logs in the terminal confirms that `useMemo` works as expected.
-
-`zig build example -Dname=test_react -Doptimize=ReleaseFast`
-
-<details><summary>Logs</summary>
-
-```txt
-[Zig] SECURE  LOADER 
-[Test] Waiting for mount
-[React] Calculating filter (Even: false)
-[React] 👍 App Mounted
-[Test] Items initially: 7
-[Test] Clicking 'Show Even Only'
-[React] Calculating filter (Even: true)
-[Test] Items after filter: 3
-[Test] Clicking 'Force Re-render'
-
-[Zig] Render BODY
-<div id="root">
-  <div>
-    <h1>
-      "Zexplorer Memo Test"
-    </h1>
-    <div>
-      <button id="btn-toggle">
-        "Show All"
-      </button>
-      <button id="btn-force">
-        "Force Re-render ("
-        "2"
-        ")"
-      </button>
-    </div>
-    <p>
-      "Status: "
-      "Filtering Active"
-    </p>
-    <ul id="list-container">
-      <li class="item">
-        "Value: "
-        <strong>
-          "2"
-        </strong>
-      </li>
-      <li class="item">
-        "Value: "
-        <strong>
-          "4"
-        </strong>
-      </li>
-      <li class="item">
-        "Value: "
-        <strong>
-          "6"
-        </strong>
-      </li>
-    </ul>
-  </div>
-</div>
-
-[Zig] RT destroyed --------
-```
-
-</details>
-
-### Preact with `html` template strings
-
- ```sh
- zig build example -Dname=test_htm -Doptimize=ReleaseFast
- ```
-
-<details><summary>Preact with html and imports via CDN</summary>
-
-```html
-<html>
-  <body>
-    <h1>HTM + Preact Demo</h1>
-    <div id="root"></div>
-    <script type="module">
-      import { html, render, useState } from "htm/preact/standalone";
-
-      const root = document.getElementById("root");
-
-      const Button = ({ onClick, children }) => {
-        console.log("[JS] Button render");
-        return html`<button id="increment-btn" onclick=${onClick}>${children}</button>`;
-      };
-
-      const CountDisplay = ({ count }) => {
-        console.log("[JS] CountDisplay render, count =", count);
-        return html`<p id="count-display">Count: ${count}</p>`;
-      };
-
-      const App = () => {
-        const [count, setCount] = useState(0);
-        console.log("[JS] App render, count =", count);
-
-        const handleClick = () => {
-          console.log("[JS] Button clicked!");
-          setCount((c) => c + 1);
-        };
-
-        return html`
-          <div class="app">
-            <h2>HTM Counter</h2>
-            <${CountDisplay} count=${count} />
-            <${Button} onClick=${handleClick}>+1<//>
-          </div>
-        `;
-      };
-
-      try {
-        render(html`<${App} />`, root);
-        console.log("[JS] Rendered successfully!");
-        console.log("[JS] innerHTML:", root.innerHTML);
-
-        const btn = document.getElementById("increment-btn");
-        if (btn) {
-          console.log("[JS] Testing clicks...");
-          for (let i = 0; i < 3; i++) {
-            setTimeout(() => btn.dispatchEvent(new Event("click")), (i + 1) * 100);
-          }
-          setTimeout(() => {
-            console.log("[JS] Final count:", document.getElementById("count-display")?.textContent);
-          }, 500);
-        }
-      } catch (e) {
-        console.log("[JS] ERROR:", e.message);
-        if (e.stack) console.log("[JS] Stack:", e.stack.split("\n").slice(0, 3).join("\n"));
-      }
-    </script>
-  </body>
-</html>
-```
-
-</details>
-
-The Preact/htm code can be compiled to bytecode and embedded in the executable.
-
-The engine does this as a pre-step. You can still upload "on-the-fly" an import (cf the SolidJS example below).
-
-
-<details><summary>The Zig runner function</summary>
-
-```zig
-fn runPreactHtm(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
-    var engine = try ScriptEngine.init(gpa, sandbox_root);
-    defer engine.deinit();
-    const html = @embedFile("test_htm.html");
-    try engine.loadHTML(html);
-    try engine.executeScripts(gpa, ".");
-    engine.run() catch |err| {
-        z.print("Run error: {}\n", .{err});
-        return err;
-    };
-    engine.processJobs();
-    const root = z.getElementById(engine.dom.doc, "root");
-    try z.prettyPrint(gpa, z.elementToNode(root.?));
-}
-```
-
-</details>
-
-<details>
-<summary>The output shows that the hooks are triggered and the DOM is updated.
-</summary>
-
-```txt
-[JS] App render, count = 0
-[JS] CountDisplay render, count = 0
-[JS] Button render
-[JS] Rendered successfully!
-[JS] innerHTML: <div class="app"><h2>HTM Counter</h2><p id="count-display">Count: 0</p><button id="increment-btn">+1</button></div>
-[JS] Testing clicks...
-[JS] Button clicked!
-[JS] App render, count = 1
-[JS] CountDisplay render, count = 1
-[JS] Button render
-[JS] Button clicked!
-[JS] App render, count = 2
-[JS] CountDisplay render, count = 2
-[JS] Button render
-[JS] Button clicked!
-[JS] App render, count = 3
-[JS] CountDisplay render, count = 3
-[JS] Button render
-[JS] Final count: Count: 3
-<div id="root">
-  <div class="app">
-    <h2>
-      "HTM Counter"
-    </h2>
-    <p id="count-display">
-      "Count: "
-      "3"
-    </p>
-    <button id="increment-btn">
-      "+1"
-    </button>
-  </div>
-</div>
-```
-
-</details>
-
-### SolidJS templated with `html`
-
-`zig build example -Dname=test_solidjs --release=fast`
-
-<details>
-<summary>SolidJS with html</summary>
-
-```html
-<html>
-  <body>
-    <h1>Testing CDN import: SolidJS</h1>
-    <div id="root"></div>
-    <script type="module">
-      import { createSignal, createEffect, onCleanup } from "solid-js";
-      import { render } from "solid-js/web";
-      import html from "solid-js/html";
-
-      console.log("[JS] SolidJS loaded");
-      const root = document.getElementById("root");
-
-      const [count, setCount] = createSignal(1);
-
-      const Counter = () => {
-        const [localCount, setLocalCount] = createSignal(0);
-
-        createEffect(() => {
-          console.log(`[JS] Rendered! Count: ${localCount()}`);
-          console.log("[JS]", root.innerHTML);
-        });
-
-        const handleClick = () => {
-          console.log("[JS] Button clicked!");
-          setLocalCount((c) => c + 1);
-        };
-
-        return html`
-          <div class="counter-app">
-            <h2>SolidJS Counter</h2>
-            <p id="count-display">Count: ${localCount}</p>
-            <button id="increment-btn" onclick=${handleClick}>+1</button>
-          </div>
-        `;
-      };
-
-      try {
-        render(() => html`<${Counter} />`, root);
-        console.log("[JS] First render: ", root.innerHTML);
-
-        // simulate periodic clicks
-        let iterations = 0;
-        const interval = setInterval(() => {
-          iterations++;
-          const btn = document.getElementById("increment-btn");
-          if (btn) {
-            btn.dispatchEvent(new Event("click", { bubbles: true }));
-          }
-          if (iterations >= 3) {
-            clearInterval(interval);
-            console.log("[JS] Auto-increment stopped after 3 iterations");
-            console.log(
-              "[JS] Final:",
-              document.getElementById("count-display")?.textContent,
-            );
-          }
-        }, 100);
-      } catch (e) {
-        console.log("[JS] SolidJS Error:", e.message);
-        if (e.stack)
-          console.log(
-            "[JS] Stack:",
-            e.stack.split("\n").slice(0, 5).join("\n"),
-          );
-      }
-    </script>
-  </body>
-</html>
-
-```
-
-</details>
-
-<details>
-<summary>The output shows that the signal triggered DOM updates.
-</summary>
-
-```txt
-[Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
-[Zig] Import map: solid-js/web -> https://unpkg.com/solid-js@1.8.0/web/dist/web.js
-[Zig] Import map: solid-js -> https://unpkg.com/solid-js@1.8.0/dist/solid.js
-
-[JS] SolidJS loaded
-[JS] createSignal: function
-[JS] render: function
-[JS] Rendered! Count: 0
-[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 0<!--#--></p><button id="increment-btn">+1</button></div>
-[JS] First render:  <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 0<!--#--></p><button id="increment-btn">+1</button></div>
-[JS] Button clicked!
-[JS] Rendered! Count: 1
-[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 1<!--#--></p><button id="increment-btn">+1</button></div>
-[JS] Button clicked!
-[JS] Rendered! Count: 2
-[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 2<!--#--></p><button id="increment-btn">+1</button></div>
-[JS] Button clicked!
-[JS] Rendered! Count: 3
-[JS] <div class="counter-app"><h2>SolidJS Counter</h2><p id="count-display">Count: 3<!--#--></p><button id="increment-btn">+1</button></div>
-[JS] Auto-increment stopped after 3 iterations
-[JS] Final: Count: 3
-<div id="root">
-  <div class="counter-app">
-    <h2>
-      "SolidJS Counter"
-    </h2>
-    <p id="count-display">
-      "Count: "
-      "3"
-    </p>
-    <button id="increment-btn">
-      "+1"
-    </button>
-  </div>
-</div>
-```
-
-</details>
-
-### Vue with templates strings
-
-`zig build example -Dname=test_vue --release=fast`
-
-<details>
-<summary>Vue 3 (Template Compiler)</summary>
-
-```html
-<html>
-  <body>
-    <h1>Testing CDN import: Vue 3 (Template Compiler)</h1>
-    <div id="root"></div>
-    <script type="module">
-      // Uses template strings 
-
-      // Vue checks for browser globals during mount
-      if (typeof SVGElement === "undefined") {
-        globalThis.SVGElement = class SVGElement {};
-      }
-      if (typeof Element === "undefined") {
-        globalThis.Element = class Element {};
-      }
-
-      import { createApp, ref, compile } from "vue";
-
-      const Counter = {
-        setup() {
-          const count = ref(0);
-          const increment = () => {
-            console.log("[JS] Button clicked!");
-            count.value++;
-          };
-          return { count, increment };
-        },
-        template: `
-          <div class="counter-app">
-            <h2>Vue Counter (Template)</h2>
-            <p id="count-display">Count: {{ count }}</p>
-            <button id="increment-btn" @click="increment">+1</button>
-          </div>
-        `,
-      };
-
-      try {
-        const app = createApp(Counter);
-        const root = document.getElementById("root");
-
-        app.mount("#root");
-        __flush(); // Drain  async scheduler
-        console.log("[JS] First render:", root.innerHTML);
-
-        // simulate periodic clicks
-        let iterations = 0;
-        const interval = setInterval(() => {
-          iterations++;
-          const btn = document.getElementById("increment-btn");
-          if (btn) {
-            btn.dispatchEvent(new Event("click", { bubbles: true }));
-            __flush(); // Drain async scheduler
-          }
-          if (iterations >= 3) {
-            clearInterval(interval);
-            console.log("[JS] Auto-increment stopped after 3 iterations");
-            console.log(
-              "[JS] Final:",
-              document.getElementById("count-display")?.textContent,
-            );
-          }
-        }, 100);
-      } catch (e) {
-        console.log("[JS] Vue Error:", e.message);
-        if (e.stack)
-          console.log(
-            "[JS] Stack:",
-            e.stack.split("\n").slice(0, 5).join("\n"),
-          );
-      }
-    </script>
-  </body>
-</html>
-
-```
-
-</details>
-
-<details>
-<summary>Vue 3 rendering in the terminal</summary>
-
-```txt
-[JS] First render: <div class="counter-app"><h2>Vue Counter</h2><p id="count-display">Count: 0</p><button id="increment-btn">+1</button></div>
-[JS] Button clicked!
-[JS] Button clicked!
-[JS] Button clicked!
-[JS] Auto-increment stopped after 3 iterations
-[JS] Final: Count: 3
-
-[Zig] Render BODY
-<div id="root">
-  <div class="counter-app">
-    <h2>
-      "Vue Counter"
-    </h2>
-    <p id="count-display">
-      "Count: 3"
-    </p>
-    <button id="increment-btn">
-      "+1"
-    </button>
-  </div>
-</div>
-[Zig] RT destroyed --------
-```
-
-</details>
 
 ### Other examples
 
@@ -1398,7 +938,7 @@ You can use native Zig functions in JS
 - **Worker pool**: OS-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
 - **EventListeners** (add, remove, dispatch) and _bubbling_ supported.
 - **ES6 Module System**: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
-- **CCSOM**: _inline_ CSS-inJS and _StyleSheet_ support. [WIP] The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`). Currently,  functional accessors: `Element.getPropertyValue()` and `Element.setProperty()` and `getComputedStyles()`.
+- **CSSOM**: _inline_ CSS-inJS and _StyleSheet_ support. [WIP] The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`). Currently,  functional accessors: `Element.getPropertyValue()` and `Element.setProperty()` and `getComputedStyles()`.
 - Templating support.
 - **DOM Sanitizer**. Handles templates. To become closer to `DOMPurify`, [TODO] Missing full support of SVG sanitization and only basic CSS sanitization.
 - `fetch` API (via libCurl Multi).
@@ -1771,7 +1311,7 @@ document.createElement("p");
 const div = document.querySelector("div");
 div.textContent = "Hi"
 div.appendChild(p);
-conosle.log(div.outerHTML);
+console.log(div.outerHTML);
 ```
 
 The Zig engine will run this JS code and you will see in the terminal:
@@ -1901,203 +1441,6 @@ a:link, a:visited {
 
 </details>
 
----
-
-<details><summary>HTMX Server-Side Rendering with Template Interpolation</summary>
-
-This example demonstrates high-performance server-side rendering with `HTMX` integration and template interpolation, achieving 280K+ operations per second.
-
-The rendering is _stateless_. The state is server-side driven, maintained in a database.
-
-There is no need for a templating langugage: using multiline strings and loops or conditionals is largely enough to build HTML strings, and faster.
-
-```zig
-const blog_html =
-    \\<!DOCTYPE html>
-    \\<html lang="en">
-    \\  <head>
-    \\    <meta charset="UTF-8"/>
-    \\    <title>HTMX Blog - High Performance Server Rendering</title>
-    \\    <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    \\    <script src="https://unpkg.com/htmx.org@1.9.6"></script>
-    \\    <style>
-    \\      .blog-post { margin: 2rem 0; padding: 1.5rem; border: 1px solid #ddd; 
-}
-    \\      .post-title { color: #333; font-size: 1.5rem; cursor: pointer; }
-    \\      .post-title:hover { color: #0066cc; }
-    \\      .post-meta { color: #666; font-size: 0.9rem; margin: 0.5rem 0; }
-    \\      .post-actions { margin-top: 1rem; }
-    \\      .post-actions button { margin-right: 0.5rem; padding: 0.25rem 0.5rem; 
-}
-    \\    </style>
-    \\  </head>
-    \\  <body>
-    \\    <main class="content">
-    \\      <article class="blog-post" data-post-id="{post_id}">
-    \\        <header class="post-header">
-    \\          <h2 class="post-title" hx-get="/posts/{post_id}/edit" 
-hx-target="#edit-modal">
-    \\            {title_template}
-    \\          </h2>
-    \\          <div class="post-meta">
-    \\            <span class="author">{author_name}</span>
-    \\            <time datetime="2024-01-01">{publish_date}</time>
-    \\            <span class="views" hx-get="/posts/{post_id}/views"
-hx-trigger="revealed">
-    \\              {view_count} views
-    \\            </span>
-    \\          </div>
-    \\        </header>
-    \\
-    \\        <div class="post-content">
-    \\          <p>Welcome {user_name}! This demonstrates high-performance HTMX
-server-side rendering with Zig.</p>
-    \\          <p>Current user: <strong>{user_name}</strong>, Post ID:
-<strong>{post_id}</strong></p>
-    \\        </div>
-    \\
-    \\        <footer class="post-actions">
-    \\          <button hx-post="/posts/{post_id}/like" hx-swap="innerHTML">
-    \\            ❤️ {like_count}
-    \\          </button>
-    \\          <button hx-get="/posts/{post_id}/comments"
-hx-target="#comments-{post_id}">
-    \\            💬 {comment_count}
-    \\          </button>
-    \\          <button hx-delete="/posts/{post_id}" hx-confirm="Delete this
-post?" hx-target="closest .blog-post">
-    \\            🗑️ Delete
-    \\          </button>
-    \\        </footer>
-    \\      </article>
-    \\    </main>
-    \\  </body>
-    \\</html>
-;
-```
-
-The code below parses the whole HTML delivered when the client connects, and starts the parser and css engine.
-
-When the webserver receives an HTMX request, the server returns a serialized updated HTML string.
-
-```zig
-const std = @import("std");
-const z = @import("zexplorer");
-
-pub fn main() !void {
-    const gpa = std.heap.c_allocator;
-
-    // One-time setup (server startup)
-    const doc = try z.parseHTML(gpa, blog_html);
-    defer z.destroyDocument(doc);
-
-    var css_engine = try z.CssSelectorEngine.init(allocator);
-    defer css_engine.deinit();
-
-    var parser = try z.Parser.init(allocator);
-    defer parser.deinit();
-
-    // 1. start the webserver: not implemented
-    // 2. Simulate handling requests received by the webserver
-    try requestHandler(gpa, doc, &css_engine, &parser);
-}
-
-// an example: tailored for each request
-fn requestHandler(
-    allocator: std.mem.Allocator,
-    doc: *z.HTMLDocument,
-    css_engine: *z.CssSelectorEngine,
-    parser: *z.Parser,
-) !void {
-
-    // 1. Target elements with CSS selectors
-    const title_elements = try css_engine.querySelectorAll(allocator, doc, ".post-title");
-    defer allocator.free(title_elements);
-
-    if (title_elements.len > 0) {
-        // 2. Clone element for modification (original DOM stays pristine)
-        const cloned_title = z.cloneNode(z.elementToNode(title_elements[0])).?;
-        defer z.destroyNode(cloned_title);
-
-        // 3. Template interpolation with curly brackets after reading the db or kv store
-        const template = "{user_name}'s Blog Post #{post_id}: {title}";
-        var content = try interpolateTemplate(allocator, template, "user_name",
-"Mr Magoo");
-        defer allocator.free(content);
-
-        const post_id_str = try std.fmt.allocPrint(allocator, "{}", .{42});
-        defer allocator.free(post_id_str);
-
-        const temp = try interpolateTemplate(allocator, content, "post_id",
-post_id_str);
-        defer allocator.free(temp);
-
-        const final_content = try interpolateTemplate(allocator, temp, "title",
-"HTMX Performance");
-        defer allocator.free(final_content);
-
-        // 4. Update element content and HTMX attributes
-        _ = try z.setInnerHTML(z.nodeToElement(cloned_title).?, final_content);
-
-        // Interpolate HTMX attributes dynamically
-        const hx_get_value = try interpolateTemplate(allocator,
-"/posts/{post_id}/edit", "post_id", post_id_str);
-        defer allocator.free(hx_get_value);
-        _ = z.setAttribute(z.nodeToElement(cloned_title).?, "hx-get",
-hx_get_value);
-
-        // 5. Serialize modified element (ready to send to client)
-        const response_html = try z.outerHTML(allocator,
-z.nodeToElement(cloned_title).?);
-        defer allocator.free(response_html);
-
-        // POST back to the client
-        std.debug.print("HTMX Response: {s}\n", .{response_html});
-        // Output: <h2 class="post-title" hx-get="/posts/42/edit">M. Magoo's Blog
-Post #42: HTMX Performance</h2>
-    }
-}
-
-// Template interpolation helper - replaces {key} with values
-fn interpolateTemplate(
-    allocator: std.mem.Allocator, 
-    template: []const u8, 
-    key: []const u8, 
-    value: []const u8) ![]u8 {
-    const placeholder = try std.fmt.allocPrint(allocator, "{{{s}}}", .{key});
-    defer allocator.free(placeholder);
-
-    // Count occurrences for efficient pre-allocation
-    var count: usize = 0;
-    var pos: usize = 0;
-    while (std.mem.indexOf(u8, template[pos..], placeholder)) |found| {
-        count += 1;
-        pos += found + placeholder.len;
-    }
-
-    if (count == 0) return try allocator.dupe(u8, template);
-
-    // Pre-allocate and replace all occurrences
-    const new_size = template.len + (value.len * count) - (placeholder.len *
-count);
-    var result = try std.ArrayList(u8).initCapacity(allocator, new_size);
-
-    pos = 0;
-    while (std.mem.indexOf(u8, template[pos..], placeholder)) |found| {
-        const actual_pos = pos + found;
-        try result.appendSlice(allocator, template[pos..actual_pos]);
-        try result.appendSlice(allocator, value);
-        pos = actual_pos + placeholder.len;
-    }
-    try result.appendSlice(allocator, template[pos..]);
-
-    return result.toOwnedSlice(allocator);
-}
-```
-
-</details>
-
----
 
 <details><summary>Example: scan a page for potential malicious content</summary>
 

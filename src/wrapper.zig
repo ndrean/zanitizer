@@ -1725,4 +1725,40 @@ pub const Context = packed struct {
     pub inline fn mallocUsableSize(self: Context, ptr: ?*const anyopaque) usize {
         return qjs.js_malloc_usable_size(self.ptr, ptr);
     }
+
+    /// Scoped handle to the JS global object for injecting values.
+    /// setString/set take ownership of the value (setPropertyStr semantics).
+    /// Caller must call deinit() to free the global ref.
+    pub const GlobalScope = struct {
+        ctx: Context,
+        global: Value,
+
+        pub fn init(ctx: Context) GlobalScope {
+            return .{ .ctx = ctx, .global = ctx.getGlobalObject() };
+        }
+
+        pub fn deinit(self: GlobalScope) void {
+            self.ctx.freeValue(self.global);
+        }
+
+        /// Set a global to a JS string created from a Zig slice.
+        pub fn setString(self: GlobalScope, name: [*:0]const u8, value: []const u8) !void {
+            try self.ctx.setPropertyStr(self.global, name, self.ctx.newString(value));
+        }
+
+        /// Set a global to an arbitrary JS value (takes ownership).
+        pub fn set(self: GlobalScope, name: [*:0]const u8, val: Value) !void {
+            try self.ctx.setPropertyStr(self.global, name, val);
+        }
+
+        /// Create a new empty JS object (convenience for building data objects).
+        pub fn newObject(self: GlobalScope) Value {
+            return self.ctx.newObject();
+        }
+
+        /// Create a new JS string (convenience for object property values).
+        pub fn newString(self: GlobalScope, str: []const u8) Value {
+            return self.ctx.newString(str);
+        }
+    };
 };

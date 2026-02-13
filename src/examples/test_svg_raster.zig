@@ -37,6 +37,7 @@ pub fn main() !void {
     try testRealSvgFromJS(gpa, sandbox_root);
     try testSvgBlobFromJS(gpa, sandbox_root);
     try testReadSvgBlobFromJS(gpa, sandbox_root);
+    try testSvgTemplateFromJS(gpa, sandbox_root);
 
     std.debug.print("\nAll SVG raster tests passed.\n", .{});
 }
@@ -298,23 +299,54 @@ fn testReadSvgBlobFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
     const opengraph_svg2 = @embedFile("test_opengraph-me.svg");
     const js = @embedFile("test_svg_read_render.js");
 
-    // Embed SVG as a JS template literal — no base64 overhead.
-    // The SVG has no backticks or ${} so template literal is safe.
-
     const val = try engine.eval(js, "<init>", .global);
     defer engine.ctx.freeValue(val);
 
-    {
-        const global = engine.ctx.getGlobalObject();
-        defer engine.ctx.freeValue(global);
-        const svg_val = engine.ctx.newString(opengraph_svg2);
-        try engine.ctx.setPropertyStr(global, "MY_SVG_DATA", svg_val);
-    }
+    const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
+    defer scope.deinit();
+    try scope.setString("MY_SVG_DATA", opengraph_svg2);
 
     const png_bytes = try engine.evalAsyncAs(allocator, []const u8, "renderSVG(MY_SVG_DATA)", "<svg-blob>");
     defer allocator.free(png_bytes);
 
     try js_canvas.verifyPngStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "svg_read_raster_opengraph_blob.png", .data = png_bytes });
-    std.debug.print("  [6] Saved 'svg_read_raster_opengraph_blob.png' ({d} bytes) — SVG via Blob + createImageBitmap\n", .{png_bytes.len});
+    std.debug.print("  [7] Saved 'svg_read_raster_opengraph_blob.png' ({d} bytes) — SVG via Blob + createImageBitmap\n", .{png_bytes.len});
+}
+
+/// Test 8: SVG template with dynamic data injected from Zig
+/// Proves the OG image generator concept: SVG background + dynamic text overlay.
+fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbr);
+    defer engine.deinit();
+
+    const js = @embedFile("test_svg_template_render.js");
+
+    const val = try engine.eval(js, "<template-init>", .global);
+    defer engine.ctx.freeValue(val);
+
+    const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
+    defer scope.deinit();
+
+    try scope.setString("TEMPLATE_SVG", opengraph_svg);
+
+    // Build and inject the data object
+    const data = scope.newObject();
+    try engine.ctx.setPropertyStr(data, "title", scope.newString("Zexplorer"));
+    try engine.ctx.setPropertyStr(data, "subtitle", scope.newString("Serverless DOM + JS + Canvas in Zig"));
+    try engine.ctx.setPropertyStr(data, "author", scope.newString("nevendrean"));
+    try engine.ctx.setPropertyStr(data, "footer", scope.newString("Built with nanosvg + stb_truetype + QuickJS"));
+    try scope.set("TEMPLATE_DATA", data);
+
+    const png_bytes = try engine.evalAsyncAs(
+        allocator,
+        []const u8,
+        "renderTemplate(TEMPLATE_SVG, TEMPLATE_DATA)",
+        "<svg-template>",
+    );
+    defer allocator.free(png_bytes);
+
+    try js_canvas.verifyPngStructure(png_bytes);
+    try std.fs.cwd().writeFile(.{ .sub_path = "svg_template_opengraph.png", .data = png_bytes });
+    std.debug.print("  [8] Saved 'svg_template_opengraph.png' ({d} bytes) — SVG template + dynamic text\n", .{png_bytes.len});
 }

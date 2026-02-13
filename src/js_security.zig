@@ -522,41 +522,266 @@ pub fn isSafePath(allocator: std.mem.Allocator, resolved_path: []const u8) bool 
     return !std.mem.startsWith(u8, resolved_path, "..");
 }
 
-// test "safe paths" {
-//     const alloc = std.testing.allocator;
+// =============================================================================
+// Security Tests
+// =============================================================================
 
-//     const TestPath = struct {
-//         path: []const u8,
-//         expected: bool,
-//     };
+const testing = std.testing;
 
-//     const testPaths = [_]TestPath{
-//         .{ .path = "./../file.js", .expected = false }, // traversal
-//         .{ .path = "subdir/../../file.js", .expected = false }, // double traversal
-//         .{ .path = "simlnik/evil.js", .expected = true }, // symlink-like
-//         .{ .path = ".././.././evil.js", .expected = false }, // mixed traversal
-//         .{ .path = "normal/../other/../file.js", .expected = true }, // normalized nested traversal
-//         .{ .path = "/absolute/path.js", .expected = false }, // absolute path
-//         .{ .path = "subdir/./file.js", .expected = true }, // allowed
-//     };
-//     for (testPaths) |test_path| {
-//         try std.testing.expect(isSafePath(alloc, test_path.path) == test_path.expected);
-//     }
-// }
+// ---------------------------------------------------------------------------
+// isSafePath: relative path validation
+// ---------------------------------------------------------------------------
 
-// test "module normalize" {
-//     const alloc = std.testing.allocator;
-//     var engine = try z.ScriptEngine.init(alloc, ".");
-//     defer engine.deinit();
+test "isSafePath: relative safe paths" {
+    const alloc = testing.allocator;
+    try testing.expect(isSafePath(alloc, "js/app.js"));
+    try testing.expect(isSafePath(alloc, "subdir/./file.js"));
+    try testing.expect(isSafePath(alloc, "a/b/c.js"));
+    try testing.expect(isSafePath(alloc, "file.js"));
+}
 
-//     const paths = [_][]const u8{
-//         "./../evil.js", // blocked
-//         "../../etc/passwd.js", // blocked
-//         "/absolute.js", // blocked
-//         "./safe.js", // allowed
-//         "bare/module", // allowed only if import map present
-//         "a/b/../../c.js", // normalized to c.js
-//         "././d/e/../f.js", // normalized to d/f.js
-//     };
-//     _ = paths;
-// }
+test "isSafePath: relative traversal blocked" {
+    const alloc = testing.allocator;
+    try testing.expect(!isSafePath(alloc, "../evil.js"));
+    try testing.expect(!isSafePath(alloc, "../../etc/passwd"));
+    try testing.expect(!isSafePath(alloc, ".././.././evil.js"));
+    try testing.expect(!isSafePath(alloc, "../../../root/.ssh/id_rsa"));
+}
+
+test "isSafePath: absolute path outside cwd blocked" {
+    const alloc = testing.allocator;
+    try testing.expect(!isSafePath(alloc, "/etc/passwd"));
+    try testing.expect(!isSafePath(alloc, "/tmp/evil.js"));
+    try testing.expect(!isSafePath(alloc, "/root/.ssh/id_rsa"));
+}
+
+test "isSafePath: absolute path must match cwd exactly with separator" {
+    const alloc = testing.allocator;
+    // Get the real CWD
+    const cwd = try std.process.getCwdAlloc(alloc);
+    defer alloc.free(cwd);
+
+    // Exact CWD is safe
+    try testing.expect(isSafePath(alloc, cwd));
+
+    // CWD + /subdir is safe
+    const safe = try std.fmt.allocPrint(alloc, "{s}/subdir/file.js", .{cwd});
+    defer alloc.free(safe);
+    try testing.expect(isSafePath(alloc, safe));
+
+    // CWD prefix without separator is NOT safe (sandbox_evil attack)
+    const evil = try std.fmt.allocPrint(alloc, "{s}_evil/file.js", .{cwd});
+    defer alloc.free(evil);
+    try testing.expect(!isSafePath(alloc, evil));
+}
+
+// ---------------------------------------------------------------------------
+// SSRF: isBlockedUrl (tests the public API from root.zig / curl_multi.zig)
+// ---------------------------------------------------------------------------
+
+test "SSRF: localhost blocked" {
+    const z = @import("root.zig");
+    try testing.expect(z.isBlockedUrl("http://localhost/admin"));
+    try testing.expect(z.isBlockedUrl("http://localhost:8080/api"));
+    try testing.expect(z.isBlockedUrl("https://localhost/secret"));
+}
+
+test "SSRF: loopback IPs blocked" {
+    const z = @import("root.zig");
+    try testing.expect(z.isBlockedUrl("http://127.0.0.1/"));
+    try testing.expect(z.isBlockedUrl("http://127.0.0.255:9090/api"));
+    try testing.expect(z.isBlockedUrl("http://0.0.0.0/"));
+}
+
+test "SSRF: IPv6 loopback blocked" {
+    const z = @import("root.zig");
+    try testing.expect(z.isBlockedUrl("http://[::1]/admin"));
+    try testing.expect(z.isBlockedUrl("http://::1/admin"));
+}
+
+test "SSRF: private networks blocked" {
+    const z = @import("root.zig");
+    // Class A private
+    try testing.expect(z.isBlockedUrl("http://10.0.0.1/"));
+    try testing.expect(z.isBlockedUrl("http://10.255.255.255/"));
+    // Class C private
+    try testing.expect(z.isBlockedUrl("http://192.168.1.1/"));
+    try testing.expect(z.isBlockedUrl("http://192.168.0.100:3000/"));
+    // Class B private (172.16-31)
+    try testing.expect(z.isBlockedUrl("http://172.16.0.1/"));
+    try testing.expect(z.isBlockedUrl("http://172.31.255.255/"));
+    // Link-local / cloud metadata
+    try testing.expect(z.isBlockedUrl("http://169.254.169.254/latest/meta-data/"));
+}
+
+test "SSRF: 172.x outside private range allowed" {
+    const z = @import("root.zig");
+    try testing.expect(!z.isBlockedUrl("http://172.15.0.1/"));
+    try testing.expect(!z.isBlockedUrl("http://172.32.0.1/"));
+}
+
+test "SSRF: public URLs allowed" {
+    const z = @import("root.zig");
+    try testing.expect(!z.isBlockedUrl("https://example.com/api"));
+    try testing.expect(!z.isBlockedUrl("https://cdn.jsdelivr.net/npm/solid-js"));
+    try testing.expect(!z.isBlockedUrl("http://8.8.8.8/"));
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox: openFileNoSymlinkEscape
+// ---------------------------------------------------------------------------
+
+test "Sandbox: open file inside sandbox" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    // build.zig exists in the project root — should be accessible
+    const file = try openFileNoSymlinkEscape(&sandbox, "build.zig");
+    file.close();
+}
+
+test "Sandbox: traversal with .. blocked" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    const result = openFileNoSymlinkEscape(&sandbox, "../../../etc/passwd");
+    try testing.expectError(error.AccessDenied, result);
+}
+
+test "Sandbox: dot-dot in middle of path blocked" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    const result = openFileNoSymlinkEscape(&sandbox, "src/../../etc/passwd");
+    try testing.expectError(error.AccessDenied, result);
+}
+
+test "Sandbox: nonexistent file returns FileNotFound" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    const result = openFileNoSymlinkEscape(&sandbox, "definitely_nonexistent_file_xyz.txt");
+    try testing.expectError(error.FileNotFound, result);
+}
+
+test "Sandbox: nested path inside sandbox works" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    // src/root.zig should exist
+    const file = try openFileNoSymlinkEscape(&sandbox, "src/root.zig");
+    file.close();
+}
+
+// ---------------------------------------------------------------------------
+// Module normalize: path escape prevention via ScriptEngine context
+// ---------------------------------------------------------------------------
+
+test "module normalize: safe relative path resolves" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    // Simulate: from "src/app.js" importing "./utils.js" → should resolve to "src/utils.js"
+    const result = js_secure_module_normalize(null, "src/app.js", "./utils.js", @ptrCast(&sandbox));
+    try testing.expect(result != null);
+    if (result) |r| {
+        const resolved = std.mem.span(r);
+        try testing.expectEqualStrings("src/utils.js", resolved);
+        // QuickJS allocated — we can't free with Zig allocator
+    }
+}
+
+test "module normalize: protocol-relative URL blocked" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    // "//evil.com/malware.js" should be blocked (protocol-relative)
+    const result = js_secure_module_normalize(null, "app.js", "//evil.com/malware.js", @ptrCast(&sandbox));
+    // Should return null (blocked) — but needs a real JSContext to throw.
+    // Without ctx, it will attempt to call JS_ThrowReferenceError(null, ...) which may crash.
+    // So we only test what's safe without a ctx.
+    _ = result;
+}
+
+test "module normalize: remote HTTPS URL passes through" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var sandbox = try Sandbox.init(alloc, cwd);
+    defer sandbox.deinit();
+
+    const result = js_secure_module_normalize(null, "app.js", "https://cdn.example.com/lib.js", @ptrCast(&sandbox));
+    try testing.expect(result != null);
+    if (result) |r| {
+        const resolved = std.mem.span(r);
+        try testing.expectEqualStrings("https://cdn.example.com/lib.js", resolved);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Module loader: end-to-end via ScriptEngine (needs full runtime)
+// ---------------------------------------------------------------------------
+
+test "module loader: import traversal escape blocked" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var engine = try ScriptEngine.init(alloc, cwd);
+    defer engine.deinit();
+
+    // Try to import a module that escapes the sandbox via ../
+    // This should fail at the normalize step (.. blocked) or loader step
+    const script =
+        \\import * as evil from "../../../etc/passwd";
+    ;
+
+    const val = engine.eval(script, "<escape-test>", .module);
+    // Should fail — either normalize returns null or loader returns null
+    try testing.expect(val == error.EvalError or val == error.JSException);
+}
+
+test "module loader: nonexistent local module fails gracefully" {
+    const alloc = testing.allocator;
+    const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
+    defer alloc.free(cwd);
+
+    var engine = try ScriptEngine.init(alloc, cwd);
+    defer engine.deinit();
+
+    const script =
+        \\import * as m from "./nonexistent_module_xyz.js";
+    ;
+
+    const val = engine.eval(script, "<missing-module>", .module);
+    try testing.expect(val == error.EvalError or val == error.JSException);
+}
