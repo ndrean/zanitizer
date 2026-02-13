@@ -332,10 +332,9 @@ fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
 
     // Build and inject the data object
     const data = scope.newObject();
-    try engine.ctx.setPropertyStr(data, "title", scope.newString("Zexplorer"));
-    try engine.ctx.setPropertyStr(data, "subtitle", scope.newString("Serverless DOM + JS + Canvas in Zig"));
-    try engine.ctx.setPropertyStr(data, "author", scope.newString("nevendrean"));
-    try engine.ctx.setPropertyStr(data, "footer", scope.newString("Built with nanosvg + stb_truetype + QuickJS"));
+    try engine.ctx.setPropertyStr(data, "title", scope.newString("Built by Zexplorer"));
+
+    try engine.ctx.setPropertyStr(data, "footer", scope.newString("Built with Zig, nanosvg, stb_truetype & QuickJS"));
     try scope.set("TEMPLATE_DATA", data);
 
     const png_bytes = try engine.evalAsyncAs(
@@ -347,6 +346,11 @@ fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
     defer allocator.free(png_bytes);
 
     try js_canvas.verifyPngStructure(png_bytes);
-    try std.fs.cwd().writeFile(.{ .sub_path = "svg_template_opengraph.png", .data = png_bytes });
+    try std.fs.cwd().writeFile(
+        .{
+            .sub_path = "svg_template_opengraph.png",
+            .data = png_bytes,
+        },
+    );
     std.debug.print("  [8] Saved 'svg_template_opengraph.png' ({d} bytes) — SVG template + dynamic text\n", .{png_bytes.len});
 }

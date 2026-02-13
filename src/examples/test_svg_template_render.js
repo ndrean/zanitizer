@@ -23,35 +23,23 @@ async function renderTemplate(svgText, data) {
   // Draw the SVG template as background (scaled to fill)
   ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
 
-  // --- Overlay dynamic text ---
+  // -- Overlay dynamic text --
 
   // Title (large, prominent)
   if (data.title) {
-    ctx.fillStyle = data.titleColor || "white";
+    ctx.fillStyle = data.titleColor || "blue";
     ctx.font = data.titleFont || "bold 48px";
-    ctx.fillText(data.title, 60, 260);
-  }
-
-  // Subtitle
-  if (data.subtitle) {
-    ctx.fillStyle = data.subtitleColor || "#cccccc";
-    ctx.font = data.subtitleFont || "28px";
-    ctx.fillText(data.subtitle, 60, 320);
-  }
-
-  // Author
-  if (data.author) {
-    ctx.fillStyle = data.authorColor || "#aaaaaa";
-    ctx.font = data.authorFont || "22px";
-    ctx.fillText(data.author, 60, 380);
+    ctx.fillText(data.title, 60, 60);
   }
 
   // Footer (bottom-left)
   if (data.footer) {
-    ctx.fillStyle = data.footerColor || "#666666";
+    ctx.fillStyle = data.footerColor || "#f11c75";
     ctx.font = data.footerFont || "18px";
     ctx.fillText(data.footer, 60, h - 40);
   }
+
+  // -- return data to Zig --
 
   const result = await canvas.toBlob();
   return await result.arrayBuffer();

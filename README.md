@@ -176,6 +176,7 @@ The output confirms that the whole page is sanitized and can be used:
 
 Confirm style set by class .untrusted on #js1: color= red
 ```
+---
 
 ### Generate OG images from SVG templates
 
@@ -187,62 +188,103 @@ It supports only a _subset of SVG_ (it uses `nanosvg` under the hood), meaning n
 
 Text can be added into the Canvas though (support via `stb_truetype`) using the preloaded `Arial` font and `fillText`, `measureText` related functions.
 
+[Source SVG](https://github.com/ndrean/zexplorer/blob/main/test_opengraph_me.svg)
+
 ```js
 // src/examples/test_svg_read_render.js
 
-async function renderSVG(svg_text_buffer) {
-  const blob = new Blob([svg_text_buffer], {type: 'image/svg+xml'});
+async function renderTemplate(svgText, data) {
+  const blob = new Blob([svgText], { type: "image/svg+xml" });
   const img = await createImageBitmap(blob);
-  
-  console.log('[JS] SVG from Blob:', img.width, 'x', img.height);
-  
-  const canvas = document.createElement('canvas');
-  const w = 800;
-  const h = w * img.height / img.width;
+
+  const w = data.width || 1200;
+  const h = data.height || 630;
+
+  const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
-  const ctx = canvas.getContext('2d');
-  
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
-  
-  ctx.fillStyle = 'blue';
-  ctx.font = '20px';
-  ctx.fillText('SVG via Blob', 10, 390);
+  const ctx = canvas.getContext("2d");
 
-  // return value to Zig
+  // White background fallback
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw the SVG template as background (scaled to fill)
+  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
+
+  // -- Overlay dynamic text --
+
+  // Title (large, prominent)
+  if (data.title) {
+    ctx.fillStyle = data.titleColor || "blue";
+    ctx.font = data.titleFont || "bold 48px";
+    ctx.fillText(data.title, 60, 60);
+  }
+
+  // Footer (bottom-left)
+  if (data.footer) {
+    ctx.fillStyle = data.footerColor || "#f11c75";
+    ctx.font = data.footerFont || "18px";
+    ctx.fillText(data.footer, 60, h - 40);
+  }
+
+  // -- return data to Zig --
+
   const result = await canvas.toBlob();
   return await result.arrayBuffer();
 }
 ```
 
 ```zig
-fn testReadSvgBlobFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
+// src/examples/test_svg_raseter.zig
+
+fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbr);
     defer engine.deinit();
 
-    const svg_text = @embedFile("test_opengraph-me.svg");
-    const js = @embedFile("test_svg_read_render.js");
+    const js = @embedFile("test_svg_template_render.js");
 
-    const val = try engine.eval(js, "<init>", .global);
+    const val = try engine.eval(js, "<template-init>", .global);
     defer engine.ctx.freeValue(val);
 
     const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
     defer scope.deinit();
-    try scope.setString("MY_SVG_DATA", svg_text);
 
-    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, "renderSVG(MY_SVG_DATA)", "<svg-blob>");
+    try scope.setString("TEMPLATE_SVG", opengraph_svg);
+
+    // Build and inject the data object
+    const data = scope.newObject();
+    try engine.ctx.setPropertyStr(data, "title", scope.newString("Built by Zexplorer"));
+
+    try engine.ctx.setPropertyStr(data, "footer", scope.newString("Built with Zig, nanosvg, stb_truetype & QuickJS"));
+    try scope.set("TEMPLATE_DATA", data);
+
+    const png_bytes = try engine.evalAsyncAs(
+        allocator,
+        []const u8,
+        "renderTemplate(TEMPLATE_SVG, TEMPLATE_DATA)",
+        "<svg-template>",
+    );
     defer allocator.free(png_bytes);
 
     try js_canvas.verifyPngStructure(png_bytes);
-    try std.fs.cwd().writeFile(.{ .sub_path = "svg_read_raster_opengraph_blob.png", .data = png_bytes });
+    try std.fs.cwd().writeFile(
+        .{
+            .sub_path = "svg_template_opengraph.png",
+            .data = png_bytes,
+        },
+    );
+    std.debug.print("  [8] Saved 'svg_template_opengraph.png' ({d} bytes) — SVG template + dynamic text\n", .{png_bytes.len});
 }
 ```
 
 The result is:
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/svg_read_raster_opengraph_blob.png" alt="SVG via Blob + createImageBitmap" width="300">
+
+[TODO] CLI...
+
+---
 
 ### Render Chart.js to PNG
 
@@ -348,6 +390,8 @@ fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
 ```
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example" width="300">
+
+---
 
 ### Run React bundled code
 
