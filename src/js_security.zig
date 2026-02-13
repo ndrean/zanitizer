@@ -580,27 +580,23 @@ test "isSafePath: absolute path must match cwd exactly with separator" {
 // ---------------------------------------------------------------------------
 
 test "SSRF: localhost blocked" {
-    const z = @import("root.zig");
     try testing.expect(z.isBlockedUrl("http://localhost/admin"));
     try testing.expect(z.isBlockedUrl("http://localhost:8080/api"));
     try testing.expect(z.isBlockedUrl("https://localhost/secret"));
 }
 
 test "SSRF: loopback IPs blocked" {
-    const z = @import("root.zig");
     try testing.expect(z.isBlockedUrl("http://127.0.0.1/"));
     try testing.expect(z.isBlockedUrl("http://127.0.0.255:9090/api"));
     try testing.expect(z.isBlockedUrl("http://0.0.0.0/"));
 }
 
 test "SSRF: IPv6 loopback blocked" {
-    const z = @import("root.zig");
     try testing.expect(z.isBlockedUrl("http://[::1]/admin"));
     try testing.expect(z.isBlockedUrl("http://::1/admin"));
 }
 
 test "SSRF: private networks blocked" {
-    const z = @import("root.zig");
     // Class A private
     try testing.expect(z.isBlockedUrl("http://10.0.0.1/"));
     try testing.expect(z.isBlockedUrl("http://10.255.255.255/"));
@@ -615,13 +611,11 @@ test "SSRF: private networks blocked" {
 }
 
 test "SSRF: 172.x outside private range allowed" {
-    const z = @import("root.zig");
     try testing.expect(!z.isBlockedUrl("http://172.15.0.1/"));
     try testing.expect(!z.isBlockedUrl("http://172.32.0.1/"));
 }
 
 test "SSRF: public URLs allowed" {
-    const z = @import("root.zig");
     try testing.expect(!z.isBlockedUrl("https://example.com/api"));
     try testing.expect(!z.isBlockedUrl("https://cdn.jsdelivr.net/npm/solid-js"));
     try testing.expect(!z.isBlockedUrl("http://8.8.8.8/"));

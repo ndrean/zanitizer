@@ -29,7 +29,8 @@ pub fn main() !void {
     // try createImageToBlob(gpa, sandbox_root);
     // try scenegraph(gpa, sandbox_root);
     // try salesGraph(gpa, sandbox_root);
-    // try chart(gpa, sandbox_root);
+    try chart(gpa, sandbox_root);
+    try chartJS2(gpa, sandbox_root);
     // try boldTriangle(gpa, sandbox_root);
     try canvasToDataURL_PNG(gpa, sandbox_root);
     try canvasToBlobJPEG(gpa, sandbox_root);

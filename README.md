@@ -138,16 +138,20 @@ pub fn main() !void {
       .run_loop = false, // no async code
   };
 
-  // parse the HTML, the external stylesheet, run the script, and sync th CSS styles to the DOM
+  // parse the HTML, load the external stylesheet, run the script, parse and sync the CSS styles to the DOM
+
   try engine.loadPage(@embedFile("test_example.html"), cfg);
 
   // print DOM to terminal
+
   if (z.bodyElement(engine.dom.doc)) |body| {
     const html = try z.outerHTML(c_alloc, body);
     defer c_alloc.free(html);
     std.debug.print("{s}\n\n", .{ html });
   }
     
+  //=== CSS test 
+
   // test to see if P has the color "red" coming the class
   if (z.getElementById(doc, "js1")) |p| {
       const color = try z.getComputedStyle(ta, p, "color");
@@ -233,7 +237,6 @@ fn testReadSvgBlobFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
 
     try js_canvas.verifyPngStructure(png_bytes);
     try std.fs.cwd().writeFile(.{ .sub_path = "svg_read_raster_opengraph_blob.png", .data = png_bytes });
-    std.debug.print("  Saved 'svg_read_raster_opengraph_blob.png' ({d} bytes)\n", .{png_bytes.len});
 }
 ```
 
@@ -243,7 +246,9 @@ The result is:
 
 ### Render Chart.js to PNG
 
-You can run [Chart.js](https://www.chartjs.org/) server-side and export the result as a PNG file. The Chart.js bundle is pre-built with Bun and embedded at compile time.
+You can run [Chart.js](https://www.chartjs.org/) server-side and export the result as a PNG file. 
+
+❗️ The Chart.js bundle is _pre-built_ with `Bun` and embedded at compile time.
 
 ```sh
 cd src/examples/zexp-frams && bun run build_chartjs.js
@@ -311,7 +316,7 @@ The HTML file defines the chart configuration and uses the `Chart` constructor:
 </html>
 ```
 
-The Zig runner loads the Chart.js bundle, then evaluates the HTML with its inline script:
+The Zig runner loads the `Chart.js` bundle, then evaluates the HTML with its inline script:
 
 ```zig
 fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
@@ -319,13 +324,17 @@ fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
     defer engine.deinit();
 
     // Load Chart.js bundle (pre-built IIFE, embedded at compile time)
+
     const chartjs = @embedFile("vendor/chart.js");
     const chartjs_val = try engine.eval(chartjs, "<chartjs>", .global);
     engine.ctx.freeValue(chartjs_val);
 
     // Load the HTML with chart config, extract and run the <script>
+
     const html = @embedFile("test_canvas.html");
     try engine.loadHTML(html);
+
+    // access the DOM with Zig
 
     const body = z.bodyNode(engine.dom.doc);
     const script_elt = z.getElementByTag(body.?, .script).?;
@@ -337,6 +346,8 @@ fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try std.fs.cwd().writeFile(.{ .sub_path = "canvas_chartjs.png", .data = png_bytes });
 }
 ```
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example>
 
 ### Run React bundled code
 
