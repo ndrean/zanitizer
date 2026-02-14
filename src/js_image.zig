@@ -31,8 +31,13 @@ extern fn stbi_load_from_memory(
 
 extern fn stbi_image_free(retval_from_stbi_load: ?*anyopaque) void;
 
-/// Pixel buffer ownership — STB uses malloc, SVG rasterization uses Zig allocator
-const PixelOwner = enum { stb, zig };
+// libwebp C bindings
+extern fn WebPGetInfo(data: [*]const u8, data_size: usize, width: *c_int, height: *c_int) c_int;
+extern fn WebPDecodeRGBA(data: [*]const u8, data_size: usize, width: *c_int, height: *c_int) ?[*]u8;
+extern fn WebPFree(ptr: ?[*]u8) void;
+
+/// Pixel buffer ownership — STB uses malloc, SVG uses Zig allocator, WebP uses libwebp allocator
+const PixelOwner = enum { stb, zig, webp };
 
 /// Raw Pixel Data (ImageBitmap)
 pub const Image = struct {
@@ -50,6 +55,11 @@ pub const Image = struct {
         // SVG detection — route to nanosvg rasterizer
         if (isSvgContent(buffer)) {
             return initFromSvgAutoScale(allocator, buffer);
+        }
+
+        // WebP detection — RIFF....WEBP magic bytes (fast pre-check)
+        if (isWebPContent(buffer)) {
+            return initFromWebP(allocator, buffer);
         }
 
         // Structural validation gate — reject malformed images before C decoder
@@ -154,6 +164,33 @@ pub const Image = struct {
         return self;
     }
 
+    /// Decodes WebP image data to RGBA pixels via libwebp.
+    /// Memory is allocated by libwebp and must be freed with WebPFree().
+    pub fn initFromWebP(allocator: std.mem.Allocator, buffer: []const u8) !*Image {
+        var w: c_int = 0;
+        var h: c_int = 0;
+
+        // Structural validation via libwebp (checks VP8/VP8L chunks)
+        if (WebPGetInfo(buffer.ptr, buffer.len, &w, &h) == 0)
+            return error.DecodeFailed;
+        if (w > 8192 or h > 8192)
+            return error.ImageTooLarge;
+
+        const pixels = WebPDecodeRGBA(buffer.ptr, buffer.len, &w, &h) orelse
+            return error.DecodeFailed;
+
+        const self = try allocator.create(Image);
+        self.* = .{
+            .width = w,
+            .height = h,
+            .channels = 4,
+            .pixels = pixels,
+            .allocator = allocator,
+            .pixel_owner = .webp,
+        };
+        return self;
+    }
+
     pub fn deinit(self: *Image) void {
         switch (self.pixel_owner) {
             .stb => stbi_image_free(self.pixels),
@@ -161,10 +198,18 @@ pub const Image = struct {
                 const len: usize = @intCast(self.width * self.height * self.channels);
                 self.allocator.free(self.pixels[0..len]);
             },
+            .webp => WebPFree(self.pixels),
         }
         self.allocator.destroy(self);
     }
 };
+
+/// Fast check for WebP magic bytes: RIFF....WEBP
+fn isWebPContent(buf: []const u8) bool {
+    return buf.len >= 12 and
+        std.mem.eql(u8, buf[0..4], "RIFF") and
+        std.mem.eql(u8, buf[8..12], "WEBP");
+}
 
 /// Detect SVG content by checking for <svg or <?xml after skipping whitespace/BOM.
 fn isSvgContent(buf: []const u8) bool {
@@ -782,6 +827,11 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
             fireImageError(ctx, rc, this_val);
         }
     } else if (std.mem.startsWith(u8, src_str, "http://") or std.mem.startsWith(u8, src_str, "https://")) {
+        // [SECURITY] SSRF gate: block requests to internal infrastructure in sanitize mode
+        if (rc.sanitize_enabled and z.isBlockedUrl(src_str)) {
+            fireImageError(ctx, rc, this_val);
+            return zqjs.UNDEFINED;
+        }
         // Async fetch via worker thread
         const loop = rc.loop;
         const url_copy = rc.allocator.dupe(u8, src_str) catch return zqjs.EXCEPTION;

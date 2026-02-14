@@ -38,6 +38,11 @@ extern fn stbi_write_jpg_to_func(
     quality: c_int,
 ) c_int;
 
+// libwebp encode C bindings
+extern fn WebPEncodeRGBA(rgba: [*]const u8, width: c_int, height: c_int, stride: c_int, quality_factor: f32, output: *[*]u8) usize;
+extern fn WebPEncodeLosslessRGBA(rgba: [*]const u8, width: c_int, height: c_int, stride: c_int, output: *[*]u8) usize;
+extern fn WebPFree(ptr: ?[*]u8) void;
+
 // Callback for STB to write data into our Zig ArrayList
 fn stbiWriteCallback(context: ?*anyopaque, data: ?*anyopaque, size: c_int) callconv(.c) void {
     const ctx: *JpegWriteContext = @ptrCast(@alignCast(context));
@@ -486,6 +491,28 @@ pub const Canvas = struct {
 
         if (res == 0) return error.EncodingFailed;
         return list.toOwnedSlice(self.allocator);
+    }
+
+    /// Encodes pixel buffer to WebP (lossy).
+    /// Returns owned slice (caller frees with allocator).
+    pub fn getWebpData(self: *Canvas, quality: f32) ![]u8 {
+        var output: [*]u8 = undefined;
+        const q = std.math.clamp(quality, 0.0, 1.0) * 100.0;
+
+        const size = WebPEncodeRGBA(
+            self.pixels.ptr,
+            @intCast(self.width),
+            @intCast(self.height),
+            @intCast(self.width * 4),
+            q,
+            &output,
+        );
+        if (size == 0) return error.EncodingFailed;
+
+        // Copy to Zig memory for uniform lifecycle management
+        const webp_slice = output[0..size];
+        defer WebPFree(output);
+        return self.allocator.dupe(u8, webp_slice);
     }
 
     // /// Returns a Base64 Data URL string: "data:image/png;base64,..."
@@ -1227,9 +1254,10 @@ fn js_canvas_toDataURL(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
     if (args.len > 0) {
         if (qjs.JS_IsString(args[0])) {
             const str = ctx.toZString(args[0]) catch "image/png";
-            // Check for JPEG request
             if (std.mem.eql(u8, str, "image/jpeg") or std.mem.eql(u8, str, "image/jpg")) {
                 mime_type = "image/jpeg";
+            } else if (std.mem.eql(u8, str, "image/webp")) {
+                mime_type = "image/webp";
             }
             ctx.freeZString(str);
         }
@@ -1246,6 +1274,9 @@ fn js_canvas_toDataURL(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
     if (std.mem.eql(u8, mime_type, "image/jpeg")) {
         raw_data = canvas.getJpegData(@floatCast(quality)) catch return ctx.throwInternalError("JPEG Encoding failed");
         prefix = "data:image/jpeg;base64,";
+    } else if (std.mem.eql(u8, mime_type, "image/webp")) {
+        raw_data = canvas.getWebpData(@floatCast(quality)) catch return ctx.throwInternalError("WebP Encoding failed");
+        prefix = "data:image/webp;base64,";
     } else {
         var png_len: c_int = 0;
         // data = canvas.getPngData() catch return ctx.throwInternalError("PNG Encoding failed");
@@ -1315,6 +1346,8 @@ fn js_canvas_toBlob(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
             const str = ctx.toZString(args[type_arg_idx]) catch "image/png";
             if (std.mem.eql(u8, str, "image/jpeg") or std.mem.eql(u8, str, "image/jpg")) {
                 mime_type = "image/jpeg";
+            } else if (std.mem.eql(u8, str, "image/webp")) {
+                mime_type = "image/webp";
             }
             ctx.freeZString(str);
         }
@@ -1327,6 +1360,8 @@ fn js_canvas_toBlob(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
     var data: []u8 = undefined;
     if (std.mem.eql(u8, mime_type, "image/jpeg")) {
         data = canvas.getJpegData(@floatCast(quality)) catch return zqjs.NULL;
+    } else if (std.mem.eql(u8, mime_type, "image/webp")) {
+        data = canvas.getWebpData(@floatCast(quality)) catch return zqjs.NULL;
     } else {
         data = canvas.getPngData() catch return zqjs.NULL;
     }
@@ -2397,20 +2432,7 @@ pub fn verifyJpegStructure(bytes: []const u8) !void {
 
         switch (marker) {
             // SOF markers (Start of Frame)
-            0xC0,
-            0xC1,
-            0xC2,
-            0xC3,
-            0xC5,
-            0xC6,
-            0xC7,
-            0xC9,
-            0xCA,
-            0xCB,
-            0xCD,
-            0xCE,
-            0xCF,
-            => {
+            0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF => {
                 has_sof = true;
                 if (marker == 0xC0) std.debug.print("Found Baseline DCT (SOF0)\n", .{});
             },

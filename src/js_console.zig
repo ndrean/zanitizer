@@ -2,6 +2,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const qjs = z.qjs;
 const w = z.wrapper;
+const log = std.log.scoped(.js_console);
 
 // Helper to print a single value with formatting
 fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue) void {
@@ -10,10 +11,10 @@ fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue) void 
         // Error.toString() typically gives "ErrorType: message"
         // We could also look for .stack if we wanted more detail
         if (ctx.toCString(val)) |str| {
-            z.print("{s}", .{str});
+            log.info("{s}", .{str});
             ctx.freeCString(str);
         } else |_| {
-            z.print("[Error]", .{});
+            log.info("[Error]", .{});
         }
         return;
     }
@@ -33,10 +34,10 @@ fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue) void 
 
         if (!ctx.isException(json_str)) {
             if (ctx.toCString(json_str)) |c_str| {
-                z.print("{s}", .{c_str});
+                log.info("{s}", .{c_str});
                 ctx.freeCString(c_str);
             } else |_| {
-                z.print("[Object]", .{});
+                log.info("[Object]", .{});
             }
             ctx.freeValue(json_str);
             return;
@@ -49,10 +50,10 @@ fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue) void 
 
     // 3. Fallback: Primitives / Default toString
     if (ctx.toCString(val)) |str| {
-        z.print("{s}", .{str});
+        log.info("{s}", .{str});
         ctx.freeCString(str);
     } else |_| {
-        z.print("[Unknown]", .{});
+        log.info("[Unknown]", .{});
     }
 }
 
@@ -76,10 +77,10 @@ pub fn js_console_print(
 
     var i: usize = 0;
     while (i < argc) : (i += 1) {
-        if (i > 0) z.print(" ", .{});
+        if (i > 0) log.info(" ", .{});
         printValue(ctx, argv[i], stringify_fn);
     }
-    z.print("\n", .{});
+    log.info("\n", .{});
 
     return w.UNDEFINED;
 }

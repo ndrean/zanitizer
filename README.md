@@ -9,7 +9,7 @@ This engine parses HTML into a real DOM and executes JavaScript against it — w
 It includes a built-in DOM+CSS optional sanitizer and can run native Zig computations alongside JS.
 It outputs a cleaned structured HTML or extracted data, without a browser.
 
-Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb) and [nanosvg](https://github.com/memononen/nanosvg), it embeds enough Web API surface to run client framework code.
+Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb), [libwepb](https://github.com/webmproject/libwebp) and [nanosvg](https://github.com/memononen/nanosvg), it embeds enough Web API surface to run client framework code.
 
 By providing a minimal DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold boot and sandboxed filesystem, at the cost of a much thinner coverage of the Web API.
 
@@ -22,24 +22,30 @@ This engine aims to be lightweight and fast. Use it when you need to:
 - **Test client frameworks** (React, Vue, Solid) in milliseconds
 - **Templating & Static Site Generation** - no async needed, pure speed.
 - **Process HTML pipelines** with native Zig performance
+- Reads and renders _static_ Images (`PNG`, `JPEG`, `WEBP`), and uses the preloaded default `Arial` font.
 
 ## What about Security?
 
-If you plan to use your own code, you can by-pass the sanitization.
+If you plan to use your own code, you can happily by-pass the sanitization. This also removes the Network safety runtime checks. You are in control.
+
+❗️ However, the filesystem access (files) is always sandboxed to the root folder you declare, and HTTPS is enforced for remote module loading sources (eg CDN).
 
 Care has been taken to make this engine safe. However, if you plan to use untrusted code, consider the following:
 
 > [!IMPORTANT]
 > zexplorer does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
 
+[Read more: **SECURITY.md**](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md)
+
 > [!NOTE]
-> 
-> - `zexplorer` provides _best-effort_ content-level safety with the optional sanitization in context step: stylesheet, HTMLStyleElement, inline style, iframes, SVG/MathML isolation, DOM clobbering, URI schema validation, XSS, mXSS. Tested successfully against the [HTML5 Security Cheatsheet  Test](https://github.com/cure53/H5SC), [OWASP CheatSheets](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [Portswigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet) and [DOMPurity tests](https://github.com/cure53/DOMPurify). Trusted code can by-pass this step for performance.
-> - `zexplorer` provides _best-effort_ for the FilesSystem access (no "/" or "..", symlink blocking, traversal rejection, no-follow, hardlink device-ID check, 16-level directory stack).
-> - `zexplorer` provides _best-effort_ for safe HTTP requests (max redirects, max size, timeout, protocol restrictions, SSRF pre-flight check). Dev environment can by-pass this and access localhost.
-> - `zexplorer` provides _best-effort_ for the Module loading via HTTP requests restrictions, Filesystem restriction (you cannot reference paths outside the handle) and size limits (remote and local); directory traversal, symlink breakout, cwd confusion, absolute path access, descriptor-based walking
-> - `zexplorer` provides _best-effort_ for the main thread and Workers fan-out, busy-loop, and memory mitigation (interruptible, max stack, max GC, constrained memory, wall-clock deadline per worker)
-> - `zexplorer` provides _best-effort_ for DOM excessive nesting, selectors depth.
+>
+> All layers below are _best-effort_ — see [SECURITY.md](SECURITY.md) for full details.
+>
+> - **Content sanitization** — DOM+CSS-aware: stylesheets, inline styles, iframes, SVG/MathML, DOM clobbering, URI schemas, XSS/mXSS. Tested against [H5SC](https://github.com/cure53/H5SC), [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [PortSwigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet), and [DOMPurify](https://github.com/cure53/DOMPurify). Optional — trusted code can skip it.
+> - **Filesystem sandbox** — kernel-enforced `openat()` with symlink blocking, traversal rejection, cross-device check, 16-level depth limit.
+> - **Network hardening** — timeouts, redirect/size limits, protocol restrictions, SSRF pre-flight filtering (enforced in sanitize mode; dev can access localhost).
+> - **Module loading** — HTTPS-only remote imports, sandboxed local paths, SRI integrity checks, 5 MB size cap.
+> - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines.
 
 **TL;DR**:
 It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and short-lived JavaScript inside an isolated environment.
@@ -66,10 +72,69 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
 
 ## Quick start
 
+How to use `zexplorer` ?
+
+- CLIs: TODO
+  - `zxp sanitize -dhtml=index.html -dss=stylesheet.css -djs=index.js -dfile=index_cleaned.html`
+  - `zxp to_svg -dtemp=index.js -dsource=example.svg -dfile=final.svg`
+  - `zxp run -djs=index.js -dout=stdout`
+- as a Zig library
+
+### Dual DOM primitives
+
+The DOM primitives are accessible in the Zig code. Since these primitives are ported into the JavaScrcipt runtime, you can access them in the runtime.
+
+For example, you create a document in the Zig code, insert a DIV and a P:
+
+```zig
+const doc = try z.parseHTML("<div>Hi</div>");
+defer z.destroyDocument(doc);
+const p = try z.createElement(doc, "p");
+const div = try z.querySelector(allocator, "div");
+z.appendChild(div.?, p);
+try z.prettyPrint(allocator, z.bodyNode(doc));
+
+const z = @import("zexplorer");
+```
+
+zexplorer runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`.
+
+Zig will happily run this JS code:
+
+```zig
+const allocator = std.testing.allocator,
+
+var engine = z.ZscriptEngine.init(allocator, sbx);
+defer engine.deinit();
+
+const script = 
+  \\document.createElement("div");
+  \\document.createElement("p");
+  \\const div = document.querySelector("div");
+  \\div.textContent = "Hi"
+  \\div.appendChild(p);
+  \\console.log(div.outerHTML);
+  ;
+
+try engine.evalModule(script);
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+and you will see in the terminal:
+
+This will output in the terminal:
+
+```txt
+<div>Hi <p></p></div>
+```
+
 ### Sanitize HTML & CSS
 
 We want to sanitize the following untrusted HTML that loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some styles. All three CSS vectors are sanitized and properly synchronized.
 
+<details><summary>HTML code</summary>
 ```html
 <!-- src/examples/test_examples.html -->
 <html>
@@ -92,9 +157,11 @@ We want to sanitize the following untrusted HTML that loads an external styleshe
   </body>
 </html>
 ```
+</details>
 
 with the following stylesheet:
 
+<details><summary>Stylesheet</summary>
 ```css
 /* src/examples/test_example.css */
 body {
@@ -104,15 +171,22 @@ body {
 }
 ```
 
+</details>
+
 and the script:
+
+<details><summary>JS code</summary>
 
 ```js
 // src/examples/test_example.js
 const html1 = `<p id="js1" class="untrusted" style="padding: 8px; behavior: url(evil.htc);">insertAdjacentHTML</p>`;
 document.body.insertAdjacentHTML("beforeend", html1);
 ```
+</details>>
 
 We want to sanitize it and output the new DOM. We run the following `Zig` code:
+
+<details><summary>Zig runner</summary>
 
 ```zig
 // src/examples/test_example.zig
@@ -164,7 +238,11 @@ pub fn main() !void {
 }
 ```
 
+</details>
+
 The output confirms that the whole page is sanitized and can be used:
+
+<details><summary>Result</summary>
 
 ```txt
 <body>
@@ -176,6 +254,9 @@ The output confirms that the whole page is sanitized and can be used:
 
 Confirm style set by class .untrusted on #js1: color= red
 ```
+
+</details>
+
 ---
 
 ### Generate OG images from SVG templates
@@ -189,6 +270,8 @@ It supports only a _subset of SVG_ (it uses `nanosvg` under the hood), meaning n
 Text can be added into the Canvas though (support via `stb_truetype`) using the preloaded `Arial` font and `fillText`, `measureText` related functions.
 
 [Source SVG](https://github.com/ndrean/zexplorer/blob/main/test_opengraph_me.svg)
+
+<details><summary>JS script and Zig runner</summary>
 
 ```js
 // src/examples/test_svg_read_render.js
@@ -278,6 +361,8 @@ fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
 }
 ```
 
+</details>
+
 The result is:
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/svg_template_opengraph.png" alt="SVG via Blob + createImageBitmap" width="600" height="300">
@@ -291,6 +376,8 @@ The result is:
 You can run [Chart.js](https://www.chartjs.org/) server-side and export the result as a PNG file. 
 
 ❗️ The Chart.js bundle is _pre-built_ with `Bun` and embedded at compile time.
+
+<details><summary>ChartJS example</summary>
 
 ```sh
 cd src/examples/zexp-frams && bun run build_chartjs.js
@@ -388,6 +475,8 @@ fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
     try std.fs.cwd().writeFile(.{ .sub_path = "canvas_chartjs.png", .data = png_bytes });
 }
 ```
+
+</details>
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example" width="600" height="400">
 
@@ -1332,48 +1421,6 @@ sequenceDiagram
 
 </details>
 
-## Dual DOM primitives
-
-The DOM primitives are accessible in the Zig code. Since these primitives are ported into the JavaScrcipt runtime, you can access them in the runtime.
-
-For example, you create a document in the Zig code, insert a DIV and a P:
-
-```zig
-const doc = try z.parseHTML("<div>Hi</div>");
-defer z.destroyDocument(doc);
-const p = try z.createElement(doc, "p");
-const div = try z.querySelector(allocator, "div");
-z.appendChild(div.?, p);
-try prettyPrint(allocator, div);
-```
-
-This will output in the terminal:
-
-```txt
-<div>
-  "Hi"
-  <p></p>
-</div>
-```
-
-The Zig code runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`. 
-
-So in the JavaScript code that the engine will run, you can:
-
-```js
-document.createElement("div");
-document.createElement("p");
-const div = document.querySelector("div");
-div.textContent = "Hi"
-div.appendChild(p);
-console.log(div.outerHTML);
-```
-
-The Zig engine will run this JS code and you will see in the terminal:
-
-```txt
-<div>Hi <p></p></div>
-```
 
 ### Examples using Zig
 
@@ -1734,6 +1781,8 @@ We opted for the following convention: add `_zc` (for _zero_copy_) to the **non 
 
 ### **The Event Loop**
 
+<details><summary>TO BE MOVED INTO TECH DOCS</summary>
+
 ```mermaid
 graph TD
     %% Nodes
@@ -1778,8 +1827,9 @@ graph TD
     style Exit fill:#f66,stroke:#333
 ```
 
----
+</details>
 
+---
 
 ## Install
 
@@ -1826,7 +1876,7 @@ zig build run -Doptimize=ReleaseFast
 
 ---
 
-### Notes
+### Special Notes
 
 #### url hash
 
@@ -1856,10 +1906,13 @@ find vendor/lexbor_src_master/source -name "*.h" | xargs grep -l "lxb_html_seral
 grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ```
 
-## License
+## Licenses
 
 - `lexbor` [License Apache 2.0](https://github.com/lexbor/lexbor/blob/master/LICENSE)
 - `quickjs` [License MIT](https://github.com/quickjs-ng/quickjs/blob/master/LICENSE)
+- `libwebp` [License BSD3](https://github.com/webmproject/libwebp/blob/main/COPYING)
+- `nanosvg` [License zlib](https://github.com/nanosvg/nanosvg/blob/master/LICENSE)
+- `stb_image` [License MIT](https://github.com/nothings/stb/blob/master/LICENSE)
 - `zig-quickjs` [License MIT](https://github.com/nDimensional/zig-quickjs/blob/main/LICENSE)
 - `zig-curl` [License MIT](https://github.com/jiacai2050/zig-curl/blob/main/LICENSE)
 

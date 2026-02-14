@@ -451,6 +451,11 @@ pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c
         return fetchBlob(ctx, url_str);
     }
 
+    // [SECURITY] SSRF gate: block requests to internal infrastructure in sanitize mode
+    if (rc.sanitize_enabled and z.isBlockedUrl(url_str)) {
+        return createPromiseRejected(ctx, "NetworkError: request to internal address blocked by SSRF filter");
+    }
+
     var method_str: []const u8 = "GET";
     var body_data: ?[]u8 = null;
     var headers_list: std.ArrayListUnmanaged([]const u8) = .empty;

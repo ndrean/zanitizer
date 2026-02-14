@@ -659,14 +659,8 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     return allocating.toOwnedSlice();
 }
 
-// Simple conditional print - always use debug print for reliability
-pub const print = switch (builtin.mode) {
-    .Debug => std.debug.print,
-    else => {
-        const out = std.fs.File.stdout();
-        var buf: [1024]u8 = undefined;
-        var writer = out.writer(&buf);
-        writer.interface.print() catch {};
-        writer.interface.flush() catch {};
-    },
-};
+// Use std.log.debug — zero overhead for unprinted messages (comptime).
+// Default log level by build mode:
+//   Debug => .debug (prints), ReleaseSafe => .info, ReleaseFast/Small => .err
+// Override in root file via: pub const std_options = .{ .log_level = .info };
+pub const print = std.log.debug;

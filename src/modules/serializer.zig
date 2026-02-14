@@ -11,7 +11,7 @@ const html_tags = @import("html_tags.zig");
 const HtmlTag = html_tags.HtmlTag;
 const Err = z.Err;
 
-pub const print = std.debug.print;
+const log = std.log.scoped(.serializer);
 const testing = std.testing;
 
 const LXB_HTML_SERIALIZE_OPT_UNDEF: c_int = 0x00;
@@ -299,7 +299,7 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
             // New IO Interface access
             fw.interface.print("{s}", .{text}) catch {};
         } else {
-            z.print("{s}", .{text});
+            log.info("{s}", .{text});
         }
         return 0;
     }
@@ -414,9 +414,7 @@ fn applyStyle(ctx: *ProcessCtx, style: []const u8, text: []const u8) void {
         fw.interface.print("{s}", .{text}) catch {};
     } else {
         // TTY MODE: Print with ANSI colors
-        z.print("{s}", .{style});
-        z.print("{s}", .{text});
-        z.print("{s}", .{z.Style.RESET});
+        log.info("{s}{s}{s}", .{ style, text, z.Style.RESET });
     }
 }
 
@@ -439,7 +437,7 @@ fn walkTree(node: *z.DomNode, depth: u8) void {
             5 => "          ",
             else => "            ",
         };
-        z.print("{s}{s}{s}{s}\n", .{ indent, ansi_colour, name, ansi_reset });
+        log.debug("{s}{s}{s}{s}\n", .{ indent, ansi_colour, name, ansi_reset });
 
         walkTree(child.?, depth + 1);
         child = z.nextSibling(child.?);

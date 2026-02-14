@@ -6,6 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const lexbor_static_lib_path = b.path("vendor/lexbor_src_master/build/liblexbor_static.a");
     const lexbor_src_path = b.path("vendor/lexbor_src_master/source/");
+    const libwebp_src_path = b.path("vendor/libwebp/src");
     const stb_image_src_path = b.path("src/c");
     const nanosvg_src_path = b.path("src/c");
     const quickjs_src_path = b.path("vendor/quickjs-ng");
@@ -38,6 +39,47 @@ pub fn build(b: *std.Build) void {
             "dtoa.c",
         },
         .flags = qjs_flags,
+    });
+    const libwebp = b.addLibrary(.{
+        .name = "webp_decoder",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    libwebp.linkLibC();
+    libwebp.addIncludePath(libwebp_src_path);
+    libwebp.addIncludePath(b.path("vendor/libwebp"));
+    libwebp.addCSourceFiles(.{
+        .root = b.path("vendor/libwebp/src/dsp"),
+        .files = &.{ "alpha_processing.c", "alpha_processing_mips_dsp_r2.c", "alpha_processing_neon.c", "alpha_processing_sse2.c", "alpha_processing_sse41.c", "cpu.c", "dec.c", "dec_clip_tables.c", "dec_mips32.c", "dec_mips_dsp_r2.c", "dec_msa.c", "dec_neon.c", "dec_sse2.c", "dec_sse41.c", "enc.c", "enc_mips32.c", "enc_mips_dsp_r2.c", "enc_msa.c", "enc_neon.c", "enc_sse2.c", "enc_sse41.c", "filters.c", "filters_mips_dsp_r2.c", "filters_msa.c", "filters_neon.c", "filters_sse2.c", "lossless.c", "lossless_mips_dsp_r2.c", "lossless_msa.c", "lossless_neon.c", "lossless_sse2.c", "lossless_sse41.c", "lossless_enc.c", "lossless_enc_mips32.c", "lossless_enc_mips_dsp_r2.c", "lossless_enc_msa.c", "lossless_enc_neon.c", "lossless_enc_sse2.c", "lossless_enc_sse41.c", "rescaler.c", "rescaler_mips32.c", "rescaler_mips_dsp_r2.c", "rescaler_msa.c", "rescaler_neon.c", "rescaler_sse2.c", "ssim.c", "ssim_sse2.c", "upsampling.c", "upsampling_mips_dsp_r2.c", "upsampling_msa.c", "upsampling_neon.c", "upsampling_sse2.c", "upsampling_sse41.c", "yuv.c", "yuv_mips32.c", "yuv_mips_dsp_r2.c", "yuv_neon.c", "yuv_sse2.c", "yuv_sse41.c", "cost.c", "cost_mips32.c", "cost_mips_dsp_r2.c", "cost_neon.c", "cost_sse2.c" },
+        .flags = &.{"-O3"},
+    });
+    libwebp.addCSourceFiles(.{
+        .root = b.path("vendor/libwebp/src/dec"),
+        .files = &.{
+            "alpha_dec.c", "buffer_dec.c", "frame_dec.c", "idec_dec.c",
+            "io_dec.c",    "quant_dec.c",  "tree_dec.c",  "vp8_dec.c",
+            "vp8l_dec.c",  "webp_dec.c",
+        },
+        .flags = &.{"-O3"},
+    });
+    libwebp.addCSourceFiles(.{
+        .root = b.path("vendor/libwebp/src/enc"),
+        .files = &.{ "alpha_enc.c", "analysis_enc.c", "backward_references_cost_enc.c", "backward_references_enc.c", "config_enc.c", "cost_enc.c", "filter_enc.c", "frame_enc.c", "histogram_enc.c", "iterator_enc.c", "near_lossless_enc.c", "picture_csp_enc.c", "picture_enc.c", "picture_psnr_enc.c", "picture_rescale_enc.c", "picture_tools_enc.c", "predictor_enc.c", "quant_enc.c", "syntax_enc.c", "token_enc.c", "tree_enc.c", "vp8l_enc.c", "webp_enc.c" },
+        .flags = &.{"-O3"},
+    });
+
+    libwebp.addCSourceFiles(.{
+        .root = b.path("vendor/libwebp/src/utils"),
+        .files = &.{ "bit_reader_utils.c", "bit_writer_utils.c", "color_cache_utils.c", "filters_utils.c", "huffman_utils.c", "huffman_encode_utils.c", "palette.c", "quant_levels_dec_utils.c", "quant_levels_utils.c", "random_utils.c", "rescaler_utils.c", "thread_utils.c", "utils.c" },
+        .flags = &.{"-O3"},
+    });
+    libwebp.addCSourceFiles(.{
+        .root = b.path("vendor/libwebp/sharpyuv"),
+        .files = &.{ "sharpyuv.c", "sharpyuv_cpu.c", "sharpyuv_csp.c", "sharpyuv_dsp.c", "sharpyuv_gamma.c", "sharpyuv_neon.c", "sharpyuv_sse2.c" },
+        .flags = &.{"-O3"},
     });
 
     const dep_curl = b.dependency(
@@ -84,7 +126,9 @@ pub fn build(b: *std.Build) void {
     zexplorer_lib.addIncludePath(lexbor_src_path);
     zexplorer_lib.addIncludePath(stb_image_src_path);
     zexplorer_lib.addIncludePath(nanosvg_src_path);
+    zexplorer_lib.addIncludePath(libwebp_src_path);
     zexplorer_lib.linkLibrary(qjs_lib);
+    zexplorer_lib.linkLibrary(libwebp);
     zexplorer_lib.linkLibC();
 
     const zexplorer_module = b.createModule(.{
@@ -99,10 +143,12 @@ pub fn build(b: *std.Build) void {
     // Link the module to the wrapper library: get C dependencies
     zexplorer_module.linkLibrary(zexplorer_lib);
     zexplorer_module.linkLibrary(qjs_lib);
+    zexplorer_module.linkLibrary(libwebp);
     zexplorer_module.addIncludePath(quickjs_src_path);
     zexplorer_module.addIncludePath(lexbor_src_path);
     zexplorer_module.addIncludePath(stb_image_src_path);
     zexplorer_module.addIncludePath(nanosvg_src_path);
+    zexplorer_module.addIncludePath(libwebp_src_path);
 
     // Link curl's C library to the module so it can find curl.h
     // The curl module depends on libcurl which needs to be linked
@@ -141,9 +187,12 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(lexbor_src_path);
     exe.addIncludePath(quickjs_src_path);
     exe.addIncludePath(nanosvg_src_path);
+    exe.addIncludePath(libwebp_src_path);
     exe.linkLibC();
     exe.linkLibrary(zexplorer_lib);
     exe.linkLibrary(qjs_lib);
+    exe.linkLibrary(libwebp);
+
     b.installArtifact(exe);
 
     // Run step
@@ -221,7 +270,9 @@ pub fn build(b: *std.Build) void {
     unit_tests.addIncludePath(lexbor_src_path);
     unit_tests.addIncludePath(stb_image_src_path);
     unit_tests.addIncludePath(nanosvg_src_path);
+    unit_tests.addIncludePath(libwebp_src_path);
     unit_tests.linkLibrary(qjs_lib);
+    unit_tests.linkLibrary(libwebp);
     unit_tests.linkLibC();
 
     // Add dependencies to test
@@ -326,6 +377,7 @@ pub fn build(b: *std.Build) void {
         check_exe.linkLibC();
         check_exe.linkLibrary(zexplorer_lib);
         check_exe.linkLibrary(qjs_lib);
+        check_exe.linkLibrary(libwebp);
         check_step.dependOn(&check_exe.step);
     }
 
@@ -357,6 +409,7 @@ pub fn build(b: *std.Build) void {
         example_exe.linkLibC();
         example_exe.linkLibrary(zexplorer_lib);
         example_exe.linkLibrary(qjs_lib);
+        example_exe.linkLibrary(libwebp);
 
         b.installArtifact(example_exe);
 
