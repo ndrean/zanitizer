@@ -22,7 +22,7 @@ This engine aims to be lightweight and fast. Use it when you need to:
 - **Test client frameworks** (React, Vue, Solid) in milliseconds
 - **Templating & Static Site Generation** - no async needed, pure speed.
 - **Process HTML pipelines** with native Zig performance
-- Reads and renders _static_ Images (`PNG`, `JPEG`, `WEBP`), and uses the preloaded default `Arial` font.
+- Read and render _static_ Images (`PNG`, `JPEG`, `WEBP`), can render "some" static `SVG` (typically icons, no `<text>`) and uses the preloaded default `Arial`font.
 
 ## What about Security?
 
@@ -263,13 +263,13 @@ Confirm style set by class .untrusted on #js1: color= red
 
 It overlaps partially `node-canvas` but is very lightweight and limited.
 
+We use a canvas compositor process: we load a static base image (PNG/JPEG/WEBP/SVG) into a Canvas, and programmatically draw text over using `fillText()` , `measureText()` functions powered by `stb_truetype` and uses the preloaded `Arial` font).
+
 You can run JavaScript code that loads SVG into a Canvas and output the result into a file.
 
 It supports only a _subset of SVG_ (it uses `nanosvg` under the hood), meaning no animations, no text.
 
-Text can be added into the Canvas though (support via `stb_truetype`) using the preloaded `Arial` font and `fillText`, `measureText` related functions.
-
-[Source SVG](https://github.com/ndrean/zexplorer/blob/main/test_opengraph_me.svg)
+The use this [SVG source](https://github.com/ndrean/zexplorer/blob/main/test_opengraph_me.svg).
 
 <details><summary>JS script and Zig runner</summary>
 
