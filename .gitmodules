@@ -13,3 +13,6 @@
 [submodule "vendor/libharu"]
 	path = vendor/libharu
 	url = https://github.com/libharu/libharu
+[submodule "vendor/miniz"]
+	path = vendor/miniz
+	url = https://github.com/richgel999/miniz
