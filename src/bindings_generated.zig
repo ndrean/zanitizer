@@ -8,6 +8,27 @@ const qjs = z.qjs;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_CSSStyleDeclaration = @import("js_CSSStyleDeclaration.zig");
+
+/// Warn-and-ignore setter for read-only properties (browsers ignore writes, QuickJS throws).
+/// Uses JSCFunctionData signature so the property name is passed as closure data[0].
+fn js_noop_setter(ctx: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue, _: c_int, func_data: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const name_str = qjs.JS_ToCString(ctx, func_data[0]);
+    if (name_str) |s| {
+        defer qjs.JS_FreeCString(ctx, s);
+        // Log the value being assigned too
+        const val_str = qjs.JS_ToCString(ctx, argv[0]);
+        if (val_str) |v| {
+            defer qjs.JS_FreeCString(ctx, v);
+            const truncated = if (v[0] != 0) v[0..@min(std.mem.len(v), 80)] else "(empty)";
+            std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored (value: {s})\n", .{s, truncated});
+        } else {
+            std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored\n", .{s});
+        }
+    } else {
+        std.debug.print("[DOM] ⚠️  Write to read-only property ignored\n", .{});
+    }
+    return w.UNDEFINED;
+}
 /// Generated wrapper for z.parseHTML
 pub fn js_parseHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     _ = this_val;
@@ -577,18 +598,6 @@ pub fn js_set_innerText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
         return ctx.throwTypeError("Native Zig Error in Setter");
     };
     return w.UNDEFINED;
-}
-// Property Getter for content
-pub fn js_get_content(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
-    const ctx = w.Context{ .ptr = ctx_ptr };
-    const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
-    const result = z.getTemplateContentAsNode(el);
-    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
-    return w.NULL;
 }
 // Property Getter for nextSibling
 pub fn js_get_nextSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -11125,21 +11134,27 @@ pub fn installDocumentBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "documentElement");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_documentElement, "get_documentElement", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "documentElement", 15);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "body");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_body, "get_body", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "body", 4);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "head");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_head, "get_head", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "head", 4);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
@@ -11158,14 +11173,18 @@ pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "parentNode");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_parentNode, "get_parentNode", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "parentNode", 10);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "ownerDocument");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_ownerDocument, "get_ownerDocument", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "ownerDocument", 13);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
@@ -11200,35 +11219,45 @@ pub fn installNodeBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "nextSibling");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nextSibling, "get_nextSibling", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "nextSibling", 11);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "previousSibling");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_previousSibling, "get_previousSibling", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "previousSibling", 15);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "firstChild");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_firstChild, "get_firstChild", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "firstChild", 10);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "lastChild");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_lastChild, "get_lastChild", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "lastChild", 9);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "firstElementChild");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_firstElementChild, "get_firstElementChild", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "firstElementChild", 17);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
@@ -11240,23 +11269,20 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "setHTML", qjs.JS_NewCFunction(ctx, js_setHTML, "setHTML", 1));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "getHTML", qjs.JS_NewCFunction(ctx, js_getHTML, "getHTML", 0));
     {
-        const atom = qjs.JS_NewAtom(ctx, "content");
-        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_content, "get_content", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
-        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
-        qjs.JS_FreeAtom(ctx, atom);
-    }
-    {
         const atom = qjs.JS_NewAtom(ctx, "nextElementSibling");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_nextElementSibling, "get_nextElementSibling", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "nextElementSibling", 18);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "lastElementChild");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_lastElementChild, "get_lastElementChild", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "lastElementChild", 16);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
@@ -11270,21 +11296,27 @@ pub fn installElementBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "namespaceURI");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_namespaceURI, "get_namespaceURI", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "namespaceURI", 12);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "classList");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_classList, "get_classList", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "classList", 9);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "dataset");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_dataset, "get_dataset", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "dataset", 7);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
@@ -11361,35 +11393,45 @@ pub fn installEventBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     {
         const atom = qjs.JS_NewAtom(ctx, "type");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_type, "get_type", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "type", 4);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "bubbles");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_bubbles, "get_bubbles", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "bubbles", 7);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "defaultPrevented");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_defaultPrevented, "get_defaultPrevented", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "defaultPrevented", 16);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "target");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_target, "get_target", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "target", 6);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }
     {
         const atom = qjs.JS_NewAtom(ctx, "currentTarget");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_currentTarget, "get_currentTarget", 0, qjs.JS_CFUNC_generic, 0);
-        const set_fn = w.UNDEFINED;
+        var name_val = qjs.JS_NewStringLen(ctx, "currentTarget", 13);
+        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        qjs.JS_FreeValue(ctx, name_val);
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);
     }

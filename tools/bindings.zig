@@ -325,14 +325,11 @@ pub const bindings = [_]BindingSpec{
 
     // innerHTML: manual binding in dom_bridge.zig (sanitization + style attachment)
 
-    .{
-        .name = "content",
-        .kind = .property,
-        .getter = "z.getTemplateContentAsNode",
-        .setter = "", // Read-Only
-        .prop_type = .optional_node,
-        .prop_this = .this_element,
-    },
+    // content: Removed from shared element prototype. In browsers, .content only exists on
+    // HTMLTemplateElement.prototype, not HTMLElement.prototype. Frameworks like React/Next.js
+    // set node.content as an expando property (e.g. node.content = nodeType) on regular elements.
+    // Having a getter/setter here intercepts those writes and breaks hydration.
+    // TODO: Re-add when per-tag prototypes are implemented (HTMLTemplateElement only).
     .{
         .name = "nextSibling",
         .kind = .property,

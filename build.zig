@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
     miniz.addCSourceFiles(
         .{
             .root = miniz_src_path,
@@ -71,7 +72,7 @@ pub fn build(b: *std.Build) void {
             "quickjs.c",
             "libregexp.c",
             "libunicode.c",
-            "cutils.c",
+            // "cutils.c",
             "dtoa.c",
         },
         .flags = qjs_flags,
@@ -247,6 +248,8 @@ pub fn build(b: *std.Build) void {
     zexplorer_lib.addIncludePath(thorvg_src_path);
     zexplorer_lib.addIncludePath(miniz_src_path);
     zexplorer_lib.addIncludePath(libharu_include_path);
+    zexplorer_lib.addIncludePath(b.path("vendor/fake_zlib"));
+    zexplorer_lib.addIncludePath(b.path("vendor/libharu/include"));
     zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibrary(libwebp);
     zexplorer_lib.linkLibrary(thorvg);
@@ -279,6 +282,8 @@ pub fn build(b: *std.Build) void {
     zexplorer_module.addIncludePath(thorvg_src_path);
     zexplorer_module.addIncludePath(miniz_src_path);
     zexplorer_module.addIncludePath(libharu_include_path);
+    zexplorer_module.addIncludePath(b.path("vendor/fake_zlib"));
+    zexplorer_module.addIncludePath(b.path("vendor/libharu/include"));
 
     // Link curl's C library to the module so it can find curl.h
     // The curl module depends on libcurl which needs to be linked
@@ -322,6 +327,8 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(thorvg_src_path);
     exe.addIncludePath(libharu_include_path);
     exe.addIncludePath(miniz_src_path);
+    exe.addIncludePath(b.path("vendor/fake_zlib"));
+    exe.addIncludePath(b.path("vendor/libharu/include"));
     exe.linkLibC();
     exe.linkLibrary(zexplorer_lib);
     exe.linkLibrary(qjs_lib);

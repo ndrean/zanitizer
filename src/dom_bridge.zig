@@ -665,6 +665,14 @@ pub const DOMBridge = struct {
             return error.Exception;
         };
 
+        // <template> only: install read-only .content getter on this instance
+        if (z.elementToTemplate(element) != null) {
+            const atom = z.qjs.JS_NewAtom(ctx.ptr, "content");
+            defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
+            const get_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_get_template_content, "get_content", 0, z.qjs.JS_CFUNC_generic, 0);
+            _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, obj, atom, get_fn, w.UNDEFINED, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
+        }
+
         // store in cache
         const dup_for_cache = ctx.dupValue(obj);
         bridge.node_cache.put(ptr_addr, dup_for_cache) catch {
@@ -736,6 +744,14 @@ pub const DOMBridge = struct {
                 _ = ctx.throwTypeError("Failed to set tagName on node");
                 return error.Exception;
             };
+
+            // <template> only: install read-only .content getter on this instance
+            if (z.elementToTemplate(element) != null) {
+                const atom = z.qjs.JS_NewAtom(ctx.ptr, "content");
+                defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
+                const get_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_get_template_content, "get_content", 0, z.qjs.JS_CFUNC_generic, 0);
+                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, obj, atom, get_fn, w.UNDEFINED, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
+            }
         }
 
         // store in cache
@@ -1903,6 +1919,20 @@ fn js_setAttribute_sanitized(
         return ctx.throwTypeError("Native Zig Error");
     };
     return w.UNDEFINED;
+}
+
+// content getter for <template> elements only (installed per-instance in wrapNode, no tag check needed)
+fn js_get_template_content(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) zqjs.Value {
+    _ = argc;
+    _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
+    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const result = z.getTemplateContentAsNode(el);
+    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
+    return w.NULL;
 }
 
 // Manual innerHTML getter

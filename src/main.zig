@@ -196,7 +196,7 @@ fn preview_vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\async function testVercel() {
         \\  try {
         \\      await zexplorer.goto("https://next-preview.vercel.app");
-        \\      console.log(document.body.innerHTML);
+        // \\      console.log(document.body.innerHTML);
         \\      return document.body.innerHTML;
         \\
         // \\      await zexplorer.waitForSelector("[data-slate-string]", 5000);
@@ -218,12 +218,25 @@ fn preview_vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
         "testVercel()",
         "<vercel>",
     );
+    defer allocator.free(lines);
     // defer {
     //     for (lines) |line| allocator.free(line);
     //     allocator.free(lines);
     // }
     // for (lines) |line|
     std.debug.print("{s}\n", .{lines});
+}
+
+fn generate_pdf(_: std.mem.Allocator, _: []const u8) !void {
+    const js =
+        \\const template = `<svg>... your visual figma design with {{total}} ...</svg>`;
+        \\const finalSvg = template.replace("{{total}}", "$4560.00");
+
+        // Generates a crisp PDF in ~40ms using native LibHaru
+        \\await zexplorer.pdf.generate(finalSvg, "./output_invoice.pdf");
+        \\console.log("Invoice generated!");
+    ;
+    _ = js;
 }
 
 fn elTest(allocator: std.mem.Allocator, sbx: []const u8) !void {

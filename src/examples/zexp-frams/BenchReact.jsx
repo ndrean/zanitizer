@@ -1,5 +1,6 @@
 import { memo, useReducer } from "react";
 import { createRoot } from "react-dom/client";
+import { flushSync } from "react-dom";
 
 const random = (max) => Math.round(Math.random() * 1000) % max;
 
@@ -128,13 +129,13 @@ const Row = memo(
     <tr className={selected ? "danger" : ""}>
       <td className="col-md-1">{item.id}</td>
       <td className="col-md-4">
-        <a onClick={() => dispatch({ type: "SELECT", id: item.id })}>
+        <a className="lbl" onClick={() => dispatch({ type: "SELECT", id: item.id })}>
           {item.label}
         </a>
       </td>
       <td className="col-md-1">
-        <a onClick={() => dispatch({ type: "REMOVE", id: item.id })}>
-          <span className="glyphicon glyphicon-remove" aria-hidden="true" />
+        <a className="remove" onClick={() => dispatch({ type: "REMOVE", id: item.id })}>
+          <span className="glyphicon glyphicon-remove remove" aria-hidden="true" />
         </a>
       </td>
       <td className="col-md-6" />
@@ -230,5 +231,8 @@ const Main = () => {
     </div>
   );
 };
+
+// Expose flushSync globally for the benchmark script
+globalThis.__flushSync = flushSync;
 
 createRoot(document.getElementById("main")).render(<Main />);

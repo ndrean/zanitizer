@@ -423,8 +423,24 @@ pub const ScriptEngine = struct {
             return js_marshall.jsToZig(allocator, self.ctx, val, T);
         }
 
-        //  executes pending jobs (microtasks) and timers.
-        try self.run();
+        //  Poll event loop until promise settles (don't wait for full drain —
+        //  frameworks like Next.js leave timers/workers alive indefinitely).
+        var poll_count: u32 = 0;
+        const max_polls: u32 = 100_000;
+        while (poll_count < max_polls) : (poll_count += 1) {
+            const ps = self.ctx.promiseState(val);
+            if (ps != .Pending) break;
+            // Run one iteration of jobs + timers
+            self.processJobs();
+            _ = self.loop.processTimers() catch 0;
+            _ = self.loop.processAsyncTasks();
+            if (self.loop.curl_multi) |cm| {
+                _ = cm.poll(0) catch .{ .running = 0, .completed = 0 };
+            }
+            self.loop.pollWorkers() catch {};
+            // Yield CPU if nothing happened this iteration
+            std.Thread.sleep(1_000_000); // 1ms
+        }
 
         const state = self.ctx.promiseState(val);
         switch (state) {

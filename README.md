@@ -1882,8 +1882,8 @@ chunk:  </tbody></table></body></html>;
 <p align="center">
   <img src="https://github.com/ndrean/z-html/blob/main/images/html-table.png" width="300" alt="image"/>
   <img src="https://github.com/ndrean/z-html/blob/main/images/tree-table.png" width="300" alt="image"/>
-</p>
 
+</p>
 </details>
 
 ---
@@ -2077,6 +2077,14 @@ zig build run -Doptimize=ReleaseFast
 ---
 
 ### Special Notes
+
+lexbor: Update vendored repo:
+
+```sh
+git submodule update --remote vendor/lexbor_src_master
+```
+
+miniz: use the release <https://github.com/richgel999/miniz/releases>
 
 #### url hash
 

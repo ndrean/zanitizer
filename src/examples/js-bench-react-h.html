@@ -2,20 +2,22 @@
   <head>
     <meta charset="utf-8" />
     <title>React Hooks</title>
-    <link href="/css/currentStyle.css" rel="stylesheet" />
   </head>
   <body>
     <div id="main"><!-- React container --></div>
     <script src="src/examples/vendor/bench-react.js"></script>
     <script type="module">
       // the React source code has been bundled by  'bun'.
+      // __flushSync wraps react-dom's flushSync — forces synchronous rendering
       function click(selector) {
         const el = document.querySelector(selector);
         if (!el) {
           console.log("Not found: " + selector);
           return;
         }
-        el.dispatchEvent(new Event("click", { bubbles: true }));
+        __flushSync(() => {
+          el.dispatchEvent(new Event("click", { bubbles: true }));
+        });
       }
 
       function measure(name, fn) {
@@ -26,6 +28,9 @@
       }
 
       console.log("\n=== React Benchmark ===\n");
+
+      // Flush React's initial async render (createRoot().render() schedules via microtasks)
+      __flush();
 
       // Warmup
       click("#run");

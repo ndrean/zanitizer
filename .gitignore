@@ -1,5 +1,7 @@
 # Lexbor - ignore build artifacts except essential distribution files
-/vendor/lexbor_src_master/
+/vendor/bytecode
+/vendor/js_cache
+
 /.zig-cache
 /zig-out/
 /.vscode/

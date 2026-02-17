@@ -981,7 +981,9 @@ const T = struct {
         \\    {{
         \\        const atom = qjs.JS_NewAtom(ctx, "{s}");
         \\        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_{s}, "get_{s}", 0, qjs.JS_CFUNC_generic, 0);
-        \\        const set_fn = w.UNDEFINED;
+        \\        var name_val = qjs.JS_NewStringLen(ctx, "{s}", {d});
+        \\        const set_fn = qjs.JS_NewCFunctionData(ctx, js_noop_setter, 1, 0, 1, @ptrCast(&name_val));
+        \\        qjs.JS_FreeValue(ctx, name_val);
         \\        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         \\        qjs.JS_FreeAtom(ctx, atom);
         \\    }}
@@ -1308,6 +1310,27 @@ pub fn main() !void {
         \\const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
         \\const js_CSSStyleDeclaration = @import("js_CSSStyleDeclaration.zig");
         \\
+        \\/// Warn-and-ignore setter for read-only properties (browsers ignore writes, QuickJS throws).
+        \\/// Uses JSCFunctionData signature so the property name is passed as closure data[0].
+        \\fn js_noop_setter(ctx: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue, _: c_int, func_data: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+        \\    const name_str = qjs.JS_ToCString(ctx, func_data[0]);
+        \\    if (name_str) |s| {
+        \\        defer qjs.JS_FreeCString(ctx, s);
+        \\        // Log the value being assigned too
+        \\        const val_str = qjs.JS_ToCString(ctx, argv[0]);
+        \\        if (val_str) |v| {
+        \\            defer qjs.JS_FreeCString(ctx, v);
+        \\            const truncated = if (v[0] != 0) v[0..@min(std.mem.len(v), 80)] else "(empty)";
+        \\            std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored (value: {s})\n", .{s, truncated});
+        \\        } else {
+        \\            std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored\n", .{s});
+        \\        }
+        \\    } else {
+        \\        std.debug.print("[DOM] ⚠️  Write to read-only property ignored\n", .{});
+        \\    }
+        \\    return w.UNDEFINED;
+        \\}
+        \\
     );
 
     // Generate DOM bindings
@@ -1538,7 +1561,7 @@ fn generateInstallerLine(writer: anytype, b: anytype) !void {
         if (b.setter.len > 0 or b.kind == .boolean_attribute or b.kind == .string_attribute) {
             try writer.print(T.INSTALL_PROPERTY_RW, .{ b.name, b.name, b.name, b.name, b.name });
         } else {
-            try writer.print(T.INSTALL_PROPERTY_RO, .{ b.name, b.name, b.name });
+            try writer.print(T.INSTALL_PROPERTY_RO, .{ b.name, b.name, b.name, b.name, b.name.len });
         }
     }
 }
