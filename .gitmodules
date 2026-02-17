@@ -1,3 +1,6 @@
 [submodule "vendor/quickjs-ng"]
 	path = vendor/quickjs-ng
 	url = https://github.com/quickjs-ng/quickjs
+[submodule "vendor/thorvg"]
+	path = vendor/thorvg
+	url = https://github.com/thorvg/thorvg
