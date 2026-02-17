@@ -78,11 +78,258 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
 
 How to use `zexplorer` ?
 
-- CLIs: WIP
+- CLI: WIP
   - `zxp sanitize -dhtml=index.html -dss=stylesheet.css -djs=index.js -dfile=index_cleaned.html`
   - `zxp to_svg -dtemp=index.js -dsource=example.svg -dfile=final.svg`
   - `zxp run -djs=index.js -dout=stdout`
 - as a Zig library
+
+### Hello world
+
+**[Dual primitives]** When you use `zexplorer` as a `Zig` library, you have DOM primitives accessible in the Zig code. Since these primitives are ported into the JavaScript runtime, you can access them as well in the runtime.
+
+**[First example]** You have a simple HTML file, _examples/hello_world.html_. You can parse it with the library and preview the DOM.
+
+```html
+<div>
+  <p>Hello world</p>
+</div>
+```
+
+We will build and execute the following _src/main.zig_ file where we respect the careful and explicit Zig memory allocation ceremony:
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+  const gpa = debug_allocator.allocator();
+  defer _ = debug_allocator.deinit();
+
+  const html = @embedFile("examples/hello_world.html");
+
+  const doc = try z.parseHTML(allocator, html);
+  defer z.destroyDocument(doc);
+
+  try z.prettyPrint(gpa, z.documentRoot(doc).?);
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+The executable is named "hello1". We build the _main.zig_ file, and execute it by using its name:
+
+```sh
+$> zig build
+$> ./zig-out/bin/hello1
+```
+
+In the terminal, you see:
+
+```txt
+<div>
+  <p>
+    "Hello ZigJS"
+  </p>
+</div>
+```
+
+---
+
+**[Example of dual primitives]** We create a DOM and query it in pur Zig and then using embedded JavaScript:
+
+In this example, we manipulate a "real-virtual DOM" in Zig:
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+  const gpa = debug_allocator.allocator();
+  defer _ = debug_allocator.deinit();
+
+  // using DOMParser alternative to `parseHTML()`
+  var parser = try z.DOMParser.init(gpa);
+  defer parser.deinit();
+  const doc = try parser.parseFromString(html);
+  defer z.destroyDocument(doc);
+
+  const p = try z.querySelector(gpa, z.bodyNode(doc).?, "p");
+  const inner_text = z.textContent_zc(z.elementToNode(p.?)); // no allocation
+
+  std.debug.print("[Zig] {s}\n", .{inner_text});
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+zexplorer runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`.
+
+In this example, we run a JavaScript snippet that knows about the "real-vDOM":
+ 
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+  const gpa = debug_allocator.allocator();
+  defer _ = debug_allocator.deinit();
+
+  const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+  defer gpa.free(sandbox_root);
+
+  var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+  defer engine.deinit();
+
+  const script = 
+    \\const innerText = document.querySelector("p").textContent;
+    \\console.log("[JS]", innerText);
+    ;
+  const html = @embedFile("examples/hello_world.html");
+
+  try engine.loadHTML(html)
+  try engine.evalModule(script, "<script>");
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+You build and execute these files and. get:
+
+```txt
+[Zig] Hello ZigJS
+[JS] Hello ZigJS
+```
+
+---
+
+**[Run JavaScript]** Let's run a JavaScript snippet that builds the same DOM programmatically and adds a `<script>` to it:
+
+```js
+// src/examples/hello_world.js
+const div = document.createElement("div");
+const p = document.createElement("p");
+p.textContent = "Hello zexplorer";
+div.appendChild(p);
+document.body.appendChild(div);
+
+const script = document.createElement("script");
+script.textContent = "const hello = document.querySelector('p').textContent; console.log("[JS]", hello);";
+document.head.appendChild(script);
+```
+
+In the _main.zig_ file, you will load the JS code and evaluate it with the ScriptEngine, again taking care of all the memory allocations:
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    const gpa = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+
+    const script = @emdFile("examples/hello_world.js");
+
+    const val = try engine.evalModule(script, "<my-script>");
+    defer engine.ctx.freeValue(val);
+
+    try engine.executeScripts(gpa, ".");
+
+    // Print the DOM to stdout
+    try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+You build and execute _main.zig_:
+
+```sh
+$> zig build
+$> ./zig-out/bin/hello2
+```
+
+The output in the terminal:
+
+```txt
+[JS] Hello zexplorer  <-- zexplorer executes the script
+
+<html>                <-- zexplorer prints the DOM to stdout
+  <head>
+    <script>
+      "const hello = document.querySelector('p').textContent; console.log('[JS]', hello);"
+    </script>
+  </head>
+  <body>
+    <div>
+      <p>
+        "Hello zexplorer"
+      </p>
+    </div>
+  </body>
+</html>
+```
+
+---
+
+**[HTML with script]** You have an HTML file (_examples/html-script.html_) with a script. We have a higher level primitive `loadPage()` that parses the HTML and CSS and syncs it, and reads and evaluates the found `<script>`'s elements.
+
+```html
+<body>
+  <p>Hello Zig</p>
+  <script>
+    const p = document.querySelector("p");
+    console.log(p.textContent);
+  </script>
+</body>
+```
+
+Your _main.zig_  file contains:
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    pub fn main() !void {
+    const gpa = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+
+    const html = @embedFile("html-script.html);
+    try engine.loadPage(html, .{});
+
+    try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+You build and execute _main.zig_:
+
+```sh
+$> zig build
+$> ./zig-out/bin/hello-2
+```
+
+The output is as expected:
+
+```txt
+[JS] Hello Zig
+
+<html>
+  <head>
+    ...
+```
 
 ### Scrap a Vercel site
 
