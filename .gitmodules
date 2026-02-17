@@ -7,3 +7,6 @@
 [submodule "vendor/lexbor_src_master"]
 	path = vendor/lexbor_src_master
 	url = https://github.com/lexbor/lexbor
+[submodule "vendor/libwebp"]
+	path = vendor/libwebp
+	url = https://github.com/webmproject/libwebp
