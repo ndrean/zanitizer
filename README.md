@@ -3,21 +3,21 @@
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 [WIP]
-`zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss knife that runs fast, delivers and dies.
+`zexplorer`  is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
 
-This engine includes a ES6 JavaScript runtime with Web APIs: it can parses HTML and CSS into a real DOM and executes ES6 code in JavaScript against it — with an event loop, timers, fetch, and workers — without a browser.
-It includes a built-in DOM+CSS optional Sanitizer.
-It can run custom native Zig computations alongside JS.
-It has also some image processing capabilities via the Canvas API: it takes an SVG, a PNG or JPEG, and can add via the Canvas API some text to deliver OG images (in PNG, JEPG) or deliver PDF.
-It outputs a cleaned structured HTML or extracted data, without a browser, either to the file system or to stdout.
+The engine includes an ES6 JavaScript runtime. It embeds enough Web API surface to run framework code (React, SolidJS, Vue, Vercel, ChartJS) and can render images (PNG, JPEG, WEBP, PDF).
 
-Built on the shoulder of giants: [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb) for PNG/JEPG decoding, [libwebp](https://github.com/webmproject/libwebp) for WebP decoding and encoding, `stb_image_writer` for PNG/JPEG encoding and `stb_truetype` for text,  [thorvg](https://github.com/thorvg/thorvg) for full SVG rasterizing, [libharu](https://github.com/libharu/libharu) and [libcurl bindings](https://github.com/jiacai2050/zig-curl).
+- You can compose JavaScript snippets and submit them to the engine. You don't need to know or use advanced Zig to use it, but you may need to install Zig to compile your implementation.
+- You can also submit an HTML file: the engine will parse the HTML and CSS into a real DOM and execute ES6 code in JavaScript against it—with an event loop, timers, fetch, and workers—without a browser.
+- It includes a built-in DOM+CSS sanitizer (optional).
+- It can run custom native Zig computations alongside JS.
+- It has image processing capabilities via the Canvas API: it takes an SVG, PNG, or JPEG, and can add text via the Canvas API to deliver OG images (in PNG, JPEG) or deliver PDF.
 
-It embeds enough Web API surface to run frameworks code (React, SolidJS, Vue, Vercel, ChartJS) and can render images (PNG, JPEG, WEBP, PDF).
+It outputs cleaned structured HTML or extracted data, without a browser, either to the file system or to stdout.
 
-By providing a minimal DOM environment for running JS outside of a browser, it can be vaguely compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in, or vaguely `dom-canvas` or vaguely `Vercel/Satori`, but running at native speed with fast cold boot and sandboxed filesystem, at the cost of a much thinner coverage of the Web API.
+Built on the shoulders of giants: [lexbor](https://lexbor.com/) for blazing-fast DOM and CSS parsing, [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb) for PNG/JPEG decoding, [libwebp](https://github.com/webmproject/libwebp) for WebP decoding and encoding, `stb_image_writer` for PNG/JPEG encoding and `stb_truetype` for text, [thorvg](https://github.com/thorvg/thorvg) for full SVG rasterizing, [libharu](https://github.com/libharu/libharu) for PDF encoding and [libcurl bindings](https://github.com/jiacai2050/zig-curl).
 
-You can take advantage of composing `JavaScript` snippets and submit them to the engine. You don't need to know or use advanced `Zig` to use it, but you may need to install `,Zig` to compile your implementation.
+By providing a minimal DOM environment for running JS outside of a browser, it can be loosely compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in, or `dom-canvas` or `Vercel/Satori` - but running at native speed with fast cold boot and sandboxed filesystem, at the cost of much thinner Web API coverage.
 
 ## What Problem Does This Solve?
 
