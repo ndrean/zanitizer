@@ -98,7 +98,7 @@ pub const ScriptEngine = struct {
         errdefer self.rt.deinit();
         self.rt.setMemoryLimit(256 * 1024 * 1024); // 256 MB
         self.rt.setGCThreshold(32 * 1024 * 1024); // 32MB before GC (avoid mid-render collection)
-        self.rt.setMaxStackSize(4 * 1024 * 1024); // 4 MB stack for deep vnode trees
+        self.rt.setMaxStackSize(16 * 1024 * 1024); // 16 MB stack (Preact's recursive diffing needs more than 4MB at 1k+ rows)
 
         self.rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
         self.rt.setCanBlock(false);

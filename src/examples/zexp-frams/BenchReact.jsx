@@ -1,4 +1,5 @@
-import { memo, useReducer } from "react";
+/** @jsxRuntime classic */
+import React, { memo, useReducer } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 

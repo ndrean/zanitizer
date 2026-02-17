@@ -1313,21 +1313,22 @@ pub fn main() !void {
         \\/// Warn-and-ignore setter for read-only properties (browsers ignore writes, QuickJS throws).
         \\/// Uses JSCFunctionData signature so the property name is passed as closure data[0].
         \\fn js_noop_setter(ctx: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue, _: c_int, func_data: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-        \\    const name_str = qjs.JS_ToCString(ctx, func_data[0]);
-        \\    if (name_str) |s| {
-        \\        defer qjs.JS_FreeCString(ctx, s);
-        \\        // Log the value being assigned too
-        \\        const val_str = qjs.JS_ToCString(ctx, argv[0]);
-        \\        if (val_str) |v| {
-        \\            defer qjs.JS_FreeCString(ctx, v);
-        \\            const truncated = if (v[0] != 0) v[0..@min(std.mem.len(v), 80)] else "(empty)";
-        \\            std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored (value: {s})\n", .{s, truncated});
-        \\        } else {
-        \\            std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored\n", .{s});
-        \\        }
-        \\    } else {
-        \\        std.debug.print("[DOM] ⚠️  Write to read-only property ignored\n", .{});
-        \\    }
+        \\    _ = ctx; _ = argv; _ = func_data;
+        \\    // Uncomment for debugging which read-only properties are being written to:
+        \\    // const name_str = qjs.JS_ToCString(ctx, func_data[0]);
+        \\    // if (name_str) |s| {
+        \\    //     defer qjs.JS_FreeCString(ctx, s);
+        \\    //     const val_str = qjs.JS_ToCString(ctx, argv[0]);
+        \\    //     if (val_str) |v| {
+        \\    //         defer qjs.JS_FreeCString(ctx, v);
+        \\    //         const truncated = if (v[0] != 0) v[0..@min(std.mem.len(v), 80)] else "(empty)";
+        \\    //         std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored (value: {s})\n", .{s, truncated});
+        \\    //     } else {
+        \\    //         std.debug.print("[DOM] ⚠️  Write to read-only property '{s}' ignored\n", .{s});
+        \\    //     }
+        \\    // } else {
+        \\    //     std.debug.print("[DOM] ⚠️  Write to read-only property ignored\n", .{});
+        \\    // }
         \\    return w.UNDEFINED;
         \\}
         \\

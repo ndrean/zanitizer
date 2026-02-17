@@ -5,7 +5,9 @@ var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
     const gpa = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
+    defer {
+        _ = .ok == debug_allocator.deinit();
+    }
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
 

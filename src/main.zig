@@ -56,7 +56,7 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
-    // try vercel(allocator, sandbox_root);
+    try vercel(allocator, sandbox_root);
     try preview_vercel(allocator, sandbox_root);
     // try elTest(allocator, sandbox_root);
     // // try js_framework_2_bench(allocator, sandbox_root);

@@ -1,0 +1,65 @@
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Preact (compat) Hooks</title>
+  </head>
+  <body>
+    <div id="main"><!-- Preact container --></div>
+    <script src="src/examples/vendor/bench-preact.js"></script>
+    <script type="module">
+      // Preact renders synchronously — no need for flushSync.
+      // Just dispatch the event and call __flush() to drain any microtasks.
+
+      function click(selector) {
+        const el = document.querySelector(selector);
+        if (!el) {
+          console.log("Not found: " + selector);
+          return;
+        }
+        el.dispatchEvent(new Event("click", { bubbles: true }));
+        __flush();
+      }
+
+      function measure(name, fn) {
+        const start = performance.now();
+        fn();
+        const end = performance.now();
+        console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
+      }
+
+      console.log("\n=== Preact Benchmark ===\n");
+
+      // Flush initial render
+      __flush();
+
+      // Warmup
+      click("#run");
+
+      if (document.querySelectorAll("tr").length === 0) {
+        console.log("Mount failed - no rows created.");
+      } else {
+        measure("Create 1k", () => click("#run"));
+        measure("Replace 1k", () => click("#run"));
+
+        measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
+        measure("Swap Rows", () => click("#swaprows"));
+        measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+        measure("Append 1k", () => click("#add"));
+        measure("Clear", () => click("#clear"));
+
+        // 10k tests last — Preact may crash here
+        try {
+          click("#runlots"); // Setup 10k
+          measure("Partial Update (10k)", () => click("#update"));
+          measure("Create 10k", () => click("#runlots"));
+          click("#clear");
+        } catch (e) {
+          console.log("10k test failed: " + e.message);
+        }
+
+        const count = document.querySelectorAll("tr").length;
+        console.log(`\nFinal Row Count: ${count} (expected 0)`);
+      }
+    </script>
+  </body>
+</html>

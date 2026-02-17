@@ -1590,10 +1590,11 @@ fn js_append(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv
     const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
     defer z.destroyNode(frag);
 
-    // appendChild on a fragment moves the fragment's children, not the fragment itself.
+    // Move fragment's children to parent (detach from fragment first to avoid sibling chain corruption)
     var frag_child = z.firstChild(frag);
     while (frag_child) |fc| {
         const next = z.nextSibling(fc);
+        z.removeNode(fc);
         z.appendChild(parent, fc);
         frag_child = next;
     }
@@ -2095,6 +2096,7 @@ fn js_replaceWith(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int,
     var frag_child = z.firstChild(frag);
     while (frag_child) |fc| {
         const next = z.nextSibling(fc);
+        z.removeNode(fc);
         z.insertBefore(child, fc);
         frag_child = next;
     }
@@ -2121,6 +2123,7 @@ fn js_replaceChildren(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_
         var frag_child = z.firstChild(frag);
         while (frag_child) |fc| {
             const next = z.nextSibling(fc);
+            z.removeNode(fc);
             z.appendChild(parent, fc);
             frag_child = next;
         }

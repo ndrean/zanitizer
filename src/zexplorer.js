@@ -98,6 +98,9 @@ window.scrollTo = window.scrollTo || function () {};
 window.scrollBy = window.scrollBy || function () {};
 
 globalThis.zexplorer = {
+  fs: {
+    writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
+  },
   async goto(url, options = { sanitize: false }) {
     applyLocationPolyfill(url);
     // JS handles the network (easy to add headers, cookies, etc.)

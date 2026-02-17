@@ -6,6 +6,10 @@ const result = await Bun.build({
   naming: "bench-react.js",
   target: "browser",
   minify: true,
+  define: {
+    "process.env.NODE_ENV": '"production"',
+  },
+  jsx: "react",          // classic transform: React.createElement (not jsxDEV)
 });
 
 if (!result.success) {

@@ -1657,6 +1657,7 @@ pub fn jsInsertBefore(parent: *z.DomNode, new_child: *z.DomNode, ref_child: ?*z.
         var frag_child = firstChild(new_child);
         while (frag_child) |fc| {
             const next = nextSibling(fc);
+            removeNode(fc); // Detach from fragment before moving
             if (ref_child) |ref| {
                 insertBefore(ref, fc);
             } else {

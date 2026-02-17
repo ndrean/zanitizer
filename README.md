@@ -56,7 +56,7 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
 
 ## What it does not have or is not
 
-- no event I/O
+- no persistent event I/O (has event loop, fetch, timers, but short-lived)
 - not a `Node.js` or `bun` alternative,
 - not a streaming or long-running async runtime,
 - a full Web API implementation,
@@ -88,7 +88,7 @@ How to use `zexplorer` ?
 
 **[Dual primitives]** When you use `zexplorer` as a `Zig` library, you have DOM primitives accessible in the Zig code. Since these primitives are ported into the JavaScript runtime, you can access them as well in the runtime.
 
-**[First example]** You have a simple HTML file, _examples/hello_world.html_. You can parse it with the library and preview the DOM.
+**[First example]** You have a simple HTML file, _examples/hello_world.html_.
 
 ```html
 <div>
@@ -96,14 +96,16 @@ How to use `zexplorer` ?
 </div>
 ```
 
-We will build and execute the following _src/main.zig_ file where we respect the careful and explicit Zig memory allocation ceremony:
+We will parse it with `z.parseHTML()` and print the DOM into the console with `prettyPrint()`. We will build and execute the following _src/ex1.zig_ file where we respect the careful and explicit Zig memory allocation ceremony:
 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
   const gpa = debug_allocator.allocator();
-  defer _ = debug_allocator.deinit();
+  defer { 
+    _= .ok == debug_allocator.deinit();
+  }
 
   const html = @embedFile("examples/hello_world.html");
 
@@ -117,11 +119,11 @@ const std = @import("std");
 const z = @import("zexplorer");
 ```
 
-The executable is named "hello1". We build the _main.zig_ file, and execute it by using its name:
+The executable is named "zxp-ex". We build the _main.zig_ file (defined for you in _build.zig_ asa the "run" step), and execute it by using its name:
 
 ```sh
-$> zig build
-$> ./zig-out/bin/hello1
+$> zig build run
+$> ./zig-out/bin/zxp-ex
 ```
 
 In the terminal, you see:
@@ -129,7 +131,7 @@ In the terminal, you see:
 ```txt
 <div>
   <p>
-    "Hello ZigJS"
+    "Hello world"
   </p>
 </div>
 ```
@@ -138,23 +140,28 @@ In the terminal, you see:
 
 **[Example of dual primitives]** We create a DOM and query it in pur Zig and then using embedded JavaScript:
 
-In this example, we manipulate a "real-virtual DOM" in Zig:
+In this example, we first parse the HTML file with `DOMParser.parseFromString()` and then we can query the "VDOM" in Zig with `z.querySelector()` and get the content with `textContent_zc()`.
 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
   const gpa = debug_allocator.allocator();
-  defer _ = debug_allocator.deinit();
+  defer {
+    _ =  .ok == debug_allocator.deinit();
+  }
 
-  // using DOMParser alternative to `parseHTML()`
+  // alternative: using DOMParser alternative instead of `parseHTML()`
   var parser = try z.DOMParser.init(gpa);
   defer parser.deinit();
+
+  const html = @embedFile("examples/hello_world.html");
   const doc = try parser.parseFromString(html);
   defer z.destroyDocument(doc);
 
-  const p = try z.querySelector(gpa, z.bodyNode(doc).?, "p");
-  const inner_text = z.textContent_zc(z.elementToNode(p.?)); // no allocation
+  const p_elt = try z.querySelector(gpa, z.bodyNode(doc).?, "p");
+  const p_node = z.elementToNode(p_elt.?);
+  const inner_text = z.textContent_zc(p_node); // no allocation
 
   std.debug.print("[Zig] {s}\n", .{inner_text});
 }
@@ -163,10 +170,8 @@ const std = @import("std");
 const z = @import("zexplorer");
 ```
 
-zexplorer runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`.
+Then, we run a JavaScript snippet that knows about the "vDOM". Indeed, zexplorer brings in a default `document` to which the JavaScript code accesses via a globalThis `document`. We use the engine `z.ScriptEngine`  and the `loadHTML()` and `evalModule()` methods.
 
-In this example, we run a JavaScript snippet that knows about the "real-vDOM":
- 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
@@ -180,25 +185,32 @@ pub fn main() !void {
   var engine = try z.ScriptEngine.init(gpa, sandbox_root);
   defer engine.deinit();
 
-  const script = 
+  const js = 
     \\const innerText = document.querySelector("p").textContent;
     \\console.log("[JS]", innerText);
     ;
   const html = @embedFile("examples/hello_world.html");
 
-  try engine.loadHTML(html)
-  try engine.evalModule(script, "<script>");
+  try engine.loadHTML(html);
+  try engine.evalModule(js, "<script>");
 }
 
 const std = @import("std");
 const z = @import("zexplorer");
 ```
 
-You build and execute these files and. get:
+You build and execute the _main.zig_ file via the "run" step:
+
+```sh
+$> zig build run
+$> ./zig-out/bin/zxp-ex
+```
+
+and get in the terminal:
 
 ```txt
-[Zig] Hello ZigJS
-[JS] Hello ZigJS
+[Zig] Hello world
+[JS] Hello world
 ```
 
 ---
@@ -218,7 +230,7 @@ script.textContent = "const hello = document.querySelector('p').textContent; con
 document.head.appendChild(script);
 ```
 
-In the _main.zig_ file, you will load the JS code and evaluate it with the ScriptEngine, again taking care of all the memory allocations:
+In the _main.zig_ file, we use the `z.ScriptEngine` to load the JS code `engine.evalModule()` and then execute it with `engine.executeScripts()`. We take care of all the memory allocations:
 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -232,7 +244,7 @@ pub fn main() !void {
     var engine = try z.ScriptEngine.init(gpa, sandbox_root);
     defer engine.deinit();
 
-    const script = @emdFile("examples/hello_world.js");
+    const script = @embedFile("examples/hello_world.js");
 
     const val = try engine.evalModule(script, "<my-script>");
     defer engine.ctx.freeValue(val);
@@ -247,19 +259,20 @@ const std = @import("std");
 const z = @import("zexplorer");
 ```
 
-You build and execute _main.zig_:
+You build and execute the _main.zig_ file via the "run" step:
+
 
 ```sh
-$> zig build
-$> ./zig-out/bin/hello2
+$> zig build run
+$> ./zig-out/bin/zxp-ex
 ```
 
 The output in the terminal:
 
 ```txt
-[JS] Hello zexplorer  <-- zexplorer executes the script
+[JS] Hello zexplorer  <-- zexplorer executed the script
 
-<html>                <-- zexplorer prints the DOM to stdout
+<html>                <-- zexplorer "pretty-printed" the DOM to stdout
   <head>
     <script>
       "const hello = document.querySelector('p').textContent; console.log('[JS]', hello);"
@@ -277,7 +290,7 @@ The output in the terminal:
 
 ---
 
-**[HTML with script]** You have an HTML file (_examples/html-script.html_) with a script. We have a higher level primitive `loadPage()` that parses the HTML and CSS and syncs it, and reads and evaluates the found `<script>`'s elements.
+**[HTML with script]** You have an HTML file (_examples/html-script.html_) with a script. We use the `z.ScriptEngine` and use a higher level primitive `loadPage()` that parses the HTML and CSS and syncs it, and reads and evaluates the found `<script>`'s elements.
 
 ```html
 <body>
@@ -295,7 +308,6 @@ Your _main.zig_  file contains:
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
-    pub fn main() !void {
     const gpa = debug_allocator.allocator();
     defer _ = debug_allocator.deinit();
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
@@ -304,7 +316,7 @@ pub fn main() !void {
     var engine = try z.ScriptEngine.init(gpa, sandbox_root);
     defer engine.deinit();
 
-    const html = @embedFile("html-script.html);
+    const html = @embedFile("html-script.html");
     try engine.loadPage(html, .{});
 
     try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
@@ -317,8 +329,8 @@ const z = @import("zexplorer");
 You build and execute _main.zig_:
 
 ```sh
-$> zig build
-$> ./zig-out/bin/hello-2
+$> zig build run
+$> ./zig-out/bin/zxp-ex
 ```
 
 The output is as expected:
@@ -341,7 +353,7 @@ We scrap <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scri
 
 </details>
 
-You write a JavaScript snippet:
+You explore the website with a JavaScript snippet:
 
 ```js
 // vercel.js
@@ -455,14 +467,16 @@ We run the following `Zig` code to to sanitize the HTML and output the new DOM.
 
 const std = @import("std");
 const z = @import("zexplorer");
-const ta = std.testing.allocator;
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
-  const c_alloc = std.heap.c_allocator;
-    const sbr = try std.fs.cwd().realpathAlloc(allocator, ".");
-    defer allocator.free(sbr);
+  const gpa = debug_allocator.allocator();
+  defer _ = debug_allocator.deinit();
+
+  const sbr = try std.fs.cwd().realpathAlloc(gpa, ".");
+  defer gpa.free(sbr);
     
-  var engine = try ScriptEngine.init(ca_alloc,sbr);
+  var engine = try ScriptEngine.init(gpa,sbr);
   defer engine.deinit();
 
   const cfg = z.LoadPageOptions{
@@ -492,7 +506,7 @@ pub fn main() !void {
   if (z.getElementById(doc, "js1")) |p| {
       const color = try z.getComputedStyle(ta, p, "color");
       defer if (color) |c| ta.free(c);
-      std.debug.print("Confirm style set by class .untrusted on #js1: color={s} \n", .{color orelse "(none)"});
+      std.debug.print("[Test] Confirm style set by class .untrusted on #js1: color={s} \n", .{color orelse "(none)"});
   }
 
   // save into a file
@@ -514,7 +528,7 @@ The output confirms that the whole page is sanitized:
   <p id="js1" class="untrusted" style="padding: 8px">insertAdjacentHTML</p>
 </body>
 
-Confirm style set by class .untrusted on #js1: color= red
+[Test] Confirm style set by class .untrusted on #js1: color= red
 ```
 
 </details>
@@ -824,57 +838,6 @@ Uses Vue 3's template compiler with `ref()` for reactive state. Simulates clicks
 
 </details>
 
-### Dual DOM primitives
-
-When you use `zexplorer` as a `Zig` library, you have  DOM primitives accessible in the Zig code. Since these primitives are ported into the JavaScript runtime, you can access them as well in the runtime.
-
-For example, you can mimic the DOM API in your Zig backend: you create a document in the Zig code, insert a DIV and a P as shown below.
-
-```zig
-const doc = try z.parseHTML("<div>Hi</div>");
-defer z.destroyDocument(doc);
-const p = try z.createElement(doc, "p");
-const div = try z.querySelector(allocator, "div");
-z.appendChild(div.?, p);
-try z.prettyPrint(allocator, z.bodyNode(doc));
-
-const z = @import("zexplorer");
-```
-
-zexplorer runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`.
-
-Zig will happily run this JS snippet:
-
-```zig
-const allocator = std.testing.allocator;
-
-const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
-defer gpa.free(sandbox_root);
-
-var engine = z.ScriptEngine.init(allocator, sandbox_root);
-defer engine.deinit();
-
-const script = 
-  \\document.createElement("div");
-  \\document.createElement("p");
-  \\const div = document.querySelector("div");
-  \\div.textContent = "Hi"
-  \\div.appendChild(p);
-  \\console.log(div.outerHTML);
-  ;
-
-try engine.evalModule(script, "<script>");
-
-const std = @import("std");
-const z = @import("zexplorer");
-```
-
-and both `Zig` scripts will output in the terminal:
-
-```txt
-<div>Hi <p></p></div>
-```
-
 ---
 
 ## Tests & performance
@@ -910,25 +873,32 @@ Source:
 
 Ref: browser Vanilla
 
-| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] | [bau] | [Comp(*) Solid] | [Temp(**) Solid] | [React18] | Vue3(***) |
-| ---------------- | ---- | --------- | ------------ | --------- | ----- | --------------- | ---------------- | --------- | --------- |
-| Create 1k        | 22.0 | 2.68      | 1.90         | 1.75      | 2.02  | 18.4            | 16.7             | 53.5      | 57.1      |
-| Replace 1k       | 24.4 | 2.56      | 2.34         | 1.81      | 1.88  | 18.3            | 17.6             | 55.1      | 56.9      |
-| Partial Up (10k) | 9.5  | 2.92      | 1.64         | 6.73      | 5.55  | 7.6             | 138.4            | 232.4     | 241.5     |
-| Select Row       | 2.2  | 0.05      | 0.01         | 0.02      | 0.02  | 3.5             | 127.9            | 197.4     | 196.4     |
-| Swap Rows        | 11.7 | 0.06      | 0.10         | 0.14      | 0.01  | 1.1             | 10.3             | 21.5      | 22.9      |
-| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      | 0.01  | 0.5             | 10.8             | 19.7      | 20.1      |
-| Create 10k       | 229  | 27.66     | 20.84        | 16.54     | 22.92 | 141.3           | 142.0            | 469.4     | 474.1     |
-| Append 1k        | 25.6 | 2.76      | 7.41         | 4.02      | 1.94  | 17.7            | 173.7            | 246.6     | 249.4     |
-| Clear            | 9.0  | 4.11      | 7.72         | 5.94      | 0.01  | 56.4            | 23.7             | 36.7      | 37.5      |
+| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] | [bau] | [Comp(*) Solid] | [Temp(**) Solid] | [React18^] | Vue3(***) |
+| ---------------- | ---- | --------- | ------------ | --------- | ----- | --------------- | ---------------- | ---------- | --------- |
+| Create 1k        | 22.0 | 3.08      | 1.65         | 1.67      | 1.97  | 18.5            | 16.7             | 105.6      | 54.8      |
+| Replace 1k       | 24.4 | 3.03      | 2.46         | 2.73      | 1.94  | 17.0            | 17.6             | 104.1      | 55.8      |
+| Partial Up (10k) | 9.5  | 2.82      | 8.86         | 7.92      | 5.40  | 7.0             | 138.4            | 117.6      | 229.8     |
+| Select Row       | 2.2  | 0.02      | 0.02         | 0.01      | 0.01  | 3.7             | 127.9            | 48.8       | 197.4     |
+| Swap Rows        | 11.7 | 0.05      | 0.09         | 0.11      | 0.01  | 1.2             | 10.3             | 36.8       | 22.1      |
+| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      | 0.00  | 0.5             | 10.8             | 5.2        | 20.2      |
+| Create 10k       | 229  | 28.71     | 16.06        | 16.15     | 19.03 | 143.5           | 142.0            | 3285.3     | 486.2     |
+| Append 1k        | 25.6 | 3.48      | 4.28         | 4.10      | 2.06  | 16.5            | 173.7            | 155.2      | 248.0     |
+| Clear            | 9.0  | 4.21      | 6.08         | 5.66      | 0.01  | 32.8            | 23.7             | 92.4       | 36.2      |
 | --               | --   | --        | --           | --        | --    |
-| Total Engine     | --   | 76        | 70           | 75        | 68    | 524             | 1087             | 2096      | 2167      |
+| Total Engine     | --   | 78        | 84           | 82        | 57    | 486             | 1087             | 7609       | 2106      |
 
 (*) compiled JSX->JS with `bun`
+
+(^) using React production build
+
+(^^) Preact
 
 (**) templated with `html` and using `map` instead of `For`
 
 (***) templated
+
+This confirms that React's reconcilier is very JS-heavy and QuickJS interpreter is 5-6x solwer than V8's JIT.
+The other frameworks do direct DOM manipulation and QuickJS performs better.
 
 ### zexplorer vs jsdom
 
@@ -1125,15 +1095,15 @@ fn bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
 **Results**
 
-The start time of the engine is approx 0.7ms (difference between the engine setup & loop execution and the JavaScript execution, as measured by `performance()` ).
+The start time of the engine is approx 1.5ms (difference between the engine setup & loop execution and the JavaScript execution, as measured by `performance()` ).
 
 | #rows  | JS/Zexplorer | Total/Zexplorer | JS/JSDom | Total/JSDom |
 | ------ | ------------ | --------------- | -------- | ----------- |
-| 100    | 0.29 ms      | 1.10 ms         | 9.81 ms  | 36.72 ms    |
-| 1_000  | 2.3 ms       | 3.0 ms          | 27.9 ms  | 32.90 ms    |
-| 10_000 | 25.1 ms      | 25.7 ms         | 191.1 ms | 197.9 ms    |
-| 20_000 | 49.3 ms      | 50.0 ms         | 315.4 ms | 318.9 ms    |
-| 50_000 | 123.5 ms     | 124.2 ms        | 741.4 ms | 745.5 ms    |
+| 100    | 0.29 ms      | 1.86 ms         | 9.81 ms  | 36.72 ms    |
+| 1_000  | 2.42 ms      | 3.77 ms         | 27.9 ms  | 32.90 ms    |
+| 10_000 | 24.83 ms     | 26.24 ms        | 191.1 ms | 197.9 ms    |
+| 20_000 | 49.11 ms     | 50.50 ms        | 315.4 ms | 318.9 ms    |
+| 50_000 | 125.28 ms    | 126.58 ms       | 741.4 ms | 745.5 ms    |
 
 The DOM operations are externalized from the JavaScript runtime and these results demonstrate this clearly.
 
@@ -2332,6 +2302,16 @@ git submodule update --remote vendor/lexbor_src_master
 ```
 
 miniz: use the release <https://github.com/richgel999/miniz/releases>
+
+Debug JS in Zig
+
+```sh
+zig build example -Dname=js-bench-preact && ./zig-out/bin/example-js-bench-preact 2>&1 | tail -20
+```
+
+```sh
+zig build example -Dname=js-bench-preact && dsymutil ./zig-out/bin/example-js-bench-preact && lldb -b -o "run" -o "bt 20" -- ./zig-out/bin/example-js-bench-preact
+```
 
 #### url hash
 

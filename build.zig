@@ -294,13 +294,13 @@ pub fn build(b: *std.Build) void {
 
     // Futur CLI executable
     const exe = b.addExecutable(.{
-        .name = "zhtml-examples",
+        .name = "zxp-ex",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zhtml-examples", .module = zexplorer_module },
+                .{ .name = "zxp", .module = zexplorer_module },
                 .{ .name = "curl", .module = curl_module },
             },
         }),
@@ -483,6 +483,7 @@ pub fn build(b: *std.Build) void {
         "src/examples/js-bench-bau.zig",
         "src/examples/js-bench-vue.zig",
         "src/examples/js-bench-react-h.zig",
+        "src/examples/js-bench-preact.zig",
         "src/examples/js-bench-solid.zig",
         "src/examples/test-worker_zig.zig",
         "src/examples/dom_purify.zig",
