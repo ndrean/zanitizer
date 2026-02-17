@@ -1012,6 +1012,54 @@ test "removeChild" {
     try testing.expectEqualStrings("<ul><li id=\"2\">Second</li></ul>", html);
 }
 
+test "removeChild on comment and text nodes" {
+    const allocator = testing.allocator;
+    // HTML with comments and text interleaved
+    const doc = try z.parseHTML(allocator, "<html><body><!--$?--><div id=\"B\">content</div><!--/$--></body></html>");
+    defer destroyDocument(doc);
+
+    const body = z.bodyNode(doc).?;
+
+    // Count initial children
+    var count: usize = 0;
+    var child = z.firstChild(body);
+    while (child) |c| : (child = z.nextSibling(c)) {
+        count += 1;
+    }
+    // Should have: comment($?) + div(B) + comment(/$) = 3
+    try testing.expect(count >= 3);
+
+    // Remove the first comment node
+    const first = z.firstChild(body).?;
+    try testing.expect(z.nodeType(first) == .comment);
+    const removed = removeChild(body, first);
+    try testing.expect(removed != null);
+
+    // Remove the last comment node (now: div + comment)
+    const div = z.firstChild(body).?;
+    try testing.expect(z.nodeType(div) == .element);
+    const after_div = z.nextSibling(div).?;
+    try testing.expect(z.nodeType(after_div) == .comment);
+    const removed2 = removeChild(body, after_div);
+    try testing.expect(removed2 != null);
+
+    // Now should only have the div
+    const html = try z.outerHTML(allocator, z.nodeToElement(z.firstChild(body).?).?);
+    defer allocator.free(html);
+    try testing.expectEqualStrings("<div id=\"B\">content</div>", html);
+
+    // Also test removing a text node
+    const div_node = z.firstChild(body).?;
+    const text_node = z.firstChild(div_node).?;
+    try testing.expect(z.nodeType(text_node) == .text);
+    const removed3 = removeChild(div_node, text_node);
+    try testing.expect(removed3 != null);
+
+    const html2 = try z.outerHTML(allocator, z.nodeToElement(div_node).?);
+    defer allocator.free(html2);
+    try testing.expectEqualStrings("<div id=\"B\"></div>", html2);
+}
+
 /// [core] Destroy a node from the DOM with its children
 pub fn destroyNode(node: *z.DomNode) void {
     lxb_dom_node_destroy(node);

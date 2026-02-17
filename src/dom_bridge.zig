@@ -25,8 +25,10 @@ const js_readable_stream = @import("js_readable_stream.zig");
 const js_writable_stream = @import("js_writable_stream.zig");
 const js_range = @import("js_range.zig");
 const js_tree_walker = @import("js_tree_walker.zig");
+const js_XMLSerializer = @import("js_XMLSerializer.zig");
 const js_canvas = @import("js_canvas.zig");
-const js_image = @import("js_image.zig");
+const js_image = z.js_image;
+const js_pdf = z.js_pdf;
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -365,19 +367,9 @@ pub const DOMBridge = struct {
 
             const style_proto = ctx.newObject();
 
-            {
-                // 1. getPropertyValue
-                const get_prop_fn = ctx.newCFunction(js_style.getPropertyValue, "getPropertyValue", 1);
-                try ctx.setPropertyStr(style_proto, "getPropertyValue", get_prop_fn);
-
-                // 2. setProperty
-                const set_prop_fn = ctx.newCFunction(js_style.setProperty, "setProperty", 2);
-                try ctx.setPropertyStr(style_proto, "setProperty", set_prop_fn);
-
-                // 3. removeProperty
-                const remove_prop_fn = ctx.newCFunction(js_style.removeProperty, "removeProperty", 1);
-                try ctx.setPropertyStr(style_proto, "removeProperty", remove_prop_fn);
-            }
+            // Install getPropertyValue, setProperty, removeProperty
+            // AND all CSS property getter/setters (style.color, style.fontSize, etc.)
+            bindings.installCSSStyleDeclarationBindings(ctx.ptr, style_proto);
 
             ctx.setClassProto(rc.classes.css_style_decl, style_proto);
         }
@@ -415,6 +407,8 @@ pub const DOMBridge = struct {
         try js_file_reader_sync.FileReaderSyncBridge.install(ctx);
         try js_range.RangeBridge.install(ctx);
         try js_tree_walker.TreeWalkerBridge.install(ctx);
+        try js_XMLSerializer.XMLSerializerBridge.install(ctx);
+        try js_pdf.install(ctx);
 
         const doc = try z.createDocument();
         errdefer z.destroyDocument(doc);
@@ -537,68 +531,38 @@ pub const DOMBridge = struct {
 
     fn createWindowAPI(self: *DOMBridge, global: w.Value) !void {
         const ctx = self.ctx;
-        const window_obj = ctx.newObject();
+
+        // window === globalThis === self (browser invariant)
+        // Do NOT create a separate object — frameworks use window/self/globalThis
+        // interchangeably and expect them to be the same object.
+        try ctx.setPropertyStr(global, "window", ctx.dupValue(global));
+        try ctx.setPropertyStr(global, "self", ctx.dupValue(global));
 
         const loc_obj = ctx.newObject();
         try ctx.setPropertyStr(loc_obj, "href", ctx.newString("about:blank"));
-        try ctx.setPropertyStr(window_obj, "location", loc_obj);
+        try ctx.setPropertyStr(global, "location", loc_obj);
 
         const nav_obj = ctx.newObject();
         try ctx.setPropertyStr(nav_obj, "userAgent", ctx.newString("Zexplorer/1.0"));
-        try ctx.setPropertyStr(window_obj, "navigator", nav_obj);
+        try ctx.setPropertyStr(global, "navigator", nav_obj);
 
-        // Attach to global
+        // history API (Next.js router uses pushState/replaceState)
+        const history_obj = ctx.newObject();
+        const noop_fn = ctx.newCFunction(struct {
+            fn f(_: ?*z.qjs.JSContext, _: w.Value, _: c_int, _: [*c]w.Value) callconv(.c) w.Value {
+                return w.UNDEFINED;
+            }
+        }.f, "noop", 3);
+        try ctx.setPropertyStr(history_obj, "pushState", ctx.dupValue(noop_fn));
+        try ctx.setPropertyStr(history_obj, "replaceState", ctx.dupValue(noop_fn));
+        try ctx.setPropertyStr(history_obj, "back", ctx.dupValue(noop_fn));
+        try ctx.setPropertyStr(history_obj, "forward", ctx.dupValue(noop_fn));
+        try ctx.setPropertyStr(history_obj, "go", noop_fn);
+        try ctx.setPropertyStr(history_obj, "state", w.NULL);
+        try ctx.setPropertyStr(global, "history", history_obj);
 
         const gcs_fn = ctx.newCFunction(js_style.window_getComputedStyle, "getComputedStyle", 1);
         try ctx.setPropertyStr(global, "getComputedStyle", gcs_fn);
-        // Also attach it to the window object proxy
-        try ctx.setPropertyStr(window_obj, "getComputedStyle", ctx.dupValue(gcs_fn));
-
-        // Copy polyfills from globalThis to window (React checks window.requestAnimationFrame)
-        const raf = ctx.getPropertyStr(global, "requestAnimationFrame");
-        if (!ctx.isUndefined(raf)) {
-            try ctx.setPropertyStr(window_obj, "requestAnimationFrame", raf);
-        } else {
-            ctx.freeValue(raf);
-        }
-        const caf = ctx.getPropertyStr(global, "cancelAnimationFrame");
-        if (!ctx.isUndefined(caf)) {
-            try ctx.setPropertyStr(window_obj, "cancelAnimationFrame", caf);
-        } else {
-            ctx.freeValue(caf);
-        }
-        const mc = ctx.getPropertyStr(global, "MessageChannel");
-        if (!ctx.isUndefined(mc)) {
-            try ctx.setPropertyStr(window_obj, "MessageChannel", mc);
-        } else {
-            ctx.freeValue(mc);
-        }
-        const mp = ctx.getPropertyStr(global, "MessagePort");
-        if (!ctx.isUndefined(mp)) {
-            try ctx.setPropertyStr(window_obj, "MessagePort", mp);
-        } else {
-            ctx.freeValue(mp);
-        }
-
-        const mo = ctx.getPropertyStr(global, "MutationObserver");
-        if (!ctx.isUndefined(mo)) {
-            try ctx.setPropertyStr(window_obj, "MutationObserver", mo);
-        } else {
-            ctx.freeValue(mo);
-        }
-
-        // Expose document on window (SolidJS uses window.document for event delegation)
-        const doc = ctx.getPropertyStr(global, "document");
-        if (!ctx.isUndefined(doc)) {
-            try ctx.setPropertyStr(window_obj, "document", doc);
-        } else {
-            ctx.freeValue(doc);
-        }
-
-        try ctx.setPropertyStr(global, "window", window_obj);
-
-        // Expose navigator on global (React accesses it as bare `navigator`, not `window.navigator`)
-        try ctx.setPropertyStr(global, "navigator", ctx.dupValue(nav_obj));
 
         // document.defaultView → globalThis (React 19 accesses constructors like
         // document.defaultView.HTMLIFrameElement; in browsers defaultView === window === globalThis)
@@ -612,7 +576,6 @@ pub const DOMBridge = struct {
 
         // Standard global aliases
         try ctx.setPropertyStr(global, "globalThis", ctx.dupValue(global));
-        try ctx.setPropertyStr(global, "self", ctx.dupValue(global));
     }
 
     pub fn applyStylesToElement(self: *DOMBridge, el: *z.HTMLElement) !void {
@@ -1245,14 +1208,33 @@ fn js_insertBefore(
     else
         null;
 
+    if (z.parentNode(new_child)) |_| {
+        z.removeNode(new_child);
+    }
+
+    if (z.nodeType(new_child) == .document_fragment) {
+        var frag_child = z.firstChild(new_child);
+        while (frag_child) |fc| {
+            const next = z.nextSibling(fc);
+            z.removeNode(fc); // Detach from the fragment!
+            _ = z.jsInsertBefore(parent, fc, ref_child);
+            frag_child = next;
+        }
+        return DOMBridge.wrapNode(ctx, new_child) catch return w.EXCEPTION;
+    }
+
     // Call the Zig implementation
+    // std.debug.print("[DOM] insertBefore (ref={s})\n", .{if (ref_child != null) "node" else "null"});
     const result = z.jsInsertBefore(parent, new_child, ref_child);
+    // std.debug.print("[DOM] insertBefore done\n", .{});
 
     // Return the inserted node
     return DOMBridge.wrapNode(ctx, result) catch return w.EXCEPTION;
 }
 
 /// parent.appendChild(child) - handles DocumentFragment specially (moves children)
+/// Also handles dynamic <script> loading: when a <script src="..."> is appended,
+/// synchronously fetches + evals + fires onload/onerror (like a browser).
 fn js_appendChild_manual(
     ctx_ptr: ?*z.qjs.JSContext,
     this_val: zqjs.Value,
@@ -1271,6 +1253,10 @@ fn js_appendChild_manual(
     const child = DOMBridge.unwrapNode(ctx, argv[0]) orelse
         return ctx.throwTypeError("Argument must be a Node");
 
+    if (z.parentNode(child)) |_| {
+        z.removeNode(child);
+    }
+
     // Check if child is a DocumentFragment
     const child_type = z.nodeType(child);
     if (child_type == .document_fragment) {
@@ -1286,7 +1272,96 @@ fn js_appendChild_manual(
     } else {
         // Normal appendChild
         z.appendChild(parent, child);
+
+        // Dynamic <script> loading: synchronously fetch + eval + fire onload
+        if (child_type == .element) {
+            const element: *z.HTMLElement = @ptrCast(@alignCast(child));
+            if (std.mem.eql(u8, z.tagName_zc(element), "SCRIPT")) {
+                if (z.getAttribute_zc(element, "src")) |src| {
+                    handleDynamicScriptLoad(ctx, argv[0], src);
+                }
+            }
+        }
+
         return DOMBridge.wrapNode(ctx, child) catch return w.EXCEPTION;
+    }
+}
+
+/// Synchronous fetch + eval for dynamically inserted <script src="...">.
+/// Uses z.get() (blocking std.http.Client) so it completes immediately.
+fn handleDynamicScriptLoad(ctx: w.Context, script_js: zqjs.Value, src: []const u8) void {
+    const rc = RuntimeContext.get(ctx);
+
+    z.print("[DynamicScript] Loading: {s}\n", .{src});
+
+    // Synchronous HTTP GET
+    const code = z.get(rc.allocator, src) catch |err| {
+        z.print("[DynamicScript] Fetch failed '{s}': {}\n", .{ src, err });
+        fireScriptEvent(ctx, script_js, "onerror");
+        return;
+    };
+    defer rc.allocator.free(code);
+
+    // Set document.currentScript
+    const global = ctx.getGlobalObject();
+    const doc_obj = ctx.getPropertyStr(global, "document");
+    ctx.freeValue(global);
+    if (!ctx.isUndefined(doc_obj)) {
+        _ = ctx.setPropertyStr(doc_obj, "currentScript", ctx.dupValue(script_js)) catch {};
+    }
+
+    // Eval in global scope using QuickJS directly
+    const c_code = rc.allocator.dupeZ(u8, code) catch {
+        if (!ctx.isUndefined(doc_obj)) {
+            _ = ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+        }
+        ctx.freeValue(doc_obj);
+        fireScriptEvent(ctx, script_js, "onerror");
+        return;
+    };
+    defer rc.allocator.free(c_code);
+
+    const c_filename = rc.allocator.dupeZ(u8, src) catch {
+        if (!ctx.isUndefined(doc_obj)) {
+            _ = ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+        }
+        ctx.freeValue(doc_obj);
+        fireScriptEvent(ctx, script_js, "onerror");
+        return;
+    };
+    defer rc.allocator.free(c_filename);
+
+    const val = z.qjs.JS_Eval(ctx.ptr, c_code.ptr, c_code.len, c_filename.ptr, z.qjs.JS_EVAL_TYPE_GLOBAL);
+
+    if (z.qjs.JS_IsException(val)) {
+        _ = ctx.checkAndPrintException();
+        if (!ctx.isUndefined(doc_obj)) {
+            _ = ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+        }
+        ctx.freeValue(doc_obj);
+        fireScriptEvent(ctx, script_js, "onerror");
+        return;
+    }
+    ctx.freeValue(val);
+
+    // Reset document.currentScript
+    if (!ctx.isUndefined(doc_obj)) {
+        _ = ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+    }
+    ctx.freeValue(doc_obj);
+
+    // Fire onload
+    z.print("[DynamicScript] Loaded OK: {s}\n", .{src});
+    fireScriptEvent(ctx, script_js, "onload");
+}
+
+/// Helper: call script_element.onload() or script_element.onerror()
+fn fireScriptEvent(ctx: w.Context, script_js: zqjs.Value, event_name: [:0]const u8) void {
+    const handler = ctx.getPropertyStr(script_js, event_name);
+    defer ctx.freeValue(handler);
+    if (z.qjs.JS_IsFunction(ctx.ptr, handler)) {
+        const ret = z.qjs.JS_Call(ctx.ptr, handler, script_js, 0, null);
+        ctx.freeValue(ret);
     }
 }
 
@@ -1997,6 +2072,7 @@ fn js_replaceWith(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int,
     return w.UNDEFINED;
 }
 
+// spces: clear all existing children, then append the new ones.
 fn js_replaceChildren(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for replaceChildren");

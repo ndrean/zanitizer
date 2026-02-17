@@ -1,16 +1,4 @@
-// node_modules/solid-js/dist/dev.js
-var sharedConfig = {
-  context: undefined,
-  registry: undefined,
-  effects: undefined,
-  done: false,
-  getContextId() {
-    return getContextId(this.context.count);
-  },
-  getNextContextId() {
-    return getContextId(this.context.count++);
-  }
-};
+// node_modules/solid-js/dist/solid.js
 function getContextId(count) {
   const num = String(count), len = num.length - 1;
   return sharedConfig.context.id + (len ? String.fromCharCode(96 + len) : "") + num;
@@ -25,53 +13,13 @@ function nextHydrateContext() {
     count: 0
   };
 }
-var IS_DEV = true;
-var equalFn = (a, b) => a === b;
-var $PROXY = Symbol("solid-proxy");
-var $TRACK = Symbol("solid-track");
-var $DEVCOMP = Symbol("solid-dev-component");
-var signalOptions = {
-  equals: equalFn
-};
-var ERROR = null;
-var runEffects = runQueue;
-var STALE = 1;
-var PENDING = 2;
-var UNOWNED = {
-  owned: null,
-  cleanups: null,
-  context: null,
-  owner: null
-};
-var Owner = null;
-var Transition = null;
-var Scheduler = null;
-var ExternalSourceConfig = null;
-var Listener = null;
-var Updates = null;
-var Effects = null;
-var ExecCount = 0;
-var DevHooks = {
-  afterUpdate: null,
-  afterCreateOwner: null,
-  afterCreateSignal: null,
-  afterRegisterGraph: null
-};
 function createRoot(fn, detachedOwner) {
-  const listener = Listener, owner = Owner, unowned = fn.length === 0, current = detachedOwner === undefined ? owner : detachedOwner, root = unowned ? {
-    owned: null,
-    cleanups: null,
-    context: null,
-    owner: null
-  } : {
+  const listener = Listener, owner = Owner, unowned = fn.length === 0, current = detachedOwner === undefined ? owner : detachedOwner, root = unowned ? UNOWNED : {
     owned: null,
     cleanups: null,
     context: current ? current.context : null,
     owner: current
-  }, updateFn = unowned ? () => fn(() => {
-    throw new Error("Dispose method must be an explicit argument to createRoot function");
-  }) : () => fn(() => untrack(() => cleanNode(root)));
-  DevHooks.afterCreateOwner && DevHooks.afterCreateOwner(root);
+  }, updateFn = unowned ? fn : () => fn(() => untrack(() => cleanNode(root)));
   Owner = root;
   Listener = null;
   try {
@@ -89,17 +37,6 @@ function createSignal(value, options) {
     observerSlots: null,
     comparator: options.equals || undefined
   };
-  {
-    if (options.name)
-      s.name = options.name;
-    if (options.internal) {
-      s.internal = true;
-    } else {
-      registerGraph(s);
-      if (DevHooks.afterCreateSignal)
-        DevHooks.afterCreateSignal(s);
-    }
-  }
   const setter = (value2) => {
     if (typeof value2 === "function") {
       if (Transition && Transition.running && Transition.sources.has(s))
@@ -112,7 +49,7 @@ function createSignal(value, options) {
   return [readSignal.bind(s), setter];
 }
 function createRenderEffect(fn, value, options) {
-  const c = createComputation(fn, value, false, STALE, options);
+  const c = createComputation(fn, value, false, STALE);
   if (Scheduler && Transition && Transition.running)
     Updates.push(c);
   else
@@ -120,7 +57,7 @@ function createRenderEffect(fn, value, options) {
 }
 function createMemo(fn, value, options) {
   options = options ? Object.assign({}, signalOptions, options) : signalOptions;
-  const c = createComputation(fn, value, true, 0, options);
+  const c = createComputation(fn, value, true, 0);
   c.observers = null;
   c.observerSlots = null;
   c.comparator = options.equals || undefined;
@@ -146,7 +83,7 @@ function createSelector(source, fn = equalFn, options) {
         }
       }
     return v;
-  }, undefined, true, STALE, options);
+  }, undefined, true, STALE);
   updateComputation(node);
   return (key) => {
     const listener = Listener;
@@ -182,7 +119,7 @@ function untrack(fn) {
 }
 function onCleanup(fn) {
   if (Owner === null)
-    console.warn("cleanups created outside a `createRoot` or `render` will never be run");
+    ;
   else if (Owner.cleanups === null)
     Owner.cleanups = [fn];
   else
@@ -217,34 +154,6 @@ function startTransition(fn) {
     return t ? t.done : undefined;
   });
 }
-var [transPending, setTransPending] = /* @__PURE__ */ createSignal(false);
-function devComponent(Comp, props) {
-  const c = createComputation(() => untrack(() => {
-    Object.assign(Comp, {
-      [$DEVCOMP]: true
-    });
-    return Comp(props);
-  }), undefined, true, 0);
-  c.props = props;
-  c.observers = null;
-  c.observerSlots = null;
-  c.name = Comp.name;
-  c.component = Comp;
-  updateComputation(c);
-  return c.tValue !== undefined ? c.tValue : c.value;
-}
-function registerGraph(value) {
-  if (Owner) {
-    if (Owner.sourceMap)
-      Owner.sourceMap.push(value);
-    else
-      Owner.sourceMap = [value];
-    value.graph = Owner;
-  }
-  if (DevHooks.afterRegisterGraph)
-    DevHooks.afterRegisterGraph(value);
-}
-var SuspenseContext;
 function readSignal() {
   const runningTransition = Transition && Transition.running;
   if (this.sources && (runningTransition ? this.tState : this.state)) {
@@ -314,7 +223,7 @@ function writeSignal(node, value, isComp) {
         if (Updates.length > 1e6) {
           Updates = [];
           if (IS_DEV)
-            throw new Error("Potential Infinite Loop Detected.");
+            ;
           throw new Error;
         }
       }, false);
@@ -393,7 +302,7 @@ function createComputation(fn, init, pure, state = STALE, options) {
     c.tState = state;
   }
   if (Owner === null)
-    console.warn("computations created outside a `createRoot` or `render` will never be disposed");
+    ;
   else if (Owner !== UNOWNED) {
     if (Transition && Transition.running && Owner.pure) {
       if (!Owner.tOwned)
@@ -407,8 +316,6 @@ function createComputation(fn, init, pure, state = STALE, options) {
         Owner.owned.push(c);
     }
   }
-  if (options && options.name)
-    c.name = options.name;
   if (ExternalSourceConfig && c.fn) {
     const [track, trigger] = createSignal(undefined, {
       equals: false
@@ -422,7 +329,6 @@ function createComputation(fn, init, pure, state = STALE, options) {
       return Transition && Transition.running ? inTransition.track(x) : ordinary.track(x);
     };
   }
-  DevHooks.afterCreateOwner && DevHooks.afterCreateOwner(c);
   return c;
 }
 function runTop(node) {
@@ -532,8 +438,6 @@ function completeUpdates(wait) {
   Effects = null;
   if (e.length)
     runUpdates(() => runEffects(e), false);
-  else
-    DevHooks.afterUpdate && DevHooks.afterUpdate();
   if (res)
     res();
 }
@@ -629,7 +533,6 @@ function cleanNode(node) {
     node.tState = 0;
   else
     node.state = 0;
-  delete node.sourceMap;
 }
 function reset(node, top) {
   if (!top) {
@@ -671,7 +574,6 @@ function handleError(err, owner = Owner) {
   else
     runErrors(error, fns, owner);
 }
-var FALLBACK = Symbol("fallback");
 function dispose(d) {
   for (let i = 0;i < d.length; i++)
     d[i]();
@@ -758,9 +660,7 @@ function mapArray(list, mapFn, options = {}) {
     function mapper(disposer) {
       disposers[j] = disposer;
       if (indexes) {
-        const [s, set] = createSignal(j, {
-          name: "index"
-        });
+        const [s, set] = createSignal(j);
         indexes[j] = set;
         return mapFn(newItems[j], s);
       }
@@ -768,35 +668,407 @@ function mapArray(list, mapFn, options = {}) {
     }
   };
 }
-var hydrationEnabled = false;
 function createComponent(Comp, props) {
   if (hydrationEnabled) {
     if (sharedConfig.context) {
       const c = sharedConfig.context;
       setHydrateContext(nextHydrateContext());
-      const r = devComponent(Comp, props || {});
+      const r = untrack(() => Comp(props || {}));
       setHydrateContext(c);
       return r;
     }
   }
-  return devComponent(Comp, props || {});
+  return untrack(() => Comp(props || {}));
 }
 function For(props) {
   const fallback = "fallback" in props && {
     fallback: () => props.fallback
   };
-  return createMemo(mapArray(() => props.each, props.children, fallback || undefined), undefined, {
-    name: "value"
-  });
+  return createMemo(mapArray(() => props.each, props.children, fallback || undefined));
 }
-if (globalThis) {
-  if (!globalThis.Solid$$)
-    globalThis.Solid$$ = true;
+var sharedConfig = {
+  context: undefined,
+  registry: undefined,
+  effects: undefined,
+  done: false,
+  getContextId() {
+    return getContextId(this.context.count);
+  },
+  getNextContextId() {
+    return getContextId(this.context.count++);
+  }
+};
+var IS_DEV = false;
+var equalFn = (a, b) => a === b;
+var $PROXY = Symbol("solid-proxy");
+var $TRACK = Symbol("solid-track");
+var $DEVCOMP = Symbol("solid-dev-component");
+var signalOptions = {
+  equals: equalFn
+};
+var ERROR = null;
+var runEffects = runQueue;
+var STALE = 1;
+var PENDING = 2;
+var UNOWNED = {
+  owned: null,
+  cleanups: null,
+  context: null,
+  owner: null
+};
+var Owner = null;
+var Transition = null;
+var Scheduler = null;
+var ExternalSourceConfig = null;
+var Listener = null;
+var Updates = null;
+var Effects = null;
+var ExecCount = 0;
+var [transPending, setTransPending] = /* @__PURE__ */ createSignal(false);
+var SuspenseContext;
+var FALLBACK = Symbol("fallback");
+var hydrationEnabled = false;
+// node_modules/solid-js/web/dist/web.js
+function reconcileArrays(parentNode, a, b) {
+  let bLength = b.length, aEnd = a.length, bEnd = bLength, aStart = 0, bStart = 0, after = a[aEnd - 1].nextSibling, map = null;
+  while (aStart < aEnd || bStart < bEnd) {
+    if (a[aStart] === b[bStart]) {
+      aStart++;
+      bStart++;
+      continue;
+    }
+    while (a[aEnd - 1] === b[bEnd - 1]) {
+      aEnd--;
+      bEnd--;
+    }
+    if (aEnd === aStart) {
+      const node = bEnd < bLength ? bStart ? b[bStart - 1].nextSibling : b[bEnd - bStart] : after;
+      while (bStart < bEnd)
+        parentNode.insertBefore(b[bStart++], node);
+    } else if (bEnd === bStart) {
+      while (aStart < aEnd) {
+        if (!map || !map.has(a[aStart]))
+          a[aStart].remove();
+        aStart++;
+      }
+    } else if (a[aStart] === b[bEnd - 1] && b[bStart] === a[aEnd - 1]) {
+      const node = a[--aEnd].nextSibling;
+      parentNode.insertBefore(b[bStart++], a[aStart++].nextSibling);
+      parentNode.insertBefore(b[--bEnd], node);
+      a[aEnd] = b[bEnd];
+    } else {
+      if (!map) {
+        map = new Map;
+        let i = bStart;
+        while (i < bEnd)
+          map.set(b[i], i++);
+      }
+      const index = map.get(a[aStart]);
+      if (index != null) {
+        if (bStart < index && index < bEnd) {
+          let i = aStart, sequence = 1, t;
+          while (++i < aEnd && i < bEnd) {
+            if ((t = map.get(a[i])) == null || t !== index + sequence)
+              break;
+            sequence++;
+          }
+          if (sequence > index - bStart) {
+            const node = a[aStart];
+            while (bStart < index)
+              parentNode.insertBefore(b[bStart++], node);
+          } else
+            parentNode.replaceChild(b[bStart++], a[aStart++]);
+        } else
+          aStart++;
+      } else
+        a[aStart++].remove();
+    }
+  }
+}
+function render(code, element, init, options = {}) {
+  let disposer;
+  createRoot((dispose2) => {
+    disposer = dispose2;
+    element === document ? code() : insert(element, code(), element.firstChild ? null : undefined, init);
+  }, options.owner);
+  return () => {
+    disposer();
+    element.textContent = "";
+  };
+}
+function template(html, isImportNode, isSVG, isMathML) {
+  let node;
+  const create = () => {
+    const t = isMathML ? document.createElementNS("http://www.w3.org/1998/Math/MathML", "template") : document.createElement("template");
+    t.innerHTML = html;
+    return isSVG ? t.content.firstChild.firstChild : isMathML ? t.firstChild : t.content.firstChild;
+  };
+  const fn = isImportNode ? () => untrack(() => document.importNode(node || (node = create()), true)) : () => (node || (node = create())).cloneNode(true);
+  fn.cloneNode = fn;
+  return fn;
+}
+function delegateEvents(eventNames, document2 = window.document) {
+  const e = document2[$$EVENTS] || (document2[$$EVENTS] = new Set);
+  for (let i = 0, l = eventNames.length;i < l; i++) {
+    const name = eventNames[i];
+    if (!e.has(name)) {
+      e.add(name);
+      document2.addEventListener(name, eventHandler);
+    }
+  }
+}
+function setAttribute(node, name, value) {
+  if (isHydrating(node))
+    return;
+  if (value == null)
+    node.removeAttribute(name);
   else
-    console.warn("You appear to have multiple instances of Solid. This can lead to unexpected behavior.");
+    node.setAttribute(name, value);
 }
-
-// node_modules/solid-js/web/dist/dev.js
+function className(node, value) {
+  if (isHydrating(node))
+    return;
+  if (value == null)
+    node.removeAttribute("class");
+  else
+    node.className = value;
+}
+function addEventListener(node, name, handler, delegate) {
+  if (delegate) {
+    if (Array.isArray(handler)) {
+      node[`\$\$${name}`] = handler[0];
+      node[`\$\$${name}Data`] = handler[1];
+    } else
+      node[`\$\$${name}`] = handler;
+  } else if (Array.isArray(handler)) {
+    const handlerFn = handler[0];
+    node.addEventListener(name, handler[0] = (e) => handlerFn.call(node, handler[1], e));
+  } else
+    node.addEventListener(name, handler, typeof handler !== "function" && handler);
+}
+function insert(parent, accessor, marker, initial) {
+  if (marker !== undefined && !initial)
+    initial = [];
+  if (typeof accessor !== "function")
+    return insertExpression(parent, accessor, initial, marker);
+  createRenderEffect((current) => insertExpression(parent, accessor(), current, marker), initial);
+}
+function isHydrating(node) {
+  return !!sharedConfig.context && !sharedConfig.done && (!node || node.isConnected);
+}
+function eventHandler(e) {
+  if (sharedConfig.registry && sharedConfig.events) {
+    if (sharedConfig.events.find(([el, ev]) => ev === e))
+      return;
+  }
+  let node = e.target;
+  const key = `\$\$${e.type}`;
+  const oriTarget = e.target;
+  const oriCurrentTarget = e.currentTarget;
+  const retarget = (value) => Object.defineProperty(e, "target", {
+    configurable: true,
+    value
+  });
+  const handleNode = () => {
+    const handler = node[key];
+    if (handler && !node.disabled) {
+      const data = node[`${key}Data`];
+      data !== undefined ? handler.call(node, data, e) : handler.call(node, e);
+      if (e.cancelBubble)
+        return;
+    }
+    node.host && typeof node.host !== "string" && !node.host._$host && node.contains(e.target) && retarget(node.host);
+    return true;
+  };
+  const walkUpTree = () => {
+    while (handleNode() && (node = node._$host || node.parentNode || node.host))
+      ;
+  };
+  Object.defineProperty(e, "currentTarget", {
+    configurable: true,
+    get() {
+      return node || document;
+    }
+  });
+  if (sharedConfig.registry && !sharedConfig.done)
+    sharedConfig.done = _$HY.done = true;
+  if (e.composedPath) {
+    const path = e.composedPath();
+    retarget(path[0]);
+    for (let i = 0;i < path.length - 2; i++) {
+      node = path[i];
+      if (!handleNode())
+        break;
+      if (node._$host) {
+        node = node._$host;
+        walkUpTree();
+        break;
+      }
+      if (node.parentNode === oriCurrentTarget) {
+        break;
+      }
+    }
+  } else
+    walkUpTree();
+  retarget(oriTarget);
+}
+function insertExpression(parent, value, current, marker, unwrapArray) {
+  const hydrating = isHydrating(parent);
+  if (hydrating) {
+    !current && (current = [...parent.childNodes]);
+    let cleaned = [];
+    for (let i = 0;i < current.length; i++) {
+      const node = current[i];
+      if (node.nodeType === 8 && node.data.slice(0, 2) === "!$")
+        node.remove();
+      else
+        cleaned.push(node);
+    }
+    current = cleaned;
+  }
+  while (typeof current === "function")
+    current = current();
+  if (value === current)
+    return current;
+  const t = typeof value, multi = marker !== undefined;
+  parent = multi && current[0] && current[0].parentNode || parent;
+  if (t === "string" || t === "number") {
+    if (hydrating)
+      return current;
+    if (t === "number") {
+      value = value.toString();
+      if (value === current)
+        return current;
+    }
+    if (multi) {
+      let node = current[0];
+      if (node && node.nodeType === 3) {
+        node.data !== value && (node.data = value);
+      } else
+        node = document.createTextNode(value);
+      current = cleanChildren(parent, current, marker, node);
+    } else {
+      if (current !== "" && typeof current === "string") {
+        current = parent.firstChild.data = value;
+      } else
+        current = parent.textContent = value;
+    }
+  } else if (value == null || t === "boolean") {
+    if (hydrating)
+      return current;
+    current = cleanChildren(parent, current, marker);
+  } else if (t === "function") {
+    createRenderEffect(() => {
+      let v = value();
+      while (typeof v === "function")
+        v = v();
+      current = insertExpression(parent, v, current, marker);
+    });
+    return () => current;
+  } else if (Array.isArray(value)) {
+    const array = [];
+    const currentArray = current && Array.isArray(current);
+    if (normalizeIncomingArray(array, value, current, unwrapArray)) {
+      createRenderEffect(() => current = insertExpression(parent, array, current, marker, true));
+      return () => current;
+    }
+    if (hydrating) {
+      if (!array.length)
+        return current;
+      if (marker === undefined)
+        return current = [...parent.childNodes];
+      let node = array[0];
+      if (node.parentNode !== parent)
+        return current;
+      const nodes = [node];
+      while ((node = node.nextSibling) !== marker)
+        nodes.push(node);
+      return current = nodes;
+    }
+    if (array.length === 0) {
+      current = cleanChildren(parent, current, marker);
+      if (multi)
+        return current;
+    } else if (currentArray) {
+      if (current.length === 0) {
+        appendNodes(parent, array, marker);
+      } else
+        reconcileArrays(parent, current, array);
+    } else {
+      current && cleanChildren(parent);
+      appendNodes(parent, array);
+    }
+    current = array;
+  } else if (value.nodeType) {
+    if (hydrating && value.parentNode)
+      return current = multi ? [value] : value;
+    if (Array.isArray(current)) {
+      if (multi)
+        return current = cleanChildren(parent, current, marker, value);
+      cleanChildren(parent, current, null, value);
+    } else if (current == null || current === "" || !parent.firstChild) {
+      parent.appendChild(value);
+    } else
+      parent.replaceChild(value, parent.firstChild);
+    current = value;
+  } else
+    ;
+  return current;
+}
+function normalizeIncomingArray(normalized, array, current, unwrap) {
+  let dynamic = false;
+  for (let i = 0, len = array.length;i < len; i++) {
+    let item = array[i], prev = current && current[normalized.length], t;
+    if (item == null || item === true || item === false)
+      ;
+    else if ((t = typeof item) === "object" && item.nodeType) {
+      normalized.push(item);
+    } else if (Array.isArray(item)) {
+      dynamic = normalizeIncomingArray(normalized, item, prev) || dynamic;
+    } else if (t === "function") {
+      if (unwrap) {
+        while (typeof item === "function")
+          item = item();
+        dynamic = normalizeIncomingArray(normalized, Array.isArray(item) ? item : [item], Array.isArray(prev) ? prev : [prev]) || dynamic;
+      } else {
+        normalized.push(item);
+        dynamic = true;
+      }
+    } else {
+      const value = String(item);
+      if (prev && prev.nodeType === 3 && prev.data === value)
+        normalized.push(prev);
+      else
+        normalized.push(document.createTextNode(value));
+    }
+  }
+  return dynamic;
+}
+function appendNodes(parent, array, marker = null) {
+  for (let i = 0, len = array.length;i < len; i++)
+    parent.insertBefore(array[i], marker);
+}
+function cleanChildren(parent, current, marker, replacement) {
+  if (marker === undefined)
+    return parent.textContent = "";
+  const node = replacement || document.createTextNode("");
+  if (current.length) {
+    let inserted = false;
+    for (let i = current.length - 1;i >= 0; i--) {
+      const el = current[i];
+      if (node !== el) {
+        const isParent = el.parentNode === parent;
+        if (!inserted && !i)
+          isParent ? parent.replaceChild(node, el) : parent.insertBefore(node, marker);
+        else
+          isParent && el.remove();
+      } else
+        inserted = true;
+    }
+  } else
+    parent.insertBefore(node, marker);
+  return [node];
+}
 var booleans = [
   "allowfullscreen",
   "async",
@@ -954,352 +1226,7 @@ var PropAliases = /* @__PURE__ */ Object.assign(Object.create(null), {
     IMG: 1
   }
 });
-function reconcileArrays(parentNode, a, b) {
-  let bLength = b.length, aEnd = a.length, bEnd = bLength, aStart = 0, bStart = 0, after = a[aEnd - 1].nextSibling, map = null;
-  while (aStart < aEnd || bStart < bEnd) {
-    if (a[aStart] === b[bStart]) {
-      aStart++;
-      bStart++;
-      continue;
-    }
-    while (a[aEnd - 1] === b[bEnd - 1]) {
-      aEnd--;
-      bEnd--;
-    }
-    if (aEnd === aStart) {
-      const node = bEnd < bLength ? bStart ? b[bStart - 1].nextSibling : b[bEnd - bStart] : after;
-      while (bStart < bEnd)
-        parentNode.insertBefore(b[bStart++], node);
-    } else if (bEnd === bStart) {
-      while (aStart < aEnd) {
-        if (!map || !map.has(a[aStart]))
-          a[aStart].remove();
-        aStart++;
-      }
-    } else if (a[aStart] === b[bEnd - 1] && b[bStart] === a[aEnd - 1]) {
-      const node = a[--aEnd].nextSibling;
-      parentNode.insertBefore(b[bStart++], a[aStart++].nextSibling);
-      parentNode.insertBefore(b[--bEnd], node);
-      a[aEnd] = b[bEnd];
-    } else {
-      if (!map) {
-        map = new Map;
-        let i = bStart;
-        while (i < bEnd)
-          map.set(b[i], i++);
-      }
-      const index = map.get(a[aStart]);
-      if (index != null) {
-        if (bStart < index && index < bEnd) {
-          let i = aStart, sequence = 1, t;
-          while (++i < aEnd && i < bEnd) {
-            if ((t = map.get(a[i])) == null || t !== index + sequence)
-              break;
-            sequence++;
-          }
-          if (sequence > index - bStart) {
-            const node = a[aStart];
-            while (bStart < index)
-              parentNode.insertBefore(b[bStart++], node);
-          } else
-            parentNode.replaceChild(b[bStart++], a[aStart++]);
-        } else
-          aStart++;
-      } else
-        a[aStart++].remove();
-    }
-  }
-}
 var $$EVENTS = "_$DX_DELEGATE";
-function render(code, element, init, options = {}) {
-  if (!element) {
-    throw new Error("The `element` passed to `render(..., element)` doesn't exist. Make sure `element` exists in the document.");
-  }
-  let disposer;
-  createRoot((dispose2) => {
-    disposer = dispose2;
-    element === document ? code() : insert(element, code(), element.firstChild ? null : undefined, init);
-  }, options.owner);
-  return () => {
-    disposer();
-    element.textContent = "";
-  };
-}
-function template(html, isImportNode, isSVG, isMathML) {
-  let node;
-  const create = () => {
-    if (isHydrating())
-      throw new Error("Failed attempt to create new DOM elements during hydration. Check that the libraries you are using support hydration.");
-    const t = isMathML ? document.createElementNS("http://www.w3.org/1998/Math/MathML", "template") : document.createElement("template");
-    t.innerHTML = html;
-    return isSVG ? t.content.firstChild.firstChild : isMathML ? t.firstChild : t.content.firstChild;
-  };
-  const fn = isImportNode ? () => untrack(() => document.importNode(node || (node = create()), true)) : () => (node || (node = create())).cloneNode(true);
-  fn.cloneNode = fn;
-  return fn;
-}
-function delegateEvents(eventNames, document2 = window.document) {
-  const e = document2[$$EVENTS] || (document2[$$EVENTS] = new Set);
-  for (let i = 0, l = eventNames.length;i < l; i++) {
-    const name = eventNames[i];
-    if (!e.has(name)) {
-      e.add(name);
-      document2.addEventListener(name, eventHandler);
-    }
-  }
-}
-function setAttribute(node, name, value) {
-  if (isHydrating(node))
-    return;
-  if (value == null)
-    node.removeAttribute(name);
-  else
-    node.setAttribute(name, value);
-}
-function className(node, value) {
-  if (isHydrating(node))
-    return;
-  if (value == null)
-    node.removeAttribute("class");
-  else
-    node.className = value;
-}
-function addEventListener(node, name, handler, delegate) {
-  if (delegate) {
-    if (Array.isArray(handler)) {
-      node[`$$${name}`] = handler[0];
-      node[`$$${name}Data`] = handler[1];
-    } else
-      node[`$$${name}`] = handler;
-  } else if (Array.isArray(handler)) {
-    const handlerFn = handler[0];
-    node.addEventListener(name, handler[0] = (e) => handlerFn.call(node, handler[1], e));
-  } else
-    node.addEventListener(name, handler, typeof handler !== "function" && handler);
-}
-function insert(parent, accessor, marker, initial) {
-  if (marker !== undefined && !initial)
-    initial = [];
-  if (typeof accessor !== "function")
-    return insertExpression(parent, accessor, initial, marker);
-  createRenderEffect((current) => insertExpression(parent, accessor(), current, marker), initial);
-}
-function isHydrating(node) {
-  return !!sharedConfig.context && !sharedConfig.done && (!node || node.isConnected);
-}
-function eventHandler(e) {
-  if (sharedConfig.registry && sharedConfig.events) {
-    if (sharedConfig.events.find(([el, ev]) => ev === e))
-      return;
-  }
-  let node = e.target;
-  const key = `$$${e.type}`;
-  const oriTarget = e.target;
-  const oriCurrentTarget = e.currentTarget;
-  const retarget = (value) => Object.defineProperty(e, "target", {
-    configurable: true,
-    value
-  });
-  const handleNode = () => {
-    const handler = node[key];
-    if (handler && !node.disabled) {
-      const data = node[`${key}Data`];
-      data !== undefined ? handler.call(node, data, e) : handler.call(node, e);
-      if (e.cancelBubble)
-        return;
-    }
-    node.host && typeof node.host !== "string" && !node.host._$host && node.contains(e.target) && retarget(node.host);
-    return true;
-  };
-  const walkUpTree = () => {
-    while (handleNode() && (node = node._$host || node.parentNode || node.host))
-      ;
-  };
-  Object.defineProperty(e, "currentTarget", {
-    configurable: true,
-    get() {
-      return node || document;
-    }
-  });
-  if (sharedConfig.registry && !sharedConfig.done)
-    sharedConfig.done = _$HY.done = true;
-  if (e.composedPath) {
-    const path = e.composedPath();
-    retarget(path[0]);
-    for (let i = 0;i < path.length - 2; i++) {
-      node = path[i];
-      if (!handleNode())
-        break;
-      if (node._$host) {
-        node = node._$host;
-        walkUpTree();
-        break;
-      }
-      if (node.parentNode === oriCurrentTarget) {
-        break;
-      }
-    }
-  } else
-    walkUpTree();
-  retarget(oriTarget);
-}
-function insertExpression(parent, value, current, marker, unwrapArray) {
-  const hydrating = isHydrating(parent);
-  if (hydrating) {
-    !current && (current = [...parent.childNodes]);
-    let cleaned = [];
-    for (let i = 0;i < current.length; i++) {
-      const node = current[i];
-      if (node.nodeType === 8 && node.data.slice(0, 2) === "!$")
-        node.remove();
-      else
-        cleaned.push(node);
-    }
-    current = cleaned;
-  }
-  while (typeof current === "function")
-    current = current();
-  if (value === current)
-    return current;
-  const t = typeof value, multi = marker !== undefined;
-  parent = multi && current[0] && current[0].parentNode || parent;
-  if (t === "string" || t === "number") {
-    if (hydrating)
-      return current;
-    if (t === "number") {
-      value = value.toString();
-      if (value === current)
-        return current;
-    }
-    if (multi) {
-      let node = current[0];
-      if (node && node.nodeType === 3) {
-        node.data !== value && (node.data = value);
-      } else
-        node = document.createTextNode(value);
-      current = cleanChildren(parent, current, marker, node);
-    } else {
-      if (current !== "" && typeof current === "string") {
-        current = parent.firstChild.data = value;
-      } else
-        current = parent.textContent = value;
-    }
-  } else if (value == null || t === "boolean") {
-    if (hydrating)
-      return current;
-    current = cleanChildren(parent, current, marker);
-  } else if (t === "function") {
-    createRenderEffect(() => {
-      let v = value();
-      while (typeof v === "function")
-        v = v();
-      current = insertExpression(parent, v, current, marker);
-    });
-    return () => current;
-  } else if (Array.isArray(value)) {
-    const array = [];
-    const currentArray = current && Array.isArray(current);
-    if (normalizeIncomingArray(array, value, current, unwrapArray)) {
-      createRenderEffect(() => current = insertExpression(parent, array, current, marker, true));
-      return () => current;
-    }
-    if (hydrating) {
-      if (!array.length)
-        return current;
-      if (marker === undefined)
-        return current = [...parent.childNodes];
-      let node = array[0];
-      if (node.parentNode !== parent)
-        return current;
-      const nodes = [node];
-      while ((node = node.nextSibling) !== marker)
-        nodes.push(node);
-      return current = nodes;
-    }
-    if (array.length === 0) {
-      current = cleanChildren(parent, current, marker);
-      if (multi)
-        return current;
-    } else if (currentArray) {
-      if (current.length === 0) {
-        appendNodes(parent, array, marker);
-      } else
-        reconcileArrays(parent, current, array);
-    } else {
-      current && cleanChildren(parent);
-      appendNodes(parent, array);
-    }
-    current = array;
-  } else if (value.nodeType) {
-    if (hydrating && value.parentNode)
-      return current = multi ? [value] : value;
-    if (Array.isArray(current)) {
-      if (multi)
-        return current = cleanChildren(parent, current, marker, value);
-      cleanChildren(parent, current, null, value);
-    } else if (current == null || current === "" || !parent.firstChild) {
-      parent.appendChild(value);
-    } else
-      parent.replaceChild(value, parent.firstChild);
-    current = value;
-  } else
-    console.warn(`Unrecognized value. Skipped inserting`, value);
-  return current;
-}
-function normalizeIncomingArray(normalized, array, current, unwrap) {
-  let dynamic = false;
-  for (let i = 0, len = array.length;i < len; i++) {
-    let item = array[i], prev = current && current[normalized.length], t;
-    if (item == null || item === true || item === false)
-      ;
-    else if ((t = typeof item) === "object" && item.nodeType) {
-      normalized.push(item);
-    } else if (Array.isArray(item)) {
-      dynamic = normalizeIncomingArray(normalized, item, prev) || dynamic;
-    } else if (t === "function") {
-      if (unwrap) {
-        while (typeof item === "function")
-          item = item();
-        dynamic = normalizeIncomingArray(normalized, Array.isArray(item) ? item : [item], Array.isArray(prev) ? prev : [prev]) || dynamic;
-      } else {
-        normalized.push(item);
-        dynamic = true;
-      }
-    } else {
-      const value = String(item);
-      if (prev && prev.nodeType === 3 && prev.data === value)
-        normalized.push(prev);
-      else
-        normalized.push(document.createTextNode(value));
-    }
-  }
-  return dynamic;
-}
-function appendNodes(parent, array, marker = null) {
-  for (let i = 0, len = array.length;i < len; i++)
-    parent.insertBefore(array[i], marker);
-}
-function cleanChildren(parent, current, marker, replacement) {
-  if (marker === undefined)
-    return parent.textContent = "";
-  const node = replacement || document.createTextNode("");
-  if (current.length) {
-    let inserted = false;
-    for (let i = current.length - 1;i >= 0; i--) {
-      const el = current[i];
-      if (node !== el) {
-        const isParent = el.parentNode === parent;
-        if (!inserted && !i)
-          isParent ? parent.replaceChild(node, el) : parent.insertBefore(node, marker);
-        else
-          isParent && el.remove();
-      } else
-        inserted = true;
-    }
-  } else
-    parent.insertBefore(node, marker);
-  return [node];
-}
 var RequestContext = Symbol();
 
 // BenchSolid.compiled.js

@@ -21,23 +21,16 @@ pub fn getPropertyValue(
 ) callconv(.c) w.Value {
     const ctx = w.Context{ .ptr = ctx_ptr };
     const rc = RuntimeContext.get(ctx);
-    const el = getElement(ctx, this_val) catch |err| {
-        if (err == error.CSSStyleDeclaration) {
-            std.debug.print("Not a CSSStyleDeclaration object", .{});
-            return ctx.throwTypeError("Not a CSSStyleDeclaration object");
-        } else {
-            return w.EXCEPTION;
-        }
-    };
+    // Return "" if no backing element (empty style object)
+    const el = getElement(ctx, this_val) catch return ctx.newString("");
 
-    if (argc < 1) return ctx.throwTypeError("getPropertyValue requires 1 argument");
+    if (argc < 1) return ctx.newString("");
 
-    const prop_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    const prop_str = ctx.toZString(argv[0]) catch return ctx.newString("");
     defer ctx.freeZString(prop_str);
 
-    // Use getInlineStyle
-    const val = z.getComputedStyle(rc.allocator, el, prop_str) catch |err|
-        return ctx.throwTypeError(@errorName(err).ptr);
+    // Return "" for missing/unknown properties (per spec, never throws)
+    const val = z.getComputedStyle(rc.allocator, el, prop_str) catch return ctx.newString("");
     defer if (val) |v| rc.allocator.free(v);
 
     if (val) |v| return ctx.newString(v);
@@ -152,8 +145,14 @@ pub fn window_getComputedStyle(
 
     if (argc < 1) return ctx.throwTypeError("getComputedStyle requires 1 argument");
 
-    const ptr = qjs.JS_GetOpaque(argv[0], rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Argument 1 must be an Element");
+    // Try html_element first, then dom_node (frameworks may pass either)
+    var ptr = qjs.JS_GetOpaque(argv[0], rc.classes.html_element);
+    if (ptr == null) ptr = qjs.JS_GetOpaque(argv[0], rc.classes.dom_node);
+    if (ptr == null) {
+        // Return an empty CSSStyleDeclaration (per spec, never throws)
+        const obj = ctx.newObjectClass(rc.classes.css_style_decl);
+        return obj;
+    }
 
     // Return CSSStyleDeclaration wrapping the element
     const obj = ctx.newObjectClass(rc.classes.css_style_decl);

@@ -1,0 +1,16 @@
+[
+    /* Test count: 1 */
+    /* Test number: 1 */
+    {
+        "data": $DATA{ ,12}
+            <body><table>\0filler\0text\0
+        $DATA,
+        "result": $DATA{ ,12}
+            <html>
+              <head>
+              <body>
+                "fillertext"
+                <table>
+        $DATA
+    },
+]

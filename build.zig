@@ -10,6 +10,42 @@ pub fn build(b: *std.Build) void {
     const stb_image_src_path = b.path("src/c");
     const nanosvg_src_path = b.path("src/c");
     const quickjs_src_path = b.path("vendor/quickjs-ng");
+    const thorvg_src_path = b.path("vendor/thorvg");
+    const miniz_src_path = b.path("vendor/miniz");
+    const libharu_src_path = b.path("vendor/libharu/src");
+    const libharu_include_path = b.path("vendor/libharu/include");
+
+    const miniz = b.addLibrary(.{
+        .name = "miniz",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    miniz.addCSourceFiles(
+        .{
+            .root = miniz_src_path,
+            .files = &.{"miniz.c"},
+            .flags = &.{"-O3"},
+        },
+    );
+    miniz.linkLibC();
+
+    const libharu = b.addLibrary(.{ .name = "hpdf", .linkage = .static, .root_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+    }) });
+    libharu.addIncludePath(b.path("vendor/fake_zlib"));
+    libharu.addIncludePath(b.path("vendor/libharu/include"));
+
+    libharu.addCSourceFiles(.{
+        .root = libharu_src_path,
+        .files = &.{ "hpdf_3dmeasure.c", "hpdf_annotation.c", "hpdf_array.c", "hpdf_binary.c", "hpdf_boolean.c", "hpdf_catalog.c", "hpdf_destination.c", "hpdf_dict.c", "hpdf_direct.c", "hpdf_doc.c", "hpdf_doc_png.c", "hpdf_encoder.c", "hpdf_encoder_cns.c", "hpdf_encoder_cnt.c", "hpdf_encoder_jp.c", "hpdf_encoder_kr.c", "hpdf_encoder_utf.c", "hpdf_encrypt.c", "hpdf_encryptdict.c", "hpdf_error.c", "hpdf_exdata.c", "hpdf_ext_gstate.c", "hpdf_font.c", "hpdf_font_cid.c", "hpdf_font_tt.c", "hpdf_font_type1.c", "hpdf_fontdef.c", "hpdf_fontdef_base14.c", "hpdf_fontdef_cid.c", "hpdf_fontdef_cns.c", "hpdf_fontdef_cnt.c", "hpdf_fontdef_jp.c", "hpdf_fontdef_kr.c", "hpdf_fontdef_tt.c", "hpdf_fontdef_type1.c", "hpdf_gstate.c", "hpdf_image.c", "hpdf_image_ccitt.c", "hpdf_image_png.c", "hpdf_info.c", "hpdf_list.c", "hpdf_mmgr.c", "hpdf_name.c", "hpdf_namedict.c", "hpdf_null.c", "hpdf_number.c", "hpdf_objects.c", "hpdf_outline.c", "hpdf_page_label.c", "hpdf_page_operator.c", "hpdf_pages.c", "hpdf_pdfa.c", "hpdf_real.c", "hpdf_shading.c", "hpdf_streams.c", "hpdf_string.c", "hpdf_u3d.c", "hpdf_utils.c", "hpdf_xref.c" },
+        // -DHPDF_NOPNGLIB prevents build failures from missing libpng
+        .flags = &.{ "-O3", "-DHPDF_NOPNGLIB" },
+    });
+
     const qjs_flags = &.{
         "-std=gnu99",
         "-D_GNU_SOURCE",
@@ -48,6 +84,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
     libwebp.linkLibC();
     libwebp.addIncludePath(libwebp_src_path);
     libwebp.addIncludePath(b.path("vendor/libwebp"));
@@ -81,6 +118,86 @@ pub fn build(b: *std.Build) void {
         .files = &.{ "sharpyuv.c", "sharpyuv_cpu.c", "sharpyuv_csp.c", "sharpyuv_dsp.c", "sharpyuv_gamma.c", "sharpyuv_neon.c", "sharpyuv_sse2.c" },
         .flags = &.{"-O3"},
     });
+
+    const thorvg = b.addLibrary(.{
+        .name = "thorvg",
+        .linkage = .static,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    thorvg.linkLibC();
+    thorvg.linkLibCpp();
+
+    const tvg_config = b.addConfigHeader(.{
+        .style = .blank,
+        .include_path = "config.h",
+    }, .{
+        .THORVG_SW_RASTER_SUPPORT = 1,
+        .THORVG_SVG_LOADER_SUPPORT = 1,
+        .THORVG_TTF_LOADER_SUPPORT = 1,
+        .THORVG_JPG_LOADER_SUPPORT = 1,
+        .THORVG_PNG_LOADER_SUPPORT = 1,
+        .THORVG_CAPI_BINDING_SUPPORT = 1,
+        .THORVG_THREAD_SUPPORT = 1,
+        .THORVG_VERSION_STRING = "0.15.2",
+    });
+    thorvg.addConfigHeader(tvg_config);
+
+    thorvg.addIncludePath(thorvg_src_path);
+    const tvg_flags = &.{
+        "-xc++",
+        "-std=c++14",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-Wno-everything",
+        // FORCE macros globally — must use THORVG_ prefix to match C++ #ifdefs
+        "-DTHORVG_SW_RASTER_SUPPORT=1",
+        "-DTHORVG_SVG_LOADER_SUPPORT=1",
+        "-DTHORVG_TTF_LOADER_SUPPORT=1",
+        "-DTHORVG_JPG_LOADER_SUPPORT=1",
+        "-DTHORVG_PNG_LOADER_SUPPORT=1",
+        "-DTHORVG_CAPI_BINDING_SUPPORT=1",
+        "-DTHORVG_THREAD_SUPPORT=1",
+    };
+    thorvg.addIncludePath(b.path("vendor/thorvg/inc"));
+    thorvg.addIncludePath(b.path("vendor/thorvg/src/common"));
+    const tvg_src_dirs = [_][]const u8{
+        "vendor/thorvg/src/common",
+        "vendor/thorvg/src/renderer",
+        "vendor/thorvg/src/renderer/sw_engine",
+        "vendor/thorvg/src/loaders/svg",
+        "vendor/thorvg/src/loaders/ttf",
+        "vendor/thorvg/src/bindings/capi",
+        "vendor/thorvg/src/loaders/raw",
+        "vendor/thorvg/src/loaders/jpg",
+        "vendor/thorvg/src/loaders/png",
+    };
+    thorvg.addIncludePath(b.path("vendor/thorvg/inc"));
+    for (tvg_src_dirs) |dir_path| {
+        thorvg.addIncludePath(b.path(dir_path));
+    }
+
+    for (tvg_src_dirs) |dir_path| {
+        var dir = b.build_root.handle.openDir(dir_path, .{ .iterate = true }) catch |err| {
+            std.debug.panic("❌ Failed to open dir {s}: {}", .{ dir_path, err });
+            continue;
+        };
+        defer dir.close();
+        var walker = dir.iterate();
+        while (walker.next() catch null) |entry| {
+            // Only grab .cpp files
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".cpp")) {
+                const full_path = b.pathJoin(&.{ dir_path, entry.name });
+
+                thorvg.addCSourceFile(.{
+                    .file = b.path(full_path),
+                    .flags = tvg_flags,
+                });
+            }
+        }
+    }
 
     const dep_curl = b.dependency(
         "curl",
@@ -127,9 +244,16 @@ pub fn build(b: *std.Build) void {
     zexplorer_lib.addIncludePath(stb_image_src_path);
     zexplorer_lib.addIncludePath(nanosvg_src_path);
     zexplorer_lib.addIncludePath(libwebp_src_path);
+    zexplorer_lib.addIncludePath(thorvg_src_path);
+    zexplorer_lib.addIncludePath(miniz_src_path);
+    zexplorer_lib.addIncludePath(libharu_include_path);
     zexplorer_lib.linkLibrary(qjs_lib);
     zexplorer_lib.linkLibrary(libwebp);
+    zexplorer_lib.linkLibrary(thorvg);
+    zexplorer_lib.linkLibrary(miniz);
+    zexplorer_lib.linkLibrary(libharu);
     zexplorer_lib.linkLibC();
+    zexplorer_lib.linkLibCpp();
 
     const zexplorer_module = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
@@ -144,19 +268,26 @@ pub fn build(b: *std.Build) void {
     zexplorer_module.linkLibrary(zexplorer_lib);
     zexplorer_module.linkLibrary(qjs_lib);
     zexplorer_module.linkLibrary(libwebp);
+    zexplorer_module.linkLibrary(thorvg);
+    zexplorer_module.linkLibrary(miniz);
+    zexplorer_module.linkLibrary(libharu);
     zexplorer_module.addIncludePath(quickjs_src_path);
     zexplorer_module.addIncludePath(lexbor_src_path);
     zexplorer_module.addIncludePath(stb_image_src_path);
     zexplorer_module.addIncludePath(nanosvg_src_path);
     zexplorer_module.addIncludePath(libwebp_src_path);
+    zexplorer_module.addIncludePath(thorvg_src_path);
+    zexplorer_module.addIncludePath(miniz_src_path);
+    zexplorer_module.addIncludePath(libharu_include_path);
 
     // Link curl's C library to the module so it can find curl.h
     // The curl module depends on libcurl which needs to be linked
     zexplorer_module.link_libc = true;
+    zexplorer_module.link_libcpp = true;
 
     b.installArtifact(zexplorer_lib);
 
-    // Examples executable
+    // Futur CLI executable
     const exe = b.addExecutable(.{
         .name = "zhtml-examples",
         .root_module = b.createModule(.{
@@ -188,10 +319,16 @@ pub fn build(b: *std.Build) void {
     exe.addIncludePath(quickjs_src_path);
     exe.addIncludePath(nanosvg_src_path);
     exe.addIncludePath(libwebp_src_path);
+    exe.addIncludePath(thorvg_src_path);
+    exe.addIncludePath(libharu_include_path);
+    exe.addIncludePath(miniz_src_path);
     exe.linkLibC();
     exe.linkLibrary(zexplorer_lib);
     exe.linkLibrary(qjs_lib);
     exe.linkLibrary(libwebp);
+    exe.linkLibrary(thorvg);
+    exe.linkLibrary(miniz);
+    exe.linkLibrary(libharu);
 
     b.installArtifact(exe);
 
@@ -273,6 +410,9 @@ pub fn build(b: *std.Build) void {
     unit_tests.addIncludePath(libwebp_src_path);
     unit_tests.linkLibrary(qjs_lib);
     unit_tests.linkLibrary(libwebp);
+    unit_tests.linkLibrary(thorvg);
+    unit_tests.linkLibrary(miniz);
+    unit_tests.linkLibrary(libharu);
     unit_tests.linkLibC();
 
     // Add dependencies to test
@@ -325,7 +465,7 @@ pub fn build(b: *std.Build) void {
         "src/examples/formdata_upload_demo.zig",
         "src/examples/disk_streaming_upload_demo.zig",
         "src/examples/fs_demo.zig",
-        "src/examples/writable_stream_demo.zig",
+        // "src/examples/writable_stream_demo.zig",
         "src/examples/streaming_demo.zig",
         "src/examples/file_reader.zig",
         "src/examples/cdn_import.zig",
@@ -339,10 +479,10 @@ pub fn build(b: *std.Build) void {
         "src/examples/js-bench-solid.zig",
         "src/examples/test-worker_zig.zig",
         "src/examples/dom_purify.zig",
-        "src/examples/test_encoding.zig",
+        "src/examples/text_encoding.zig",
         "src/examples/jsdom_zexplorer_speed_test.zig",
         "src/examples/h5sc-test.zig",
-        "src/examples/blob_url.zig",
+        // "src/examples/blob_url.zig",
         "src/examples/blob_object_url.zig",
         "src/examples/test_css_sanitization.zig",
         "src/examples/test_css_pipeline.zig",
@@ -357,6 +497,9 @@ pub fn build(b: *std.Build) void {
         "src/examples/test_image4.zig",
         "src/examples/dompurify_tests.zig",
         "src/examples/test_svg_raster.zig",
+        "src/examples/test_og_generator.zig",
+        "src/examples/test_og_generator_v3.zig",
+        "src/examples/test_invoice_generator.zig",
     };
     for (example_files) |example_file| {
         const check_exe = b.addExecutable(.{
@@ -374,10 +517,22 @@ pub fn build(b: *std.Build) void {
         check_exe.addObjectFile(lexbor_static_lib_path);
         check_exe.addIncludePath(lexbor_src_path);
         check_exe.addIncludePath(quickjs_src_path);
+        check_exe.addIncludePath(stb_image_src_path);
+        check_exe.addIncludePath(nanosvg_src_path);
+        check_exe.addIncludePath(libwebp_src_path);
+        check_exe.addIncludePath(thorvg_src_path);
+        check_exe.addIncludePath(libharu_include_path);
+        check_exe.addIncludePath(miniz_src_path);
         check_exe.linkLibC();
+        check_exe.linkLibCpp();
         check_exe.linkLibrary(zexplorer_lib);
         check_exe.linkLibrary(qjs_lib);
         check_exe.linkLibrary(libwebp);
+        check_exe.linkLibrary(thorvg);
+        check_exe.linkLibrary(miniz);
+        check_exe.linkLibrary(libharu);
+
+        b.installArtifact(check_exe);
         check_step.dependOn(&check_exe.step);
     }
 
@@ -406,10 +561,17 @@ pub fn build(b: *std.Build) void {
         example_exe.addObjectFile(lexbor_static_lib_path);
         example_exe.addIncludePath(lexbor_src_path);
         example_exe.addIncludePath(quickjs_src_path);
+        example_exe.addIncludePath(thorvg_src_path);
+        example_exe.addIncludePath(libharu_include_path);
+        example_exe.addIncludePath(miniz_src_path);
         example_exe.linkLibC();
+        example_exe.linkLibCpp();
         example_exe.linkLibrary(zexplorer_lib);
         example_exe.linkLibrary(qjs_lib);
         example_exe.linkLibrary(libwebp);
+        example_exe.linkLibrary(thorvg);
+        example_exe.linkLibrary(miniz);
+        example_exe.linkLibrary(libharu);
 
         b.installArtifact(example_exe);
 

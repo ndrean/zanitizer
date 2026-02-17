@@ -6,22 +6,22 @@ async function test() {
     const blob = new Blob([content], { type: mime });
 
     const url = URL.createObjectURL(blob);
-    console.log("[JS] ObjectURL from Blob: ", url);
+    console.log(`[JS] ObjectURL from Blob: ${url}`);
 
     console.log("[JS] Fetching.ObjectURL..");
     const res = await fetch(url);
-    console.log("[JS] response:", res);
+    console.log(`[JS] response: ${res}`);
 
-    console.log("[JS] StatusText:", res.statusText);
+    console.log(`[JS] StatusText: ${res.statusText}`);
     if (!res.ok) throw new Error("Response not OK");
 
     // Note: Real fetch uses res.headers.get(), but we returned a plain object
     const type = res.headers["Content-Type"];
-    console.log("[JS] Content-Type:", type);
+    console.log(`[JS] Content-Type: ${type}`);
     if (type !== mime) throw new Error("Wrong Mime Type");
 
     const text = await res.text();
-    console.log("[JS] Body:", text);
+    console.log(`[JS] Body: ${text}`);
     if (text !== content) throw new Error("Body mismatch");
 
     // JSON Test
@@ -33,10 +33,10 @@ async function test() {
     console.log(jsonRes);
 
     const jsonObj = await jsonRes.text();
-    console.log("[JS] JSON Prop:", jsonObj);
+    console.log(`[JS] JSON Prop: ${jsonObj}`);
     const obj = JSON.parse(jsonObj);
 
-    console.log("[JS] JSON Prop:", obj.size);
+    console.log(`[JS] JSON Prop: ${obj.size}`);
     if (obj.size !== 123) throw new Error("JSON mismatch");
 
     URL.revokeObjectURL(url);
@@ -49,9 +49,10 @@ async function test() {
     const html = `<div class="some-class" data-value="test">`;
 
     const arr = tagRE.exec(html);
-    console.log("[JS] RegExp Test:", arr);
+    console.log(`[JS] RegExp Test:  ${arr[0]}`);
+    console.log(arr[0]);
   } catch (e) {
-    console.log("[JS] ❌ ERROR:", e.message || e);
+    console.log(`[JS] ❌ ERROR:  ${e.message || e}`);
   }
 }
 

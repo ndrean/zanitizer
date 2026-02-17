@@ -1,16 +1,25 @@
-//! Threaded fetch(). Usedd in Worker().
+//! Threaded fetch(). Used in Worker() context
+//!
+//! FormData is manually serialized via `js_formData.serializeFormData()``
+//!
+//! inline procies `js_text_proxy`, js_json_proxy` wrapps sync functions in promises
+//!
+//! uses hardenEasy()
+//!
+//! `text()`, `arrayBuffer()`, `json()`
+//! `blob()` is non-standard: it returns a promise
 
 const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const curl = @import("curl");
-const js_security = @import("js_security.zig");
-const EventLoop = @import("event_loop.zig").EventLoop;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_formData = @import("js_formData.zig");
-const js_blob = @import("js_blob.zig");
-const js_file = @import("js_file.zig");
+const curl = z.curl;
+const js_security = z.js_security;
+const EventLoop = z.EventLoop;
+const RuntimeContext = z.RuntimeContext;
+const js_formData = z.js_formData;
+const js_blob = z.js_blob;
+const js_file = z.js_file;
 
 // ============================================================================
 // STRUCTS
@@ -216,6 +225,65 @@ fn fetchBlob(ctx: zqjs.Context, url: []const u8) zqjs.Value {
         "arrayBuffer",
         ctx.newCFunction(js_blob_response_blob, "arrayBuffer", 0),
     ) catch {};
+
+    const prom = createPromiseResolved(ctx, resp);
+    ctx.freeValue(resp);
+    return prom;
+}
+
+// ===========================================================
+// FILE:// FETCH LOGIC
+// ===========================================================
+
+fn fetchFile(ctx: zqjs.Context, url: []const u8) zqjs.Value {
+    const rc = RuntimeContext.get(ctx);
+    const allocator = rc.loop.allocator;
+
+    // Strip "file://" prefix to get the actual path
+    const path = url["file://".len..];
+
+    const file = js_security.openFileNoSymlinkEscape(rc.sandbox, path) catch {
+        return createPromiseRejected(ctx, "NetworkError: file not found or access denied");
+    };
+    defer file.close();
+
+    const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch {
+        return createPromiseRejected(ctx, "NetworkError: failed to read file");
+    };
+    defer allocator.free(data);
+
+    const resp = ctx.newObject();
+
+    ctx.setPropertyStr(resp, "status", ctx.newInt64(200)) catch {};
+    ctx.setPropertyStr(resp, "ok", ctx.newBool(true)) catch {};
+    ctx.setPropertyStr(resp, "url", ctx.newString(url)) catch {};
+
+    const ab = ctx.newArrayBufferCopy(data);
+    ctx.setPropertyStr(resp, "_body", ab) catch {
+        ctx.freeValue(ab);
+    };
+
+    const headers_obj = ctx.newObject();
+    ctx.setPropertyStr(resp, "headers", headers_obj) catch {
+        ctx.freeValue(headers_obj);
+    };
+
+    const text_fn = qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0);
+    ctx.setPropertyStr(resp, "text", text_fn) catch {
+        ctx.freeValue(text_fn);
+    };
+    const json_fn = qjs.JS_NewCFunction(ctx.ptr, js_json_proxy, "json", 0);
+    ctx.setPropertyStr(resp, "json", json_fn) catch {
+        ctx.freeValue(json_fn);
+    };
+    const blob_fn = qjs.JS_NewCFunction(ctx.ptr, js_blob_proxy, "blob", 0);
+    ctx.setPropertyStr(resp, "blob", blob_fn) catch {
+        ctx.freeValue(blob_fn);
+    };
+    const ab_fn = qjs.JS_NewCFunction(ctx.ptr, js_arrayBuffer_proxy, "arrayBuffer", 0);
+    ctx.setPropertyStr(resp, "arrayBuffer", ab_fn) catch {
+        ctx.freeValue(ab_fn);
+    };
 
     const prom = createPromiseResolved(ctx, resp);
     ctx.freeValue(resp);
@@ -562,6 +630,11 @@ fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs
     // BLOB INTERCEPTION
     if (std.mem.startsWith(u8, url_str, "blob:")) {
         return fetchBlob(ctx, url_str);
+    }
+
+    // FILE:// INTERCEPTION
+    if (std.mem.startsWith(u8, url_str, "file://")) {
+        return fetchFile(ctx, url_str);
     }
 
     // [SECURITY] SSRF gate: block requests to internal infrastructure in sanitize mode

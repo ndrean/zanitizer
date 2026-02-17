@@ -50,30 +50,57 @@ fn js_URL_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
 
     // Parse URL (with optional base)
     if (argc >= 2 and !ctx.isUndefined(argv[1])) {
-        // Parse with base URL
+        // The base can be a URL object OR a string!
+        var base_url: ?*z.URL = null;
+        var temp_parser: ?*z.URLParser = null;
+        var temp_url: ?*z.URL = null;
+
         const base_ptr = qjs.JS_GetOpaque(argv[1], rc.classes.url);
-        if (base_ptr == null) {
-            url_obj.parser.destroy();
-            rc.allocator.destroy(url_obj.parser);
-            rc.allocator.destroy(url_obj);
-            return ctx.throwTypeError("Second argument must be a URL");
+        if (base_ptr != null) {
+            // Path A: It's already a URL Object
+            const base_url_obj: *URLObject = @ptrCast(@alignCast(base_ptr));
+            base_url = base_url_obj.url;
+        } else if (ctx.isString(argv[1])) {
+            // Path B: It's a string. We must parse it temporarily!
+            const base_str = ctx.toZString(argv[1]) catch return ctx.throwOutOfMemory();
+            defer ctx.freeZString(base_str);
+
+            temp_parser = rc.allocator.create(z.URLParser) catch return ctx.throwOutOfMemory();
+            temp_parser.?.* = z.URLParser.create() catch return ctx.throwTypeError("Failed to create temp parser");
+
+            temp_url = rc.allocator.create(z.URL) catch return ctx.throwOutOfMemory();
+            temp_url.?.* = temp_parser.?.parse(base_str) catch return ctx.throwTypeError("Invalid base URL string");
+
+            base_url = temp_url;
+        } else {
+            return ctx.throwTypeError("Second argument must be a URL object or a valid URL string");
         }
-        const base_url_obj: *URLObject = @ptrCast(@alignCast(base_ptr));
 
-        url_obj.url = rc.allocator.create(z.URL) catch {
-            url_obj.parser.destroy();
-            rc.allocator.destroy(url_obj.parser);
-            rc.allocator.destroy(url_obj);
-            return ctx.throwOutOfMemory();
-        };
+        url_obj.url = rc.allocator.create(z.URL) catch return ctx.throwOutOfMemory();
 
-        url_obj.url.* = url_obj.parser.parseRelative(url_str, base_url_obj.url) catch {
-            rc.allocator.destroy(url_obj.url);
-            url_obj.parser.destroy();
-            rc.allocator.destroy(url_obj.parser);
-            rc.allocator.destroy(url_obj);
+        // Perform the relative parsing
+        url_obj.url.* = url_obj.parser.parseRelative(url_str, base_url.?) catch {
+            // Cleanup temp allocations on failure
+            if (temp_url) |tu| {
+                tu.destroy();
+                rc.allocator.destroy(tu);
+            }
+            if (temp_parser) |tp| {
+                tp.destroy();
+                rc.allocator.destroy(tp);
+            }
             return ctx.throwTypeError("Invalid URL");
         };
+
+        // Cleanup temp allocations on success
+        if (temp_url) |tu| {
+            tu.destroy();
+            rc.allocator.destroy(tu);
+        }
+        if (temp_parser) |tp| {
+            tp.destroy();
+            rc.allocator.destroy(tp);
+        }
     } else {
         // Parse absolute URL
         url_obj.url = rc.allocator.create(z.URL) catch {

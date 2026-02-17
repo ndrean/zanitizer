@@ -452,6 +452,20 @@ pub fn js_get_ownerDocument(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
     const result = z.ownerDocument(node);
     return DOMBridge.wrapDocument(ctx, result) catch w.EXCEPTION;
 }
+// Property Getter for documentElement
+pub fn js_get_documentElement(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const doc: *z.HTMLDocument = blk: {
+        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        return ctx.throwTypeError("Method called on object that is not a Document");
+    };
+    const result = z.documentRoot(doc);
+    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
+    return w.NULL;
+}
 // Property Getter for body
 pub fn js_get_body(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     _ = argc; _ = argv;
@@ -463,6 +477,20 @@ pub fn js_get_body(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
         return ctx.throwTypeError("Method called on object that is not a Document");
     };
     const result = z.bodyElement(doc);
+    if (result) |el| return DOMBridge.wrapElement(ctx, el) catch w.EXCEPTION;
+    return w.NULL;
+}
+// Property Getter for head
+pub fn js_get_head(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    _ = argc; _ = argv;
+    const ctx = w.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const doc: *z.HTMLDocument = blk: {
+        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        return ctx.throwTypeError("Method called on object that is not a Document");
+    };
+    const result = z.headElement(doc);
     if (result) |el| return DOMBridge.wrapElement(ctx, el) catch w.EXCEPTION;
     return w.NULL;
 }
@@ -11095,8 +11123,22 @@ pub fn installDocumentBindings(ctx: ?*qjs.JSContext, proto: qjs.JSValue) void {
     _ = qjs.JS_SetPropertyStr(ctx, proto, "createDocumentFragment", qjs.JS_NewCFunction(ctx, js_createDocumentFragment, "createDocumentFragment", 0));
     _ = qjs.JS_SetPropertyStr(ctx, proto, "getElementById", qjs.JS_NewCFunction(ctx, js_getElementById, "getElementById", 1));
     {
+        const atom = qjs.JS_NewAtom(ctx, "documentElement");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_documentElement, "get_documentElement", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
         const atom = qjs.JS_NewAtom(ctx, "body");
         const get_fn = qjs.JS_NewCFunction2(ctx, js_get_body, "get_body", 0, qjs.JS_CFUNC_generic, 0);
+        const set_fn = w.UNDEFINED;
+        _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
+        qjs.JS_FreeAtom(ctx, atom);
+    }
+    {
+        const atom = qjs.JS_NewAtom(ctx, "head");
+        const get_fn = qjs.JS_NewCFunction2(ctx, js_get_head, "get_head", 0, qjs.JS_CFUNC_generic, 0);
         const set_fn = w.UNDEFINED;
         _ = qjs.JS_DefinePropertyGetSet(ctx, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
         qjs.JS_FreeAtom(ctx, atom);

@@ -2,7 +2,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const js_security = @import("js_security.zig");
+const js_security = z.js_security;
 const sanitizer_mod = @import("modules/sanitizer.zig");
 
 const EventLoop = @import("event_loop.zig").EventLoop;
@@ -16,11 +16,14 @@ const FormDataBridge = @import("js_formData.zig").FormDataBridge;
 const FSBridge = @import("js_fs.zig").FSBridge;
 const js_console = @import("js_console.zig");
 const js_marshall = @import("js_marshall.zig");
+const CurlMulti = @import("curl_multi.zig").CurlMulti;
+const ScriptBuffers = @import("curl_multi.zig").ScriptBuffers;
 
 const Sanitizer = sanitizer_mod.Sanitizer;
 const SanitizeOptions = sanitizer_mod.SanitizeOptions;
 
 const TIMEOUT_MS: i64 = 5000;
+const RUN_TIMEOUT_MS: i64 = 30_000; // 30s wall-clock limit for engine.run()
 
 /// Options for `loadPage()` - the high-level page loading orchestrator.
 ///
@@ -132,6 +135,7 @@ pub const ScriptEngine = struct {
         errdefer self.dom.deinit();
 
         self.rc.dom_bridge = @ptrCast(@alignCast(&self.dom));
+        self.rc.engine_ptr = @ptrCast(self);
 
         // (timers)
         try self.loop.install(self.ctx);
@@ -144,6 +148,20 @@ pub const ScriptEngine = struct {
         try FetchBridge.install(self.ctx);
         try FormDataBridge.install(self.ctx);
         try FSBridge.install(self.ctx);
+
+        const global = self.ctx.getGlobalObject();
+        defer self.ctx.freeValue(global);
+
+        _ = try self.ctx.setPropertyStr(global, "__native_flush", self.ctx.newCFunction(js_flush, "flush", 0));
+        _ = try self.ctx.setPropertyStr(global, "__native_loadPage", self.ctx.newCFunction(js_native_loadPage, "loadPage", 2));
+
+        const stdlib_code = @embedFile("zexplorer.js");
+        const eval_res = qjs.JS_Eval(self.ctx.ptr, stdlib_code.ptr, stdlib_code.len, "zexplorer.js", qjs.JS_EVAL_TYPE_GLOBAL);
+
+        if (qjs.JS_IsException(eval_res)) {
+            std.debug.print("CRITICAL: Failed to load zexplorer.js standard library!\n", .{});
+        }
+        defer self.ctx.freeValue(eval_res);
 
         // TODO Other async bindings (sandboxed readFile, etc.)
         // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
@@ -158,9 +176,9 @@ pub const ScriptEngine = struct {
         defer self.ctx.freeValue(global_obj);
 
         const keys_to_remove = [_][:0]const u8{
-            "eval",
+            // "eval",
             "Function",
-            "WebAssembly", // If included in your build
+            "WebAssembly", // not included in build
             "Atomics",
             "ShareArrayBuffer",
         };
@@ -206,13 +224,25 @@ pub const ScriptEngine = struct {
 
     /// Run Event Loop until completion (or until empty)
     pub fn run(self: *ScriptEngine) !void {
-        while ((try self.rt.executePendingJob()) != null) {}
+        // Set interrupt deadline so the interrupt handler can kill runaway JS
+        // during event loop execution (not just during eval)
+        self.interrupt_deadline = std.time.milliTimestamp() + RUN_TIMEOUT_MS;
+        defer self.interrupt_deadline = 0;
+
+        // NOTE: No pre-drain here — the event loop's step 2 drains microtasks
+        // with a safety limit. A pre-drain without limits caused hangs when
+        // JS code (React hydration) called native DOM functions that loop
+        // forever on corrupted trees (lxb_selectors_find bypasses JS interrupt).
         try self.loop.run(.Script);
     }
 
     /// Evaluate code and returns the raw JS Value.
     /// ⚠️ The Caller OWNS this value and must free it with engine.ctx.freeValue(val).
     pub fn eval(self: *ScriptEngine, code: []const u8, filename: []const u8, eval_type: zqjs.Context.EvalType) !zqjs.Value {
+        // Save previous deadline so nested eval() calls (e.g. executeScripts
+        // called from __native_loadPage during engine.run()) don't cancel
+        // the outer deadline set by run().
+        const prev_deadline = self.interrupt_deadline;
         self.interrupt_deadline = std.time.milliTimestamp() + TIMEOUT_MS;
 
         const c_code = try self.allocator.dupeZ(u8, code);
@@ -229,10 +259,11 @@ pub const ScriptEngine = struct {
         ) catch {
             // The exception is still in the context, print it before returning
             _ = self.ctx.checkAndPrintException();
+            self.interrupt_deadline = prev_deadline; // restore outer deadline
             return error.JSException;
         };
 
-        self.interrupt_deadline = 0; // reset deadline after eval
+        self.interrupt_deadline = prev_deadline; // restore outer deadline
 
         // Check for JS-level exceptions (syntax errors, throw new Error(), etc.)
         if (self.ctx.isException(val)) {
@@ -406,10 +437,45 @@ pub const ScriptEngine = struct {
                 const reason = self.ctx.promiseResult(val);
                 defer self.ctx.freeValue(reason);
 
-                const reason_str = self.ctx.toCString(reason) catch "Unknown Rejection";
-                defer self.ctx.freeCString(reason_str);
+                // Diagnostic: identify the rejection value type
+                if (self.ctx.isUndefined(reason)) {
+                    std.debug.print("❌ JS Promise Rejected with: undefined\n", .{});
+                    std.debug.print("   (catch block swallowed the error — check console output above)\n", .{});
+                    return error.JSPromiseRejected;
+                }
 
-                std.debug.print("❌ JS Promise Rejected: {s}\n", .{reason_str});
+                // Clear any pending exception before converting to string
+                const pending = self.ctx.getException();
+                if (!self.ctx.isNull(pending)) self.ctx.freeValue(pending);
+
+                // Try direct toString first
+                if (self.ctx.toCString(reason)) |reason_str| {
+                    defer self.ctx.freeCString(reason_str);
+                    std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(reason_str)});
+                } else |_| {
+                    // Try .message then .stack for Error objects
+                    const msg_prop = self.ctx.getPropertyStr(reason, "message");
+                    defer self.ctx.freeValue(msg_prop);
+                    if (self.ctx.toCString(msg_prop)) |msg_str| {
+                        defer self.ctx.freeCString(msg_str);
+                        std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(msg_str)});
+
+                        const stack_prop = self.ctx.getPropertyStr(reason, "stack");
+                        defer self.ctx.freeValue(stack_prop);
+                        if (self.ctx.toCString(stack_prop)) |stack_str| {
+                            defer self.ctx.freeCString(stack_str);
+                            std.debug.print("   Stack: {s}\n", .{std.mem.span(stack_str)});
+                        } else |_| {}
+                    } else |_| {
+                        if (self.ctx.isNull(reason)) {
+                            std.debug.print("❌ JS Promise Rejected with: null\n", .{});
+                        } else if (self.ctx.isObject(reason)) {
+                            std.debug.print("❌ JS Promise Rejected with: [object] (toString failed)\n", .{});
+                        } else {
+                            std.debug.print("❌ JS Promise Rejected with: (unknown type)\n", .{});
+                        }
+                    }
+                }
                 return error.JSPromiseRejected;
             },
             .Fulfilled => {
@@ -676,6 +742,15 @@ pub const ScriptEngine = struct {
     }
 
     /// [host] Process all <script> tags in the document (Inline and Remote)
+    const ScriptMeta = struct {
+        filename: []const u8,
+        filename_owned: ?[]u8,
+        /// For inline scripts: borrowed pointer into Lexbor DOM (not owned)
+        inline_code: ?[]const u8,
+        is_module: bool,
+        script_element: *z.HTMLElement,
+    };
+
     pub fn executeScripts(self: *ScriptEngine, allocator: std.mem.Allocator, base_dir: []const u8) !void {
         const scripts = try z.querySelectorAll(
             self.allocator,
@@ -685,47 +760,107 @@ pub const ScriptEngine = struct {
         defer allocator.free(scripts);
         if (scripts.len == 0) return;
 
-        for (scripts, 0..) |script, i| {
-            var code_owned: ?[]u8 = null;
-            var filename_owned: ?[]u8 = null;
+        std.debug.print("[Engine] Found {d} scripts to execute\n", .{scripts.len});
 
-            defer {
-                if (filename_owned) |f| self.allocator.free(f);
-                if (code_owned) |c| self.allocator.free(c);
+        // ================================================================
+        // PHASE 1: Collect metadata & submit parallel fetches
+        // ================================================================
+        const buffers = try ScriptBuffers.init(self.allocator, scripts.len);
+        defer buffers.deinit();
+
+        const metas = try self.allocator.alloc(ScriptMeta, scripts.len);
+        defer {
+            for (metas) |m| {
+                if (m.filename_owned) |f| self.allocator.free(f);
+            }
+            self.allocator.free(metas);
+        }
+
+        var remote_count: u32 = 0;
+        const cm = self.loop.getCurlMulti() catch null;
+
+        for (scripts, 0..) |script, i| {
+            metas[i] = .{
+                .filename = "",
+                .filename_owned = null,
+                .inline_code = null,
+                .is_module = false,
+                .script_element = script,
+            };
+
+            const type_attr = z.getAttribute_zc(script, "type");
+
+            // Skip non-executable script types (e.g. "application/json", "application/ld+json",
+            // "text/template", "importmap"). Only execute: no type, "", "text/javascript", "module".
+            if (type_attr) |t| {
+                if (t.len > 0 and
+                    !std.mem.eql(u8, t, "module") and
+                    !std.mem.eql(u8, t, "text/javascript"))
+                {
+                    continue;
+                }
             }
 
-            var filename: []const u8 = "";
-            var code: []const u8 = "";
+            metas[i].is_module = if (type_attr) |t| std.mem.eql(u8, t, "module") else false;
 
             // CASE A: External Script (<script src="...">)
             if (z.getAttribute_zc(script, "src")) |src| {
-                if (isRemote(src)) {
-                    if (isRemote(src)) {
-                        z.print("[Engine] Fetching remote script: {s}\n", .{src});
-                        const remote_code = self.get(src) catch |err| {
-                            z.print("Failed to fetch script '{s}': {}\n", .{ src, err });
+                const src_is_remote = isRemote(src);
+                const base_is_remote = isRemote(base_dir);
+
+                if (src_is_remote or base_is_remote) {
+                    var fetch_url: []const u8 = src;
+
+                    if (!src_is_remote) {
+                        var parser = z.URLParser.create() catch continue;
+                        defer parser.destroy();
+
+                        var base_url = parser.parse(base_dir) catch continue;
+                        defer base_url.destroy();
+
+                        var target_url = parser.parseRelative(src, &base_url) catch continue;
+                        defer target_url.destroy();
+
+                        const resolved_str = target_url.toString(self.allocator) catch continue;
+                        metas[i].filename_owned = resolved_str;
+                        fetch_url = resolved_str;
+                    } else {
+                        metas[i].filename_owned = self.allocator.dupe(u8, src) catch continue;
+                        fetch_url = metas[i].filename_owned.?;
+                    }
+
+                    metas[i].filename = fetch_url;
+                    z.print("[Engine] Fetching remote script: {s}\n", .{fetch_url});
+
+                    // Submit to curl_multi for parallel fetch
+                    if (cm) |c| {
+                        c.submitScriptRequest(self.ctx, fetch_url, buffers, @intCast(i)) catch |err| {
+                            z.print("Failed to submit script fetch '{s}': {}\n", .{ fetch_url, err });
                             continue;
                         };
-                        code_owned = remote_code;
-                        code = remote_code;
-                        filename = src;
+                        remote_count += 1;
+                    } else {
+                        // Fallback: synchronous fetch via std.http
+                        const remote_code = self.get(fetch_url) catch |err| {
+                            z.print("Failed to fetch script '{s}': {}\n", .{ fetch_url, err });
+                            continue;
+                        };
+                        buffers.results[i] = remote_code;
                     }
                 } else {
-                    // resolve Path relative to Sandbox
+                    // Local sandbox script
                     const rel_path = self.resolvePathInSandbox(base_dir, src) catch |err| {
                         z.print("Security: Blocked script path '{s}' (Error: {any})\n", .{ src, err });
                         continue;
                     };
+                    metas[i].filename_owned = rel_path;
+                    metas[i].filename = rel_path;
 
-                    filename_owned = rel_path;
-                    filename = rel_path;
-
-                    const file_content = self.sandbox.dir.readFileAlloc(self.allocator, filename, 5 * 1024 * 1024) catch |err| {
-                        z.print("Failed to load script '{s}' from sandbox: {any}\n", .{ filename, err });
+                    const file_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                        z.print("Failed to load script '{s}' from sandbox: {any}\n", .{ rel_path, err });
                         continue;
                     };
-                    code_owned = file_content;
-                    code = file_content;
+                    buffers.results[i] = file_content;
                 }
             }
             // CASE B: Inline Script
@@ -733,33 +868,73 @@ pub const ScriptEngine = struct {
                 const text = z.textContent_zc(z.elementToNode(script));
                 if (text.len == 0) continue;
 
-                code = text; // borrowed from Lexbor
-                // virtual filename for stack
-                const name = try std.fmt.allocPrint(self.allocator, "{s}/inline-script-{d}.js", .{ base_dir, i });
-                filename_owned = name;
-                filename = name;
+                metas[i].inline_code = text; // borrowed from Lexbor
+                const name = std.fmt.allocPrint(self.allocator, "{s}/inline-script-{d}.js", .{ base_dir, i }) catch continue;
+                metas[i].filename_owned = name;
+                metas[i].filename = name;
             }
+        }
 
-            // EXECUTE
-            const type_attr = z.getAttribute_zc(script, "type");
-            const is_module = if (type_attr) |t| std.mem.eql(u8, t, "module") else false;
+        // Wait for all parallel fetches to complete
+        if (cm) |c| {
+            if (remote_count > 0) {
+                std.debug.print("[Engine] Waiting for {d} parallel script fetches...\n", .{remote_count});
+                while (buffers.pending_count > 0) {
+                    _ = c.poll(100) catch break;
+                }
+                std.debug.print("[Engine] All remote scripts fetched\n", .{});
+            }
+        }
 
-            if (is_module) {
-                // Returns Promise (ignored here)
+        // ================================================================
+        // PHASE 2: Execute scripts in document order
+        // ================================================================
+        for (scripts, 0..) |script, i| {
+            const meta = metas[i];
+
+            // Get the code: either from buffers (remote/local file) or inline
+            const code: []const u8 = if (meta.inline_code) |ic| ic else if (buffers.results[i]) |buf| buf else {
+                // No code available (fetch failed or empty)
+                continue;
+            };
+            const filename = if (meta.filename.len > 0) meta.filename else continue;
+
+            // Set document.currentScript before execution
+            const global = self.ctx.getGlobalObject();
+            const doc_obj = self.ctx.getPropertyStr(global, "document");
+            self.ctx.freeValue(global);
+
+            if (meta.is_module) {
+                if (!self.ctx.isUndefined(doc_obj)) {
+                    _ = self.ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+                }
                 self.runModule(code, filename) catch |err| {
                     z.print("Module execution failed: {any}\n", .{err});
                 };
             } else {
-                // Classic Script
-                // We must use .global type
+                if (!self.ctx.isUndefined(doc_obj)) {
+                    const script_js = DOMBridge.wrapNode(self.ctx, z.elementToNode(script)) catch zqjs.NULL;
+                    _ = self.ctx.setPropertyStr(doc_obj, "currentScript", script_js) catch {};
+                }
+
                 const val = self.eval(code, filename, .global) catch |err| {
                     z.print("Script execution failed: {any}\n", .{err});
+                    if (!self.ctx.isUndefined(doc_obj)) {
+                        _ = self.ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+                    }
+                    self.ctx.freeValue(doc_obj);
                     continue;
                 };
                 self.ctx.freeValue(val);
+
+                if (!self.ctx.isUndefined(doc_obj)) {
+                    _ = self.ctx.setPropertyStr(doc_obj, "currentScript", zqjs.NULL) catch {};
+                }
             }
+            self.ctx.freeValue(doc_obj);
+            std.debug.print("[Engine] Script {d}/{d} done\n", .{ i + 1, scripts.len });
         }
-        // self.processJobs(); // force jobs after all scripts have been executed
+        std.debug.print("[Engine] All {d} scripts executed\n", .{scripts.len});
     }
 
     /// Scans the DOM for <link rel="stylesheet"> and loads them.
@@ -789,14 +964,38 @@ pub const ScriptEngine = struct {
             if (!std.mem.eql(u8, rel, "stylesheet")) continue;
 
             const href = z.getAttribute_zc(link_el, "href") orelse continue;
-            if (isRemote(href)) {
-                z.print("[Engine] Fetching remote CSS: {s}\n", .{href});
-                const remote_css = self.get(href) catch |err| {
-                    z.print("Failed to fetch CSS '{s}': {}\n", .{ href, err });
+            const href_is_remote = isRemote(href);
+            const base_is_remote = isRemote(base_dir);
+
+            if (href_is_remote or base_is_remote) {
+                var fetch_url: []const u8 = href;
+
+                // If href is relative, resolve it against the remote base_dir
+                if (!href_is_remote) {
+                    var parser = z.URLParser.create() catch continue;
+                    defer parser.destroy();
+
+                    var base_url = parser.parse(base_dir) catch continue;
+                    defer base_url.destroy();
+
+                    var target_url = parser.parseRelative(href, &base_url) catch continue;
+                    defer target_url.destroy();
+
+                    const resolved_str = target_url.toString(self.allocator) catch continue;
+                    path_owned = resolved_str;
+                    fetch_url = resolved_str;
+                }
+
+                z.print("[Engine] Fetching remote CSS: {s}\n", .{fetch_url});
+                const remote_css = self.get(fetch_url) catch |err| {
+                    z.print("Failed to fetch CSS '{s}': {}\n", .{ fetch_url, err });
                     continue;
                 };
 
-                std.debug.assert(remote_css.len > 0);
+                if (remote_css.len == 0) {
+                    self.allocator.free(remote_css);
+                    continue;
+                }
                 const safe_css = try self.allocator.dupeZ(u8, remote_css);
                 self.allocator.free(remote_css);
                 css_owned = safe_css;
@@ -824,7 +1023,7 @@ pub const ScriptEngine = struct {
         }
     }
 
-    /// TO BE REMOVED. NOT SAFE. Helper to fetch remote resources synchronously
+    /// Synchronous HTTP GET (still used for CSS loading)
     pub fn get(self: *ScriptEngine, url: []const u8) ![]u8 {
         var allocating = std.Io.Writer.Allocating.init(self.allocator);
         defer allocating.deinit();
@@ -874,4 +1073,99 @@ fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
     return FetchPayload{
         .url = try loop.allocator.dupe(u8, url_str),
     };
+}
+
+fn js_native_loadPage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+
+    // Extract the engine from the context backpack!
+    const engine_ptr = rc.engine_ptr orelse {
+        return qjs.JS_ThrowInternalError(ctx.ptr, "Fatal: ScriptEngine pointer lost");
+    };
+    const engine: *ScriptEngine = @ptrCast(@alignCast(engine_ptr));
+
+    if (argc < 1) return qjs.JS_ThrowTypeError(ctx.ptr, "loadPage requires an HTML string");
+
+    const html = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
+    defer ctx.freeZString(html);
+
+    // Extract options from argv[1] if provided
+    var base_dir_owned: ?[]u8 = null;
+    defer if (base_dir_owned) |b| engine.allocator.free(b);
+
+    var options = LoadPageOptions{
+        .sanitize = false,
+        .execute_scripts = true,
+        .load_stylesheets = true,
+    };
+
+    if (argc >= 2 and ctx.isObject(argv[1])) {
+        // base_dir: string — critical for resolving relative script src against remote URLs
+        const base_dir_val = ctx.getPropertyStr(argv[1], "base_dir");
+        defer ctx.freeValue(base_dir_val);
+        if (!ctx.isUndefined(base_dir_val)) {
+            if (ctx.toZString(base_dir_val)) |str| {
+                defer ctx.freeZString(str);
+                base_dir_owned = engine.allocator.dupe(u8, str) catch null;
+                if (base_dir_owned) |owned| {
+                    options.base_dir = owned;
+                }
+            } else |_| {}
+        }
+
+        // sanitize: bool
+        const sanitize_val = ctx.getPropertyStr(argv[1], "sanitize");
+        defer ctx.freeValue(sanitize_val);
+        if (!ctx.isUndefined(sanitize_val)) {
+            options.sanitize = qjs.JS_ToBool(ctx.ptr, sanitize_val) != 0;
+        }
+
+        // execute_scripts: bool
+        const exec_val = ctx.getPropertyStr(argv[1], "execute_scripts");
+        defer ctx.freeValue(exec_val);
+        if (!ctx.isUndefined(exec_val)) {
+            options.execute_scripts = qjs.JS_ToBool(ctx.ptr, exec_val) != 0;
+        }
+
+        // load_stylesheets: bool
+        const css_val = ctx.getPropertyStr(argv[1], "load_stylesheets");
+        defer ctx.freeValue(css_val);
+        if (!ctx.isUndefined(css_val)) {
+            options.load_stylesheets = qjs.JS_ToBool(ctx.ptr, css_val) != 0;
+        }
+    }
+
+    engine.loadPage(html, options) catch |err| {
+        std.debug.print("{any}\n", .{err});
+    };
+
+    return zqjs.UNDEFINED;
+}
+
+pub fn js_flush(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    _: c_int,
+    _: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    const rt = qjs.JS_GetRuntime(ctx_ptr);
+    var ctx_out: ?*qjs.JSContext = ctx_ptr;
+
+    // Drain all pending jobs (microtasks/promises)
+    var iterations: u32 = 0;
+    const max_iterations: u32 = 10000; // Safety limit
+    const deadline = std.time.milliTimestamp() + 5000; // 5s wall-clock limit
+
+    while (iterations < max_iterations) : (iterations += 1) {
+        const ret = qjs.JS_ExecutePendingJob(rt, &ctx_out);
+        if (ret <= 0) break; // No more jobs or error
+        // Check wall-clock timeout every 100 iterations
+        if (iterations % 100 == 0 and std.time.milliTimestamp() > deadline) {
+            std.debug.print("[flush] wall-clock timeout after {d} iterations\n", .{iterations});
+            break;
+        }
+    }
+
+    return zqjs.UNDEFINED;
 }

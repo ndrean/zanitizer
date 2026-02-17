@@ -11,7 +11,7 @@ const html_tags = @import("html_tags.zig");
 const HtmlTag = html_tags.HtmlTag;
 const Err = z.Err;
 
-const log = std.log.scoped(.serializer);
+const print = z.print;
 const testing = std.testing;
 
 const LXB_HTML_SERIALIZE_OPT_UNDEF: c_int = 0x00;
@@ -177,14 +177,11 @@ const ProcessCtx = struct {
     current_attribute: ?[]const u8 = null,
     expect_element_next: bool = false,
 
-    // New 0.15.2+ Writer Pattern
-    // We store a pointer to the Writer struct because the interface is intrusive
-    // and we must not copy it.
+    // 0.15.2+ Writer Pattern — store pointers, never copy the interface.
     file_writer: ?*std.fs.File.Writer = null,
+    stdout_writer: ?*std.fs.File.Writer = null,
 
-    pub fn init(
-        indent: usize,
-    ) @This() {
+    pub fn init(indent: usize) @This() {
         return .{
             .indent = indent,
             .opt = 0,
@@ -195,31 +192,32 @@ const ProcessCtx = struct {
             .current_attribute = null,
             .expect_element_next = false,
             .file_writer = null,
+            .stdout_writer = null,
         };
     }
 };
 
 /// [serializer] Prints the current node in a pretty format. No deallocation needed.
 ///
-/// The styling is defined in the "colours.zig" module.
-/// It defaults to print to the TTY with `z.print()`.
+/// Uses a buffered stdout writer for efficient output. ANSI colors for TTY.
 pub fn prettyPrint(allocator: std.mem.Allocator, node: *z.DomNode) !void {
     // First, apply aggressive minification for clean TTY display
     if (z.nodeToElement(node)) |element| {
-        z.minifyDOMForDisplay(allocator, element) catch {
-            // If minification fails, continue with original content
-        };
+        z.minifyDOMForDisplay(allocator, element) catch {};
     }
 
-    const result = prettyPrintOpt(
-        node,
-        defaultStyler,
-        ProcessCtx.init(0),
-    );
+    var stdout_buffer: [4096]u8 = undefined;
+    var sw = std.fs.File.stdout().writer(&stdout_buffer);
+
+    var ctx = ProcessCtx.init(0);
+    ctx.stdout_writer = &sw;
+
+    const result = prettyPrintOpt(node, defaultStyler, ctx);
+    sw.interface.flush() catch {};
+
     if (result != z._OK) {
         return Err.SerializeFailed;
     }
-    return;
 }
 
 fn prettyPrintOpt(
@@ -239,6 +237,8 @@ fn prettyPrintOpt(
 
 /// [serializer] Saves the DOM structure to a clean HTML file.
 /// Fast path: no tag parsing or style lookups, just writes bytes directly.
+///
+/// Buffered printer.
 pub fn printDOM(_: std.mem.Allocator, doc: *z.HTMLDocument, filename: []const u8) !void {
     var file = try std.fs.cwd().createFile(filename, .{});
     defer file.close();
@@ -296,10 +296,9 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
     const text = data[0..len];
     if (z.isWhitespaceOnlyText(text)) {
         if (ctx_ptr.file_writer) |fw| {
-            // New IO Interface access
             fw.interface.print("{s}", .{text}) catch {};
-        } else {
-            log.info("{s}", .{text});
+        } else if (ctx_ptr.stdout_writer) |sw| {
+            sw.interface.print("{s}", .{text}) catch {};
         }
         return 0;
     }
@@ -410,11 +409,11 @@ fn defaultStyler(data: [*:0]const u8, len: usize, context: ?*anyopaque) callconv
 
 fn applyStyle(ctx: *ProcessCtx, style: []const u8, text: []const u8) void {
     if (ctx.file_writer) |fw| {
-        // FILE MODE: Use the intrusive interface to print cleanly
+        // FILE MODE: plain text, no colors
         fw.interface.print("{s}", .{text}) catch {};
-    } else {
-        // TTY MODE: Print with ANSI colors
-        log.info("{s}{s}{s}", .{ style, text, z.Style.RESET });
+    } else if (ctx.stdout_writer) |sw| {
+        // TTY MODE: ANSI colors, buffered
+        sw.interface.print("{s}{s}{s}", .{ style, text, z.Style.RESET }) catch {};
     }
 }
 
@@ -437,7 +436,7 @@ fn walkTree(node: *z.DomNode, depth: u8) void {
             5 => "          ",
             else => "            ",
         };
-        log.debug("{s}{s}{s}{s}\n", .{ indent, ansi_colour, name, ansi_reset });
+        print("{s}{s}{s}{s}\n", .{ indent, ansi_colour, name, ansi_reset });
 
         walkTree(child.?, depth + 1);
         child = z.nextSibling(child.?);

@@ -93,7 +93,9 @@ pub fn getElementsByClassName(allocator: std.mem.Allocator, doc: *z.HTMLDocument
 /// Find elements by tag name (like document.getElementsByTagName)
 /// Returns owned slice - caller must free with allocator.free(result)
 pub fn getElementsByTagName(allocator: std.mem.Allocator, doc: *z.HTMLDocument, tag_name: []const u8) ![]const *z.HTMLElement {
-    const root = z.bodyElement(doc) orelse return &[_]*z.HTMLElement{};
+    // Search from document root (<html>), not <body>, so <head> and its children are found too
+    const root_node = z.documentRoot(doc) orelse return &[_]*z.HTMLElement{};
+    const root = z.nodeToElement(root_node) orelse return &[_]*z.HTMLElement{};
 
     const TagContext = struct {
         allocator: std.mem.Allocator,

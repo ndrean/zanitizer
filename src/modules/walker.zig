@@ -60,13 +60,56 @@ extern "c" fn lxb_dom_node_simple_walk(
     ctx: ?*anyopaque,
 ) void;
 
-/// [walker] Traverse the DOM
+/// [walker] Traverse the DOM (safe Zig re-implementation with cycle guard)
+/// Mirrors lxb_dom_node_simple_walk but adds a max-iteration limit to prevent
+/// infinite loops when DOM tree pointers are corrupted by JS-driven mutations.
 pub fn simpleWalk(
     root: *z.DomNode,
     callback: *const fn (*z.DomNode, ?*anyopaque) callconv(.c) c_int,
     ctx: ?*anyopaque,
 ) void {
-    lxb_dom_node_simple_walk(root, callback, ctx);
+    const max_iterations: usize = 500_000;
+    var iterations: usize = 0;
+    var node: ?*z.DomNode = z.firstChild(root);
+
+    while (node) |n| {
+        iterations += 1;
+        if (iterations > max_iterations) {
+            std.debug.print("[walker] SAFETY LIMIT: {d} iterations on simpleWalk, aborting (DOM too large or corrupted)\n", .{max_iterations});
+            return;
+        }
+
+        const action = callback(n, ctx);
+        if (action == z._STOP) return;
+
+        // LEXBOR_ACTION_NEXT (2) = skip children. Our callbacks only return
+        // _CONTINUE (0) or _STOP (1), so check action != 2 for completeness.
+        if (z.firstChild(n) != null and action != 2) {
+            node = z.firstChild(n);
+        } else {
+            // Go up until we find a node with a next sibling (or hit root)
+            var current: *z.DomNode = n;
+            while (current != root and z.nextSibling(current) == null) {
+                current = z.parentNode(current) orelse return; // null parent = bail
+            }
+            if (current == root) return;
+            node = z.nextSibling(current);
+        }
+    }
+}
+
+/// [walker] Count total nodes in a subtree (for diagnostics)
+pub fn countNodes(root: *z.DomNode) usize {
+    var count: usize = 0;
+    const counter = struct {
+        fn cb(_: *z.DomNode, ctx: ?*anyopaque) callconv(.c) c_int {
+            const c: *usize = @ptrCast(@alignCast(ctx.?));
+            c.* += 1;
+            return z._CONTINUE;
+        }
+    }.cb;
+    simpleWalk(root, counter, @ptrCast(&count));
+    return count;
 }
 
 /// Helper to convert "aligned" `anyopaque` to the target pointer type `T`

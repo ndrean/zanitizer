@@ -1,7 +1,9 @@
 console.log("[Main] Spawning Worker...");
 
 // setup the worker task
-const w = new Worker("test-worker_worker-task.js", { type: "module" });
+const w = new Worker("test-worker_worker-task.js", {
+  type: "module",
+});
 
 w.onerror = (e) => {
   console.log(`[Main] 💥 WORKER ERROR CAUGHT: "${e.message}"`);

@@ -26,11 +26,11 @@ fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     defer engine.deinit();
 
-    z.print("\n=== JS-framework-Vue3 -----------------------------\n\n", .{});
+    z.print("\n=== JS-framework-React-Hooks -----------------------------\n\n", .{});
 
     const start = std.time.nanoTimestamp();
 
-    const html = @embedFile("js-bench-vue.html");
+    const html = @embedFile("js-bench-react-h.html");
 
     try engine.loadHTML(html);
     try engine.executeScripts(allocator, ".");

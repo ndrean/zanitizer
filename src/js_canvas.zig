@@ -2,12 +2,12 @@ const std = @import("std");
 const z = @import("root.zig");
 const qjs = z.qjs;
 const zqjs = z.wrapper;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+const RuntimeContext = z.RuntimeContext;
+const DOMBridge = z.DOMBridge;
 const BlobObject = @import("js_blob.zig").BlobObject;
 const css_color = @import("css_color.zig");
-const js_utils = @import("js_utils.zig");
-const js_image = @import("js_image.zig");
+const js_utils = z.js_utils;
+const js_image = z.js_image;
 const Font = @import("font.zig").Font;
 
 // stb_image_write C bindings - manual declaration since stbi_write_png_to_mem

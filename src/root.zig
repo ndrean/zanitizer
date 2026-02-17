@@ -3,53 +3,90 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// =======================================================================
+// === ThorVG bindings
+// =======================================================================
+
+pub const thorvg = @import("thorvg.zig");
 // NanoSVG — extern struct to access width/height without C shim
 pub const NSVGimage = extern struct {
     width: f32,
     height: f32,
     shapes: ?*anyopaque, // NSVGshape linked list (opaque — we only read dimensions)
 };
+
 pub const NSVGrasterizer = opaque {};
+
 // ============================================================================
-// QuickJS-ng bindings
+// === QuickJS-ng bindings
 // ============================================================================
 pub const qjs = @cImport({
     @cInclude("quickjs.h");
 });
 
 pub const MAX_WORKERS = 8;
-
-pub const curl = @import("curl");
-const curl_multi = @import("curl_multi.zig");
-pub const hardenEasy = curl_multi.hardenEasy;
-pub const isBlockedUrl = curl_multi.isBlockedUrl;
 pub const FETCH_TIMEOUT_MS = curl_multi.FETCH_TIMEOUT_MS;
 pub const FETCH_CONNECT_TIMEOUT_MS = curl_multi.FETCH_CONNECT_TIMEOUT_MS;
 pub const FETCH_MAX_REDIRECTS = curl_multi.FETCH_MAX_REDIRECTS;
 pub const FETCH_MAX_RESPONSE_SIZE = curl_multi.FETCH_MAX_RESPONSE_SIZE;
+
+pub const curl = @import("curl");
+pub const curl_multi = @import("curl_multi.zig");
+pub const hardenEasy = curl_multi.hardenEasy;
+pub const isBlockedUrl = curl_multi.isBlockedUrl;
 // Import wrapper for cleaner QuickJS API
 pub const wrapper = @import("wrapper.zig");
 pub const dom_bridge = @import("dom_bridge.zig");
-// DOM class ID for QuickJS opaque object wrapping
-// Initialized by DOMBridge.init(), used by generated bindings
-// Note: This is a pointer to the actual var in dom_bridge.zig
-// Access with z.dom_class_id.* in generated code
-// pub const dom_class_id = &dom_bridge.dom_class_id;
-// Mailbox for inter-thread communication (Worker pattern)
-pub const Mailbox = @import("mailbox.zig").Mailbox;
-pub const events = @import("js_events.zig");
-pub const js_marshall = @import("js_marshall.zig");
-pub const js_canvas = @import("js_canvas.zig");
-pub const js_blob = @import("js_blob.zig");
-pub const js_image = @import("js_image.zig");
-pub const js_security = @import("js_security.zig");
-
-// Exports for examples
+pub const DOMBridge = dom_bridge.DOMBridge;
+pub const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+pub const EventLoop = @import("event_loop.zig").EventLoop;
 pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;
 pub const LoadPageOptions = @import("script_engine.zig").LoadPageOptions;
+pub const JSWorker = @import("js_worker.zig");
+pub const FetchBridge = @import("js_fetch.zig").FetchBridge;
+pub const AsyncBridge = @import("async_bridge.zig");
+pub const FormDataBridge = @import("js_formData.zig").FormDataBridge;
+pub const FSBridge = @import("js_fs.zig").FSBridge;
+pub const sanitizer_mod = @import("modules/sanitizer.zig");
+
+pub const Mailbox = @import("mailbox.zig").Mailbox;
+pub const bindings = @import("bindings_generated.zig");
+pub const async_bridge = @import("async_bridge.zig");
+pub const events = @import("js_events.zig");
+pub const js_marshall = @import("js_marshall.zig");
+pub const js_security = @import("js_security.zig");
+pub const js_worker = @import("js_worker.zig");
+pub const js_utils = @import("js_utils.zig");
+pub const js_fetch_easy = @import("js_fetch_easy.zig");
+pub const js_console = @import("js_console.zig");
+pub const js_DocFragment = @import("js_DocFragment.zig");
+pub const js_DOMParser = @import("js_DomParser.zig");
+pub const js_style = @import("js_CSSStyleDeclaration.zig");
+pub const js_classList = @import("js_classList.zig");
+pub const js_dataset = @import("js_dataset.zig");
+pub const js_url = @import("js_url.zig");
+pub const js_headers = @import("js_headers.zig");
+pub const js_events = @import("js_events.zig");
+pub const js_blob = @import("js_blob.zig");
+pub const js_file = @import("js_File.zig");
+pub const js_formData = @import("js_formData.zig");
+pub const js_polyfills = @import("js_polyfills.zig");
+pub const js_filelist = @import("js_filelist.zig");
+pub const js_file_reader_sync = @import("js_file_reader_sync.zig");
+pub const js_file_reader = @import("js_file_reader.zig");
+pub const js_text_encoding = @import("js_text_encoding.zig");
+pub const js_readable_stream = @import("js_readable_stream.zig");
+pub const js_writable_stream = @import("js_writable_stream.zig");
+pub const js_range = @import("js_range.zig");
+pub const js_tree_walker = @import("js_tree_walker.zig");
+pub const js_XMLSerializer = @import("js_XMLSerializer.zig");
+pub const js_canvas = @import("js_canvas.zig");
+pub const js_image = @import("js_image_thorvg.zig");
+pub const js_pdf = @import("js_pdf.zig");
+
 pub const native_bridge = @import("js_native_bridge.zig");
+// TODO : remove js_httpbin
 pub const js_httpbin = @import("js_httpbin.zig");
-pub const runtime_context = @import("runtime_context.zig");
 
 // Event handling functions: implemented in dom_bridge.zig
 pub const addEventListener = dom_bridge.addEventListener;
@@ -79,7 +116,7 @@ pub fn isFunction(ctx: ?*qjs.JSContext, val: qjs.JSValue) bool {
 }
 
 // ======================================================================
-// Lexbor core modules
+// === Lexbor core modules
 // ======================================================================
 const lxb = @import("modules/core.zig");
 const css = @import("modules/css_selectors.zig");
@@ -107,12 +144,9 @@ const styles = @import("modules/styles.zig");
 const url_mod = @import("modules/url.zig");
 const encoding = @import("modules/encoding.zig");
 
-// ================================================================================
-
 // Re-export commonly used types
 pub const Err = @import("errors.zig").LexborError;
 
-//===================================================================================
 // General Status codes & constants & definitions
 
 pub const _CONTINUE: c_int = 0;
@@ -151,7 +185,6 @@ pub const lexbor_str_t = extern struct {
 // Opaque lexbor structs
 
 pub const DomDocument = opaque {};
-// pub const HTMLDocument = opaque {};
 pub const HTMLDocument = opaque {
     // treat HTMLDocument as a DomDocument (lxb_dom_document_t is the first member of lxb_html_document_t)
     pub inline fn asDom(self: *HTMLDocument) *DomDocument {
@@ -165,7 +198,6 @@ pub const DocumentFragment = opaque {};
 pub const HTMLTemplateElement = opaque {};
 pub const DomAttr = opaque {};
 pub const DomCollection = opaque {};
-
 pub const HtmlParser = opaque {};
 
 pub const CssParser = opaque {};
@@ -185,8 +217,6 @@ pub const CssRuleDeclaration = opaque {};
 pub const CssRuleDeclarationList = opaque {};
 pub const HtmlStyleElement = opaque {};
 // lxb_html_style_element_t
-
-//==============================================================================================
 
 pub const createDocument = lxb.createDocument;
 pub const destroyDocument = lxb.destroyDocument;
@@ -620,6 +650,7 @@ pub const getElementsByAttributeName = search.getElementsByAttributeName;
 // Walker Search traversal functions
 
 pub const simpleWalk = walker.simpleWalk;
+pub const countNodes = walker.countNodes;
 pub const castContext = walker.castContext;
 pub const genProcessAll = walker.genProcessAll;
 pub const genSearchElement = walker.genSearchElement;
@@ -659,8 +690,9 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     return allocating.toOwnedSlice();
 }
 
-// Use std.log.debug — zero overhead for unprinted messages (comptime).
-// Default log level by build mode:
-//   Debug => .debug (prints), ReleaseSafe => .info, ReleaseFast/Small => .err
-// Override in root file via: pub const std_options = .{ .log_level = .info };
-pub const print = std.log.debug;
+/// Write directly to stdout (unbuffered). Use for program output
+/// (console.log, prettyPrint, etc). For debug diagnostics, use std.debug.print.
+pub fn print(comptime fmt: []const u8, args: anytype) void {
+    var w = std.fs.File.stdout().writer(&.{});
+    w.interface.print(fmt, args) catch {};
+}

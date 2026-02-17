@@ -56,79 +56,174 @@ pub fn main() !void {
     defer allocator.free(sandbox_root);
 
     setupSignalHandler();
-    try elTest(allocator, sandbox_root);
-    // try js_framework_2_bench(allocator, sandbox_root);
-    try timersAndEncoding(allocator, sandbox_root);
-    try test_FileReaderSync(allocator, sandbox_root);
-    try test_FormData_Upload(allocator, sandbox_root);
-    try uploadFile(allocator, sandbox_root);
-    // try testBlobFetch(allocator, sandbox_root);
-    try testBlobURLs(allocator, sandbox_root);
-    try classList(allocator, sandbox_root);
-    try async_Fetch_Blob(allocator, sandbox_root);
-    try test_FileReader(allocator, sandbox_root);
-    try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
-    try async_Script_and_pass_to_Zig(allocator, sandbox_root);
-    try async_Fetch_API_Demo(allocator, sandbox_root);
-    // try async_CSV_JSON_Parser(allocator, sandbox_root);
-    // try async_CSV_Tuple_Parser(allocator, sandbox_root);
-    try nativeBridge(allocator, sandbox_root);
-    try returnNativeBridge(allocator, sandbox_root);
-    // try mock_class(allocator, sandbox_root);
-    try urlObject(allocator, sandbox_root);
-    try inline_crud_css_js(allocator, sandbox_root);
-    try stylesheet_txt(allocator, sandbox_root);
-    try stylesheet_style_tag(allocator, sandbox_root);
-    try link_and_script(allocator, sandbox_root);
+    // try vercel(allocator, sandbox_root);
+    try preview_vercel(allocator, sandbox_root);
+    // try elTest(allocator, sandbox_root);
+    // // try js_framework_2_bench(allocator, sandbox_root);
+    // try timersAndEncoding(allocator, sandbox_root);
+    // try test_FileReaderSync(allocator, sandbox_root);
+    // try test_FormData_Upload(allocator, sandbox_root);
+    // try uploadFile(allocator, sandbox_root);
+    // // try testBlobFetch(allocator, sandbox_root);
+    // try testBlobURLs(allocator, sandbox_root);
+    // try classList(allocator, sandbox_root);
+    // try async_Fetch_Blob(allocator, sandbox_root);
+    // try test_FileReader(allocator, sandbox_root);
+    // try execute_async_Script_in_HTML_And_pass_To_Zig(allocator, sandbox_root);
+    // try async_Script_and_pass_to_Zig(allocator, sandbox_root);
+    // try async_Fetch_API_Demo(allocator, sandbox_root);
+    // // try async_CSV_JSON_Parser(allocator, sandbox_root);
+    // // try async_CSV_Tuple_Parser(allocator, sandbox_root);
+    // try nativeBridge(allocator, sandbox_root);
+    // try returnNativeBridge(allocator, sandbox_root);
+    // // try mock_class(allocator, sandbox_root);
+    // try urlObject(allocator, sandbox_root);
+    // try inline_crud_css_js(allocator, sandbox_root);
+    // try stylesheet_txt(allocator, sandbox_root);
+    // try stylesheet_style_tag(allocator, sandbox_root);
+    // try link_and_script(allocator, sandbox_root);
 
-    try extractScript(allocator, sandbox_root);
+    // try extractScript(allocator, sandbox_root);
 
-    try simpleESM(allocator, sandbox_root);
-    try cdnImport(allocator, sandbox_root);
-    // try importModule(allocator);
-    // try js_framework_1_bench(allocator);
-    // try js_framework_3_bench(allocator);
-    // try bench(allocator, sandbox_root);
+    // try simpleESM(allocator, sandbox_root);
+    // try cdnImport(allocator, sandbox_root);
+    // // try importModule(allocator);
+    // // try js_framework_1_bench(allocator);
+    // // try js_framework_3_bench(allocator);
+    // // try bench(allocator, sandbox_root);
 
-    try eventListeners(allocator, sandbox_root);
+    // try eventListeners(allocator, sandbox_root);
 
-    try textContentSetter(allocator, sandbox_root);
-    // try fullCycle(allocator);
-    // // try customPointClass(allocator);
-    // // try demoPoint2Class(allocator);
-    try domParser(allocator, sandbox_root);
-    // try buildDOM(allocator);
+    // try textContentSetter(allocator, sandbox_root);
+    // // try fullCycle(allocator);
+    // // // try customPointClass(allocator);
+    // // // try demoPoint2Class(allocator);
+    // try domParser(allocator, sandbox_root);
+    // // try buildDOM(allocator);
 
-    // try eventListener(allocator);
-    // // try performance2(allocator);
-    // // // try demoCustomPointClass(allocator);
-    // // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
-    // try first_QuickJS_test(allocator);
-    // try getValueFromQJSinZig(allocator);
+    // // try eventListener(allocator);
+    // // // try performance2(allocator);
+    // // // // try demoCustomPointClass(allocator);
+    // // // // try demoPoint2Class(allocator); // TODO: Fix ClassBuilder segfault
+    // // try first_QuickJS_test(allocator);
+    // // try getValueFromQJSinZig(allocator);
 
-    // try test_event_loop(allocator);
-    try promise_scope(allocator, sandbox_root);
-    // try async_task_sequence_AB(allocator);
-    try async_task_sequence_ABCDEFGH(allocator, sandbox_root);
-    // try execute_Simple_Script_In_HTML(allocator);
-    // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
-    // try firstJSONPass(allocator);
-    // try simplifiedJSONPass(allocator);
-    // try JS_Proxy_And_Generators(allocator);
+    // // try test_event_loop(allocator);
+    // try promise_scope(allocator, sandbox_root);
+    // // try async_task_sequence_AB(allocator);
+    // try async_task_sequence_ABCDEFGH(allocator, sandbox_root);
+    // // try execute_Simple_Script_In_HTML(allocator);
+    // // try execute_Passing_Binary_Data_from_Zig_to_JS_Async(allocator);
+    // // try firstJSONPass(allocator);
+    // // try simplifiedJSONPass(allocator);
+    // // try JS_Proxy_And_Generators(allocator);
 
-    try demoWorker(allocator, sandbox_root);
+    // try demoWorker(allocator, sandbox_root);
 
-    // // lexb =====
+    // // // lexb =====
 
-    try simpleParsingsMethods(allocator, sandbox_root);
-    // try demoNormalizer(allocator);
-    try demoTemplate(allocator);
-    try demoParserReUse(allocator);
-    try demoStreamParser(allocator);
-    try demoInsertAdjacentElement(allocator);
-    try demoInsertAdjacentHTML(allocator);
-    try demoSetInnerHTML(allocator);
-    // try demoSuspiciousAttributes(allocator);
+    // try simpleParsingsMethods(allocator, sandbox_root);
+    // // try demoNormalizer(allocator);
+    // try demoTemplate(allocator);
+    // try demoParserReUse(allocator);
+    // try demoStreamParser(allocator);
+    // try demoInsertAdjacentElement(allocator);
+    // try demoInsertAdjacentHTML(allocator);
+    // try demoSetInnerHTML(allocator);
+    // // try demoSuspiciousAttributes(allocator);
+}
+
+fn vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const script =
+        \\async function testVercel() {
+        \\  try {
+        \\      await zexplorer.goto("https://demo.vercel.store");
+        // \\      __flush();
+        \\      await zexplorer.waitForSelector("a[href^='/product/']");
+        \\      const links = document.querySelectorAll("a[href^='/product/']");
+        \\      const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
+        \\      const items = unique.map(href => {
+        \\        const el = document.querySelector(`a[href='${href}']`);
+        \\        return el.textContent.trim();
+        \\      });
+        \\      console.log(items);
+        \\      return items;
+        \\  } catch (err) {
+        \\      console.error(err);
+        \\  }
+        \\}
+    ;
+
+    const val = try engine.eval(script, "test_vercel.js", .global);
+    defer engine.ctx.freeValue(val);
+
+    const items = try engine.evalAsyncAs(
+        allocator,
+        []const []const u8,
+        "testVercel()",
+        "<vercel>",
+    );
+    defer {
+        for (items) |item| allocator.free(item);
+        allocator.free(items);
+    }
+
+    // Join with newlines for file output
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(allocator);
+    for (items) |item| {
+        try buf.appendSlice(allocator, item);
+        try buf.append(allocator, '\n');
+    }
+
+    try std.fs.cwd().writeFile(
+        .{
+            .sub_path = "vercel_data.txt",
+            .data = buf.items,
+        },
+    );
+}
+
+fn preview_vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    // /s/LCkidJ7x0
+    const script =
+        \\async function testVercel() {
+        \\  try {
+        \\      await zexplorer.goto("https://next-preview.vercel.app");
+        \\      console.log(document.body.innerHTML);
+        \\      return document.body.innerHTML;
+        \\
+        // \\      await zexplorer.waitForSelector("[data-slate-string]", 5000);
+        // \\      const results = document.querySelectorAll("[data-slate-string]");
+        // \\      const result =  [...results].map((node) => node.textContent).filter((txt) => txt.includes("x-vercel-id"));
+        // \\      console.log(result);
+        // \\      return result;
+        \\  } catch (err) {
+        \\      console.error(err);
+        \\  }
+        \\}
+    ;
+    const val = try engine.eval(script, "test_vercel.js", .global);
+    defer engine.ctx.freeValue(val);
+
+    const lines = try engine.evalAsyncAs(
+        allocator,
+        []const u8,
+        "testVercel()",
+        "<vercel>",
+    );
+    // defer {
+    //     for (lines) |line| allocator.free(line);
+    //     allocator.free(lines);
+    // }
+    // for (lines) |line|
+    std.debug.print("{s}\n", .{lines});
 }
 
 fn elTest(allocator: std.mem.Allocator, sbx: []const u8) !void {

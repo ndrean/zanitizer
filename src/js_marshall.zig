@@ -54,6 +54,22 @@ pub fn jsToZig(allocator: std.mem.Allocator, ctx: w.Context, val: w.Value, compt
                 defer ctx.freeCString(str);
                 return allocator.dupe(u8, std.mem.span(str));
             }
+            // Slice of non-u8: marshal JS array → []const Child
+            if (ptr_info.size == .slice) {
+                if (!ctx.isArray(val)) return error.ExpectedArray;
+                const len_val = ctx.getPropertyStr(val, "length");
+                defer ctx.freeValue(len_val);
+                var len_i32: i32 = 0;
+                if (qjs.JS_ToInt32(ctx.ptr, &len_i32, len_val) != 0) return error.JsConversionFailed;
+                const len: u32 = @intCast(len_i32);
+                const items = try allocator.alloc(ptr_info.child, len);
+                for (0..len) |i| {
+                    const elem = ctx.getPropertyUint32(val, @intCast(i));
+                    defer ctx.freeValue(elem);
+                    items[i] = try jsToZig(allocator, ctx, elem, ptr_info.child);
+                }
+                return items;
+            }
             return error.UnsupportedPointerType;
         },
         .@"struct" => {

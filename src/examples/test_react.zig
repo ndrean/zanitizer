@@ -17,6 +17,7 @@ pub fn main() !void {
 
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
+    z.print("run `bun build_react_app.js` from the folder src/examples/zexp-frams\n", .{});
 
     try run_test(gpa, sandbox_root);
 }

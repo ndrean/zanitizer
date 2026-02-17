@@ -22,7 +22,7 @@ pub fn main() !void {
 }
 
 fn bench(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    z.print("\n=== JS-simple-bench --------------------------------\n\n", .{});
+    z.print("\n=== JS-simple-bench ---------------------------\n\n", .{});
 
     const values = [_]u32{ 100, 1000, 10000, 20000, 50000 };
 

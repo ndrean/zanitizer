@@ -390,6 +390,17 @@ pub const Runtime = struct {
                 std.debug.print("[QuickJS] ⚠️  Unhandled Promise Rejection (Unknown Reason)\n", .{});
             }
 
+            // Print stack trace if reason is an Error object
+            const stack = qjs.JS_GetPropertyStr(ctx, reason, "stack");
+            if (stack.tag != qjs.JS_TAG_UNDEFINED) {
+                const stack_str = qjs.JS_ToCString(ctx, stack);
+                if (stack_str) |s| {
+                    std.debug.print("{s}\n", .{s});
+                    qjs.JS_FreeCString(ctx, s);
+                }
+            }
+            qjs.JS_FreeValue(ctx, stack);
+
             qjs.JS_FreeValue(ctx, val_str);
         }
     }

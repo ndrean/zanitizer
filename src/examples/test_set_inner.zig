@@ -34,7 +34,7 @@ fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
         z.print("Run error: {}\n", .{err});
         return err;
     };
-    const root = z.getElementById(engine.dom.doc, "test");
 
+    const root = z.getElementById(engine.dom.doc, "test");
     try z.prettyPrint(gpa, z.elementToNode(root.?));
 }

@@ -157,21 +157,29 @@ pub const CssSelectorEngine = struct {
         const root_node = try toNode(root);
         const list = try self.getSelector(selector);
 
-        var ctx = FirstContext{ .result = null };
+        // Use safe simpleWalk (iteration-limited) + per-node match
+        // instead of lxb_selectors_find which traverses the DOM internally
+        // and hangs on corrupted trees with circular pointers.
+        const SafeFirstCtx = struct {
+            result: ?*z.HTMLElement = null,
+            selectors: *z.CssSelectors,
+            list: *z.CssSelectorList,
 
-        // Special handling for DocumentFragment: lexbor doesn't descend into fragment children
-        if (z.nodeType(root_node) == .document_fragment) {
-            var child = z.firstChild(root_node);
-            while (child) |c| : (child = z.nextSibling(c)) {
-                if (z.isTypeElement(c)) {
-                    _ = lxb_selectors_find(self.selectors, c, list, findFirstCb, &ctx);
-                    if (ctx.result != null) break; // Found first match
+            fn walkCb(node: *z.DomNode, ctx_ptr: ?*anyopaque) callconv(.c) c_int {
+                if (!z.isTypeElement(node)) return z._CONTINUE;
+                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr.?));
+                var matched = false;
+                _ = lxb_selectors_match_node(ctx.selectors, node, ctx.list, matchCb, &matched);
+                if (matched) {
+                    ctx.result = z.nodeToElement(node);
+                    return z._STOP;
                 }
+                return z._CONTINUE;
             }
-        } else {
-            const status = lxb_selectors_find(self.selectors, root_node, list, findFirstCb, &ctx);
-            if (status != z._OK and ctx.result == null) return error.SelectorFindError;
-        }
+        };
+
+        var ctx = SafeFirstCtx{ .selectors = self.selectors, .list = list };
+        z.simpleWalk(root_node, SafeFirstCtx.walkCb, @ptrCast(&ctx));
         return ctx.result;
     }
 
@@ -180,23 +188,30 @@ pub const CssSelectorEngine = struct {
         const root_node = try toNode(root);
         const list = try self.getSelector(selector);
 
-        var ctx = AllContext.init(self.allocator);
-        defer ctx.deinit();
+        // Use safe simpleWalk (iteration-limited) + per-node match
+        // instead of lxb_selectors_find which hangs on corrupted trees.
+        const SafeAllCtx = struct {
+            results: std.ArrayListUnmanaged(*z.HTMLElement) = .{},
+            allocator: std.mem.Allocator,
+            selectors: *z.CssSelectors,
+            list: *z.CssSelectorList,
 
-        // Special handling for DocumentFragment: lexbor doesn't descend into fragment children
-        // So we manually iterate through each element child and run the selector on it
-        if (z.nodeType(root_node) == .document_fragment) {
-            var child = z.firstChild(root_node);
-            while (child) |c| : (child = z.nextSibling(c)) {
-                if (z.isTypeElement(c)) {
-                    // Search within this element subtree
-                    _ = lxb_selectors_find(self.selectors, c, list, findAllCb, &ctx);
+            fn walkCb(node: *z.DomNode, ctx_ptr: ?*anyopaque) callconv(.c) c_int {
+                if (!z.isTypeElement(node)) return z._CONTINUE;
+                const ctx: *@This() = @ptrCast(@alignCast(ctx_ptr.?));
+                var matched = false;
+                _ = lxb_selectors_match_node(ctx.selectors, node, ctx.list, matchCb, &matched);
+                if (matched) {
+                    if (z.nodeToElement(node)) |el| {
+                        ctx.results.append(ctx.allocator, el) catch {};
+                    }
                 }
+                return z._CONTINUE;
             }
-        } else {
-            const status = lxb_selectors_find(self.selectors, root_node, list, findAllCb, &ctx);
-            if (status != z._OK) return error.SelectorFindError;
-        }
+        };
+
+        var ctx = SafeAllCtx{ .allocator = self.allocator, .selectors = self.selectors, .list = list };
+        z.simpleWalk(root_node, SafeAllCtx.walkCb, @ptrCast(&ctx));
         return ctx.results.toOwnedSlice(self.allocator);
     }
 

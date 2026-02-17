@@ -59,6 +59,41 @@ fn setEndAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: 
     return zqjs.UNDEFINED;
 }
 
+fn selectNodeContents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const self = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
+
+    const node = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument 1 must be a Node");
+
+    // selectNodeContents(node) sets the range to span all children of node
+    self.common_parent = node;
+    self.start_node = z.firstChild(node);
+    self.end_node = null; // null = end of children
+
+    return zqjs.UNDEFINED;
+}
+
+fn insertNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(ctx);
+    const self = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
+
+    const new_node = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument 1 must be a Node");
+    const parent = self.common_parent orelse return zqjs.UNDEFINED;
+
+    // insertNode inserts at the start of the range
+    if (self.start_node) |ref_node| {
+        // Insert before the start node (lexbor: insertBefore(reference, new))
+        z.insertBefore(ref_node, new_node);
+    } else {
+        // No start node = empty range or range covers all children; append
+        z.appendChild(parent, new_node);
+    }
+
+    return zqjs.UNDEFINED;
+}
+
 fn deleteContents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const rc = RuntimeContext.get(zqjs.Context{ .ptr = ctx_ptr });
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -136,6 +171,8 @@ pub const RangeBridge = struct {
 
         try ctx.setPropertyStr(proto, "setStartBefore", ctx.newCFunction(setStartBefore, "setStartBefore", 1));
         try ctx.setPropertyStr(proto, "setEndAfter", ctx.newCFunction(setEndAfter, "setEndAfter", 1));
+        try ctx.setPropertyStr(proto, "selectNodeContents", ctx.newCFunction(selectNodeContents, "selectNodeContents", 1));
+        try ctx.setPropertyStr(proto, "insertNode", ctx.newCFunction(insertNode, "insertNode", 1));
         try ctx.setPropertyStr(proto, "deleteContents", ctx.newCFunction(deleteContents, "deleteContents", 0));
 
         const ctor = ctx.newCFunction2(js_Range_constructor, "Range", 0, qjs.JS_CFUNC_constructor, 0);

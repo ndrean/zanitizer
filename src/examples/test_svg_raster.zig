@@ -14,6 +14,7 @@ extern fn stbi_write_png_to_mem(
 ) ?[*]u8;
 
 const opengraph_svg = @embedFile("test_opengraph-me.svg");
+const opengraph_text_svg = @embedFile("test_opengraph-text.svg");
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -38,6 +39,7 @@ pub fn main() !void {
     try testSvgBlobFromJS(gpa, sandbox_root);
     try testReadSvgBlobFromJS(gpa, sandbox_root);
     try testSvgTemplateFromJS(gpa, sandbox_root);
+    try testSvgNativeText(gpa);
 
     std.debug.print("\nAll SVG raster tests passed.\n", .{});
 }
@@ -353,4 +355,31 @@ fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
         },
     );
     std.debug.print("  [8] Saved 'svg_template_opengraph.png' ({d} bytes) — SVG template + dynamic text\n", .{png_bytes.len});
+}
+
+/// Test 9: Native SVG <text> rendering via ThorVG (nanosvg cannot render <text> elements)
+fn testSvgNativeText(allocator: std.mem.Allocator) !void {
+    const img = try z.js_image.Image.initFromMemory(allocator, opengraph_text_svg);
+    defer img.deinit();
+
+    z.print("  [9] Native SVG text: {d}x{d} (channels={d})\n", .{ img.width, img.height, img.channels });
+    std.debug.assert(img.width >= 1200);
+    std.debug.assert(img.height >= 630);
+    std.debug.assert(img.channels == 4);
+
+    // Encode to PNG and save
+    var out_len: c_int = 0;
+    const png_ptr = stbi_write_png_to_mem(
+        img.pixels,
+        0,
+        img.width,
+        img.height,
+        4,
+        &out_len,
+    ) orelse return error.PngEncodeFailed;
+    const png_bytes = png_ptr[0..@intCast(out_len)];
+    defer std.c.free(png_ptr);
+
+    try std.fs.cwd().writeFile(.{ .sub_path = "svg_native_text.png", .data = png_bytes });
+    std.debug.print("  [9] Saved 'svg_native_text.png' ({d} bytes) — ThorVG native <text> rendering\n", .{png_bytes.len});
 }

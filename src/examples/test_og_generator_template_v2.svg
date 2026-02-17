@@ -1,0 +1,17 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="hole">
+        <rect width="1200" height="630" fill="white" />
+        <circle cx="175" cy="175" r="75" fill="black" />
+    </mask>
+  </defs>
+  <rect width="1200" height="630" fill="#0f172a" mask="url(#hole)"/>
+        
+  <text x="100" y="380" font-family="Arial" font-size="80" fill="#ffffff" font-weight="bold">
+    {{TITLE}}
+  </text>
+        
+  <text x="100" y="480" font-family="Arial" font-size="40" fill="#94a3b8">
+    Written by {{AUTHOR}}
+  </text>
+ </svg>

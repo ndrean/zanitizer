@@ -1,8 +1,11 @@
 //! DOM Events Implementation: map JS_Event to Zig struct
 const std = @import("std");
+const z = @import("root.zig");
 const w = @import("wrapper.zig");
 const qjs = @import("root.zig").qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const RuntimeContext = z.RuntimeContext;
+const DOMBridge = z.DOMBridge;
+const bindings = z.bindings;
 
 // IMPORTS TO AVOID CYCLE (Don't import root.zig)
 
@@ -129,10 +132,8 @@ pub fn getBubbles(ev: *DomEvent) bool {
 // Lazy Import Helper
 fn wrapNodeHelper(ctx: w.Context, node: ?*DomNode) !w.Value {
     if (node) |n| {
-        // Import DOMBridge here to break import cycle
-        const DOMBridge = @import("dom_bridge.zig").DOMBridge;
         // Use z.DomNode cast if types don't align perfectly,
-        // but since they are opaque, @ptrCast works.
+        // but since they are opaque, @ptrCast works!
         return DOMBridge.wrapNode(ctx, @ptrCast(n));
     }
     return w.NULL;
@@ -165,29 +166,27 @@ pub const EventBridge = struct {
         const rc = RuntimeContext.get(ctx);
         const rt = ctx.getRuntime();
 
-        // 1. Register Class
         if (rc.classes.event == 0) {
             rc.classes.event = rt.newClassID();
         }
 
         try rt.newClass(rc.classes.event, .{
             .class_name = "Event",
-            .finalizer = Finalizer, // Point to the function above
+            .finalizer = Finalizer,
         });
 
-        // 2. Prototype
+        // Prototype
         const proto = ctx.newObject();
-        const bindings = @import("bindings_generated.zig");
         bindings.installEventBindings(ctx.ptr, proto);
         ctx.setClassProto(rc.classes.event, proto);
 
-        // 3. Constructor
+        // Constructor
         const ctor = ctx.newCFunction2(constructor, "Event", 1, qjs.JS_CFUNC_constructor, 0);
         ctx.setConstructor(ctor, proto);
 
-        // 4. Global
+        // Global
         const global = ctx.getGlobalObject();
-        defer ctx.freeValue(global);
+        defer ctx.freeValue(global); // TODO Leak??
         try ctx.setPropertyStr(global, "Event", ctor);
     }
 };

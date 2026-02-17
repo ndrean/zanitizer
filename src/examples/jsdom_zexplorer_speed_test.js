@@ -25,7 +25,7 @@ start = performance.now();
 let clickCount = 0;
 btn.addEventListener("click", () => {
   clickCount++;
-  btn.textContent = `Clicked ${clickCount}`
+  btn.textContent = `Clicked ${clickCount}`;
 });
 
 // Simulate clicks
@@ -33,17 +33,14 @@ for (let i = 0; i < parseInt(NB); i++) {
   btn.dispatchEvent("click");
 }
 
-
-
 time = performance.now() - start;
 
 console.log(
-  JSON.stringify({{
+  JSON.stringify({
     time: time,
     elementCount: lis.length,
     last_li_id: lis[lis.length - 1].getAttribute("id"),
     last_li_text: lis[lis.length - 1].textContent,
     success: clickCount === parseInt(NB),
-  }}),
+  }),
 );
-

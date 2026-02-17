@@ -65,7 +65,7 @@
 
         app.mount("#root");
         console.log("[JS] First render:", root.innerHTML);
-        __flush();
+        // __flush();
 
         // simulate periodic clicks
         let iterations = 0;
@@ -74,7 +74,7 @@
           const btn = document.getElementById("increment-btn");
           if (btn) {
             btn.dispatchEvent(new Event("click", { bubbles: true }));
-            __flush();
+            // __flush();
           }
           if (iterations >= 3) {
             clearInterval(interval);

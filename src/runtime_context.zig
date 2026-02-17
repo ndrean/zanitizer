@@ -14,6 +14,7 @@ pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,
     loop: *EventLoop,
     dom_bridge: ?*anyopaque = null, // !!! circular ref with ScriptEngine, so use anyopaque
+    engine_ptr: ?*anyopaque = null,
     sandbox: *js_security.Sandbox, // ScriptEngine owns this
     sandbox_root: []const u8, // for worker threads
     global_document: ?*z.HTMLDocument = null,
@@ -60,10 +61,12 @@ pub const RuntimeContext = struct {
         writable_stream_writer: zqjs.ClassID = 0,
         range: zqjs.ClassID = 0,
         tree_walker: zqjs.ClassID = 0,
+        xml_serializer: zqjs.ClassID = 0,
         canvas: zqjs.ClassID = 0,
         html_canvas: zqjs.ClassID = 0,
         image: zqjs.ClassID = 0,
         html_image: zqjs.ClassID = 0,
+        pdf_document: zqjs.ClassID = 0,
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

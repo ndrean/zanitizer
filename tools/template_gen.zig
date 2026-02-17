@@ -679,6 +679,24 @@ const T = struct {
         \\
     ;
 
+    const DOC_PROP_OPT_NODE_GETTER =
+        \\// Property Getter for {s}
+        \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    _ = argc; _ = argv;
+        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    const doc: *z.HTMLDocument = blk: {{
+        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\        return ctx.throwTypeError("Method called on object that is not a Document");
+        \\    }};
+        \\    const result = {s}(doc);
+        \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
+        \\    return w.NULL;
+        \\}}
+        \\
+    ;
+
     // ========================================================================
     // EVENT PROPERTY - String Zero-Copy (type)
     // ========================================================================
@@ -1064,6 +1082,7 @@ const Pattern = enum {
     doc_method_node_noargs,
     doc_method_opt_element,
     doc_prop_opt_element,
+    doc_prop_opt_node,
     event_prop_string_zc,
     event_prop_bool,
     event_prop_opt_node,
@@ -1094,6 +1113,7 @@ fn classifyBinding(b: anytype) Pattern {
             },
             .this_document => switch (b.prop_type) {
                 .optional_element => .doc_prop_opt_element,
+                .optional_node => .doc_prop_opt_node,
                 else => .unknown,
             },
             .this_node => switch (b.prop_type) {
@@ -1429,6 +1449,9 @@ fn generateBinding(writer: anytype, b: anytype) !void {
         },
         .doc_prop_opt_element => {
             try writer.print(T.DOC_PROP_OPT_ELEMENT_GETTER, .{ name, name, b.getter });
+        },
+        .doc_prop_opt_node => {
+            try writer.print(T.DOC_PROP_OPT_NODE_GETTER, .{ name, name, b.getter });
         },
         .event_prop_string_zc => {
             try writer.print(T.EVENT_PROP_STRING_ZC_GETTER, .{ name, name, b.getter });

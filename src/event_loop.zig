@@ -366,9 +366,23 @@ pub const EventLoop = struct {
             // 2. DRAIN MICROTASKS (Promises)
             // Execute all pending jobs before touching timers or sleeping.
             // This ensures "Promise.resolve().then(...)" runs immediately.
-            while (true) {
-                const ctx_ptr = try self.rt.executePendingJob();
-                if (ctx_ptr == null) break;
+            // Safety limit prevents infinite microtask chains (e.g. React scheduler
+            // continuously queueing microtasks via queueMicrotask/Promise.resolve).
+            {
+                var micro_count: u32 = 0;
+                const max_microtasks: u32 = 50_000;
+                while (micro_count < max_microtasks) : (micro_count += 1) {
+                    const ctx_ptr = self.rt.executePendingJob() catch |err| {
+                        // JS job threw — log but don't kill the event loop
+                        // (frameworks have unhandled rejections that aren't fatal)
+                        std.debug.print("[EventLoop] Job error: {any}\n", .{err});
+                        continue;
+                    };
+                    if (ctx_ptr == null) break;
+                }
+                if (micro_count >= max_microtasks) {
+                    std.debug.print("[EventLoop] SAFETY: microtask drain hit {d} limit, yielding to timers/IO\n", .{max_microtasks});
+                }
             }
 
             // 3. EXIT CHECK

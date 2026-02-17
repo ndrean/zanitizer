@@ -1,22 +1,22 @@
+//! non blocking `curl_multi` (event-loop driven) used in Main runtime.
+//!
+//! Native multipart via `curl_multi.submitMultipartRequest()`.
+//! Response methods are delegated to `js_response.addResponseMethods()`.
+//!
+//! hardenEasy() is applied inside `curl_multi.zig` at Easy handle creation.
 const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const curl = @import("curl");
-const js_security = @import("js_security.zig");
-const EventLoop = @import("event_loop.zig").EventLoop;
+const js_security = z.js_security;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 const js_formData = @import("js_formData.zig");
-const js_blob = @import("js_blob.zig");
-const js_file = @import("js_file.zig");
+const js_blob = z.js_blob;
+const js_file = z.js_file;
 const js_response = @import("js_response.zig");
 const curl_multi_mod = @import("curl_multi.zig");
 const CurlMulti = curl_multi_mod.CurlMulti;
 const MultipartEntry = curl_multi_mod.MultipartEntry;
-
-// ============================================================================
-// STRUCTS
-// ============================================================================
 
 const FetchTask = struct {
     allocator: std.mem.Allocator,
@@ -27,32 +27,7 @@ const FetchTask = struct {
     sandbox: *js_security.Sandbox,
 };
 
-const FetchResult = struct {
-    arena: std.heap.ArenaAllocator,
-    status: i64,
-    ok: bool,
-    url: []const u8,
-    body: []const u8,
-    headers: []const []const u8,
-};
-
-const FetchCallbackCtx = struct {
-    result: *FetchResult,
-    resolve: zqjs.Value,
-    reject: zqjs.Value,
-};
-
-const FetchWorkerArgs = struct {
-    loop: *EventLoop,
-    task: FetchTask,
-    ctx: zqjs.Context,
-    resolve: zqjs.Value,
-    reject: zqjs.Value,
-};
-
-// ============================================================================
-// PROMISE HELPERS (FIXED: Var Args & Exception Safety)
-// ============================================================================
+// === PROMISE HELPERS (Var Args & Exception Safety)
 
 fn createPromiseResolved(ctx: zqjs.Context, val: zqjs.Value) zqjs.Value {
     var funcs: [2]qjs.JSValue = undefined;
@@ -93,9 +68,7 @@ fn createPromiseRejected(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
     return promise;
 }
 
-// ============================================================================
-// BLOB FETCH LOGIC (The New Fixes)
-// ============================================================================
+// === BLOB FETCH LOGIC
 
 fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
     const ctx = zqjs.Context{ .ptr = ctx_ptr };
@@ -229,125 +202,68 @@ fn fetchBlob(ctx: zqjs.Context, url: []const u8) zqjs.Value {
 }
 
 // ============================================================================
-// WORKER / IO LOGIC
+// FILE:// FETCH LOGIC
 // ============================================================================
 
-fn fetchWorkerWrapper(args: FetchWorkerArgs) void {
-    const loop = args.loop;
-    const task = args.task;
-    const ctx = args.ctx;
-    const resolve = args.resolve;
-    const reject = args.reject;
+fn fetchFile(ctx: zqjs.Context, url: []const u8) zqjs.Value {
+    const rc = RuntimeContext.get(ctx);
+    const allocator = rc.loop.allocator;
 
-    const res = performIO(task);
+    // Strip "file://" prefix to get the actual path
+    const path = url["file://".len..];
 
-    const cb_ctx = loop.allocator.create(FetchCallbackCtx) catch @panic("OOM");
-    cb_ctx.* = .{
-        .result = res,
-        .resolve = resolve,
-        .reject = reject,
+    const file = js_security.openFileNoSymlinkEscape(rc.sandbox, path) catch {
+        return createPromiseRejected(ctx, "NetworkError: file not found or access denied");
     };
-    loop.enqueueTask(.{
-        .ctx = ctx,
-        .resolve = resolve,
-        .reject = reject,
-        .result = .{ .custom = .{
-            .data = cb_ctx,
-            .callback = finishFetch,
-            .destroy = destroyFetchCallbackCtx,
-        } },
-    });
-    destroyFetchTask(task.allocator, task);
-}
+    defer file.close();
 
-fn performIO(task: FetchTask) *FetchResult {
-    const res = task.allocator.create(FetchResult) catch @panic("OOM");
-    res.arena = std.heap.ArenaAllocator.init(task.allocator);
-    const arena_alloc = res.arena.allocator();
+    const data = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch {
+        return createPromiseRejected(ctx, "NetworkError: failed to read file");
+    };
+    defer allocator.free(data);
 
-    res.url = arena_alloc.dupe(u8, task.url) catch @panic("OOM");
-    res.body = &.{};
-    res.headers = &.{};
-    res.status = 0;
-    res.ok = false;
+    const resp = ctx.newObject();
 
-    if (std.mem.startsWith(u8, task.url, "http")) {
-        performCurlRequest(task, res, arena_alloc);
-    } else {
-        const file = js_security.openFileNoSymlinkEscape(task.sandbox, task.url) catch {
-            res.status = 404;
-            return res;
-        };
-        defer file.close();
-        res.body = file.readToEndAlloc(arena_alloc, 10 * 1024 * 1024) catch {
-            res.status = 500;
-            return res;
-        };
-        res.status = 200;
-        res.ok = true;
-    }
-    return res;
-}
+    ctx.setPropertyStr(resp, "status", ctx.newInt64(200)) catch {};
+    ctx.setPropertyStr(resp, "ok", ctx.newBool(true)) catch {};
+    ctx.setPropertyStr(resp, "url", ctx.newString(url)) catch {};
 
-fn performCurlRequest(task: FetchTask, res: *FetchResult, arena: std.mem.Allocator) void {
-    const ca_bundle = curl.allocCABundle(arena) catch return;
-    defer ca_bundle.deinit();
-    var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch return;
-    defer easy.deinit();
+    const ab = ctx.newArrayBufferCopy(data);
+    ctx.setPropertyStr(resp, "_body", ab) catch {
+        ctx.freeValue(ab);
+    };
 
-    const url_z = arena.dupeZ(u8, task.url) catch return;
-    easy.setUrl(url_z) catch return;
-
-    // --- UPDATED METHOD HANDLING ---
-    if (std.mem.eql(u8, task.method, "POST")) {
-        easy.setMethod(.POST) catch return;
-        if (task.body) |b| easy.setPostFields(b) catch return;
-    } else if (std.mem.eql(u8, task.method, "PUT")) {
-        easy.setMethod(.PUT) catch return;
-        if (task.body) |b| easy.setPostFields(b) catch return;
-    } else if (std.mem.eql(u8, task.method, "PATCH")) {
-        // Assuming your curl wrapper maps .PATCH.
-        // If not, use: easy.setCustomRequest("PATCH") catch return;
-        easy.setMethod(.PATCH) catch return;
-        if (task.body) |b| easy.setPostFields(b) catch return;
-    } else if (std.mem.eql(u8, task.method, "DELETE")) {
-        easy.setMethod(.DELETE) catch return;
-    } else if (std.mem.eql(u8, task.method, "HEAD")) {
-        easy.setMethod(.HEAD) catch return;
-    } else {
-        // Default to GET
-        easy.setMethod(.GET) catch return;
-    }
-
-    var headers = curl.Easy.Headers{};
-    defer headers.deinit();
-    if (task.headers.len > 0) {
-        for (task.headers) |h| {
-            const h_z = arena.dupeZ(u8, h) catch return;
-            headers.add(h_z) catch return;
+    // Build Headers object using constructor (provides .get() method)
+    {
+        const global = ctx.getGlobalObject();
+        defer ctx.freeValue(global);
+        const headers_ctor = ctx.getPropertyStr(global, "Headers");
+        defer ctx.freeValue(headers_ctor);
+        if (!ctx.isUndefined(headers_ctor)) {
+            var args = [_]qjs.JSValue{ctx.newObject()};
+            const headers_obj = qjs.JS_CallConstructor(ctx.ptr, headers_ctor, 1, &args);
+            ctx.freeValue(args[0]);
+            ctx.setPropertyStr(resp, "headers", headers_obj) catch {
+                ctx.freeValue(headers_obj);
+            };
+        } else {
+            const headers_obj = ctx.newObject();
+            ctx.setPropertyStr(resp, "headers", headers_obj) catch {
+                ctx.freeValue(headers_obj);
+            };
         }
-        easy.setHeaders(headers) catch return;
     }
 
-    var writer = std.Io.Writer.Allocating.init(arena);
-    defer writer.deinit();
-    easy.setWriter(&writer.writer) catch return;
+    js_response.addResponseMethods(ctx, resp);
 
-    const ret = easy.perform() catch return;
-    res.status = ret.status_code;
-    res.ok = (ret.status_code >= 200 and ret.status_code < 300);
-    res.body = writer.toOwnedSlice() catch return;
-
-    if (curl.hasParseHeaderSupport()) {
-        var header_list: std.ArrayListUnmanaged([]const u8) = .empty;
-        var iter = ret.iterateHeaders(.{}) catch return;
-        while (iter.next() catch return) |h| {
-            const line = std.fmt.allocPrint(arena, "{s}: {s}", .{ h.name, h.get() }) catch return;
-            header_list.append(arena, line) catch return;
-        }
-        res.headers = header_list.items;
-    }
+    const prom = createPromiseResolved(ctx, resp);
+    ctx.freeValue(resp);
+    return prom;
 }
+
+// ============================================================================
+// HELPERS
+// ============================================================================
 
 fn destroyFetchTask(allocator: std.mem.Allocator, task: FetchTask) void {
     allocator.free(task.url);
@@ -355,81 +271,6 @@ fn destroyFetchTask(allocator: std.mem.Allocator, task: FetchTask) void {
     if (task.body) |b| allocator.free(b);
     for (task.headers) |h| allocator.free(h);
     allocator.free(task.headers);
-}
-
-fn destroyFetchCallbackCtx(allocator: std.mem.Allocator, data: *anyopaque) void {
-    const ctx: *FetchCallbackCtx = @ptrCast(@alignCast(data));
-    const res = ctx.result;
-    res.arena.deinit();
-    allocator.destroy(res);
-    allocator.destroy(ctx);
-}
-
-fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
-    const rc = RuntimeContext.get(ctx);
-    const cb_ctx: *FetchCallbackCtx = @ptrCast(@alignCast(data));
-    defer destroyFetchCallbackCtx(rc.allocator, data);
-
-    const res = cb_ctx.result;
-    const real_resolve = cb_ctx.resolve;
-    const real_reject = cb_ctx.reject;
-    if (res.status == 0) {
-        const err = ctx.newString("Network Error");
-        defer ctx.freeValue(err);
-        _ = ctx.call(real_reject, zqjs.UNDEFINED, &.{err});
-        return;
-    }
-
-    const resp = ctx.newObject();
-    defer ctx.freeValue(resp);
-
-    const status_val = ctx.newInt64(res.status);
-    ctx.setPropertyStr(resp, "status", status_val) catch {
-        ctx.freeValue(status_val);
-    };
-
-    const ok_val = ctx.newBool(res.ok);
-    ctx.setPropertyStr(resp, "ok", ok_val) catch {
-        ctx.freeValue(ok_val);
-    };
-
-    const url_val = ctx.newString(res.url);
-    ctx.setPropertyStr(resp, "url", url_val) catch {
-        ctx.freeValue(url_val);
-    };
-
-    const ab = ctx.newArrayBufferCopy(res.body);
-    ctx.setPropertyStr(resp, "_body", ab) catch {
-        ctx.freeValue(ab);
-    };
-
-    const headers_init = ctx.newObject();
-    for (res.headers) |line| {
-        if (std.mem.indexOfScalar(u8, line, ':')) |idx| {
-            const key = std.mem.trim(u8, line[0..idx], " \t\r\n");
-            const val = std.mem.trim(u8, line[idx + 1 ..], " \t\r\n");
-            const val_js = ctx.newString(val);
-            const atom = ctx.newAtom(key);
-            defer ctx.freeAtom(atom);
-            _ = qjs.JS_SetProperty(ctx.ptr, headers_init, atom, val_js);
-        }
-    }
-
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    const headers_ctor = ctx.getPropertyStr(global, "Headers");
-    defer ctx.freeValue(headers_ctor);
-    var args = [_]qjs.JSValue{headers_init};
-    const headers_obj = qjs.JS_CallConstructor(ctx.ptr, headers_ctor, 1, &args);
-    ctx.freeValue(headers_init);
-    ctx.setPropertyStr(resp, "headers", headers_obj) catch {
-        ctx.freeValue(headers_obj);
-    };
-
-    // Add response methods: text(), json(), arrayBuffer(), blob(), body
-    js_response.addResponseMethods(ctx, resp);
-
-    _ = ctx.call(real_resolve, zqjs.UNDEFINED, &.{resp});
 }
 
 // ============================================================================
@@ -449,6 +290,11 @@ pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c
     // BLOB INTERCEPTION
     if (std.mem.startsWith(u8, url_str, "blob:")) {
         return fetchBlob(ctx, url_str);
+    }
+
+    // FILE:// INTERCEPTION
+    if (std.mem.startsWith(u8, url_str, "file://")) {
+        return fetchFile(ctx, url_str);
     }
 
     // [SECURITY] SSRF gate: block requests to internal infrastructure in sanitize mode

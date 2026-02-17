@@ -1,8 +1,8 @@
 // Imports work inside Workers now
 
-import { capitalize } from "vendor/es-toolkit.min.js";
+import { capitalize } from "src/examples/vendor/es-toolkit.min.js";
 try {
-  importScripts("vendor/MathLib.js");
+  importScripts("src/examples/vendor/MathLib.js");
 } catch (e) {
   console.log("[Worker] Error loading script: " + e);
 }

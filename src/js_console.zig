@@ -2,42 +2,36 @@ const std = @import("std");
 const z = @import("root.zig");
 const qjs = z.qjs;
 const w = z.wrapper;
-const log = std.log.scoped(.js_console);
 
-// Helper to print a single value with formatting
-fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue) void {
+const Stdout = *std.Io.Writer;
+
+// Helper to print a single value
+fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue, stdout: Stdout) void {
     // 1. Handle Errors (print stack trace or message)
     if (z.wrapper.Context.isError(val)) {
-        // Error.toString() typically gives "ErrorType: message"
-        // We could also look for .stack if we wanted more detail
         if (ctx.toCString(val)) |str| {
-            log.info("{s}", .{str});
+            stdout.print("{s}", .{str}) catch {};
             ctx.freeCString(str);
         } else |_| {
-            log.info("[Error]", .{});
+            stdout.print("[Error]", .{}) catch {};
         }
         return;
     }
 
     // 2. Handle Objects (Try JSON.stringify for readability)
     if (ctx.isObject(val) and !ctx.isNull(val)) {
-        // args: [value, replacer=null, space=2]
         const space = ctx.newInt32(2);
         var args = [_]qjs.JSValue{ val, w.NULL, space };
 
         const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
-
-        // We are done with 'space' (it was passed by value/copy to args array logic?
-        // No, in QJS raw calls, we own our handles. 'args' array holds them.
-        // We must free 'space' after call.
         defer ctx.freeValue(space);
 
         if (!ctx.isException(json_str)) {
             if (ctx.toCString(json_str)) |c_str| {
-                log.info("{s}", .{c_str});
+                stdout.print("{s}", .{c_str}) catch {};
                 ctx.freeCString(c_str);
             } else |_| {
-                log.info("[Object]", .{});
+                stdout.print("[Object]", .{}) catch {};
             }
             ctx.freeValue(json_str);
             return;
@@ -50,10 +44,10 @@ fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue) void 
 
     // 3. Fallback: Primitives / Default toString
     if (ctx.toCString(val)) |str| {
-        log.info("{s}", .{str});
+        stdout.print("{s}", .{str}) catch {};
         ctx.freeCString(str);
     } else |_| {
-        log.info("[Unknown]", .{});
+        stdout.print("[Unknown]", .{}) catch {};
     }
 }
 
@@ -64,6 +58,10 @@ pub fn js_console_print(
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context{ .ptr = ctx_ptr };
+
+    var buf: [4096]u8 = undefined;
+    var sw = std.fs.File.stdout().writer(&buf);
+    const stdout: Stdout = &sw.interface;
 
     // Grab JSON.stringify once for this batch
     const global = ctx.getGlobalObject();
@@ -76,11 +74,12 @@ pub fn js_console_print(
     defer ctx.freeValue(stringify_fn);
 
     var i: usize = 0;
-    while (i < argc) : (i += 1) {
-        if (i > 0) log.info(" ", .{});
-        printValue(ctx, argv[i], stringify_fn);
+    while (i < @as(usize, @intCast(argc))) : (i += 1) {
+        if (i > 0) stdout.print(" ", .{}) catch {};
+        printValue(ctx, argv[i], stringify_fn, stdout);
     }
-    log.info("\n", .{});
+    stdout.print("\n", .{}) catch {};
+    stdout.flush() catch {};
 
     return w.UNDEFINED;
 }
@@ -91,9 +90,7 @@ pub fn install(ctx: w.Context) !void {
 
     const console = ctx.newObject();
 
-    // Attach methods
-    // We reuse the same C function for log, error, warn, info
-    // (unless you want prefixes like [ERROR])
+    // Attach methods: reuse the same C function for log, error, warn, info
 
     const log_fn = ctx.newCFunction(js_console_print, "log", 1);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, console, "log", log_fn);

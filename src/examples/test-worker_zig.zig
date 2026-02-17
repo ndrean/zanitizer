@@ -38,7 +38,7 @@ fn demoWorker(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     z.print("\n=== Worker Thread Demo ------------------------\n\n", .{});
 
-    const source = try std.fs.cwd().readFileAlloc(allocator, "test-worker_main-thread.js", 1024 * 1024);
+    const source = try std.fs.cwd().readFileAlloc(allocator, "src/examples/test-worker_main-thread.js", 1024 * 1024);
     defer allocator.free(source);
 
     const val = try engine.evalModule(source, "<main_with_worker.js>");

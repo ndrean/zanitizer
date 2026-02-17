@@ -3,15 +3,21 @@
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 [WIP]
-zexplorer is designed for content pipelines, not general-purpose application runtimes.
+`zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss knife that runs fast, delivers and dies.
 
-This engine parses HTML into a real DOM and executes JavaScript against it — with an event loop, timers, fetch, and workers — without a browser.
-It includes a built-in DOM+CSS optional sanitizer and can run native Zig computations alongside JS.
-It outputs a cleaned structured HTML or extracted data, without a browser.
+This engine includes a ES6 JavaScript runtime with Web APIs: it can parses HTML and CSS into a real DOM and executes ES6 code in JavaScript against it — with an event loop, timers, fetch, and workers — without a browser.
+It includes a built-in DOM+CSS optional Sanitizer.
+It can run custom native Zig computations alongside JS.
+It has also some image processing capabilities via the Canvas API: it takes an SVG, a PNG or JPEG, and can add via the Canvas API some text to deliver OG images (in PNG, JEPG) or deliver PDF.
+It outputs a cleaned structured HTML or extracted data, without a browser, either to the file system or to stdout.
 
-Built on the shoulder of giants, [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb), [libwepb](https://github.com/webmproject/libwebp) and [nanosvg](https://github.com/memononen/nanosvg), it embeds enough Web API surface to run client framework code.
+Built on the shoulder of giants: [lexbor](https://lexbor.com/) for blazing fast DOM and CSS parsing, and [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb) for PNG/JEPG decoding, [libwebp](https://github.com/webmproject/libwebp) for WebP decoding and encoding, `stb_image_writer` for PNG/JPEG encoding and `stb_truetype` for text,  [thorvg](https://github.com/thorvg/thorvg) for full SVG rasterizing, [libharu](https://github.com/libharu/libharu) and [libcurl bindings](https://github.com/jiacai2050/zig-curl).
 
-By providing a minimal DOM environment for running JS outside of a browser, it can be compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in but running at native speed with fast cold boot and sandboxed filesystem, at the cost of a much thinner coverage of the Web API.
+It embeds enough Web API surface to run frameworks code (React, SolidJS, Vue, Vercel, ChartJS) and can render images (PNG, JPEG, WEBP, PDF).
+
+By providing a minimal DOM environment for running JS outside of a browser, it can be vaguely compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in, or vaguely `dom-canvas` or vaguely `Vercel/Satori`, but running at native speed with fast cold boot and sandboxed filesystem, at the cost of a much thinner coverage of the Web API.
+
+You can take advantage of composing `JavaScript` snippets and submit them to the engine. You don't need to know or use advanced `Zig` to use it, but you may need to install `,Zig` to compile your implementation.
 
 ## What Problem Does This Solve?
 
@@ -22,30 +28,28 @@ This engine aims to be lightweight and fast. Use it when you need to:
 - **Test client frameworks** (React, Vue, Solid) in milliseconds
 - **Templating & Static Site Generation** - no async needed, pure speed.
 - **Process HTML pipelines** with native Zig performance
-- Read and render _static_ Images (`PNG`, `JPEG`, `WEBP`), can render "some" static `SVG` (typically icons, no `<text>`) and uses the preloaded default `Arial`font.
+- **render _static_ Images** (`PNG`, `JPEG`, `WEBP`, `SVG`) and compose or layer via the Canvas API to render PNG, JEPG, WEB or PDF. It uses the preloaded default `Roboto`font.
 
 ## What about Security?
 
 If you plan to use your own code, you can happily by-pass the sanitization. This also removes the Network safety runtime checks. You are in control.
 
-❗️ However, the filesystem access (files) is always sandboxed to the root folder you declare, and HTTPS is enforced for remote module loading sources (eg CDN).
-
-Care has been taken to make this engine safe. However, if you plan to use untrusted code, consider the following:
+❗️ Note that the filesystem access (files) is always sandboxed to the root folder you declare, and HTTPS is enforced for remote module loading sources (eg CDN imorts or JavaScript chunks).
 
 > [!IMPORTANT]
-> zexplorer does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
-
-[Read more: **SECURITY.md**](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md)
+> If you plan to use untrusted code, consider the following:
+> 
+> Care has been taken to make this engine safe.  However, `zexplorer` does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
 
 > [!NOTE]
 >
-> All layers below are _best-effort_ — see [SECURITY.md](SECURITY.md) for full details.
+> All layers below are _best-effort_ — see [SECURITY.md]([SECURITY.md](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md)) for full details.
 >
-> - **Content sanitization** — DOM+CSS-aware: stylesheets, inline styles, iframes, SVG/MathML, DOM clobbering, URI schemas, XSS/mXSS. Tested against [H5SC](https://github.com/cure53/H5SC), [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [PortSwigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet), and [DOMPurify](https://github.com/cure53/DOMPurify). Optional — trusted code can skip it.
+> - **Content sanitization** — DOM+CSS-aware: stylesheets, inline styles, iframes, SVG/MathML, DOM clobbering, URI schemas, XSS/mXSS. Tested against [H5SC](https://github.com/cure53/H5SC), [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [PortSwigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet), and [DOMPurify](https://github.com/cure53/DOMPurify). It is optional: trusted code can skip it.
 > - **Filesystem sandbox** — kernel-enforced `openat()` with symlink blocking, traversal rejection, cross-device check, 16-level depth limit.
-> - **Network hardening** — timeouts, redirect/size limits, protocol restrictions, SSRF pre-flight filtering (enforced in sanitize mode; dev can access localhost).
+> - **Network hardening** — timeouts, redirect/size limits, protocol restrictions, SSRF pre-flight filtering (enforced in sanitize mode; dev can access localhost if sanitization is off).
 > - **Module loading** — HTTPS-only remote imports, sandboxed local paths, SRI integrity checks, 5 MB size cap.
-> - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines.
+> - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines, max DOM-tree walking.
 
 **TL;DR**:
 It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and short-lived JavaScript inside an isolated environment.
@@ -61,80 +65,89 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
   
 ## How it compares?
 
-| Feature           | zexplorer               | JSDOM           | Puppeteer       |
-| ----------------- | ----------------------- | --------------- | --------------- |
-| Startup time      | **1ms**                 | ~100ms          | ~500ms          |
-| DOM sanitization  | **Built-in, DOM-aware** | Needs DOMPurify | Browser context |
-| Memory footprint  | **~5MB**                | ~50MB           | ~200MB          |
-| Web API coverage  | ~40% (essential)        | ~90%            | 100%            |
-| JavaScript engine | QuickJS (bytecode)      | Node.js V8      | Chrome V8       |
-| Security model    | **OS process**          | Node.js process | OS process      |
+| Feature           | zexplorer                | JSDOM           | Puppeteer       |
+| ----------------- | ------------------------ | --------------- | --------------- |
+| Startup time      | 1ms                      | ~30ms           | ~500ms          |
+| DOM sanitization  | Built-in, DOM & CSSaware | Needs DOMPurify | Browser context |
+| Memory footprint  | 8MB                      | ~50MB           | ~200MB          |
+| Web API coverage  | ~40% (essential)         | ~90%            | 100%            |
+| JavaScript engine | QuickJS (bytecode)       | Node.js V8      | Chrome V8       |
+| Security model    | OS process               | Node.js process | OS process      |
 
 ## Quick start
 
 How to use `zexplorer` ?
 
-- CLIs: TODO
+- CLIs: WIP
   - `zxp sanitize -dhtml=index.html -dss=stylesheet.css -djs=index.js -dfile=index_cleaned.html`
   - `zxp to_svg -dtemp=index.js -dsource=example.svg -dfile=final.svg`
   - `zxp run -djs=index.js -dout=stdout`
 - as a Zig library
 
-### Dual DOM primitives
+### Scrap a Vercel site
 
-The DOM primitives are accessible in the Zig code. Since these primitives are ported into the JavaScrcipt runtime, you can access them in the runtime.
+We scrap <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scripts in order to hydrate the first SSR rendered page.
 
-For example, you create a document in the Zig code, insert a DIV and a P:
+<details><summary>Preview demo.vercel.store</summary>
 
-```zig
-const doc = try z.parseHTML("<div>Hi</div>");
-defer z.destroyDocument(doc);
-const p = try z.createElement(doc, "p");
-const div = try z.querySelector(allocator, "div");
-z.appendChild(div.?, p);
-try z.prettyPrint(allocator, z.bodyNode(doc));
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo-vercel-store.png" alt="vercel" width="600" height="400">
 
-const z = @import("zexplorer");
+</details>
+
+You write a JavaScript snippet:
+
+```js
+// vercel.js
+
+async function testVercel() {
+  try {
+    await zexplorer.goto("https://demo.vercel.store");
+
+    await zexplorer.waitForSelector("a[href^='/product/']");
+    const links = document.querySelectorAll("a[href^='/product/']");
+    const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
+    const items = unique.map(href => {
+      const el = document.querySelector(`a[href='${href}']`);
+      return el.textContent.trim();
+    });
+
+    console.log(items);
+    return items; // <-- return to the engine to marshall the array
+  } catch (err) {
+    console.error(err);
+  }
+}
 ```
 
-zexplorer runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`.
+You pass it to the engine:
 
-Zig will happily run this JS code:
-
-```zig
-const allocator = std.testing.allocator,
-
-var engine = z.ZscriptEngine.init(allocator, sbx);
-defer engine.deinit();
-
-const script = 
-  \\document.createElement("div");
-  \\document.createElement("p");
-  \\const div = document.querySelector("div");
-  \\div.textContent = "Hi"
-  \\div.appendChild(p);
-  \\console.log(div.outerHTML);
-  ;
-
-try engine.evalModule(script);
-
-const std = @import("std");
-const z = @import("zexplorer");
+```sh
+time .zxp --f=vercel.js --out=data.txt > /dev/null 2>&1
 ```
 
-and you will see in the terminal:
+and you get your data back in 1s:
 
-This will output in the terminal:
 
 ```txt
-<div>Hi <p></p></div>
+0.17s user 0.14s system 37% cpu 0.835 total
+
+[
+  "Acme Circles T-Shirt$20.00USD",
+  "Acme Drawstring Bag$12.00USD",
+  "Acme Cup$15.00USD",
+  "Acme Mug$15.00USD",
+  "Acme Hoodie$50.00USD",
+  "Acme Baby Onesie$10.00USD",
+  "Acme Baby Cap$10.00USD"
+]
 ```
 
 ### Sanitize HTML & CSS
 
-We want to sanitize the following untrusted HTML that loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some styles. All three CSS vectors are sanitized and properly synchronized.
+We want to sanitize the following untrusted HTML that loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some inline styles. All three CSS vectors are sanitized and properly synchronized.
 
 <details><summary>HTML code</summary>
+
 ```html
 <!-- src/examples/test_examples.html -->
 <html>
@@ -162,6 +175,7 @@ We want to sanitize the following untrusted HTML that loads an external styleshe
 with the following stylesheet:
 
 <details><summary>Stylesheet</summary>
+
 ```css
 /* src/examples/test_example.css */
 body {
@@ -182,9 +196,10 @@ and the script:
 const html1 = `<p id="js1" class="untrusted" style="padding: 8px; behavior: url(evil.htc);">insertAdjacentHTML</p>`;
 document.body.insertAdjacentHTML("beforeend", html1);
 ```
-</details>>
 
-We want to sanitize it and output the new DOM. We run the following `Zig` code:
+</details>
+
+We run the following `Zig` code to to sanitize the HTML and output the new DOM.
 
 <details><summary>Zig runner</summary>
 
@@ -240,7 +255,7 @@ pub fn main() !void {
 
 </details>
 
-The output confirms that the whole page is sanitized and can be used:
+The output confirms that the whole page is sanitized:
 
 <details><summary>Result</summary>
 
@@ -261,112 +276,141 @@ Confirm style set by class .untrusted on #js1: color= red
 
 ### Generate OG images from SVG templates
 
-It overlaps partially `node-canvas` but is very lightweight and limited.
+We display two examples shows that `zexplorer` overlaps partially [node-canvas](https://github.com/Automattic/node-canvas) and [Vercel/satori](https://github.com/vercel/satori)  (no JSX but `React` can be loaded) but is very lightweight and limited.
 
-We use a canvas compositor process: we load a static base image (PNG/JPEG/WEBP/SVG) into a Canvas, and programmatically draw text over using `fillText()` , `measureText()` functions powered by `stb_truetype` and uses the preloaded `Arial` font).
+Given this SVG (designed in Figma):
 
-You can run JavaScript code that loads SVG into a Canvas and output the result into a file.
+<details><summary>SVG template</summary>
 
-It supports only a _subset of SVG_ (it uses `nanosvg` under the hood), meaning no animations, no text.
+```html
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <mask id="hole">
+        <rect width="1200" height="630" fill="white" />
+        <circle cx="175" cy="175" r="75" fill="black" />
+    </mask>
+  </defs>
+  <rect width="1200" height="630" fill="#0f172a" mask="url(#hole)"/>
+        
+  <text x="100" y="380" font-family="Arial" font-size="80" fill="#ffffff" font-weight="bold">
+    {{TITLE}}
+  </text>
+        
+  <text x="100" y="480" font-family="Arial" font-size="40" fill="#94a3b8">
+    Written by {{AUTHOR}}
+  </text>
+ </svg>
+```
 
-The use this [SVG source](https://github.com/ndrean/zexplorer/blob/main/test_opengraph_me.svg).
+</details>
 
-<details><summary>JS script and Zig runner</summary>
+The following "standard" JavaScript snippet makes a layered composition of a "fetched" image and the interpolated SVG template inside a Canvas.
+
+You extract the data and return an ArrayBuffer that Zig will marshall.
+
+<details><summary>JS code</summary>
 
 ```js
-// src/examples/test_svg_read_render.js
+async function loadImage(url) {
+  return await new Promise((resolve, reject) => {
+    try {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = (e) => reject(new Error(`Image failed to load: ${url}`));
+      img.src = url;
+    } catch (e) {
+      reject(new Error(`Failed to fetch image: ${e.message}`));
+    }
+  });
+}
 
-async function renderTemplate(svgText, data) {
-  const blob = new Blob([svgText], { type: "image/svg+xml" });
-  const img = await createImageBitmap(blob);
+async function generateOGImage({ title, author, avatarUrl }) {
+  console.log(`Generating OG Image for:  ${title}`);
+  const avatarImg = await loadImage(avatarUrl);
 
-  const w = data.width || 1200;
-  const h = data.height || 630;
+  const templ_res = await fetch(
+    "file://src/examples/test_og_generator_template_v2.svg",
+  );
+
+  const rawSvgTemplate = await templ_res.text();
+  const finalSvgText = rawSvgTemplate
+    .replace("{{TITLE}}", title)
+    .replace("{{AUTHOR}}", author);
+  const svgBlob = new Blob([finalSvgText], { type: "image/svg+xml" });
+  const imgSVG = await createImageBitmap(svgBlob);
 
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
+  canvas.width = 1200;
+  canvas.height = 630;
   const ctx = canvas.getContext("2d");
+  ctx.drawImage(avatarImg, 100, 100, 150, 150); // in the hole
+  ctx.drawImage(imgSVG, 0, 0);
 
-  // White background fallback
-  ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, w, h);
+  const pngBlob = await canvas.toBlob();
+  return await pngBlob.arrayBuffer();
+}
 
-  // Draw the SVG template as background (scaled to fill)
-  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
+async function renderTemplate() {
+  try {
+    console.log("Called");
+    const pngBytes = await generateOGImage({
+      title: "Headless Browser in Zig",
+      author: "N. Drean",
+      avatarUrl: "https://github.com/torvalds.png",
+    });
 
-  // -- Overlay dynamic text --
-
-  // Title (large, prominent)
-  if (data.title) {
-    ctx.fillStyle = data.titleColor || "blue";
-    ctx.font = data.titleFont || "bold 48px";
-    ctx.fillText(data.title, 60, 60);
+    return pngBytes; // return data to Zig to save in a file
+  } catch (e) {
+    console.error("Failed to generate OG image:", e);
   }
-
-  // Footer (bottom-left)
-  if (data.footer) {
-    ctx.fillStyle = data.footerColor || "#f11c75";
-    ctx.font = data.footerFont || "18px";
-    ctx.fillText(data.footer, 60, h - 40);
-  }
-
-  // -- return data to Zig --
-
-  const result = await canvas.toBlob();
-  return await result.arrayBuffer();
 }
 ```
 
+</details>
+
+The Zig code to run this is quite simple:
+
+
+<details><summary>Zig runner</summary>
+
 ```zig
-// src/examples/test_svg_raseter.zig
+pub fn main() !void {
+    const allocator = std.testing.allocator;
 
-fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbr);
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    try run_test(gpa, sandbox_root);
+}
+
+fn run_test(allocator: std.mem.Allocator, sbx: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbx);
     defer engine.deinit();
+    const script = @embedFile("test_og_generator.js");
 
-    const js = @embedFile("test_svg_template_render.js");
-
-    const val = try engine.eval(js, "<template-init>", .global);
+    const val = try engine.eval(script, "<script>", .global);
     defer engine.ctx.freeValue(val);
 
-    const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
-    defer scope.deinit();
-
-    try scope.setString("TEMPLATE_SVG", opengraph_svg);
-
-    // Build and inject the data object
-    const data = scope.newObject();
-    try engine.ctx.setPropertyStr(data, "title", scope.newString("Built by Zexplorer"));
-
-    try engine.ctx.setPropertyStr(data, "footer", scope.newString("Built with Zig, nanosvg, stb_truetype & QuickJS"));
-    try scope.set("TEMPLATE_DATA", data);
-
-    const png_bytes = try engine.evalAsyncAs(
-        allocator,
-        []const u8,
-        "renderTemplate(TEMPLATE_SVG, TEMPLATE_DATA)",
-        "<svg-template>",
-    );
+    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, "renderTemplate()", "<svg-template>");
     defer allocator.free(png_bytes);
 
-    try js_canvas.verifyPngStructure(png_bytes);
-    try std.fs.cwd().writeFile(
-        .{
-            .sub_path = "svg_template_opengraph.png",
-            .data = png_bytes,
-        },
-    );
-    std.debug.print("  [8] Saved 'svg_template_opengraph.png' ({d} bytes) — SVG template + dynamic text\n", .{png_bytes.len});
+    try std.fs.cwd().writeFile(.{.sub_path = "templated.png", .data = png_bytes});
 }
+
+const std = @import("std");
+const z = @import("zexplorer");
+const ScriptEngine = z.ScriptEngine;
+const js_canvas = z.js_canvas;
 ```
 
 </details>
 
 The result is:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/svg_template_opengraph.png" alt="SVG via Blob + createImageBitmap" width="600" height="300">
+<img src="https://github.com/ndrean/zexplorer/blob/main/template_generated.png" alt="OG image" width="600" height="300">
 
+
+2) 
 [TODO] CLI...
 
 ---
@@ -533,8 +577,60 @@ Uses Vue 3's template compiler with `ref()` for reactive state. Simulates clicks
 
 </details>
 
-## Tests & performance
+### Dual DOM primitives
 
+When you use `zexplorer` as a `Zig` library, you have  DOM primitives accessible in the Zig code. Since these primitives are ported into the JavaScript runtime, you can access them as well in the runtime.
+
+For example, you can mimic the DOM API in your Zig backend: you create a document in the Zig code, insert a DIV and a P as shown below.
+
+```zig
+const doc = try z.parseHTML("<div>Hi</div>");
+defer z.destroyDocument(doc);
+const p = try z.createElement(doc, "p");
+const div = try z.querySelector(allocator, "div");
+z.appendChild(div.?, p);
+try z.prettyPrint(allocator, z.bodyNode(doc));
+
+const z = @import("zexplorer");
+```
+
+zexplorer runs a JavaScript runtime which brings in a default `document` to which the JavaScript code accesses via a global `document`.
+
+Zig will happily run this JS snippet:
+
+```zig
+const allocator = std.testing.allocator;
+
+const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+defer gpa.free(sandbox_root);
+
+var engine = z.ScriptEngine.init(allocator, sandbox_root);
+defer engine.deinit();
+
+const script = 
+  \\document.createElement("div");
+  \\document.createElement("p");
+  \\const div = document.querySelector("div");
+  \\div.textContent = "Hi"
+  \\div.appendChild(p);
+  \\console.log(div.outerHTML);
+  ;
+
+try engine.evalModule(script, "<script>");
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+and both `Zig` scripts will output in the terminal:
+
+```txt
+<div>Hi <p></p></div>
+```
+
+---
+
+## Tests & performance
 
 | Operation            | zexplorer | JSDOM+DOMPurify |
 | -------------------- | --------- | --------------- |
@@ -894,6 +990,110 @@ List of implemented server and Web API and examples
  > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
 
 ### Other examples
+
+#### Canvas layering
+
+1) We use a canvas compositor process: we load a static base image (PNG/JPEG/WEBP/SVG) into a Canvas, and programmatically draw text over using `fillText()`, `measureText()`... functions powered by `stb_truetype`. It comes with the `Arial` font preloaded. The ouput is printed into a file.
+The use this [SVG source](https://github.com/ndrean/zexplorer/blob/main/test_opengraph_me.svg).
+
+<details><summary>JS script and Zig runner</summary>
+
+```js
+// src/examples/test_svg_read_render.js
+
+async function renderTemplate(svgText, data) {
+  const blob = new Blob([svgText], { type: "image/svg+xml" });
+  const img = await createImageBitmap(blob);
+
+  const w = data.width || 1200;
+  const h = data.height || 630;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+
+  // White background fallback
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw the SVG template as background (scaled to fill)
+  ctx.drawImage(img, 0, 0, img.width, img.height, 0, 0, w, h);
+
+  // -- Overlay dynamic text --
+
+  // Title (large, prominent)
+  if (data.title) {
+    ctx.fillStyle = data.titleColor || "blue";
+    ctx.font = data.titleFont || "bold 48px";
+    ctx.fillText(data.title, 60, 60);
+  }
+
+  // Footer (bottom-left)
+  if (data.footer) {
+    ctx.fillStyle = data.footerColor || "#f11c75";
+    ctx.font = data.footerFont || "18px";
+    ctx.fillText(data.footer, 60, h - 40);
+  }
+
+  // -- return data to Zig --
+
+  const result = await canvas.toBlob();
+  return await result.arrayBuffer();
+}
+```
+
+```zig
+// src/examples/test_svg_raseter.zig
+
+fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
+    var engine = try ScriptEngine.init(allocator, sbr);
+    defer engine.deinit();
+
+    const js = @embedFile("test_svg_template_render.js");
+
+    const val = try engine.eval(js, "<template-init>", .global);
+    defer engine.ctx.freeValue(val);
+
+    const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
+    defer scope.deinit();
+
+    try scope.setString("TEMPLATE_SVG", opengraph_svg);
+
+    // Build and inject the data object
+    const data = scope.newObject();
+    try engine.ctx.setPropertyStr(data, "title", scope.newString("Built by Zexplorer"));
+
+    try engine.ctx.setPropertyStr(data, "footer", scope.newString("Built with Zig, nanosvg, stb_truetype & QuickJS"));
+    try scope.set("TEMPLATE_DATA", data);
+
+    const png_bytes = try engine.evalAsyncAs(
+        allocator,
+        []const u8,
+        "renderTemplate(TEMPLATE_SVG, TEMPLATE_DATA)",
+        "<svg-template>",
+    );
+    defer allocator.free(png_bytes);
+
+    try js_canvas.verifyPngStructure(png_bytes);
+    try std.fs.cwd().writeFile(
+        .{
+            .sub_path = "svg_template_opengraph.png",
+            .data = png_bytes,
+        },
+    );
+    std.debug.print("  [8] Saved 'svg_template_opengraph.png' ({d} bytes) — SVG template + dynamic text\n", .{png_bytes.len});
+}
+```
+
+</details>
+
+The result is:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/svg_template_opengraph.png" alt="SVG via Blob + createImageBitmap" width="600" height="300">
+
+---
+
 
 <details><summary>uppload a file: POST a Blob</summary>
 
@@ -1911,7 +2111,7 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 - `lexbor` [License Apache 2.0](https://github.com/lexbor/lexbor/blob/master/LICENSE)
 - `quickjs` [License MIT](https://github.com/quickjs-ng/quickjs/blob/master/LICENSE)
 - `libwebp` [License BSD3](https://github.com/webmproject/libwebp/blob/main/COPYING)
-- `nanosvg` [License zlib](https://github.com/nanosvg/nanosvg/blob/master/LICENSE)
+- `thorvg` [License MIT](https://github.com/thorvg/thorvg/blob/master/LICENSE)
 - `stb_image` [License MIT](https://github.com/nothings/stb/blob/master/LICENSE)
 - `zig-quickjs` [License MIT](https://github.com/nDimensional/zig-quickjs/blob/main/LICENSE)
 - `zig-curl` [License MIT](https://github.com/jiacai2050/zig-curl/blob/main/LICENSE)

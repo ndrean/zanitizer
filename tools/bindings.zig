@@ -265,9 +265,25 @@ pub const bindings = [_]BindingSpec{
     //     .return_type = .node_list, // Returns ArrayList(*DomNode) -> NodeList
     // },
     .{
+        .name = "documentElement",
+        .kind = .property,
+        .getter = "z.documentRoot",
+        .setter = "", // Read-Only
+        .prop_type = .optional_node, // Returns ?*DomNode (the <html> element)
+        .prop_this = .this_document,
+    },
+    .{
         .name = "body",
         .kind = .property,
         .getter = "z.bodyElement", // Uses your new helper
+        .setter = "", // EMPTY = Read-Only (no js_set_body generated)
+        .prop_type = .optional_element, // Returns ?*HTMLElement
+        .prop_this = .this_document, // Strict check for Document
+    },
+    .{
+        .name = "head",
+        .kind = .property,
+        .getter = "z.headElement", // Uses your new helper
         .setter = "", // EMPTY = Read-Only (no js_set_body generated)
         .prop_type = .optional_element, // Returns ?*HTMLElement
         .prop_this = .this_document, // Strict check for Document

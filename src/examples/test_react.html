@@ -1,7 +1,7 @@
 <html>
   <body>
     <div id="root"><!-- REACT root div --></div>
-    <script src="zexp-react/dist/app.js"></script>
+    <script src="src/examples/vendor/app.js"></script>
     <script type="module">
       /*
       async function sleep(ms) {
@@ -29,6 +29,7 @@
         // Test 2: Trigger useMemo (Click Filter)
         console.log("[Test] Clicking 'Show Even Only'");
         btn.dispatchEvent(new Event("click", { bubbles: true }));
+        console.log("Button clicked!");
         __flush(); // Drain re-render
         console.log(`[Test] Items after filter: ${list.children.length}`); // Should be 3
         if (list.children.length !== 3) console.error("❌ Filter failed");
@@ -37,6 +38,7 @@
         // If Memo works, "Calculating filter..." should NOT print in console for this step
         console.log("[Test] Clicking 'Force Re-render'...");
         btnForce.dispatchEvent(new Event("click", { bubbles: true }));
+        console.log("Button clicked!");
         __flush(); // Drain re-render
 
         console.log(
