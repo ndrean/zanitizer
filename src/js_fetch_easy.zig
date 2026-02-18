@@ -101,7 +101,7 @@ fn createPromiseRejected(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
 // BLOB FETCH
 
 fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
@@ -130,7 +130,7 @@ fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
 }
 
 fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
@@ -165,7 +165,7 @@ fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
 }
 
 fn js_blob_response_blob(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
     const prom = createPromiseResolved(ctx, blob_val);
     ctx.freeValue(blob_val);
@@ -294,7 +294,7 @@ fn fetchFile(ctx: zqjs.Context, url: []const u8) zqjs.Value {
 // NETWORK RESPONSE PROXIES: .text(), .json(), .blob(), .arrayBuffer()
 
 fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const body_val = ctx.getPropertyStr(this, "_body");
     defer ctx.freeValue(body_val);
 
@@ -308,7 +308,7 @@ fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 }
 
 fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const text_val = js_res_text(ctx_ptr, this, 0, null);
     defer ctx.freeValue(text_val);
 
@@ -321,7 +321,7 @@ fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 }
 
 fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const body_val = ctx.getPropertyStr(this, "_body");
     defer ctx.freeValue(body_val);
 
@@ -352,12 +352,12 @@ fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 }
 
 fn js_res_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return ctx.getPropertyStr(this, "_body");
 }
 
 fn js_async_wrapper(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, workFn: fn (?*qjs.JSContext, qjs.JSValue, c_int, [*c]qjs.JSValue) callconv(.c) qjs.JSValue) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     var resolvers: [2]qjs.JSValue = undefined;
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
     const resolve = resolvers[0];
@@ -617,7 +617,7 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
 // JS_FETCH (Threaded)
 
 fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("fetch requires a URL");
 
     const rc = RuntimeContext.get(ctx);

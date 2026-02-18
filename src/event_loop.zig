@@ -520,7 +520,7 @@ pub const EventLoop = struct {
 };
 
 fn js_reportResult(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-    const ctx = z.wrapper.Context{ .ptr = ctx_ptr };
+    const ctx = z.wrapper.Context.from(ctx_ptr);
     if (argc < 1) return z.wrapper.UNDEFINED;
 
     // Duplicate the value so it survives after this function returns

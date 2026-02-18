@@ -38,7 +38,7 @@ fn js_filelist_item(
     _: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file_list);
@@ -60,7 +60,7 @@ fn js_filelist_get_length(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file_list);

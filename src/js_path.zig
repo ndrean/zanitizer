@@ -5,7 +5,7 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 
 fn js_path_join(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const allocator = ctx.getAllocator(); // Use scratch allocator or heap
 
     // 1. Collect all arguments into a slice of paths
@@ -32,7 +32,7 @@ fn js_path_join(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c
 }
 
 fn js_path_basename(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("path required");
 
     const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
@@ -44,7 +44,7 @@ fn js_path_basename(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv:
 }
 
 fn js_path_dirname(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("path required");
 
     const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
@@ -56,7 +56,7 @@ fn js_path_dirname(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: 
 }
 
 fn js_path_extname(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("path required");
 
     const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
@@ -68,7 +68,7 @@ fn js_path_extname(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: 
 }
 
 fn js_path_resolve(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const allocator = ctx.getAllocator();
 
     var paths = std.ArrayList([]const u8).init(allocator);

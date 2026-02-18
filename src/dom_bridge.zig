@@ -29,6 +29,9 @@ const js_XMLSerializer = @import("js_XMLSerializer.zig");
 const js_canvas = @import("js_canvas.zig");
 const js_image = z.js_image;
 const js_pdf = z.js_pdf;
+const js_utils = @import("js_utils.zig");
+const js_compositor = @import("js_compositor.zig");
+const SanitizeOptions = @import("modules/sanitizer.zig").SanitizeOptions;
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -60,7 +63,7 @@ pub const DOMBridge = struct {
     /// - canvas: Returns a native Canvas object with a backing DOM <canvas> element
     /// - template: Uses z.createTemplate() which properly creates the content DocumentFragment
     fn js_createElement_with_canvas(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
-        const ctx = w.Context{ .ptr = ctx_ptr };
+        const ctx = w.Context.from(ctx_ptr);
         const rc = RuntimeContext.get(ctx);
 
         if (argc < 1) return w.EXCEPTION;
@@ -71,8 +74,8 @@ pub const DOMBridge = struct {
 
         // Get document from this_val (needed for all element types)
         const doc: *z.HTMLDocument = blk: {
-            if (z.qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-            if (z.qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+            if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+            if (ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
             return ctx.throwTypeError("Method called on object that is not a Document");
         };
 
@@ -88,30 +91,21 @@ pub const DOMBridge = struct {
             };
 
             // Create JS object with canvas class
-            const obj = z.qjs.JS_NewObjectClass(ctx.ptr, rc.classes.canvas);
-            if (z.qjs.JS_IsException(obj)) {
+            const obj = ctx.newObjectClass(rc.classes.canvas);
+            if (ctx.isException(obj)) {
                 canvas_struct.deinit();
                 return w.EXCEPTION;
             }
 
             // Link opaque pointer
-            _ = z.qjs.JS_SetOpaque(obj, canvas_struct);
+            ctx.setOpaque(obj, canvas_struct) catch return w.EXCEPTION;
             return obj;
         }
 
-        // Handle img specially - native HTMLImageElement with backing DOM element
-        if (std.ascii.eqlIgnoreCase(tag_name, "img")) {
-            const img_struct = js_image.HTMLImageElement.init(rc.allocator) catch return ctx.throwOutOfMemory();
-
-            const obj = z.qjs.JS_NewObjectClass(ctx.ptr, rc.classes.html_image);
-            if (z.qjs.JS_IsException(obj)) {
-                if (ctx.ptr) |p| img_struct.deinit(p);
-                return w.EXCEPTION;
-            }
-
-            _ = z.qjs.JS_SetOpaque(obj, img_struct);
-            return obj;
-        }
+        // Note: createElement("img") falls through to the default path and returns
+        // a regular html_element wrapped <img> DOM element. This gives it full DOM
+        // methods (className, style, getAttribute, appendChild, etc.).
+        // Only `new Image()` creates the full HTMLImageElement wrapper with bitmap/onload.
 
         // Handle template specially - requires z.createTemplate for proper content DocumentFragment
         if (std.ascii.eqlIgnoreCase(tag_name, "template")) {
@@ -143,93 +137,21 @@ pub const DOMBridge = struct {
             // !!NO DEFER HERE! setClassProto takes ownership.
 
             bindings.installNodeBindings(ctx.ptr, node_proto);
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "childNodes");
-                const get_fn = ctx.newCFunction(js_get_childNodes, "get_childNodes", 0);
-                _ = z.qjs.JS_DefinePropertyGetSet(
-                    ctx.ptr,
-                    node_proto,
-                    atom,
-                    get_fn,
-                    zqjs.UNDEFINED,
-                    z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE,
-                );
-                z.qjs.JS_FreeAtom(ctx.ptr, atom);
-            }
+            js_utils.defineGetter(ctx, node_proto, "childNodes", js_get_childNodes);
+            js_utils.defineGetter(ctx, node_proto, "children", js_get_children);
+            js_utils.defineGetter(ctx, node_proto, "isConnected", js_get_isConnected);
 
-            // children property (element children only) - needed for DocumentFragment
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "children");
-                const get_fn = ctx.newCFunction(js_get_children, "get_children", 0);
-                _ = z.qjs.JS_DefinePropertyGetSet(
-                    ctx.ptr,
-                    node_proto,
-                    atom,
-                    get_fn,
-                    zqjs.UNDEFINED,
-                    z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE,
-                );
-                z.qjs.JS_FreeAtom(ctx.ptr, atom);
-            }
-
-            // isConnected property (read-only) - walks up to document
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "isConnected");
-                const get_fn = ctx.newCFunction(js_get_isConnected, "get_isConnected", 0);
-                _ = z.qjs.JS_DefinePropertyGetSet(
-                    ctx.ptr,
-                    node_proto,
-                    atom,
-                    get_fn,
-                    zqjs.UNDEFINED,
-                    z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE,
-                );
-                z.qjs.JS_FreeAtom(ctx.ptr, atom);
-            }
-
-            // Manual: insertBefore(newChild, refChild) - refChild can be null
-            {
-                const ib_fn = ctx.newCFunction(js_insertBefore, "insertBefore", 2);
-                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "insertBefore", ib_fn);
-            }
-
-            // Manual: appendChild - overrides generated binding to handle DocumentFragment
-            {
-                const ac_fn = ctx.newCFunction(js_appendChild_manual, "appendChild", 1);
-                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "appendChild", ac_fn);
-            }
-
-            // ParentNode mixin: querySelector/querySelectorAll (also on Node for DocumentFragment support)
-            {
-                const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
-                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "querySelector", qs_fn);
-                const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
-                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "querySelectorAll", qsa_fn);
-            }
-            // Add modern DOM manipulation methods
-            const append_fn = ctx.newCFunction(js_append, "append", -1);
-            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "append", append_fn);
-
-            const prepend_fn = ctx.newCFunction(js_prepend, "prepend", -1);
-            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "prepend", prepend_fn);
-
-            const before_fn = ctx.newCFunction(js_before, "before", -1);
-            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "before", before_fn);
-
-            const after_fn = ctx.newCFunction(js_after, "after", -1);
-            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "after", after_fn);
-
-            const replaceWith_fn = ctx.newCFunction(js_replaceWith, "replaceWith", -1);
-            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "replaceWith", replaceWith_fn);
-
-            const replaceChildren_fn = ctx.newCFunction(js_replaceChildren, "replaceChildren", -1);
-            _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "replaceChildren", replaceChildren_fn);
-
-            // Text.splitText(offset)
-            {
-                const split_fn = ctx.newCFunction(js_splitText, "splitText", 1);
-                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, node_proto, "splitText", split_fn);
-            }
+            js_utils.defineMethod(ctx, node_proto, "insertBefore", js_insertBefore, 2);
+            js_utils.defineMethod(ctx, node_proto, "appendChild", js_appendChild_manual, 1);
+            js_utils.defineMethod(ctx, node_proto, "querySelector", js_querySelector, 1);
+            js_utils.defineMethod(ctx, node_proto, "querySelectorAll", js_querySelectorAll, 1);
+            js_utils.defineMethod(ctx, node_proto, "append", js_append, -1);
+            js_utils.defineMethod(ctx, node_proto, "prepend", js_prepend, -1);
+            js_utils.defineMethod(ctx, node_proto, "before", js_before, -1);
+            js_utils.defineMethod(ctx, node_proto, "after", js_after, -1);
+            js_utils.defineMethod(ctx, node_proto, "replaceWith", js_replaceWith, -1);
+            js_utils.defineMethod(ctx, node_proto, "replaceChildren", js_replaceChildren, -1);
+            js_utils.defineMethod(ctx, node_proto, "splitText", js_splitText, 1);
 
             ctx.setClassProto(rc.classes.dom_node, node_proto);
 
@@ -243,85 +165,26 @@ pub const DOMBridge = struct {
             const el_proto = ctx.newObject();
             bindings.installElementBindings(ctx.ptr, el_proto);
 
-            // Manual: setAttribute - overrides generated binding to sanitize style/event attrs
-            {
-                const sa_fn = ctx.newCFunction(js_setAttribute_sanitized, "setAttribute", 2);
-                _ = z.qjs.JS_SetPropertyStr(ctx.ptr, el_proto, "setAttribute", sa_fn);
-            }
+            // Methods (override generated bindings where needed)
+            js_utils.defineMethod(ctx, el_proto, "setAttribute", js_setAttribute_sanitized, 2);
+            js_utils.defineMethod(ctx, el_proto, "querySelector", js_querySelector, 1);
+            js_utils.defineMethod(ctx, el_proto, "querySelectorAll", js_querySelectorAll, 1);
+            js_utils.defineMethod(ctx, el_proto, "matches", js_matches, 1);
+            js_utils.defineMethod(ctx, el_proto, "insertAdjacentHTML", js_insertAdjacentHTML, 2);
+            js_utils.defineMethod(ctx, el_proto, "insertAdjacentElement", js_insertAdjacentElement, 2);
+            js_utils.defineMethod(ctx, el_proto, "focus", js_focus, 0);
+            js_utils.defineMethod(ctx, el_proto, "getBoundingClientRect", js_HTMLElement_getBoundingClientRect, 0);
 
-            // Manual: innerHTML - overrides generated binding to sanitize + attach styles
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "innerHTML");
-                defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
-                const get_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_get_innerHTML, "get_innerHTML", 0, z.qjs.JS_CFUNC_generic, 0);
-                const set_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_set_innerHTML, "set_innerHTML", 1, z.qjs.JS_CFUNC_generic, 0);
-                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, el_proto, atom, get_fn, set_fn, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
-            }
+            // Accessor properties (getter + setter)
+            js_utils.defineAccessor(ctx, el_proto, "innerHTML", js_get_innerHTML, js_set_innerHTML);
+            js_utils.defineAccessor(ctx, el_proto, "outerHTML", js_get_outerHTML, js_set_outerHTML);
+            js_utils.defineAccessor(ctx, el_proto, "style", js_style.get_element_style, js_style.set_element_style);
+            js_utils.defineAccessor(ctx, el_proto, "src", js_HTMLElement_get_src, js_HTMLElement_set_src);
+            js_utils.defineAccessor(ctx, el_proto, "href", js_HTMLElement_get_href, js_HTMLElement_set_href);
 
-            // Manual: outerHTML - overrides generated binding to sanitize + attach styles
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "outerHTML");
-                defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
-                const get_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_get_outerHTML, "get_outerHTML", 0, z.qjs.JS_CFUNC_generic, 0);
-                const set_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_set_outerHTML, "set_outerHTML", 1, z.qjs.JS_CFUNC_generic, 0);
-                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, el_proto, atom, get_fn, set_fn, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
-            }
-
-            {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "style");
-                defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
-
-                // Getter (Generic, 0 args)
-                const get_fn_val = ctx.newCFunction(js_style.get_element_style, "get_style", 0);
-
-                const set_fn_val = ctx.newCFunction(js_style.set_element_style, "set_style", 1);
-
-                // define Property (Configurable + Enumerable)
-                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, el_proto, // The prototype object
-                    atom, // "style"
-                    get_fn_val, // Getter function
-                    set_fn_val, // Setter function
-                    z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
-            }
-
-            const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
-            try ctx.setPropertyStr(
-                el_proto,
-                "querySelector",
-                qs_fn,
-            );
-
-            const qsa_fn = ctx.newCFunction(js_querySelectorAll, "querySelectorAll", 1);
-            try ctx.setPropertyStr(
-                el_proto,
-                "querySelectorAll",
-                qsa_fn,
-            );
-
-            const matches_fn = ctx.newCFunction(js_matches, "matches", 1);
-            try ctx.setPropertyStr(
-                el_proto,
-                "matches",
-                matches_fn,
-            );
-
-            // Element.insertAdjacentHTML(position, html)
-            {
-                const iah_fn = ctx.newCFunction(js_insertAdjacentHTML, "insertAdjacentHTML", 2);
-                try ctx.setPropertyStr(el_proto, "insertAdjacentHTML", iah_fn);
-            }
-
-            // Element.insertAdjacentElement(position, newElement)
-            {
-                const iae_fn = ctx.newCFunction(js_insertAdjacentElement, "insertAdjacentElement", 2);
-                try ctx.setPropertyStr(el_proto, "insertAdjacentElement", iae_fn);
-            }
-
-            // Element.focus() - no-op in headless environment
-            {
-                const focus_fn = ctx.newCFunction(js_focus, "focus", 0);
-                try ctx.setPropertyStr(el_proto, "focus", focus_fn);
-            }
+            // Getter-only properties
+            js_utils.defineGetter(ctx, el_proto, "clientWidth", js_HTMLElement_clientWidth);
+            js_utils.defineGetter(ctx, el_proto, "clientHeight", js_HTMLElement_clientHeight);
 
             // Inheritance: HTMLElement -> Node
             {
@@ -374,15 +237,39 @@ pub const DOMBridge = struct {
             ctx.setClassProto(rc.classes.css_style_decl, style_proto);
         }
 
-        // Expose HTMLElement constructor globally BEFORE polyfills
-        // (polyfills like onclick need HTMLElement.prototype to exist)
+        // Expose DOM constructor globals BEFORE polyfills
+        // (frameworks like Svelte need Node.prototype, Text.prototype, Element.prototype)
         {
             const global = ctx.getGlobalObject();
             defer ctx.freeValue(global);
+
+            // HTMLElement (polyfills like onclick need HTMLElement.prototype)
             const html_element_ctor = ctx.newCFunction2(js_HTMLElement_constructor, "HTMLElement", 0, z.qjs.JS_CFUNC_constructor, 0);
             const html_element_proto = ctx.getClassProto(rc.classes.html_element);
             try ctx.setPropertyStr(html_element_ctor, "prototype", html_element_proto);
             try ctx.setPropertyStr(global, "HTMLElement", html_element_ctor);
+
+            // Node — Svelte uses Object.getOwnPropertyDescriptor(Node.prototype, 'firstChild')
+            const node_ctor = ctx.newObject();
+            // getClassProto returns a ref; setPropertyStr consumes it
+            try ctx.setPropertyStr(node_ctor, "prototype", ctx.getClassProto(rc.classes.dom_node));
+            // Standard node type constants
+            try ctx.setPropertyStr(node_ctor, "ELEMENT_NODE", ctx.newInt32(1));
+            try ctx.setPropertyStr(node_ctor, "TEXT_NODE", ctx.newInt32(3));
+            try ctx.setPropertyStr(node_ctor, "COMMENT_NODE", ctx.newInt32(8));
+            try ctx.setPropertyStr(node_ctor, "DOCUMENT_NODE", ctx.newInt32(9));
+            try ctx.setPropertyStr(node_ctor, "DOCUMENT_FRAGMENT_NODE", ctx.newInt32(11));
+            try ctx.setPropertyStr(global, "Node", node_ctor);
+
+            // Text — Svelte checks Object.isExtensible(Text.prototype)
+            const text_ctor = ctx.newObject();
+            try ctx.setPropertyStr(text_ctor, "prototype", ctx.getClassProto(rc.classes.dom_node));
+            try ctx.setPropertyStr(global, "Text", text_ctor);
+
+            // Element — Svelte patches Element.prototype with __click, __className etc.
+            const element_ctor = ctx.newObject();
+            try ctx.setPropertyStr(element_ctor, "prototype", ctx.getClassProto(rc.classes.html_element));
+            try ctx.setPropertyStr(global, "Element", element_ctor);
         }
 
         // Web APIs classes
@@ -489,6 +376,9 @@ pub const DOMBridge = struct {
         const fn_val = ctx.newCFunction(js_reportResult, "sendToHost", 1);
         try ctx.setPropertyStr(global, "sendToHost", fn_val);
 
+        // Compositor: generateRoutePng(mapData, svgString, filename)
+        try ctx.setPropertyStr(global, "__native_generateRoutePng", ctx.newCFunction(js_compositor.js_generateRoutePng, "generateRoutePng", 5));
+
         // HTMLElement constructor is now exposed in init() before polyfills
     }
 
@@ -542,9 +432,7 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(loc_obj, "href", ctx.newString("about:blank"));
         try ctx.setPropertyStr(global, "location", loc_obj);
 
-        const nav_obj = ctx.newObject();
-        try ctx.setPropertyStr(nav_obj, "userAgent", ctx.newString("Zexplorer/1.0"));
-        try ctx.setPropertyStr(global, "navigator", nav_obj);
+        // navigator is set in js_polyfills.install()
 
         // history API (Next.js router uses pushState/replaceState)
         const history_obj = ctx.newObject();
@@ -667,10 +555,7 @@ pub const DOMBridge = struct {
 
         // <template> only: install read-only .content getter on this instance
         if (z.elementToTemplate(element) != null) {
-            const atom = z.qjs.JS_NewAtom(ctx.ptr, "content");
-            defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
-            const get_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_get_template_content, "get_content", 0, z.qjs.JS_CFUNC_generic, 0);
-            _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, obj, atom, get_fn, w.UNDEFINED, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
+            js_utils.defineGetter(ctx, obj, "content", js_get_template_content);
         }
 
         // store in cache
@@ -747,10 +632,7 @@ pub const DOMBridge = struct {
 
             // <template> only: install read-only .content getter on this instance
             if (z.elementToTemplate(element) != null) {
-                const atom = z.qjs.JS_NewAtom(ctx.ptr, "content");
-                defer z.qjs.JS_FreeAtom(ctx.ptr, atom);
-                const get_fn = z.qjs.JS_NewCFunction2(ctx.ptr, js_get_template_content, "get_content", 0, z.qjs.JS_CFUNC_generic, 0);
-                _ = z.qjs.JS_DefinePropertyGetSet(ctx.ptr, obj, atom, get_fn, w.UNDEFINED, z.qjs.JS_PROP_CONFIGURABLE | z.qjs.JS_PROP_ENUMERABLE);
+                js_utils.defineGetter(ctx, obj, "content", js_get_template_content);
             }
         }
 
@@ -773,19 +655,19 @@ pub const DOMBridge = struct {
             return @ptrCast(@alignCast(ptr));
         }
 
-        // 2. Is it an Element? (div, span)
+        // Element? (div, span)
         if (ctx.getOpaque(val, rc.classes.html_element)) |ptr| {
             const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
             return z.elementToNode(el); // Cast *HTMLElement -> *DomNode
         }
 
-        // 3. Is it a DocumentFragment?
+        // DocumentFragment?
         if (ctx.getOpaque(val, rc.classes.document_fragment)) |ptr| {
             const frag: *z.DocumentFragment = @ptrCast(@alignCast(ptr));
             return z.fragmentToNode(frag); // Cast *DocumentFragment -> *DomNode
         }
 
-        // 4. Is it a Document?
+        // Document?
         if (ctx.getOpaque(val, rc.classes.document)) |ptr| {
             const doc: *z.HTMLDocument = @ptrCast(@alignCast(ptr));
             return z.documentRoot(doc); // Cast *HTMLDocument -> *DomNode
@@ -797,10 +679,16 @@ pub const DOMBridge = struct {
             }
         }
 
-        // 5. Is it a Canvas with a backing DOM element?
+        // Canvas with a backing DOM element?
         if (ctx.getOpaque(val, rc.classes.canvas)) |ptr| {
             const canvas: *js_canvas.Canvas = @ptrCast(@alignCast(ptr));
             if (canvas.element) |el| return z.elementToNode(el);
+        }
+
+        // Image? (HTMLImageElement has a backing DOM <img> element)
+        if (ctx.getOpaque(val, rc.classes.html_image)) |ptr| {
+            const img: *js_image.HTMLImageElement = @ptrCast(@alignCast(ptr));
+            if (img.element) |el| return z.elementToNode(el);
         }
 
         return null;
@@ -938,9 +826,7 @@ pub fn dispatchEvent(
     // Browser spec: drain microtask queue after dispatching an event.
     // This lets frameworks like Vue/React flush their schedulers (nextTick)
     // without requiring an explicit __flush() call after every dispatchEvent.
-    const rt = z.qjs.JS_GetRuntime(ctx.ptr);
-    var ctx_out: ?*z.qjs.JSContext = ctx.ptr;
-    while (z.qjs.JS_ExecutePendingJob(rt, &ctx_out) > 0) {}
+    js_polyfills.drainMicrotasksGCSafe(z.qjs.JS_GetRuntime(ctx.ptr), ctx.ptr);
 
     return !ev_struct.default_prevented;
 }
@@ -951,7 +837,7 @@ fn js_reportResult(
     argc: c_int,
     argv: [*c]zqjs.Value,
 ) callconv(.c) zqjs.Value {
-    const ctx = z.wrapper.Context{ .ptr = ctx_ptr };
+    const ctx = z.wrapper.Context.from(ctx_ptr);
     if (argc < 1) return z.wrapper.UNDEFINED;
 
     const str = ctx.toCString(argv[0]) catch "???";
@@ -978,7 +864,7 @@ fn js_HTMLElement_constructor(
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     return ctx.throwTypeError("Illegal constructor: HTMLElement cannot be constructed directly");
 }
 
@@ -989,7 +875,7 @@ fn js_querySelector(
     argc: c_int,
     argv: [*c]zqjs.Value,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return ctx.throwTypeError("querySelector requires 1 argument");
 
@@ -1033,7 +919,7 @@ fn js_querySelectorAll(
     argc: c_int,
     argv: [*c]zqjs.Value,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return ctx.throwTypeError("querySelectorAll requires 1 argument");
 
@@ -1081,7 +967,7 @@ fn js_matches(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
@@ -1107,7 +993,7 @@ fn js_getElementsByTagName(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 1) return w.EXCEPTION;
 
@@ -1151,7 +1037,7 @@ fn js_get_childNodes(
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // Unwrap 'this' to *DomNode
@@ -1178,7 +1064,7 @@ fn js_get_children(
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     // Unwrap 'this' to *DomNode
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("children: 'this' is not a Node");
@@ -1206,7 +1092,7 @@ fn js_insertBefore(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     if (argc < 1) return ctx.throwTypeError("insertBefore requires at least 1 argument");
 
@@ -1233,16 +1119,16 @@ fn js_insertBefore(
         while (frag_child) |fc| {
             const next = z.nextSibling(fc);
             z.removeNode(fc); // Detach from the fragment!
-            _ = z.jsInsertBefore(parent, fc, ref_child);
+            _ = z.jsInsertBefore(parent, fc, ref_child) catch
+                return ctx.throwTypeError("NotFoundError: refChild is not a child of parent");
             frag_child = next;
         }
         return DOMBridge.wrapNode(ctx, new_child) catch return w.EXCEPTION;
     }
 
     // Call the Zig implementation
-    // std.debug.print("[DOM] insertBefore (ref={s})\n", .{if (ref_child != null) "node" else "null"});
-    const result = z.jsInsertBefore(parent, new_child, ref_child);
-    // std.debug.print("[DOM] insertBefore done\n", .{});
+    const result = z.jsInsertBefore(parent, new_child, ref_child) catch
+        return ctx.throwTypeError("NotFoundError: refChild is not a child of parent");
 
     // Return the inserted node
     return DOMBridge.wrapNode(ctx, result) catch return w.EXCEPTION;
@@ -1257,7 +1143,7 @@ fn js_appendChild_manual(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     if (argc < 1) return ctx.throwTypeError("appendChild requires 1 argument");
 
@@ -1387,7 +1273,7 @@ fn js_get_parentNode(
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const parent = z.parentNode(node);
     if (parent) |p| {
@@ -1402,7 +1288,7 @@ fn js_get_ownerDocument(
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     // Return the global document object
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
@@ -1426,7 +1312,7 @@ fn js_createRange(
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     // Call Range constructor with 0 args
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
@@ -1452,7 +1338,7 @@ fn js_createTextNode(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     // const rc = RuntimeContext.get(ctx);
 
     // 'this' is the document object. We need to unwrap it to create a node in the right context.
@@ -1485,7 +1371,7 @@ fn js_parseHTMLSafe(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const allocator = rc.allocator;
 
@@ -1584,7 +1470,7 @@ fn jsValuesToFragment(ctx: w.Context, doc: *z.HTMLDocument, argc: c_int, argv: [
 }
 
 fn js_append(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for append");
     const doc = z.ownerDocument(parent);
     const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
@@ -1602,7 +1488,7 @@ fn js_append(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv
 }
 
 fn js_get_isConnected(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return zqjs.FALSE;
 
     // Walk up parentNode chain; if we reach a document node, it's connected
@@ -1620,34 +1506,34 @@ fn js_focus(_: ?*z.qjs.JSContext, _: zqjs.Value, _: c_int, _: [*c]zqjs.Value) ca
 }
 
 fn js_prepend(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for prepend");
     const doc = z.ownerDocument(parent);
     const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
     defer z.destroyNode(frag);
-    _ = z.jsInsertBefore(parent, frag, z.firstChild(parent));
+    _ = z.jsInsertBefore(parent, frag, z.firstChild(parent)) catch return ctx.throwTypeError("NotFoundError: insertBefore failed");
     return w.UNDEFINED;
 }
 
 fn js_before(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const child = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for before");
     const parent = z.parentNode(child) orelse return w.UNDEFINED;
     const doc = z.ownerDocument(parent);
     const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
     defer z.destroyNode(frag);
-    _ = z.jsInsertBefore(parent, frag, child);
+    _ = z.jsInsertBefore(parent, frag, child) catch return ctx.throwTypeError("NotFoundError: insertBefore failed");
     return w.UNDEFINED;
 }
 
 fn js_after(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const child = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for after");
     const parent = z.parentNode(child) orelse return w.UNDEFINED;
     const doc = z.ownerDocument(parent);
     const frag = jsValuesToFragment(ctx, doc, argc, argv) catch return w.EXCEPTION;
     defer z.destroyNode(frag);
-    _ = z.jsInsertBefore(parent, frag, z.nextSibling(child));
+    _ = z.jsInsertBefore(parent, frag, z.nextSibling(child)) catch return ctx.throwTypeError("NotFoundError: insertBefore failed");
     return w.UNDEFINED;
 }
 
@@ -1658,7 +1544,7 @@ fn js_splitText(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("splitText requires 1 argument");
 
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse
@@ -1695,13 +1581,11 @@ fn js_insertAdjacentHTML(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 2) return ctx.throwTypeError("insertAdjacentHTML requires 2 arguments");
 
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("insertAdjacentHTML called on non-Element");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "insertAdjacentHTML called on non-Element") orelse return w.EXCEPTION;
 
     const position_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(position_str);
@@ -1715,18 +1599,7 @@ fn js_insertAdjacentHTML(
 
     if (rc.sanitize_enabled) {
         const sanitizer_mod = @import("modules/sanitizer.zig");
-        const strict_options = sanitizer_mod.SanitizeOptions{
-            .remove_scripts = true,
-            .remove_styles = false,
-            .sanitize_css = true,
-            .remove_comments = rc.sanitize_options.remove_comments,
-            .strict_uri = rc.sanitize_options.strict_uri,
-            .sanitize_dom_clobbering = true,
-            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
-            .allow_embeds = false,
-            .allow_iframes = false,
-            .frameworks = rc.sanitize_options.frameworks,
-        };
+        const strict_options = strictSanitizeOptions(rc);
         var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch {
             return ctx.throwTypeError("Failed to initialize sanitizer");
         };
@@ -1827,22 +1700,20 @@ fn js_insertAdjacentElement(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 2) return ctx.throwTypeError("insertAdjacentElement requires 2 arguments");
 
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("insertAdjacentElement called on non-Element");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "insertAdjacentElement called on non-Element") orelse return w.EXCEPTION;
 
     const position_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(position_str);
 
     // Unwrap second argument as HTMLElement (also supports Canvas via backing element)
     const new_el: *z.HTMLElement = blk: {
-        if (z.qjs.JS_GetOpaque(argv[1], rc.classes.html_element)) |p|
+        if (ctx.getOpaque(argv[1], rc.classes.html_element)) |p|
             break :blk @ptrCast(@alignCast(p));
-        if (z.qjs.JS_GetOpaque(argv[1], rc.classes.canvas)) |p| {
+        if (ctx.getOpaque(argv[1], rc.classes.canvas)) |p| {
             const canvas: *js_canvas.Canvas = @ptrCast(@alignCast(p));
             if (canvas.element) |backing| break :blk backing;
         }
@@ -1868,13 +1739,11 @@ fn js_setAttribute_sanitized(
     argc: c_int,
     argv: [*c]z.qjs.JSValue,
 ) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     if (argc < 2) return ctx.throwTypeError("setAttribute requires 2 arguments");
 
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("setAttribute called on non-Element");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "setAttribute called on non-Element") orelse return w.EXCEPTION;
 
     const attr_name = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(attr_name);
@@ -1926,11 +1795,8 @@ fn js_setAttribute_sanitized(
 fn js_get_template_content(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) zqjs.Value {
     _ = argc;
     _ = argv;
-    const ctx = w.Context{ .ptr = ctx_ptr };
-    const rc = RuntimeContext.get(ctx);
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const ctx = w.Context.from(ctx_ptr);
+    const el = unwrapElement(ctx, this_val, "Object is not an HTMLElement") orelse return w.EXCEPTION;
     const result = z.getTemplateContentAsNode(el);
     if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
     return w.NULL;
@@ -1940,11 +1806,9 @@ fn js_get_template_content(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, arg
 fn js_get_innerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) zqjs.Value {
     _ = argc;
     _ = argv;
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "Object is not an HTMLElement") orelse return w.EXCEPTION;
     const result = z.innerHTML(rc.allocator, el) catch return w.EXCEPTION;
     defer rc.allocator.free(result);
     return ctx.newString(result);
@@ -1953,28 +1817,15 @@ fn js_get_innerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
 // Manual innerHTML setter — sanitizes when sanitize_enabled + attaches styles
 fn js_set_innerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) zqjs.Value {
     _ = argc;
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "Setter called on object that is not an HTMLElement") orelse return w.EXCEPTION;
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
 
     if (rc.sanitize_enabled) {
         const sanitizer_mod = @import("modules/sanitizer.zig");
-        const strict_options = sanitizer_mod.SanitizeOptions{
-            .remove_scripts = true,
-            .remove_styles = false,
-            .sanitize_css = true,
-            .remove_comments = rc.sanitize_options.remove_comments,
-            .strict_uri = rc.sanitize_options.strict_uri,
-            .sanitize_dom_clobbering = true,
-            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
-            .allow_embeds = false,
-            .allow_iframes = false,
-            .frameworks = rc.sanitize_options.frameworks,
-        };
+        const strict_options = strictSanitizeOptions(rc);
         var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch |err| {
             std.debug.print("JS Setter Error (innerHTML sanitizer init): {}\n", .{err});
             return ctx.throwTypeError("Failed to initialize sanitizer");
@@ -2005,11 +1856,9 @@ fn js_set_innerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
 fn js_get_outerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) zqjs.Value {
     _ = argc;
     _ = argv;
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "Object is not an HTMLElement") orelse return w.EXCEPTION;
     const result = z.outerHTML(rc.allocator, el) catch return w.EXCEPTION;
     defer rc.allocator.free(result);
     return ctx.newString(result);
@@ -2018,11 +1867,9 @@ fn js_get_outerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
 // Manual outerHTML setter — sanitizes when sanitize_enabled + attaches styles
 fn js_set_outerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) zqjs.Value {
     _ = argc;
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = z.qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
-    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const el = unwrapElement(ctx, this_val, "Setter called on object that is not an HTMLElement") orelse return w.EXCEPTION;
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
 
@@ -2031,18 +1878,7 @@ fn js_set_outerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
 
     if (rc.sanitize_enabled) {
         const sanitizer_mod = @import("modules/sanitizer.zig");
-        const strict_options = sanitizer_mod.SanitizeOptions{
-            .remove_scripts = true,
-            .remove_styles = false,
-            .sanitize_css = true,
-            .remove_comments = rc.sanitize_options.remove_comments,
-            .strict_uri = rc.sanitize_options.strict_uri,
-            .sanitize_dom_clobbering = true,
-            .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
-            .allow_embeds = false,
-            .allow_iframes = false,
-            .frameworks = rc.sanitize_options.frameworks,
-        };
+        const strict_options = strictSanitizeOptions(rc);
         var san = sanitizer_mod.Sanitizer.init(rc.allocator, strict_options) catch |err| {
             std.debug.print("JS Setter Error (outerHTML sanitizer init): {}\n", .{err});
             return ctx.throwTypeError("Failed to initialize sanitizer");
@@ -2085,7 +1921,7 @@ fn js_set_outerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
 }
 
 fn js_replaceWith(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const child = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for replaceWith");
     const parent = z.parentNode(child) orelse return w.UNDEFINED;
     const doc = z.ownerDocument(parent);
@@ -2106,7 +1942,7 @@ fn js_replaceWith(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int,
 
 // spces: clear all existing children, then append the new ones.
 fn js_replaceChildren(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_int, argv: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const parent = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node for replaceChildren");
 
     // Remove all existing children
@@ -2129,4 +1965,144 @@ fn js_replaceChildren(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_
         }
     }
     return w.UNDEFINED;
+}
+
+// --- Helpers ---
+
+/// Unwrap an HTMLElement from a JS this_val. Returns null with a TypeError if not an element.
+fn unwrapElement(ctx: w.Context, this_val: zqjs.Value, err_msg: [*:0]const u8) ?*z.HTMLElement {
+    const rc = RuntimeContext.get(ctx);
+    return ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse {
+        _ = ctx.throwTypeError(err_msg);
+        return null;
+    };
+}
+
+/// Build strict sanitize options from RuntimeContext (DRY helper for innerHTML/outerHTML/insertAdjacentHTML)
+fn strictSanitizeOptions(rc: *RuntimeContext) z.SanitizeOptions {
+    return .{
+        .remove_scripts = true,
+        .remove_styles = false,
+        .sanitize_css = true,
+        .remove_comments = rc.sanitize_options.remove_comments,
+        .strict_uri = rc.sanitize_options.strict_uri,
+        .sanitize_dom_clobbering = true,
+        .allow_custom_elements = rc.sanitize_options.allow_custom_elements,
+        .allow_embeds = false,
+        .allow_iframes = false,
+        .frameworks = rc.sanitize_options.frameworks,
+    };
+}
+
+/// Parse a pixel dimension from an element: checks width/height attribute first,
+/// then falls back to parsing the style attribute (e.g. "width: 800px").
+fn parseDimension(element: *z.HTMLElement, attr_name: []const u8, style_prop: []const u8) ?i32 {
+    // 1. Check HTML attribute: <div width="800">
+    if (z.getAttribute_zc(element, attr_name)) |val| {
+        if (std.fmt.parseInt(i32, val, 10)) |v| return v else |_| {}
+    }
+    // 2. Parse from style attribute: style="width: 800px; ..."
+    if (z.getAttribute_zc(element, "style")) |style| {
+        var it = std.mem.splitScalar(u8, style, ';');
+        while (it.next()) |decl| {
+            const trimmed = std.mem.trim(u8, decl, " \t\r\n");
+            if (std.mem.indexOfScalar(u8, trimmed, ':')) |colon| {
+                const prop = std.mem.trim(u8, trimmed[0..colon], " \t");
+                if (std.ascii.eqlIgnoreCase(prop, style_prop)) {
+                    const raw_val = std.mem.trim(u8, trimmed[colon + 1 ..], " \t");
+                    // Strip "px" suffix if present
+                    const num_str = if (std.mem.endsWith(u8, raw_val, "px"))
+                        raw_val[0 .. raw_val.len - 2]
+                    else
+                        raw_val;
+                    if (std.fmt.parseInt(i32, std.mem.trim(u8, num_str, " "), 10)) |v| return v else |_| {}
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/// clientWidth getter — reads from attribute/style, fallback 0
+fn js_HTMLElement_clientWidth(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
+        const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        if (parseDimension(el, "width", "width")) |v| return ctx.newInt32(v);
+    }
+    return ctx.newInt32(600);
+}
+
+/// clientHeight getter — reads from attribute/style, fallback 0
+fn js_HTMLElement_clientHeight(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
+        const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        if (parseDimension(el, "height", "height")) |v| return ctx.newInt32(v);
+    }
+    return ctx.newInt32(800);
+}
+
+/// getBoundingClientRect() — returns rect based on element dimensions (headless: no layout)
+fn js_HTMLElement_getBoundingClientRect(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+
+    var cw: i32 = 0;
+    var ch: i32 = 0;
+
+    if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
+        const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        cw = parseDimension(el, "width", "width") orelse 0;
+        ch = parseDimension(el, "height", "height") orelse 0;
+    }
+
+    const obj = ctx.newObject();
+    ctx.setPropertyStr(obj, "x", ctx.newInt32(0)) catch {};
+    ctx.setPropertyStr(obj, "y", ctx.newInt32(0)) catch {};
+    ctx.setPropertyStr(obj, "top", ctx.newInt32(0)) catch {};
+    ctx.setPropertyStr(obj, "left", ctx.newInt32(0)) catch {};
+    ctx.setPropertyStr(obj, "width", ctx.newInt32(cw)) catch {};
+    ctx.setPropertyStr(obj, "height", ctx.newInt32(ch)) catch {};
+    ctx.setPropertyStr(obj, "bottom", ctx.newInt32(ch)) catch {};
+    ctx.setPropertyStr(obj, "right", ctx.newInt32(cw)) catch {};
+
+    return obj;
+}
+
+/// Generic reflected attribute getter — returns getAttribute(attr) or ""
+fn reflectedAttrGetter(ctx: w.Context, this_val: z.qjs.JSValue, comptime attr: []const u8) z.qjs.JSValue {
+    const rc = RuntimeContext.get(ctx);
+    if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
+        const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        if (z.getAttribute_zc(el, attr)) |val| return ctx.newString(val);
+    }
+    return ctx.newString("");
+}
+
+/// Generic reflected attribute setter — calls setAttribute(attr, value)
+fn reflectedAttrSetter(ctx: w.Context, this_val: z.qjs.JSValue, argv: [*c]w.Value, comptime attr: []const u8) z.qjs.JSValue {
+    const rc = RuntimeContext.get(ctx);
+    if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
+        const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+        defer ctx.freeZString(val_str);
+        z.setAttribute(el, attr, val_str) catch {};
+    }
+    return w.UNDEFINED;
+}
+
+fn js_HTMLElement_get_src(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    return reflectedAttrGetter(.{ .ptr = ctx_ptr }, this_val, "src");
+}
+fn js_HTMLElement_set_src(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    return reflectedAttrSetter(.{ .ptr = ctx_ptr }, this_val, argv, "src");
+}
+fn js_HTMLElement_get_href(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    return reflectedAttrGetter(.{ .ptr = ctx_ptr }, this_val, "href");
+}
+fn js_HTMLElement_set_href(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    return reflectedAttrSetter(.{ .ptr = ctx_ptr }, this_val, argv, "href");
 }

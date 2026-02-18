@@ -314,15 +314,13 @@ fn js_ReadableStream_getReader(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // Get stream from this
-    const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream);
-    if (stream_ptr == null) {
+    const stream = ctx.getOpaqueAs(ReadableStreamObject, this, rc.classes.readable_stream) orelse {
         return ctx.throwTypeError("Invalid ReadableStream");
-    }
-    const stream: *ReadableStreamObject = @ptrCast(@alignCast(stream_ptr));
+    };
 
     if (stream.locked) {
         return ctx.throwTypeError("ReadableStream is locked");
@@ -349,7 +347,7 @@ fn js_ReadableStream_get_locked(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream);
@@ -365,7 +363,7 @@ fn js_ReadableStream_cancel(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream);
@@ -396,7 +394,7 @@ fn js_Reader_read(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const reader_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream_reader);
@@ -505,7 +503,7 @@ fn js_Reader_releaseLock(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const reader_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream_reader);
@@ -523,7 +521,7 @@ fn js_Reader_cancel(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const reader_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream_reader);
@@ -542,7 +540,7 @@ fn js_Reader_get_closed(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const reader_ptr = qjs.JS_GetOpaque(this, rc.classes.readable_stream_reader);

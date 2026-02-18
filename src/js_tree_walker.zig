@@ -58,7 +58,7 @@ fn matchesWhatToShow(node: *z.DomNode, what_to_show: u32) bool {
 
 /// TreeWalker.nextNode() — depth-first forward traversal
 fn js_nextNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -172,7 +172,7 @@ fn descendToAccepted(self: *TreeWalkerObject, start: *z.DomNode) ?*z.DomNode {
 
 /// TreeWalker.previousNode() — reverse depth-first traversal
 fn js_previousNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -207,7 +207,7 @@ fn js_previousNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _:
 
 /// TreeWalker.parentNode() — walk to first accepted ancestor
 fn js_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -226,7 +226,7 @@ fn js_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [
 
 /// TreeWalker.firstChild() — first accepted child
 fn js_firstChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -243,7 +243,7 @@ fn js_firstChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [
 
 /// TreeWalker.nextSibling() — next accepted sibling
 fn js_nextSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -260,7 +260,7 @@ fn js_nextSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: 
 
 /// Property getter: TreeWalker.currentNode
 fn js_get_currentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -269,7 +269,7 @@ fn js_get_currentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int,
 
 /// Property getter: TreeWalker.root
 fn js_get_root(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -278,7 +278,7 @@ fn js_get_root(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c
 
 /// Property getter: TreeWalker.whatToShow
 fn js_get_whatToShow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
         return ctx.throwTypeError("Not a TreeWalker");
@@ -389,7 +389,7 @@ pub fn js_createTreeWalker(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("createTreeWalker requires at least 1 argument");

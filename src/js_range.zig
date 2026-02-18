@@ -28,7 +28,7 @@ pub fn getPtr(comptime T: type, val: qjs.JSValue, class_id: qjs.JSClassID) ?*T {
 // ============================================================================
 
 fn setStartBefore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const self = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
@@ -42,8 +42,8 @@ fn setStartBefore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, arg
 }
 
 fn setEndAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const rc = RuntimeContext.get(zqjs.Context{ .ptr = ctx_ptr });
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(zqjs.Context.from(ctx_ptr));
+    const ctx = zqjs.Context.from(ctx_ptr);
     const this = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
 
     const node = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument 1 must be a Node");
@@ -60,7 +60,7 @@ fn setEndAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: 
 }
 
 fn selectNodeContents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
 
@@ -75,7 +75,7 @@ fn selectNodeContents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int,
 }
 
 fn insertNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const self = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
 
@@ -95,8 +95,8 @@ fn insertNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [
 }
 
 fn deleteContents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const rc = RuntimeContext.get(zqjs.Context{ .ptr = ctx_ptr });
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const rc = RuntimeContext.get(zqjs.Context.from(ctx_ptr));
+    const ctx = zqjs.Context.from(ctx_ptr);
     const this = getPtr(RangeObject, this_val, rc.classes.range) orelse return ctx.throwTypeError("Not a Range");
 
     const parent = this.common_parent orelse return zqjs.UNDEFINED;
@@ -187,7 +187,7 @@ pub const RangeBridge = struct {
 };
 
 fn js_Range_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const rt = ctx.getRuntime();
 

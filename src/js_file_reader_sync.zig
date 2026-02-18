@@ -83,22 +83,22 @@ fn readSync(ctx: zqjs.Context, blob_val: qjs.JSValue, read_type: ReadType) qjs.J
 // ============================================================================
 
 fn js_FileReaderSync_readAsArrayBuffer(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return readSync(ctx, argv[0], .ArrayBuffer);
 }
 
 fn js_FileReaderSync_readAsText(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return readSync(ctx, argv[0], .Text);
 }
 
 fn js_FileReaderSync_readAsDataURL(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return readSync(ctx, argv[0], .DataURL);
 }
 
 fn js_FileReaderSync_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const proto = ctx.getPropertyStr(new_target, "prototype");
     const obj = qjs.JS_NewObjectProto(ctx.ptr, proto);
     ctx.freeValue(proto);

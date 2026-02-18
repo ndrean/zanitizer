@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+  <head>
+    <script>
+      globalThis.navigator = {
+        userAgent:
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Zexplorer/1.0",
+        platform: "Linux x86_64",
+        maxTouchPoints: 0,
+      };
+      globalThis.window = globalThis.window || globalThis;
+      globalThis.window.devicePixelRatio = 1;
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+        get: () => 800,
+      });
+      Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+        get: () => 600,
+      });
+      HTMLElement.prototype.getBoundingClientRect = function () {
+        return {
+          top: 0,
+          left: 0,
+          width: 800,
+          height: 600,
+          bottom: 600,
+          right: 800,
+        };
+      };
+      Object.defineProperty(globalThis.Element.prototype, "className", {
+        get: function () {
+          return this.getAttribute("class") || "";
+        },
+        set: function (val) {
+          this.setAttribute("class", val);
+        },
+      });
+      if (
+        !Object.getOwnPropertyDescriptor(
+          globalThis.HTMLElement.prototype,
+          "style",
+        )
+      ) {
+        Object.defineProperty(globalThis.HTMLElement.prototype, "style", {
+          get: function () {
+            if (!this._styleProxy) {
+              this._styleProxy = new Proxy(
+                {},
+                {
+                  set: (target, prop, value) => {
+                    target[prop] = value;
+                    // Convert camelCase (zIndex) to kebab-case (z-index) and write to DOM
+                    const cssText = Object.entries(target)
+                      .map(
+                        ([k, v]) =>
+                          `${k.replace(/([A-Z])/g, "-$1").toLowerCase()}:${v}`,
+                      )
+                      .join(";");
+                    this.setAttribute("style", cssText);
+                    return true;
+                  },
+                  get: (target, prop) => target[prop] || "",
+                },
+              );
+            }
+            return this._styleProxy;
+          },
+        });
+      }
+    </script>
+
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  </head>
+  <body>
+    <div id="map" style="width: 800px; height: 600px"></div>
+
+    <script>
+      // Debug: patch L.DomUtil.addClass to log the failing element
+      const _origSetTimeout = globalThis.setTimeout;
+      globalThis.setTimeout = function (fn, ms) {
+        return _origSetTimeout(function () {
+          try {
+            fn();
+          } catch (e) {
+            console.log("[setTimeout error] " + e.message);
+          }
+        }, ms);
+      };
+
+      // Monkey-patch createElement to track all creations
+      const _origCE = document.createElement.bind(document);
+      let ceCount = 0;
+      document.createElement = function (tag) {
+        const el = _origCE(tag);
+        ceCount++;
+        if (el.className === undefined) {
+          console.log(
+            "[DEBUG] createElement(" +
+              tag +
+              ") #" +
+              ceCount +
+              " has undefined className!",
+          );
+          console.log(
+            "[DEBUG]   tagName=" +
+              el.tagName +
+              " proto=" +
+              Object.getPrototypeOf(el),
+          );
+        }
+        return el;
+      };
+
+      console.log("[Test] Booting Leaflet...");
+
+      // Initialize the Map
+      const map = L.map("map", {
+        zoomControl: false,
+        attributionControl: false,
+      }).setView([51.505, -0.09], 13);
+
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+
+      // Give Leaflet a micro-tick to calculate the DOM nodes
+      setTimeout(() => {
+        console.log("\n--- DOM EXTRACTION ---");
+        const tiles = document.querySelectorAll("img.leaflet-tile");
+
+        if (tiles.length === 0) {
+          console.log(
+            "❌ Failed: No tiles found. Leaflet rejected the container.",
+          );
+          return;
+        }
+
+        console.log(`✅ Success! Leaflet injected ${tiles.length} map tiles!`);
+
+        Array.from(tiles).forEach((img, index) => {
+          console.log(`Tile ${index + 1}: ${img.getAttribute("src")}`);
+          console.log(`  Style: ${img.getAttribute("style")}`);
+        });
+      }, 50); // Small timeout allows microtasks to flush
+    </script>
+  </body>
+</html>

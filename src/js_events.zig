@@ -69,7 +69,7 @@ pub fn constructor(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     if (argc < 1) return ctx.throwTypeError("Event constructor requires 'type' argument");
 

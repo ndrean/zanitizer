@@ -24,7 +24,7 @@ fn js_norm(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const opaque_ptr = qjs.JS_GetOpaque2(ctx.ptr, this, PointClass.class_id);
     if (opaque_ptr == null) return ctx.throwTypeError("Invalid this");
 

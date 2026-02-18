@@ -19,7 +19,7 @@ pub fn getPropertyValue(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     // Return "" if no backing element (empty style object)
     const el = getElement(ctx, this_val) catch return ctx.newString("");
@@ -44,7 +44,7 @@ pub fn setProperty(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const el = getElement(ctx, this_val) catch return w.EXCEPTION;
@@ -67,7 +67,7 @@ pub fn removeProperty(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = getElement(ctx, this_val) catch return w.EXCEPTION;
     if (argc < 1) return ctx.throwTypeError("removeProperty requires 1 argument");
@@ -95,7 +95,7 @@ pub fn get_element_style(
     _: c_int,
     _: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
     if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
@@ -113,7 +113,7 @@ pub fn set_element_style(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
@@ -140,7 +140,7 @@ pub fn window_getComputedStyle(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("getComputedStyle requires 1 argument");

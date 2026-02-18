@@ -22,24 +22,6 @@ pub const UNINITIALIZED = Value{ .tag = qjs.JS_TAG_UNINITIALIZED, .u = .{ .int32
 
 // pub const EXCEPTION = qjs.JS_EXCEPTION;
 
-// !! Context also defines
-pub inline fn isUndefined(val: Value) bool {
-    return qjs.JS_IsUndefined(val);
-    // QuickJS-ng headers usually return bool directly or int
-}
-
-pub inline fn isNull(val: Value) bool {
-    return qjs.JS_IsNull(val);
-}
-
-pub inline fn isException(val: Value) bool {
-    return qjs.JS_IsException(val);
-}
-
-pub inline fn isFunction(ctx: ?*qjs.JSContext, val: Value) bool {
-    return qjs.JS_IsFunction(ctx, val);
-}
-
 pub const TypedArrayType = enum(c_int) {
     Uint8ClampedArray = qjs.JS_TYPED_ARRAY_UINT8C,
     Int8Array = qjs.JS_TYPED_ARRAY_INT8,
@@ -557,6 +539,11 @@ pub const Runtime = struct {
 
 pub const Context = packed struct {
     ptr: ?*qjs.JSContext,
+
+    /// Wrap a raw C context pointer. Use instead of `Context{ .ptr = ctx_ptr }`.
+    pub inline fn from(ctx_ptr: ?*qjs.JSContext) Context {
+        return .{ .ptr = ctx_ptr };
+    }
 
     pub inline fn init(runtime: *const Runtime) Context {
         return .{ .ptr = qjs.JS_NewContext(runtime.ptr) };
@@ -1509,6 +1496,12 @@ pub const Context = packed struct {
     // Safe version of getOpaque that checks the context
     pub inline fn getOpaque2(self: Context, obj: Value, class_id: ClassID) ?*anyopaque {
         return qjs.JS_GetOpaque2(self.ptr, obj, class_id);
+    }
+
+    /// Typed version of getOpaque — returns `?*T` directly, no manual @ptrCast needed.
+    pub inline fn getOpaqueAs(self: Context, comptime T: type, obj: Value, class_id: ClassID) ?*T {
+        const ptr = self.getOpaque(obj, class_id) orelse return null;
+        return @ptrCast(@alignCast(ptr));
     }
 
     // Class and prototype handling

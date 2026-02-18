@@ -1,0 +1,160 @@
+<!doctype html>
+<html>
+  <head>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  </head>
+  <body>
+    <div id="map" style="width: 800px; height: 600px"></div>
+
+    <script>
+      async function runDrawGeoJSONRoute(deliveryData) {
+        console.log("[Test] Booting Leaflet GeoJSON Engine...");
+
+        const map = L.map("map", {
+          zoomControl: false,
+          attributionControl: false,
+        }).setView([51.505, -0.09], 13);
+
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(
+          map,
+        );
+
+        // Draw a path from Hyde Park to the Tower of London!
+        const route = {
+          type: "LineString",
+          coordinates: [
+            [-0.15, 51.505],
+            [-0.12, 51.51],
+            [-0.076, 51.508],
+          ],
+        };
+        L.geoJSON(route, {
+          style: { color: "red", weight: 6, opacity: 0.8 },
+        }).addTo(map);
+
+        // 1. Extract the Tiles
+        const tiles = Array.from(
+          document.querySelectorAll("img.leaflet-tile"),
+        ).map((img) => ({
+          url: img.src,
+          x: parseInt(img.style.left || 0, 10),
+          y: parseInt(img.style.top || 0, 10),
+        }));
+
+        // 2. Extract the SVG Vector Data!
+        const svgElement = document.querySelector(".leaflet-overlay-pane svg");
+        const svgString = svgElement ? svgElement.outerHTML : "";
+
+        console.log(`✅ Extracted ${tiles.length} tiles and SVG overlay!`);
+
+        const readyTiles = [];
+        for (const t of tiles) {
+          try {
+            const res = await fetch(t.url);
+            const buffer = await res.arrayBuffer();
+            readyTiles.push({
+              buffer: buffer,
+              x: t.x,
+              y: t.y,
+              w: t.w,
+              h: t.h,
+            });
+            console.log(`  + Fetched tile at (${t.x}, ${t.y})`);
+          } catch (e) {
+            console.log(`  - Failed to fetch ${t.url}`);
+          }
+        }
+
+        // 3. Send to Zig Compositor
+        // CRITICAL: Dimensions must match the CSS width/height of the map div!
+        const mapBuffer = zexplorer.generateRoutePng(
+          readyTiles,
+          svgString,
+          null, // No file output, keep in memory
+          800, // Map DOM width
+          600, // Map DOM height
+        );
+        console.log("Composited Map loaded:", mapBuffer.byteLength, "bytes");
+
+        // 4. Load the UI Background Template
+        const templateRes = await fetch(
+          "file://src/examples/test_route_report_template.svg",
+        );
+        const svgText = await templateRes.text();
+        const svgBlob = new Blob([svgText], { type: "image/svg+xml" });
+        const bgBitmap = await createImageBitmap(svgBlob);
+
+        // 5. Assemble the PDF Layout (Top-to-Bottom)
+        const pdf = new PDFDocument();
+        pdf.addPage(); // Zig backend handles A4 sizing natively
+
+        // Layer 1: Background
+        pdf.drawImage(bgBitmap, 0, 0, 595, 842);
+
+        // Calculate responsive dimensions
+        const margin = 40;
+        const pdfPageWidth = 595;
+        const maxImageWidth = pdfPageWidth - margin * 2;
+        const imgWidth = maxImageWidth;
+        const imgHeight = (600 / 800) * imgWidth; // 4:3 Aspect Ratio scaling
+        const mapStartY = 160;
+
+        // Layer 2: Title Text at the top
+        pdf.fillStyle = "#0f172a";
+        pdf.setFont("Roboto-Bold", 24);
+        pdf.fillText("Delivery Route Summary", margin, margin + 20);
+
+        // Layer 3: The Map (Placed below the title)
+        pdf.drawImageFromBuffer(
+          mapBuffer,
+          margin,
+          mapStartY,
+          imgWidth,
+          imgHeight,
+        );
+
+        // Layer 4: Report Data (Placed dynamically below the map)
+        const textStartY = mapStartY + imgHeight + 40; // Properly declared and calculated
+        pdf.setFont("Roboto", 12);
+        pdf.fillStyle = "#475569";
+
+        // Left Column
+        pdf.fillText(`Date: ${deliveryData.date}`, margin + 15, textStartY);
+        pdf.fillText(
+          `Driver: ${deliveryData.driverName}`,
+          margin + 15,
+          textStartY + 25,
+        );
+
+        // Right Column
+        const rightColX = pdfPageWidth - margin - 180;
+        pdf.fillText(`Est Time: ${deliveryData.eta}`, rightColX, textStartY);
+        pdf.fillText(
+          `Total Distance: ${deliveryData.distance}`,
+          rightColX,
+          textStartY + 25,
+        );
+
+        // Layer 5: Decorative Border around the text
+        pdf.setLineWidth(2);
+        pdf.setDrawColor("#cbd5e1");
+        pdf.strokeRect(margin, textStartY - 25, maxImageWidth, 65);
+
+        pdf.save(`RouteReport_${deliveryData.id}.pdf`);
+        console.log("🟢 Route Report generated");
+      }
+
+      runDrawGeoJSONRoute({
+        id: "LDN-8492",
+        driverName: "Auto-Pilot",
+        date: "Feb 18, 2026",
+        distance: "6.4 km",
+        eta: "18 mins",
+      }).catch((e) => console.error("Error:", e.message, e.stack));
+    </script>
+  </body>
+</html>

@@ -43,7 +43,7 @@ pub const BlobObject = struct {
 
 // === Liefcycle
 pub fn js_Blob_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // 1. Accumulate Parts (Temporary storage)
@@ -133,7 +133,7 @@ pub fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
 
 /// Blob.text()
 pub fn js_Blob_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
@@ -167,7 +167,7 @@ pub fn js_Blob_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*
 
 /// Blob.arrayBuffer()
 pub fn js_Blob_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
@@ -198,7 +198,7 @@ pub fn js_Blob_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int
 
 /// Blob.stream() — returns a ReadableStream backed by the blob's data
 pub fn js_Blob_stream(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
@@ -211,7 +211,7 @@ pub fn js_Blob_stream(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: 
 
 /// Blob.slice(start?, end?, contentType?)
 pub fn js_Blob_slice(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
@@ -266,7 +266,7 @@ pub fn js_Blob_slice(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, a
 
 /// Accessor Blob.size
 pub fn js_Blob_get_size(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
     if (ptr == null) return zqjs.UNDEFINED;
@@ -276,7 +276,7 @@ pub fn js_Blob_get_size(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _
 
 /// Accessor Blob.type
 pub fn js_Blob_get_type(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this, rc.classes.blob);
     if (ptr == null) return ctx.newString("");

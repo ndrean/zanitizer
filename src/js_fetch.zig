@@ -71,7 +71,7 @@ fn createPromiseRejected(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
 // === BLOB FETCH LOGIC
 
 fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
@@ -100,7 +100,7 @@ fn js_blob_response_text(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
 }
 
 fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
@@ -135,7 +135,7 @@ fn js_blob_response_json(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_in
 }
 
 fn js_blob_response_blob(ctx_ptr: ?*qjs.JSContext, this_val: zqjs.Value, _: c_int, _: [*c]zqjs.Value) callconv(.c) zqjs.Value {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const blob_val = ctx.getPropertyStr(this_val, "_blob");
     const prom = createPromiseResolved(ctx, blob_val);
     ctx.freeValue(blob_val);
@@ -277,7 +277,7 @@ fn destroyFetchTask(allocator: std.mem.Allocator, task: FetchTask) void {
 // MAIN FETCH
 
 pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("fetch requires a URL");
 
     const rc = RuntimeContext.get(ctx);

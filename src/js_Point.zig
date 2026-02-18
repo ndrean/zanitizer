@@ -33,7 +33,7 @@ fn constructor(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const allocator = ctx.getAllocator();
 
     var x: f64 = 0;

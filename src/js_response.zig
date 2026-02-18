@@ -13,7 +13,7 @@ const js_readable_stream = @import("js_readable_stream.zig");
 // Response Body Methods
 
 fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const body_val = ctx.getPropertyStr(this, "_body");
     defer ctx.freeValue(body_val);
 
@@ -27,7 +27,7 @@ fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 }
 
 fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const text_val = js_res_text(ctx_ptr, this, 0, null);
     defer ctx.freeValue(text_val);
 
@@ -40,7 +40,7 @@ fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 }
 
 fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const body_val = ctx.getPropertyStr(this, "_body");
     defer ctx.freeValue(body_val);
 
@@ -71,13 +71,13 @@ fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 }
 
 fn js_res_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return ctx.getPropertyStr(this, "_body");
 }
 
 /// response.body getter - returns ReadableStream
 fn js_res_body(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
 
     // Check if we already created a stream (cached in _stream)
     const cached = ctx.getPropertyStr(this, "_stream");
@@ -115,7 +115,7 @@ fn js_res_body(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 // Async Wrappers (return Promises)
 
 fn js_async_wrapper(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, workFn: fn (?*qjs.JSContext, qjs.JSValue, c_int, [*c]qjs.JSValue) callconv(.c) qjs.JSValue) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     var resolvers: [2]qjs.JSValue = undefined;
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
     const resolve = resolvers[0];

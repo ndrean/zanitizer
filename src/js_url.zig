@@ -23,7 +23,7 @@ pub const URLObject = struct {
 };
 
 fn js_URL_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("URL constructor requires at least 1 argument");
@@ -55,10 +55,8 @@ fn js_URL_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
         var temp_parser: ?*z.URLParser = null;
         var temp_url: ?*z.URL = null;
 
-        const base_ptr = qjs.JS_GetOpaque(argv[1], rc.classes.url);
-        if (base_ptr != null) {
+        if (ctx.getOpaqueAs(URLObject, argv[1], rc.classes.url)) |base_url_obj| {
             // Path A: It's already a URL Object
-            const base_url_obj: *URLObject = @ptrCast(@alignCast(base_ptr));
             base_url = base_url_obj.url;
         } else if (ctx.isString(argv[1])) {
             // Path B: It's a string. We must parse it temporarily!
@@ -138,12 +136,10 @@ fn js_URL_finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
 
 // URL getters
 fn js_URL_get_href(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     const str = self.url.toString(rc.allocator) catch return ctx.throwOutOfMemory();
     defer rc.allocator.free(str);
@@ -152,12 +148,10 @@ fn js_URL_get_href(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c
 }
 
 fn js_URL_get_protocol(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     const scheme = self.url.scheme();
     const protocol = std.fmt.allocPrint(rc.allocator, "{s}:", .{scheme}) catch return ctx.throwOutOfMemory();
@@ -167,34 +161,28 @@ fn js_URL_get_protocol(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _:
 }
 
 fn js_URL_get_username(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     return ctx.newString(self.url.username());
 }
 
 fn js_URL_get_password(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     return ctx.newString(self.url.password());
 }
 
 fn js_URL_get_hostname(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     const host_str = self.url.hostname(rc.allocator) catch return ctx.throwOutOfMemory();
     defer rc.allocator.free(host_str);
@@ -203,12 +191,10 @@ fn js_URL_get_hostname(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _:
 }
 
 fn js_URL_get_port(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     if (self.url.hasPort()) {
         const port_str = std.fmt.allocPrint(rc.allocator, "{d}", .{self.url.port()}) catch return ctx.throwOutOfMemory();
@@ -219,23 +205,19 @@ fn js_URL_get_port(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c
 }
 
 fn js_URL_get_pathname(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     return ctx.newString(self.url.pathname());
 }
 
 fn js_URL_get_search(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     const search = self.url.search();
     if (search.len > 0) {
@@ -247,12 +229,10 @@ fn js_URL_get_search(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [
 }
 
 fn js_URL_get_hash(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url);
-    if (ptr == null) return ctx.throwTypeError("Not a URL object");
-    const self: *URLObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLObject, this, rc.classes.url) orelse return ctx.throwTypeError("Not a URL object");
 
     const hash = self.url.hash();
     if (hash.len > 0) {
@@ -282,7 +262,7 @@ pub const URLSearchParamsObject = struct {
 };
 
 fn js_URLSearchParams_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const params_obj = rc.allocator.create(URLSearchParamsObject) catch return ctx.throwOutOfMemory();
@@ -333,14 +313,12 @@ fn js_URLSearchParams_finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.
 }
 
 fn js_URLSearchParams_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 2) return ctx.throwTypeError("append requires 2 arguments");
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url_search_params);
-    if (ptr == null) return ctx.throwTypeError("Not a URLSearchParams object");
-    const self: *URLSearchParamsObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLSearchParamsObject, this, rc.classes.url_search_params) orelse return ctx.throwTypeError("Not a URLSearchParams object");
 
     const name = ctx.toZString(argv[0]) catch return ctx.throwOutOfMemory();
     defer ctx.freeZString(name);
@@ -352,14 +330,12 @@ fn js_URLSearchParams_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: 
 }
 
 fn js_URLSearchParams_delete(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("delete requires 1 argument");
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.url_search_params);
-    if (ptr == null) return ctx.throwTypeError("Not a URLSearchParams object");
-    const self: *URLSearchParamsObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(URLSearchParamsObject, this, rc.classes.url_search_params) orelse return ctx.throwTypeError("Not a URLSearchParams object");
 
     const name = ctx.toZString(argv[0]) catch return ctx.throwOutOfMemory();
     defer ctx.freeZString(name);
@@ -369,7 +345,7 @@ fn js_URLSearchParams_delete(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: 
 }
 
 fn js_URLSearchParams_get(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("get requires 1 argument");
@@ -388,7 +364,7 @@ fn js_URLSearchParams_get(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_i
 }
 
 fn js_URLSearchParams_has(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("has requires 1 argument");
@@ -404,7 +380,7 @@ fn js_URLSearchParams_has(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_i
 }
 
 fn js_URLSearchParams_set(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 2) return ctx.throwTypeError("set requires 2 arguments");
@@ -423,7 +399,7 @@ fn js_URLSearchParams_set(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_i
 }
 
 fn js_URLSearchParams_sort(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this, rc.classes.url_search_params);
@@ -435,7 +411,7 @@ fn js_URLSearchParams_sort(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int
 }
 
 fn js_URLSearchParams_toString(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this, rc.classes.url_search_params);
@@ -456,7 +432,7 @@ pub fn js_createObjectURL(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx); //  access state
 
     if (argc < 1) return ctx.throwTypeError("Blob expected");
@@ -496,7 +472,7 @@ pub fn js_revokeObjectURL(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return zqjs.UNDEFINED;

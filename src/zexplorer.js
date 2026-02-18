@@ -7,6 +7,9 @@ if (typeof self === "undefined") {
   globalThis.self = globalThis;
 }
 
+// navigator is set in Zig (js_polyfills.install) with a full Chrome-like userAgent
+window.devicePixelRatio = window.devicePixelRatio || 1;
+
 function applyLocationPolyfill(urlStr) {
   try {
     const parsedUrl = new URL(urlStr);
@@ -41,6 +44,55 @@ function applyLocationPolyfill(urlStr) {
   } catch (e) {
     console.error("Invalid URL for polyfill:", urlStr);
   }
+}
+
+globalThis.SVGRect = function () {
+  this.x = 0;
+  this.y = 0;
+  this.width = 0;
+  this.height = 0;
+};
+
+// 2. Attach it to all Elements (safest headless fallback)
+if (!globalThis.Element.prototype.createSVGRect) {
+  globalThis.Element.prototype.createSVGRect = function () {
+    return new SVGRect();
+  };
+}
+
+globalThis.SVGRect = function () {
+  this.x = 0;
+  this.y = 0;
+  this.width = 0;
+  this.height = 0;
+};
+globalThis.SVGMatrix = function () {
+  this.a = 1;
+  this.b = 0;
+  this.c = 0;
+  this.d = 1;
+  this.e = 0;
+  this.f = 0;
+};
+
+if (!globalThis.Element.prototype.createSVGRect) {
+  globalThis.Element.prototype.createSVGRect = function () {
+    return new SVGRect();
+  };
+}
+
+if (!globalThis.Element.prototype.createSVGMatrix) {
+  globalThis.Element.prototype.createSVGMatrix = function () {
+    return new SVGMatrix();
+  };
+}
+
+// Leaflet sometimes asks paths for their bounding box.
+// We return a fake empty rect to prevent crashes.
+if (!globalThis.Element.prototype.getBBox) {
+  globalThis.Element.prototype.getBBox = function () {
+    return new SVGRect();
+  };
 }
 
 window.matchMedia =
@@ -134,6 +186,22 @@ globalThis.zexplorer = {
       }
       poll();
     });
+  },
+
+  generateRoutePng(
+    tiles,
+    svgString,
+    outputPath = null,
+    width = 800,
+    height = 600,
+  ) {
+    return __native_generateRoutePng(
+      tiles,
+      svgString,
+      outputPath,
+      width,
+      height,
+    );
   },
 
   pdf: {

@@ -78,7 +78,7 @@ const ReadDirResult = struct {
 // WORKER FUNCTIONS (Run on Background Thread)
 
 fn js_createReadStream(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("Path required");
 
     const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
@@ -94,7 +94,7 @@ fn js_createReadStream(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, ar
 }
 
 fn js_createWriteStream(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("Path required");
 
     const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
@@ -247,7 +247,7 @@ fn workRename(allocator: std.mem.Allocator, p: CopyPayload) ![]u8 {
 }
 
 fn js_fileFromPath(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("Path required");

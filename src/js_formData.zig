@@ -40,7 +40,7 @@ pub const FormData = struct {
 };
 
 fn js_FormData_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const fd = FormData.init(rc.allocator);
 
@@ -53,7 +53,7 @@ fn js_FormData_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _
 }
 
 // fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     const ctx = zqjs.Context.from(ctx_ptr);
 //     const rc = RuntimeContext.get(ctx);
 
 //     if (argc < 2) return ctx.throwTypeError("append requires name and value");
@@ -153,7 +153,7 @@ fn js_FormData_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _
 // }
 
 fn js_FormData_append(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 2) return ctx.throwTypeError("append requires at least 2 arguments");

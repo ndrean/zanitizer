@@ -2,10 +2,15 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
+<img src="https://github.com.ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="400", height="400" >
+
 [WIP]
 `zexplorer`  is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
 
-The engine includes an ES6 JavaScript runtime. It embeds enough Web API surface to run framework code (React, SolidJS, Vue, Vercel, ChartJS) and can render images (PNG, JPEG, WEBP, PDF).
+The engine includes an ES6 JavaScript runtime. It embeds enough Web API surface to run framework code: it is tested successfully against some [js-framework-benchmark repos](https://github.com/krausest/js-framework-benchmark) in particular `React`, `Preact`, `SolidJS`, `Vue` and `Svelte`.
+It is also tested against the `Vercel` demo site for scrapping it.
+
+It can also render images (PNG, JPEG, WEBP) and return PDF. Check the examples of rendering `ChartJS` and `Leaflet` map embedded in an SVG template as a PDF.
 
 - You can compose JavaScript snippets and submit them to the engine. You don't need to know or use advanced Zig to use it, but you may need to install Zig to compile your implementation.
 - You can also submit an HTML file: the engine will parse the HTML and CSS into a real DOM and execute ES6 code in JavaScript against it—with an event loop, timers, fetch, and workers—without a browser.
@@ -67,7 +72,7 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
 
 | Feature           | zexplorer                | JSDOM           | Puppeteer       |
 | ----------------- | ------------------------ | --------------- | --------------- |
-| Startup time      | 1ms                      | ~30ms           | ~500ms          |
+| Startup time      | 2ms                      | ~30ms           | ~500ms          |
 | DOM sanitization  | Built-in, DOM & CSSaware | Needs DOMPurify | Browser context |
 | Memory footprint  | 8MB                      | ~50MB           | ~200MB          |
 | Web API coverage  | ~40% (essential)         | ~90%            | 100%            |
@@ -78,11 +83,11 @@ It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and
 
 How to use `zexplorer` ?
 
-- CLI: WIP
+- as a Zig library to run JS code
+- via the CLI: WIP
   - `zxp sanitize -dhtml=index.html -dss=stylesheet.css -djs=index.js -dfile=index_cleaned.html`
   - `zxp to_svg -dtemp=index.js -dsource=example.svg -dfile=final.svg`
   - `zxp run -djs=index.js -dout=stdout`
-- as a Zig library
 
 ### Hello world
 
@@ -353,7 +358,7 @@ We scrap <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scri
 
 </details>
 
-You explore the website with a JavaScript snippet:
+You can scrap the Vercel website with this JavaScript snippet that mimics `Puppeteer`'s API.
 
 ```js
 // vercel.js
@@ -363,6 +368,7 @@ async function testVercel() {
     await zexplorer.goto("https://demo.vercel.store");
 
     await zexplorer.waitForSelector("a[href^='/product/']");
+
     const links = document.querySelectorAll("a[href^='/product/']");
     const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
     const items = unique.map(href => {
@@ -380,12 +386,52 @@ async function testVercel() {
 
 You pass it to the engine:
 
-```sh
-time .zxp --f=vercel.js --out=data.txt > /dev/null 2>&1
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    const gpa = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+
+    const script = @embedFile("vercel.js");
+    const val = try engine.eval(script, "test_vercel.js", .global);
+    defer engine.ctx.freeValue(val);
+    
+    // output is an Array of strings
+    const items = try engine.evalAsyncAs(
+        allocator,
+        []const []const u8,
+        "testVercel()",
+        "<vercel>",
+    );
+    defer {
+        for (items) |item| allocator.free(item);
+        allocator.free(items);
+    }
+
+    // output : toOwnedSlice or file
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    for (items) |item| {
+        try buf.appendSlice(allocator, item);
+        try buf.append(allocator, '\n');
+    }
+
+    try std.fs.cwd().writeFile(
+        .{
+            .sub_path = "vercel_data.txt",
+            .data = buf.items,
+        },
+    );
+}
 ```
 
 and you get your data back in 1s:
-
 
 ```txt
 0.17s user 0.14s system 37% cpu 0.835 total
@@ -400,6 +446,15 @@ and you get your data back in 1s:
   "Acme Baby Cap$10.00USD"
 ]
 ```
+
+TODO
+
+```sh
+.zxp --js=vercel.js --async=true --fmt=array --out=vercel_data.txt 
+# or --out=array if piping
+```
+
+---
 
 ### Sanitize HTML & CSS
 
@@ -676,6 +731,212 @@ The result is:
 
 ---
 
+### Embed Leaflet geoJSON path map in an SVG and output a PDF
+
+<details><summary>The HTML file that draws a Leaflet map into an SVG template and renders a PDF</summary>
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  </head>
+  <body>
+    <div id="map" style="width: 800px; height: 600px"></div>
+
+    <script>
+      async function runDrawGeoJSONRoute(deliveryData) {
+        console.log("[Test] Booting Leaflet GeoJSON Engine...");
+
+        const map = L.map("map", {
+          zoomControl: false,
+          attributionControl: false,
+        }).setView([51.505, -0.09], 13);
+
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(
+          map,
+        );
+
+        // Draw a path from Hyde Park to the Tower of London!
+        const route = {
+          type: "LineString",
+          coordinates: [
+            [-0.15, 51.505],
+            [-0.12, 51.51],
+            [-0.076, 51.508],
+          ],
+        };
+        L.geoJSON(route, {
+          style: { color: "red", weight: 6, opacity: 0.8 },
+        }).addTo(map);
+
+        // 1. Extract the Tiles
+        const tiles = Array.from(
+          document.querySelectorAll("img.leaflet-tile"),
+        ).map((img) => ({
+          url: img.src,
+          x: parseInt(img.style.left || 0, 10),
+          y: parseInt(img.style.top || 0, 10),
+        }));
+
+        // 2. Extract the SVG Vector Data!
+        const svgElement = document.querySelector(".leaflet-overlay-pane svg");
+        const svgString = svgElement ? svgElement.outerHTML : "";
+
+        console.log(`✅ Extracted ${tiles.length} tiles and SVG overlay!`);
+
+        const readyTiles = [];
+        for (const t of tiles) {
+          try {
+            const res = await fetch(t.url);
+            const buffer = await res.arrayBuffer();
+            readyTiles.push({
+              buffer: buffer,
+              x: t.x,
+              y: t.y,
+              w: t.w,
+              h: t.h,
+            });
+            console.log(`  + Fetched tile at (${t.x}, ${t.y})`);
+          } catch (e) {
+            console.log(`  - Failed to fetch ${t.url}`);
+          }
+        }
+
+        // 3. Send to Zig Compositor
+        // CRITICAL: Dimensions must match the CSS width/height of the map div!
+        const mapBuffer = zexplorer.generateRoutePng(
+          readyTiles,
+          svgString,
+          null, // No file output, keep in memory
+          800, // Map DOM width
+          600, // Map DOM height
+        );
+        console.log("Composited Map loaded:", mapBuffer.byteLength, "bytes");
+
+        // 4. Load the UI Background Template
+        const templateRes = await fetch(
+          "file://src/examples/test_route_report_template.svg",
+        );
+        const svgText = await templateRes.text();
+        const svgBlob = new Blob([svgText], { type: "image/svg+xml" });
+        const bgBitmap = await createImageBitmap(svgBlob);
+
+        // 5. Assemble the PDF Layout (Top-to-Bottom)
+        const pdf = new PDFDocument();
+        pdf.addPage(); // Zig backend handles A4 sizing natively
+
+        // Layer 1: Background
+        pdf.drawImage(bgBitmap, 0, 0, 595, 842);
+
+        // Calculate responsive dimensions
+        const margin = 40;
+        const pdfPageWidth = 595;
+        const maxImageWidth = pdfPageWidth - margin * 2;
+        const imgWidth = maxImageWidth;
+        const imgHeight = (600 / 800) * imgWidth; // 4:3 Aspect Ratio scaling
+        const mapStartY = 160;
+
+        // Layer 2: Title Text at the top
+        pdf.fillStyle = "#0f172a";
+        pdf.setFont("Roboto-Bold", 24);
+        pdf.fillText("Delivery Route Summary", margin, margin + 20);
+
+        // Layer 3: The Map (Placed below the title)
+        pdf.drawImageFromBuffer(
+          mapBuffer,
+          margin,
+          mapStartY,
+          imgWidth,
+          imgHeight,
+        );
+
+        // Layer 4: Report Data (Placed dynamically below the map)
+        const textStartY = mapStartY + imgHeight + 40; // Properly declared and calculated
+        pdf.setFont("Roboto", 12);
+        pdf.fillStyle = "#475569";
+
+        // Left Column
+        pdf.fillText(`Date: ${deliveryData.date}`, margin + 15, textStartY);
+        pdf.fillText(
+          `Driver: ${deliveryData.driverName}`,
+          margin + 15,
+          textStartY + 25,
+        );
+
+        // Right Column
+        const rightColX = pdfPageWidth - margin - 180;
+        pdf.fillText(`Est Time: ${deliveryData.eta}`, rightColX, textStartY);
+        pdf.fillText(
+          `Total Distance: ${deliveryData.distance}`,
+          rightColX,
+          textStartY + 25,
+        );
+
+        // Layer 5: Decorative Border around the text
+        pdf.setLineWidth(2);
+        pdf.setDrawColor("#cbd5e1");
+        pdf.strokeRect(margin, textStartY - 25, maxImageWidth, 65);
+
+        pdf.save(`RouteReport_${deliveryData.id}.pdf`);
+        console.log("🟢 Route Report generated");
+      }
+
+      runDrawGeoJSONRoute({
+        id: "LDN-8492",
+        driverName: "Auto-Pilot",
+        date: "Feb 18, 2026",
+        distance: "6.4 km",
+        eta: "18 mins",
+      }).catch((e) => console.error("Error:", e.message, e.stack));
+    </script>
+  </body>
+</html>
+```
+
+</details>
+
+
+<details><summary>Zig runner</summary>
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    const gpa = debug_allocator.allocator(),
+    defer {
+      _ = .ok == debug_allocator.deinit();
+    };
+
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var engine = try ScriptEngine.init(allocator, sbx);
+    defer engine.deinit();
+
+    const html = @embedFile("test_route_report.html");
+    try engine.loadPage(html, .{});
+    try engine.run();
+}
+
+const std = @import("std");
+const builtin = @import("builtin");
+const z = @import("zexplorer");
+const ScriptEngine = z.ScriptEngine;
+```
+
+</details>
+
+The result is:
+
+<https://github.com/ndrean/zexplorer/blob/main/images/RouteReport.pdf>
+
+---
+
 ### Render Chart.js to PNG
 
 You can run [Chart.js](https://www.chartjs.org/) server-side and export the result as a PNG file. 
@@ -844,10 +1105,9 @@ Uses Vue 3's template compiler with `ref()` for reactive state. Simulates clicks
 
 | Operation            | zexplorer | JSDOM+DOMPurify |
 | -------------------- | --------- | --------------- |
-| Cold start           | 1ms       | 30ms            |
-| Sanitize 24KB HTML   | 1ms       | 11ms            |
-| Create 10k DOM nodes | 25ms      | 191ms           |
-| Full React SSR       | 53ms      | 500ms+          |
+| Cold start           | 1.5ms     | 30ms            |
+| Sanitize 36kB HTML   | 2.1ms     | 11ms            |
+| Create 10k DOM nodes | 26ms      | 191ms           |
 
 ### zexplorer running js-framework-benchmark code
 
@@ -868,41 +1128,42 @@ Source:
 - [bau](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/bau/main.js)
 - [Comp(*) Solid](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid/src/main.jsx)
 - [Temp(**) Solid](https://github.com/ndrean/zexplorer/src/examples/js-bench-solid.js)
-- [React18](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx)
+- [Svelte5](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/svelte/src/App.svelte) (compiled with `svelte/compiler`, bundled with Bun)
+- [React19](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx)
+- [Preact](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx) (same source, built with preact/compat)
 - [Vue3](https://github.com/ndrean/zexplorer/src/examples/js-bench-vue3.js)
 
 Ref: browser Vanilla
 
-| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] | [bau] | [Comp(*) Solid] | [Temp(**) Solid] | [React18^] | Vue3(***) |
-| ---------------- | ---- | --------- | ------------ | --------- | ----- | --------------- | ---------------- | ---------- | --------- |
-| Create 1k        | 22.0 | 3.08      | 1.65         | 1.67      | 1.97  | 18.5            | 16.7             | 105.6      | 54.8      |
-| Replace 1k       | 24.4 | 3.03      | 2.46         | 2.73      | 1.94  | 17.0            | 17.6             | 104.1      | 55.8      |
-| Partial Up (10k) | 9.5  | 2.82      | 8.86         | 7.92      | 5.40  | 7.0             | 138.4            | 117.6      | 229.8     |
-| Select Row       | 2.2  | 0.02      | 0.02         | 0.01      | 0.01  | 3.7             | 127.9            | 48.8       | 197.4     |
-| Swap Rows        | 11.7 | 0.05      | 0.09         | 0.11      | 0.01  | 1.2             | 10.3             | 36.8       | 22.1      |
-| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      | 0.00  | 0.5             | 10.8             | 5.2        | 20.2      |
-| Create 10k       | 229  | 28.71     | 16.06        | 16.15     | 19.03 | 143.5           | 142.0            | 3285.3     | 486.2     |
-| Append 1k        | 25.6 | 3.48      | 4.28         | 4.10      | 2.06  | 16.5            | 173.7            | 155.2      | 248.0     |
-| Clear            | 9.0  | 4.21      | 6.08         | 5.66      | 0.01  | 32.8            | 23.7             | 92.4       | 36.2      |
-| --               | --   | --        | --           | --        | --    |
-| Total Engine     | --   | 78        | 84           | 82        | 57    | 486             | 1087             | 7609       | 2106      |
+| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] | [bau] | [Comp(*) Solid] | [Temp(**) Solid] | [Svelte5] | [React19^] | [Preact^^] | Vue3(***) |
+| ---------------- | ---- | --------- | ------------ | --------- | ----- | --------------- | ---------------- | --------- | ---------- | ---------- | --------- |
+| Create 1k        | 22.0 | 3.08      | 1.65         | 1.67      | 1.97  | 18.5            | 16.7             | 26.0      | 105.0      | 157.8      | 54.7      |
+| Replace 1k       | 24.4 | 3.03      | 2.46         | 2.73      | 1.94  | 17.0            | 17.6             | 26.9      | 106.2      | 159.1      | 55.2      |
+| Partial Up (10k) | 9.5  | 2.82      | 8.86         | 7.92      | 5.40  | 7.0             | 138.4            | 8.7       | 128.6      | 166.0      | 205.2     |
+| Select Row       | 2.2  | 0.02      | 0.02         | 0.01      | 0.01  | 3.7             | 127.9            | 3.0       | 47.2       | 5.9        | 199.2     |
+| Swap Rows        | 11.7 | 0.05      | 0.09         | 0.11      | 0.01  | 1.2             | 10.3             | 1.1       | 37.1       | 4.9        | 21.7      |
+| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      | 0.00  | 0.5             | 10.8             | 0.7       | 5.1        | 4.9        | 20.5      |
+| Create 10k       | 229  | 28.71     | 16.06        | 16.15     | 19.03 | 143.5           | 142.0            | 422.1     | 3601.9     | 5670.4     | 473.2     |
+| Append 1k        | 25.6 | 3.48      | 4.28         | 4.10      | 2.06  | 16.5            | 173.7            | 22.8      | 154.9      | 121.4      | 245.8     |
+| Clear            | 9.0  | 4.21      | 6.08         | 5.66      | 0.01  | 32.8            | 23.7             | 9.1       | 92.7       | 10.3       | 37.8      |
+| --               | --   | --        | --           | --        | --    | --              | --               | --        | --         | --         | --        |
+| Total Engine     | --   | 78        | 84           | 82        | 57    | 486             | 1087             | 954       | 8715       | 8255       | 2086      |
 
 (*) compiled JSX->JS with `bun`
 
-(^) using React production build
+(^) React production build (`process.env.NODE_ENV = "production"`)
 
-(^^) Preact
+(^^) Preact/compat production build (same JSX source as React, aliased via build plugin)
 
 (**) templated with `html` and using `map` instead of `For`
 
 (***) templated
 
-This confirms that React's reconcilier is very JS-heavy and QuickJS interpreter is 5-6x solwer than V8's JIT.
-The other frameworks do direct DOM manipulation and QuickJS performs better.
+Svelte 5's compiled approach generates direct imperative DOM operations (no VDOM), making it the fastest compiled framework on QuickJS — on par with Compiled Solid for 1k operations and significantly faster than React/Preact/Vue. Preact is lighter than React (3KB vs 45KB) but its microtask-scheduled rendering creates more GC pressure at scale. React's fiber architecture pays off for partial updates where its diffing skips unchanged subtrees more efficiently.
 
 ### zexplorer vs jsdom
 
-While JSDOM emulates more of the many web standards, zexplorer can run Vanilla code, Preact/React code (no JSX, via templating or compiled) or Vue (again via templating) or SolidJS (via templating or compiled). Check the examples below.
+While JSDOM emulates more of the many web standards, zexplorer can run Vanilla code, Preact/React code (no JSX, via templating or compiled), Vue (via templating), SolidJS (via templating or compiled), or Svelte 5 (compiled). Check the examples below.
 
 We present a comparison in performance between `JSDOM` and `zexplorer` on a Vanilla example where build a simple DOM and run querySelectors and populate elements.
 

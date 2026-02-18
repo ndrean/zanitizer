@@ -352,21 +352,21 @@ fn makeTypeError(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
 
 /// bitmap.width
 fn js_get_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const img = unwrapImage(ctx, this_val) orelse return zqjs.UNDEFINED;
     return qjs.JS_NewInt32(ctx.ptr, img.width);
 }
 
 /// bitmap.height
 fn js_get_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const img = unwrapImage(ctx, this_val) orelse return zqjs.UNDEFINED;
     return qjs.JS_NewInt32(ctx.ptr, img.height);
 }
 
 /// Global "constructor" function: createImageBitmap(blob)
 pub fn js_createImageBitmap(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const args = argv[0..@intCast(argc)];
 
@@ -694,7 +694,7 @@ fn html_image_finalizer(rt: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void 
 }
 
 fn js_html_image_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const img = HTMLImageElement.init(rc.allocator) catch return zqjs.EXCEPTION;
@@ -711,7 +711,7 @@ fn js_html_image_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int,
 
 /// img.decode() — no-op stub, resolves immediately (image already decoded in src setter)
 fn js_html_image_decode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     var resolvers: [2]qjs.JSValue = undefined;
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
     if (qjs.JS_IsException(promise)) return zqjs.EXCEPTION;
@@ -725,7 +725,7 @@ fn js_html_image_decode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [
 
 /// The Job called by the Event Loop to trigger 'onload'
 fn js_image_onload_job(ctx_ptr: ?*qjs.JSContext, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const this_val = argv[0]; // We passed 'this' as the argument
     const rc = RuntimeContext.get(ctx);
 
@@ -743,7 +743,7 @@ fn js_image_onload_job(ctx_ptr: ?*qjs.JSContext, _: c_int, argv: [*c]qjs.JSValue
 }
 
 fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -860,7 +860,7 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
 }
 
 fn js_html_image_get_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -872,7 +872,7 @@ fn js_html_image_get_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
 }
 
 fn js_html_image_set_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -883,7 +883,7 @@ fn js_html_image_set_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: 
 }
 
 fn js_html_image_get_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -891,7 +891,7 @@ fn js_html_image_get_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: 
 }
 
 fn js_html_image_get_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -899,7 +899,7 @@ fn js_html_image_get_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _:
 }
 
 fn js_html_image_set_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -910,7 +910,7 @@ fn js_html_image_set_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _:
 }
 
 fn js_html_image_get_width_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -918,7 +918,7 @@ fn js_html_image_get_width_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 
 fn js_html_image_get_height_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -926,7 +926,7 @@ fn js_html_image_get_height_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 
 fn js_html_image_get_complete(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -935,7 +935,7 @@ fn js_html_image_get_complete(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _
 
 /// img.addEventListener('load'|'error', callback) — maps to onload/onerror
 fn js_html_image_addEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -958,7 +958,7 @@ fn js_html_image_addEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 
 /// img.removeEventListener('load'|'error', callback) — clears onload/onerror
 fn js_html_image_removeEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));

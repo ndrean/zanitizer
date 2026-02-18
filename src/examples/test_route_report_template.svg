@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 595 842" width="595" height="842">
+  <defs>
+    <filter id="card-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    
+    <linearGradient id="header-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/> <stop offset="100%" stop-color="#1e293b"/> </linearGradient>
+  </defs>
+
+  <rect width="100%" height="100%" fill="#f8fafc"/> <rect width="100%" height="160" fill="url(#header-grad)"/>
+  
+  <circle cx="595" cy="0" r="220" fill="#ffffff" opacity="0.03"/>
+  <circle cx="595" cy="0" r="140" fill="#ffffff" opacity="0.04"/>
+
+  <text x="50" y="70" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="bold" fill="#ffffff">ZEXPLORER LOGISTICS</text>
+  <text x="50" y="100" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="normal" fill="#94a3b8" letter-spacing="2">AUTOMATED GEOSPATIAL REPORTING</text>
+  
+  <rect x="445" y="48" width="100" height="26" rx="4" fill="#0369a1" opacity="0.3"/>
+  <text x="495" y="65" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="bold" fill="#38bdf8" text-anchor="middle" letter-spacing="1">CONFIDENTIAL</text>
+
+  <rect x="50" y="200" width="495" height="140" rx="8" fill="#ffffff" filter="url(#card-shadow)"/>
+  
+  <line x1="297" y1="230" x2="297" y2="310" stroke="#e2e8f0" stroke-width="1.5"/>
+
+  <rect x="50" y="380" width="495" height="340" rx="8" fill="#ffffff" filter="url(#card-shadow)"/>
+  
+  <circle cx="297" cy="550" r="40" fill="#f1f5f9"/>
+  <path d="M297 535 C288 535 281 542 281 551 C281 563 297 575 297 575 C297 575 313 563 313 551 C313 542 306 535 297 535 Z" fill="#cbd5e1"/>
+  <circle cx="297" cy="549" r="5" fill="#ffffff"/>
+
+  <line x1="50" y1="780" x2="545" y2="780" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="50" y="805" font-family="Arial, Helvetica, sans-serif" font-size="10" fill="#64748b">Generated natively by zexplorer headless engine</text>
+  <text x="545" y="805" font-family="Arial, Helvetica, sans-serif" font-size="10" font-weight="bold" fill="#64748b" text-anchor="end">SYS-7734-9A</text>
+</svg>

@@ -15,7 +15,7 @@ pub fn js_btoa(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     if (argc < 1) return w.UNDEFINED;
     const temp_alloc = std.heap.c_allocator;
 
@@ -69,18 +69,33 @@ pub fn js_flush(
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     const rt = qjs.JS_GetRuntime(ctx_ptr);
-    var ctx_out: ?*qjs.JSContext = ctx_ptr;
+    drainMicrotasksGCSafe(rt, ctx_ptr);
+    return w.UNDEFINED;
+}
 
-    // Drain all pending jobs (microtasks/promises)
+/// Drain pending microtasks with GC suppressed.
+///
+/// QuickJS-ng's GC can crash on corrupted `mapped_arguments` objects when
+/// triggered mid-render (e.g. during Preact's microtask-scheduled VDOM diff).
+/// We suppress GC during the drain and run it explicitly afterwards, when
+/// all temporary objects have been properly freed.
+pub fn drainMicrotasksGCSafe(rt: ?*qjs.JSRuntime, ctx_ptr: ?*qjs.JSContext) void {
+    const rt_nonnull = rt orelse return;
+    // Suppress GC during microtask execution
+    const saved_threshold = qjs.JS_GetGCThreshold(rt_nonnull);
+    qjs.JS_SetGCThreshold(rt_nonnull, std.math.maxInt(usize));
+
+    var ctx_out: ?*qjs.JSContext = ctx_ptr;
     var iterations: u32 = 0;
-    const max_iterations: u32 = 10000; // Safety limit
+    const max_iterations: u32 = 10000;
 
     while (iterations < max_iterations) : (iterations += 1) {
-        const ret = qjs.JS_ExecutePendingJob(rt, &ctx_out);
-        if (ret <= 0) break; // No more jobs or error
+        const ret = qjs.JS_ExecutePendingJob(rt_nonnull, &ctx_out);
+        if (ret <= 0) break;
     }
 
-    return w.UNDEFINED;
+    // Restore threshold and run GC now that we're in a safe state
+    qjs.JS_SetGCThreshold(rt_nonnull, saved_threshold);
 }
 
 // atob: ASCII to Binary (Base64 Decode)
@@ -90,7 +105,7 @@ pub fn js_atob(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = z.wrapper.Context{ .ptr = ctx_ptr };
+    const ctx = z.wrapper.Context.from(ctx_ptr);
     if (argc < 1) return z.wrapper.UNDEFINED;
     const temp_alloc = std.heap.c_allocator;
 
@@ -117,7 +132,7 @@ pub fn js_arrayBufferToBase64DataUri(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     if (argc < 2) return ctx.throwTypeError("arrayBufferToBase64DataUri requires 2 arguments");
     const temp_alloc = std.heap.c_allocator;
 
@@ -178,6 +193,20 @@ pub fn js_arrayBufferToBase64DataUri(
 pub fn install(ctx: w.Context) !void {
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
+
+    // navigator — headless browser identity (must be set before any scripts run)
+    {
+        const nav_obj = ctx.newObject();
+        try ctx.setPropertyStr(nav_obj, "userAgent", ctx.newString(
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Zexplorer/1.0",
+        ));
+        try ctx.setPropertyStr(nav_obj, "platform", ctx.newString("Linux x86_64"));
+        try ctx.setPropertyStr(nav_obj, "language", ctx.newString("en-US"));
+        try ctx.setPropertyStr(nav_obj, "maxTouchPoints", ctx.newInt32(0));
+        try ctx.setPropertyStr(nav_obj, "cookieEnabled", w.FALSE);
+        try ctx.setPropertyStr(nav_obj, "onLine", w.TRUE);
+        try ctx.setPropertyStr(global, "navigator", nav_obj);
+    }
 
     const env_polyfill =
         \\if (typeof globalThis.process === 'undefined') {

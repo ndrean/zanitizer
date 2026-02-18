@@ -66,7 +66,7 @@ fn js_TextEncoder_encode(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     if (argc < 1) {
         // Return empty Uint8Array
@@ -103,7 +103,7 @@ fn js_TextEncoder_encodeInto(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     if (argc < 2) return ctx.throwTypeError("encodeInto requires 2 arguments");
 
@@ -160,7 +160,7 @@ fn js_TextEncoder_get_encoding(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     return ctx.newString("utf-8");
 }
 
@@ -171,7 +171,7 @@ fn js_TextEncoder_constructor(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (qjs.JS_IsUndefined(new_target)) {
@@ -195,7 +195,7 @@ fn js_TextDecoder_constructor(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (qjs.JS_IsUndefined(new_target)) {
@@ -262,7 +262,7 @@ fn js_TextDecoder_decode(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // Get decoder object
@@ -325,7 +325,7 @@ fn js_TextDecoder_get_encoding(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.text_decoder);
@@ -342,7 +342,7 @@ fn js_TextDecoder_get_fatal(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.text_decoder);
@@ -359,7 +359,7 @@ fn js_TextDecoder_get_ignoreBOM(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.text_decoder);

@@ -25,7 +25,7 @@ fn js_file_constructor(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 2) return ctx.throwTypeError("File constructor requires at least 2 arguments: (bits, name)");
@@ -198,7 +198,7 @@ fn js_file_get_name(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file);
@@ -214,7 +214,7 @@ fn js_file_get_lastModified(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file);
@@ -230,7 +230,7 @@ fn js_file_get_size(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file);
@@ -248,7 +248,7 @@ fn js_file_get_type(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.file);
@@ -266,7 +266,7 @@ fn js_file_fromPath(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) return ctx.throwTypeError("File.fromPath requires a path argument");

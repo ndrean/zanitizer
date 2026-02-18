@@ -38,7 +38,7 @@ pub fn js_receiveHttpBin(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("Expected 1 argument");
 
     const rc = RuntimeContext.get(ctx);

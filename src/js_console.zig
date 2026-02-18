@@ -57,7 +57,7 @@ pub fn js_console_print(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     var buf: [4096]u8 = undefined;
     var sw = std.fs.File.stdout().writer(&buf);

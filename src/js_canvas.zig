@@ -739,7 +739,7 @@ fn js_canvas_get_canvas(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_in
 
 /// Canvas.getAttribute(name) - returns attribute as string or null
 fn js_canvas_getAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.NULL;
 
     if (argc < 1) return zqjs.NULL;
@@ -771,7 +771,7 @@ fn js_canvas_getAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 
 /// Canvas.setAttribute(name, value)
 fn js_canvas_setAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     if (argc < 2) return zqjs.UNDEFINED;
@@ -805,7 +805,7 @@ fn js_canvas_setAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 
 /// Canvas.removeAttribute(name)
 fn js_canvas_removeAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     if (argc < 1) return zqjs.UNDEFINED;
@@ -823,7 +823,7 @@ fn js_canvas_removeAttribute(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 
 /// Canvas.style getter - returns a cached CSSStyleDeclaration-like object
 fn js_canvas_get_style(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
 
     // Try to get cached __style property
     const existing = qjs.JS_GetPropertyStr(ctx.ptr, this_val, "__style");
@@ -847,13 +847,13 @@ fn js_canvas_get_style(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int
 
 /// Canvas.tagName / Canvas.nodeName getter - returns "CANVAS"
 fn js_canvas_get_tagName(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return ctx.newString("CANVAS");
 }
 
 /// Canvas.isConnected getter - check if backing element is in the DOM
 fn js_canvas_get_isConnected(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.FALSE;
 
     // Connected if backing element has a parent
@@ -867,7 +867,7 @@ fn js_canvas_get_isConnected(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _:
 
 /// Canvas.parentNode getter - returns parent via backing element
 fn js_canvas_get_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.NULL;
 
     if (canvas.element) |el| {
@@ -880,7 +880,7 @@ fn js_canvas_get_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: 
 
 /// Setter Canvas.width
 fn js_canvas_get_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     // Return int32
@@ -889,7 +889,7 @@ fn js_canvas_get_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int
 
 /// Setter Canvas.width
 fn js_canvas_set_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     // Safety: Setters are called with 1 argument (the value)
@@ -906,7 +906,7 @@ fn js_canvas_set_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 
 /// Getter Canvas.height
 fn js_canvas_get_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     return qjs.JS_NewInt32(ctx.ptr, @intCast(canvas.height));
@@ -914,7 +914,7 @@ fn js_canvas_get_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_in
 
 /// Setter Canvas.height
 fn js_canvas_set_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     const args = argv[0..@intCast(argc)];
@@ -932,13 +932,13 @@ fn js_canvas_set_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 fn js_canvas_get_fillStyle(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     // MVP: Just return default string or cache it?
     // Returning "#000000" is fine for now, or store the string in Canvas struct if I want round-trip exactness.
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return ctx.newString("#000000"); // Simplify for MVP
 }
 
 /// Setter Canvas.fillStyle
 fn js_canvas_set_fillStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     const args = argv[0..@intCast(argc)];
 
@@ -953,7 +953,7 @@ fn js_canvas_set_fillStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 
 fn js_canvas_get_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     // Return current state, e.g. "24.5px Arial"
@@ -963,7 +963,7 @@ fn js_canvas_get_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int,
 }
 
 fn js_canvas_set_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     if (argc < 1) return zqjs.UNDEFINED;
@@ -1014,12 +1014,12 @@ fn js_canvas_set_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 
 fn js_canvas_get_strokeStyle(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return ctx.newString("#000000"); // MVP return
 }
 
 fn js_canvas_set_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     if (argc < 1) return zqjs.EXCEPTION;
@@ -1031,7 +1031,7 @@ fn js_canvas_set_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 
 fn js_canvas_closePath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     canvas.closePath();
     return zqjs.UNDEFINED;
@@ -1039,13 +1039,13 @@ fn js_canvas_closePath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int
 
 // 2. LineWidth Accessor
 fn js_canvas_get_lineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     return qjs.JS_NewFloat64(ctx.ptr, @floatCast(canvas.line_width));
 }
 
 fn js_canvas_set_lineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     if (argc < 1) return zqjs.EXCEPTION;
 
@@ -1058,7 +1058,7 @@ fn js_canvas_set_lineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 
 // === Methods
 fn js_canvas_getContext(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const args = argv[0..@intCast(argc)];
 
     // Check if 'this' is actually a canvas
@@ -1091,7 +1091,7 @@ fn js_canvas_getContext(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 
 fn js_canvas_drawImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     if (argc < 3) return zqjs.UNDEFINED;
@@ -1140,7 +1140,7 @@ fn js_canvas_drawImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 
 /// Canvas.fillRect(x, y, w, h)
 fn js_canvas_fillRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
     const args = argv[0..@intCast(argc)];
 
@@ -1161,7 +1161,7 @@ fn js_canvas_fillRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 
 // ctx.arc(x, y, radius, startAngle, endAngle)
 fn js_canvas_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 0;
@@ -1181,7 +1181,7 @@ fn js_canvas_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, a
 }
 
 fn js_canvas_translate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 0;
@@ -1194,7 +1194,7 @@ fn js_canvas_translate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 
 fn js_canvas_scale(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 1;
@@ -1208,7 +1208,7 @@ fn js_canvas_scale(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 
 // Canvas.measureText(text) -> TextMetrics { width: number }
 fn js_canvas_measureText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
     const args = argv[0..@intCast(argc)];
@@ -1241,7 +1241,7 @@ fn js_canvas_measureText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 
 /// reurns a base64 encoded PNG or JPEG
 fn js_canvas_toDataURL(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
     const rc = RuntimeContext.get(ctx);
     const args = argv[0..@intCast(argc)];
@@ -1320,7 +1320,7 @@ fn js_canvas_toDataURL(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 // canvas(callback, type, quality) or canvas.toBlob() -> Promise
 /// PNG or JPEG
 fn js_canvas_toBlob(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
     const args = argv[0..@intCast(argc)];
@@ -1397,7 +1397,7 @@ fn js_canvas_toBlob(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 }
 
 fn js_canvas_fillText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx); // <--- Access Context
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
     const args = argv[0..@intCast(argc)];
@@ -1425,7 +1425,7 @@ fn js_canvas_fillText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 
 fn js_registerFont(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx); // <--- Access Context
     const args = argv[0..@intCast(argc)];
 
@@ -1447,7 +1447,7 @@ fn js_registerFont(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: 
 }
 
 fn js_canvas_save(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     canvas.save() catch return ctx.throwInternalError("Stack overflow");
@@ -1456,7 +1456,7 @@ fn js_canvas_save(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: 
 
 // Canvas.restore()
 fn js_canvas_restore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     canvas.restore();
@@ -1464,14 +1464,14 @@ fn js_canvas_restore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, 
 }
 
 fn js_canvas_beginPath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     canvas.beginPath();
     return zqjs.UNDEFINED;
 }
 
 fn js_canvas_moveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 0;
@@ -1484,7 +1484,7 @@ fn js_canvas_moveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 }
 
 fn js_canvas_lineTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 0;
@@ -1497,7 +1497,7 @@ fn js_canvas_lineTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 }
 
 fn js_canvas_stroke(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     canvas.stroke();
     return zqjs.UNDEFINED;
@@ -1508,7 +1508,7 @@ fn js_canvas_stroke(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _
 /// ctx.setTransform(a, b, c, d, e, f) - reset transform to matrix
 /// Simplified: ignores rotation (b,c), uses a=scaleX, d=scaleY, e=translateX, f=translateY
 fn js_canvas_setTransform(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var a: f64 = 1;
@@ -1531,7 +1531,7 @@ fn js_canvas_setTransform(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 
 /// ctx.clearRect(x, y, w, h) - clear area to transparent black
 fn js_canvas_clearRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: i32 = 0;
@@ -1568,7 +1568,7 @@ fn js_canvas_clearRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 
 /// ctx.fill() - fill current path (simplified: fill enclosed polygon)
 fn js_canvas_fill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     if (canvas.path.items.len < 3) return zqjs.UNDEFINED;
 
@@ -1684,7 +1684,7 @@ fn fillScanSpan(pixels: []u8, cv_w: u32, scan_y: i32, x_start: f32, x_end: f32, 
 
 /// ctx.rect(x, y, w, h) - add rectangle sub-path
 fn js_canvas_rect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 0;
@@ -1707,7 +1707,7 @@ fn js_canvas_rect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 
 /// ctx.strokeRect(x, y, w, h) - stroke a rectangle
 fn js_canvas_strokeRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
 
     var x: f64 = 0;
@@ -1742,13 +1742,13 @@ fn js_canvas_setLineDash(_: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qj
 
 /// ctx.getLineDash() - returns empty array
 fn js_canvas_getLineDash(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     return ctx.newArray();
 }
 
 /// ctx.createLinearGradient(x0, y0, x1, y1) - returns a stub gradient object
 fn js_canvas_createLinearGradient(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     // Return an object with addColorStop method (no-op)
     const grad = ctx.newObject();
     const add_stop_fn = qjs.JS_NewCFunction(ctx.ptr, js_gradient_addColorStop, "addColorStop", 2);
@@ -1758,7 +1758,7 @@ fn js_canvas_createLinearGradient(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c
 
 /// ctx.createRadialGradient(x0, y0, r0, x1, y1, r1) - returns a stub gradient object
 fn js_canvas_createRadialGradient(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const grad = ctx.newObject();
     const add_stop_fn = qjs.JS_NewCFunction(ctx.ptr, js_gradient_addColorStop, "addColorStop", 2);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, grad, "addColorStop", add_stop_fn);
@@ -1804,7 +1804,7 @@ fn js_canvas_rotate(_: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSV
 
 /// ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y) - approximate with lineTo
 fn js_canvas_bezierCurveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     var cp1x: f64 = 0;
     var cp1y: f64 = 0;
@@ -1827,7 +1827,7 @@ fn js_canvas_bezierCurveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c
 
 /// ctx.quadraticCurveTo(cpx, cpy, x, y) - approximate with lineTo
 fn js_canvas_quadraticCurveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     var cpx: f64 = 0;
     var cpy: f64 = 0;
@@ -1851,7 +1851,7 @@ fn js_canvas_ellipse(_: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JS
 
 /// ctx.resetTransform() - reset to identity
 fn js_canvas_resetTransformJS(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return zqjs.UNDEFINED;
     canvas.resetTransform();
     return zqjs.UNDEFINED;
@@ -1861,7 +1861,7 @@ fn js_canvas_resetTransformJS(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _
 // These use __propName on the JS object for persistence
 
 fn js_canvas_get_cached_string(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, prop_name: [:0]const u8, default: [:0]const u8) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const existing = qjs.JS_GetPropertyStr(ctx.ptr, this_val, prop_name);
     if (!qjs.JS_IsUndefined(existing)) return existing;
     return ctx.newString(default);
@@ -1984,7 +1984,7 @@ fn js_canvas_set_miterLimit(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: 
 // === Liefcycle
 
 fn js_canvas_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const args = argv[0..@intCast(argc)];
 
@@ -2031,7 +2031,7 @@ fn finalizer(
 
 // === getImageData: reads RGBA pixels from the canvas buffer
 fn js_canvas_getImageData(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
 
     if (argc < 4) return ctx.throwTypeError("getImageData requires 4 arguments");
@@ -2090,7 +2090,7 @@ fn js_canvas_getImageData(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 
 /// ctx.putImageData(imageData, dx, dy [, dirtyX, dirtyY, dirtyWidth, dirtyHeight])
 fn js_canvas_putImageData(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const canvas = unwrapCanvas(ctx, this_val) orelse return ctx.throwTypeError("Not a Canvas");
 
     if (argc < 3) return ctx.throwTypeError("putImageData requires at least 3 arguments");

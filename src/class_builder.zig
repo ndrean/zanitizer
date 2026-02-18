@@ -48,7 +48,7 @@ pub const ClassBuilder = struct {
                 argc: c_int,
                 argv: [*c]qjs.JSValue,
             ) callconv(.c) qjs.JSValue {
-                const ctx = w.Context{ .ptr = ctx_ptr };
+                const ctx = w.Context.from(ctx_ptr);
                 _ = new_target;
 
                 // Get allocator from runtime
@@ -145,7 +145,7 @@ pub const ClassBuilder = struct {
                         _: c_int,
                         _: [*c]qjs.JSValue,
                     ) callconv(.c) qjs.JSValue {
-                        const ctx = w.Context{ .ptr = ctx_ptr };
+                        const ctx = w.Context.from(ctx_ptr);
                         const opaque_ptr = qjs.JS_GetOpaque2(ctx.ptr, this, class_id);
                         if (opaque_ptr == null) return ctx.throwTypeError("Invalid this");
 
@@ -171,7 +171,7 @@ pub const ClassBuilder = struct {
                         argc: c_int,
                         argv: [*c]qjs.JSValue,
                     ) callconv(.c) qjs.JSValue {
-                        const ctx = w.Context{ .ptr = ctx_ptr };
+                        const ctx = w.Context.from(ctx_ptr);
                         if (argc < 1) return ctx.throwTypeError("Missing value");
 
                         const opaque_ptr = qjs.JS_GetOpaque2(ctx.ptr, this, class_id);
@@ -220,7 +220,7 @@ pub const ClassBuilder = struct {
                 _: c_int,
                 _: [*c]qjs.JSValue,
             ) callconv(.c) qjs.JSValue {
-                const ctx = w.Context{ .ptr = ctx_ptr };
+                const ctx = w.Context.from(ctx_ptr);
                 const opaque_ptr = qjs.JS_GetOpaque2(ctx.ptr, this, class_id);
                 if (opaque_ptr == null) return ctx.throwTypeError("Invalid this");
 

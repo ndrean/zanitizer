@@ -40,16 +40,14 @@
       } else {
         measure("Create 1k", () => click("#run"));
         measure("Replace 1k", () => click("#run"));
-
         measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
         measure("Swap Rows", () => click("#swaprows"));
         measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
         measure("Append 1k", () => click("#add"));
         measure("Clear", () => click("#clear"));
 
-        // 10k tests last — Preact may crash here
         try {
-          click("#runlots"); // Setup 10k
+          click("#runlots");
           measure("Partial Update (10k)", () => click("#update"));
           measure("Create 10k", () => click("#runlots"));
           click("#clear");

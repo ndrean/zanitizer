@@ -57,7 +57,7 @@ pub fn main() !void {
 
     setupSignalHandler();
     try vercel(allocator, sandbox_root);
-    try preview_vercel(allocator, sandbox_root);
+    // try preview_vercel(allocator, sandbox_root);
     // try elTest(allocator, sandbox_root);
     // // try js_framework_2_bench(allocator, sandbox_root);
     // try timersAndEncoding(allocator, sandbox_root);
@@ -157,6 +157,7 @@ fn vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
         \\}
     ;
 
+    // const val = try engine.evalModule(script, "script");
     const val = try engine.eval(script, "test_vercel.js", .global);
     defer engine.ctx.freeValue(val);
 

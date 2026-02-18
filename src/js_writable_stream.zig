@@ -336,14 +336,12 @@ fn js_WritableStream_getWriter(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream);
-    if (stream_ptr == null) {
+    const stream = ctx.getOpaqueAs(WritableStreamObject, this, rc.classes.writable_stream) orelse {
         return ctx.throwTypeError("Invalid WritableStream");
-    }
-    const stream: *WritableStreamObject = @ptrCast(@alignCast(stream_ptr));
+    };
 
     if (stream.locked) {
         return ctx.throwTypeError("WritableStream is locked");
@@ -368,13 +366,10 @@ fn js_WritableStream_get_locked(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream);
-    if (stream_ptr == null) return ctx.newBool(false);
-
-    const stream: *WritableStreamObject = @ptrCast(@alignCast(stream_ptr));
+    const stream = ctx.getOpaqueAs(WritableStreamObject, this, rc.classes.writable_stream) orelse return ctx.newBool(false);
     return ctx.newBool(stream.locked);
 }
 
@@ -384,12 +379,10 @@ fn js_WritableStream_close(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream);
-    if (stream_ptr) |p| {
-        const stream: *WritableStreamObject = @ptrCast(@alignCast(p));
+    if (ctx.getOpaqueAs(WritableStreamObject, this, rc.classes.writable_stream)) |stream| {
         if (stream.state == .writable) {
             stream.file.close();
             stream.state = .closed;
@@ -405,12 +398,10 @@ fn js_WritableStream_abort(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const stream_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream);
-    if (stream_ptr) |p| {
-        const stream: *WritableStreamObject = @ptrCast(@alignCast(p));
+    if (ctx.getOpaqueAs(WritableStreamObject, this, rc.classes.writable_stream)) |stream| {
         if (stream.state != .closed) {
             stream.file.close();
             stream.state = .errored;
@@ -439,18 +430,16 @@ fn js_Writer_write(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     if (argc < 1) {
         return ctx.throwTypeError("write() requires a chunk argument");
     }
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr == null) {
+    const writer = ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer) orelse {
         return ctx.throwTypeError("Invalid writer");
-    }
-    const writer: *WriterObject = @ptrCast(@alignCast(writer_ptr));
+    };
     const stream = writer.stream;
 
     if (stream.state != .writable) {
@@ -551,14 +540,12 @@ fn js_Writer_close(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr == null) {
+    const writer = ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer) orelse {
         return ctx.throwTypeError("Invalid writer");
-    }
-    const writer: *WriterObject = @ptrCast(@alignCast(writer_ptr));
+    };
     const stream = writer.stream;
 
     if (stream.state == .closed) {
@@ -582,12 +569,10 @@ fn js_Writer_abort(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr) |p| {
-        const writer: *WriterObject = @ptrCast(@alignCast(p));
+    if (ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer)) |writer| {
         if (writer.stream.state != .closed) {
             writer.stream.file.close();
             writer.stream.state = .errored;
@@ -603,12 +588,10 @@ fn js_Writer_releaseLock(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr) |p| {
-        const writer: *WriterObject = @ptrCast(@alignCast(p));
+    if (ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer)) |writer| {
         writer.stream.locked = false;
     }
 
@@ -621,14 +604,12 @@ fn js_Writer_get_closed(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr == null) {
+    const writer = ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer) orelse {
         return createRejectedPromise(ctx, "Invalid writer");
-    }
-    const writer: *WriterObject = @ptrCast(@alignCast(writer_ptr));
+    };
 
     if (writer.stream.state == .closed) {
         return createResolvedPromise(ctx, zqjs.UNDEFINED);
@@ -645,14 +626,12 @@ fn js_Writer_get_ready(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr == null) {
+    const writer = ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer) orelse {
         return createRejectedPromise(ctx, "Invalid writer");
-    }
-    const writer: *WriterObject = @ptrCast(@alignCast(writer_ptr));
+    };
 
     // If not backpressured, resolve immediately
     if (!writer.isBackpressured()) {
@@ -677,14 +656,12 @@ fn js_Writer_get_desiredSize(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
-    const writer_ptr = qjs.JS_GetOpaque(this, rc.classes.writable_stream_writer);
-    if (writer_ptr == null) {
+    const writer = ctx.getOpaqueAs(WriterObject, this, rc.classes.writable_stream_writer) orelse {
         return zqjs.NULL;
-    }
-    const writer: *WriterObject = @ptrCast(@alignCast(writer_ptr));
+    };
 
     // desiredSize = highWaterMark - queueSize (can be negative)
     const desired: i64 = @as(i64, @intCast(writer.high_water_mark)) - @as(i64, @intCast(writer.queue_size));

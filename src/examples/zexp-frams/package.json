@@ -4,17 +4,21 @@
   "type": "module",
   "devDependencies": {
     "@babel/core": "^7.29.0",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@types/bun": "latest",
-    "babel-preset-solid": "^1.9.10"
+    "babel-preset-solid": "^1.9.10",
+    "vite": "^7.3.1"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "bun-plugin-svelte": "^0.0.6",
     "chart.js": "^4.5.1",
     "preact": "^10.28.3",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "solid-js": "^1.9.11"
+    "solid-js": "^1.9.11",
+    "svelte": "^5.51.3"
   }
 }

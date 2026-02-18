@@ -59,7 +59,7 @@ pub fn Binder(comptime T: type) type {
         }
 
         fn constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-            const ctx = zqjs.Context{ .ptr = ctx_ptr };
+            const ctx = zqjs.Context.from(ctx_ptr);
             _ = new_target;
             const allocator = getAllocator(ctx);
             const self = allocator.create(T) catch return ctx.throwOutOfMemory();
@@ -195,7 +195,7 @@ pub fn Binder(comptime T: type) type {
         fn wrapMethod(comptime func_name: []const u8, comptime mtype: MethodType) qjs.JSCFunction {
             const Wrapper = struct {
                 fn call(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-                    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+                    const ctx = zqjs.Context.from(ctx_ptr);
                     const allocator = getAllocator(ctx);
 
                     const self_opt = unwrap(ctx, this_val);

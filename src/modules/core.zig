@@ -1651,7 +1651,19 @@ pub fn insertBefore(reference_node: *z.DomNode, new_node: *z.DomNode) void {
 ///
 /// Per DOM Living Standard: If newChild is already in the document, it is
 /// removed from its current parent before being inserted at the new location.
-pub fn jsInsertBefore(parent: *z.DomNode, new_child: *z.DomNode, ref_child: ?*z.DomNode) *z.DomNode {
+pub const InsertBeforeError = error{
+    /// refChild is not a child of parent (DOM NotFoundError)
+    NotFoundError,
+};
+
+pub fn jsInsertBefore(parent: *z.DomNode, new_child: *z.DomNode, ref_child: ?*z.DomNode) InsertBeforeError!*z.DomNode {
+    // DOM spec: validate refChild.parentNode === parent
+    if (ref_child) |ref| {
+        if (parentNode(ref) != parent) {
+            return error.NotFoundError;
+        }
+    }
+
     // DOM spec: DocumentFragment inserts all its children, not itself
     if (z.nodeType(new_child) == .document_fragment) {
         var frag_child = firstChild(new_child);
@@ -2737,6 +2749,17 @@ test "isWhitespaceOnlyNode" {
     const my_test = try z.isNodeTextEmpty(span_text);
     try testing.expect(!my_test);
 }
+
+// test "svelte focus" {
+//     const allocator = testing.allocator;
+//     const doc = try z.parseHTML(allocator, "<div><!-- svelte:focus --><p>follower</p></div>");
+//     defer destroyDocument(doc);
+//     const body = z.bodyElement(doc).?;
+//     const div = firstChild(z.elementToNode(body)).?;
+//     const first = firstChild(div);
+//     const name = z.nodeName_zc(first.?);
+//     std.debug.print("NAME: {s}\n", .{name});
+// }
 
 test "create Html element, tagFromQualifiedName, custom element" {
     const allocator = testing.allocator;

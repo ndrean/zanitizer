@@ -15,7 +15,7 @@ fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:
 // ----------------------------------------------------------------------------
 
 fn js_setTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     // if (argc < 2) return ctx.throwTypeError("setTimeout requires 2 arguments");
     if (argc < 1) return ctx.throwTypeError("setTimeout requires callback");
 
@@ -35,7 +35,7 @@ fn js_setTimeout(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*
 }
 
 fn js_setInterval(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 2) return ctx.throwTypeError("setInterval requires 2 arguments");
 
     const rc = RuntimeContext.get(ctx);
@@ -50,7 +50,7 @@ fn js_setInterval(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [
 }
 
 fn js_clearTimer(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return zqjs.UNDEFINED;
 
     const rc = RuntimeContext.get(ctx);

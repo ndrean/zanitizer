@@ -147,12 +147,11 @@ fn finalizer(_: ?*qjs.JSRuntime, val: qjs.JSValue) callconv(.c) void {
 }
 
 fn js_Headers_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 2) return ctx.throwTypeError("append requires 2 arguments");
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.headers);
-    if (ptr == null) return ctx.throwTypeError("Not a Headers object");
-    const self: *HeadersObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HeadersObject, this, rc.classes.headers) orelse
+        return ctx.throwTypeError("Not a Headers object");
 
     const name = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeZString(name);
@@ -164,12 +163,11 @@ fn js_Headers_append(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, a
 }
 
 fn js_Headers_set(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 2) return ctx.throwTypeError("set requires 2 arguments");
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.headers);
-    if (ptr == null) return ctx.throwTypeError("Not a Headers object");
-    const self: *HeadersObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HeadersObject, this, rc.classes.headers) orelse
+        return ctx.throwTypeError("Not a Headers object");
 
     const name = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeZString(name);
@@ -181,12 +179,11 @@ fn js_Headers_set(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv
 }
 
 fn js_Headers_get(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("get requires 1 argument");
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.headers);
-    if (ptr == null) return ctx.throwTypeError("Not a Headers object");
-    const self: *HeadersObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HeadersObject, this, rc.classes.headers) orelse
+        return ctx.throwTypeError("Not a Headers object");
 
     const name = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeZString(name);
@@ -200,13 +197,12 @@ fn js_Headers_get(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv
 }
 
 fn js_Headers_has(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("has requires 1 argument");
 
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.headers);
-    if (ptr == null) return ctx.throwTypeError("Not a Headers object");
-    const self: *HeadersObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HeadersObject, this, rc.classes.headers) orelse
+        return ctx.throwTypeError("Not a Headers object");
 
     const name = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeZString(name);
@@ -216,13 +212,12 @@ fn js_Headers_has(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv
 }
 
 fn js_Headers_delete(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("delete requires 1 argument");
     const rc = RuntimeContext.get(ctx);
 
-    const ptr = qjs.JS_GetOpaque(this, rc.classes.headers);
-    if (ptr == null) return ctx.throwTypeError("Not a Headers object");
-    const self: *HeadersObject = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HeadersObject, this, rc.classes.headers) orelse
+        return ctx.throwTypeError("Not a Headers object");
 
     const name = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
     defer ctx.freeZString(name);
@@ -232,7 +227,7 @@ fn js_Headers_delete(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, a
 }
 
 fn js_Headers_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const self = HeadersObject.init(rc.allocator);

@@ -225,7 +225,7 @@ const WorkerThread = struct {
             const ret = qjs.JS_ExecutePendingJob(rt.ptr, &err_ctx_ptr);
             if (ret < 0) {
                 // if (rt.executePendingJob() catch null) |err_ctx| {
-                const err_ctx = zqjs.Context{ .ptr = err_ctx_ptr };
+                const err_ctx = zqjs.Context.from(err_ctx_ptr);
                 handleException(err_ctx, loop, core);
             }
             // const wait_ms: i64 = loop.processTimers() catch 100;
@@ -486,7 +486,7 @@ pub const JSWorker = struct {
 // the JS engine calls `js_postMessage()`  to push message through the Mailbox
 fn js_postMessage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     std.debug.print("[Worker] js_postMessage called\n", .{});
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
 
     // Get WorkerCore from RuntimeContext
@@ -522,7 +522,7 @@ fn js_postMessage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [
 }
 
 fn js_close(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
     const core: *WorkerCore = @ptrCast(@alignCast(core_ptr));
@@ -533,7 +533,7 @@ fn js_close(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSVal
 }
 
 fn js_importScripts(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("importScripts requires at least one argument");
     const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
     const core_ptr = loop.worker_core orelse return ctx.throwInternalError("WorkerCore not found");
@@ -560,7 +560,7 @@ pub fn js_Worker_constructor(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("Worker constructor requires scriptPath argument");
 
     // const loop = EventLoop.getFromContext(ctx) orelse return ctx.throwInternalError("EventLoop not found");
@@ -610,7 +610,7 @@ pub fn js_Worker_constructor(
 
 pub fn js_Worker_postMessage(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     std.debug.print("[Main] js_Worker_postMessage called\n", .{});
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("postMessage requires 1 argument");
 
     const worker = qjs.JS_GetOpaque(this, worker_class_id);
@@ -635,7 +635,7 @@ pub fn js_Worker_postMessage(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, argc: 
 
 pub fn js_Worker_terminate(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     std.debug.print("[js_Worker_terminate] Called from JS.\n", .{});
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const worker = qjs.JS_GetOpaque(this, worker_class_id);
     if (worker == null) return ctx.throwTypeError("Not a Worker instance");
     const w: *JSWorker = @ptrCast(@alignCast(worker));
@@ -649,7 +649,7 @@ fn js_set_onerror(
     argc: c_int,
     argv: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return zqjs.UNDEFINED;
     const loop = EventLoop.getFromContext(ctx) orelse return zqjs.UNDEFINED;
 
@@ -669,7 +669,7 @@ fn js_get_onerror(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     // Get the loop instance (assuming you have a helper for this)
     const loop = EventLoop.getFromContext(ctx) orelse return zqjs.UNDEFINED;
 

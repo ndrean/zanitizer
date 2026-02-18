@@ -4,7 +4,7 @@ const qjs = z.qjs;
 const zqjs = z.wrapper;
 
 pub fn js_writeFileSync(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
 
     if (argc < 2) return ctx.throwTypeError("writeFile requires path and ArrayBuffer");
 

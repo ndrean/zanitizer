@@ -15,7 +15,7 @@ pub fn getAllocator(ctx: ?*qjs.JSContext) std.mem.Allocator {
     // const opaque_ptr = qjs.JS_GetContextOpaque(ctx);
     // const allocator_ptr: *std.mem.Allocator = @ptrCast(@alignCast(opaque_ptr));
     // return allocator_ptr.*;
-    const w_ctx = w.Context{ .ptr = ctx };
+    const w_ctx = w.Context.from(ctx);
     const rc = RuntimeContext.get(w_ctx);
     return rc.allocator;
 }
@@ -314,7 +314,7 @@ pub fn installNativeBridge(ctx: w.Context) void {
     const native_obj = ctx.newObject();
 
     // Add functions
-    // const _ctx = w.Context{ .ptr = ctx_ptr };
+    // const _ctx = w.Context.from(ctx_ptr);
     const process_array_fn = qjs.JS_NewCFunction2(
         ctx.ptr,
         js_processArray,

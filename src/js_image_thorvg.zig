@@ -365,6 +365,7 @@ pub const HTMLImageElement = struct {
     natural_width: u32,
     natural_height: u32,
     complete: bool,
+    element: ?*z.HTMLElement, // Backing DOM <img> element for DOM tree participation
 
     // Callbacks stored as persistent JS Values
     onload: qjs.JSValue,
@@ -379,6 +380,7 @@ pub const HTMLImageElement = struct {
             .natural_width = 0,
             .natural_height = 0,
             .complete = false,
+            .element = null,
             .onload = zqjs.UNDEFINED,
             .onerror = zqjs.UNDEFINED,
         };
@@ -399,14 +401,13 @@ pub fn unwrapImage(ctx: zqjs.Context, val: qjs.JSValue) ?*Image {
     const rc = RuntimeContext.get(ctx);
 
     // 1. Try ImageBitmap
-    if (qjs.JS_GetOpaque(val, rc.classes.image)) |ptr| {
-        return @ptrCast(@alignCast(ptr));
+    if (ctx.getOpaqueAs(Image, val, rc.classes.image)) |img| {
+        return img;
     }
 
     // 2. Try HTMLImageElement
     // (We need to register a separate class ID for this, see install())
-    if (qjs.JS_GetOpaque(val, rc.classes.html_image)) |ptr| {
-        const el: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    if (ctx.getOpaqueAs(HTMLImageElement, val, rc.classes.html_image)) |el| {
         return el.bitmap;
     }
 
@@ -434,21 +435,21 @@ fn makeTypeError(ctx: zqjs.Context, msg: [:0]const u8) zqjs.Value {
 
 /// bitmap.width
 fn js_get_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const img = unwrapImage(ctx, this_val) orelse return zqjs.UNDEFINED;
     return qjs.JS_NewInt32(ctx.ptr, img.width);
 }
 
 /// bitmap.height
 fn js_get_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const img = unwrapImage(ctx, this_val) orelse return zqjs.UNDEFINED;
     return qjs.JS_NewInt32(ctx.ptr, img.height);
 }
 
 /// Global "constructor" function: createImageBitmap(blob)
 pub fn js_createImageBitmap(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const args = argv[0..@intCast(argc)];
 
@@ -471,14 +472,12 @@ pub fn js_createImageBitmap(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_in
         return promise;
     }
 
-    const blob_ptr = qjs.JS_GetOpaque(args[0], rc.classes.blob);
-    if (blob_ptr == null) {
+    const blob_obj = ctx.getOpaqueAs(js_blob.BlobObject, args[0], rc.classes.blob) orelse {
         const err = makeTypeError(ctx, "Argument 1 must be a Blob");
         _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
         ctx.freeValue(err);
         return promise;
-    }
-    const blob_obj: *js_blob.BlobObject = @ptrCast(@alignCast(blob_ptr));
+    };
 
     // Decode Image - blocking -
     // The Image{} is allocated with engine.allcoator so tracks his own pixels (stb)
@@ -531,8 +530,7 @@ fn imageLoadComplete(ctx: zqjs.Context, this_val: zqjs.Value, body: []const u8, 
         return;
     }
 
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return;
-    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image) orelse return;
 
     if (self.bitmap) |b| b.deinit();
 
@@ -550,8 +548,7 @@ fn imageLoadComplete(ctx: zqjs.Context, this_val: zqjs.Value, body: []const u8, 
 }
 
 fn fireImageError(ctx: zqjs.Context, rc: *RuntimeContext, this_val: zqjs.Value) void {
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return;
-    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image) orelse return;
     if (qjs.JS_IsFunction(ctx.ptr, self.onerror)) {
         const ret = qjs.JS_Call(ctx.ptr, self.onerror, this_val, 0, null);
         qjs.JS_FreeValue(ctx.ptr, ret);
@@ -651,7 +648,7 @@ fn html_image_finalizer(rt: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void 
 }
 
 fn js_html_image_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const img = HTMLImageElement.init(rc.allocator) catch return zqjs.EXCEPTION;
@@ -668,7 +665,7 @@ fn js_html_image_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int,
 
 /// img.decode() — no-op stub, resolves immediately (image already decoded in src setter)
 fn js_html_image_decode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     var resolvers: [2]qjs.JSValue = undefined;
     const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
     if (qjs.JS_IsException(promise)) return zqjs.EXCEPTION;
@@ -682,14 +679,12 @@ fn js_html_image_decode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [
 
 /// The Job called by the Event Loop to trigger 'onload'
 fn js_image_onload_job(ctx_ptr: ?*qjs.JSContext, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const this_val = argv[0]; // We passed 'this' as the argument
     const rc = RuntimeContext.get(ctx);
 
     // Unwrap
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image);
-    if (ptr) |p| {
-        const self: *HTMLImageElement = @ptrCast(@alignCast(p));
+    if (ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image)) |self| {
         if (qjs.JS_IsFunction(ctx.ptr, self.onload)) {
             // Call onload() with 'this' as context
             const ret = qjs.JS_Call(ctx.ptr, self.onload, this_val, 0, null);
@@ -700,10 +695,9 @@ fn js_image_onload_job(ctx_ptr: ?*qjs.JSContext, _: c_int, argv: [*c]qjs.JSValue
 }
 
 fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
-    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
 
     const src_str = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
     // Store a copy for the getter (toZString returns a temp view)
@@ -761,9 +755,7 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
         }
     } else if (std.mem.startsWith(u8, src_str, "blob:")) {
         if (rc.blob_registry.get(src_str)) |blob_val| {
-            const blob_ptr = qjs.JS_GetOpaque(blob_val, rc.classes.blob);
-            if (blob_ptr) |p| {
-                const blob: *js_blob.BlobObject = @ptrCast(@alignCast(p));
+            if (ctx.getOpaqueAs(js_blob.BlobObject, blob_val, rc.classes.blob)) |blob| {
 
                 if (self.bitmap) |b| b.deinit();
 
@@ -806,10 +798,9 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
 }
 
 fn js_html_image_get_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
-    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
 
     if (self.src) |s| {
         return ctx.newString(s);
@@ -818,10 +809,9 @@ fn js_html_image_get_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
 }
 
 fn js_html_image_set_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
-    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
 
     qjs.JS_FreeValue(ctx.ptr, self.onload);
     self.onload = qjs.JS_DupValue(ctx.ptr, argv[0]);
@@ -829,15 +819,14 @@ fn js_html_image_set_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: 
 }
 
 fn js_html_image_get_onload(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
-    const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
+    const self = ctx.getOpaqueAs(HTMLImageElement, this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     return qjs.JS_DupValue(ctx.ptr, self.onload);
 }
 
 fn js_html_image_get_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -845,7 +834,7 @@ fn js_html_image_get_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _:
 }
 
 fn js_html_image_set_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.EXCEPTION;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -856,7 +845,7 @@ fn js_html_image_set_onerror(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _:
 }
 
 fn js_html_image_get_width_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -864,7 +853,7 @@ fn js_html_image_get_width_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 
 fn js_html_image_get_height_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -872,7 +861,7 @@ fn js_html_image_get_height_prop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 
 fn js_html_image_get_complete(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -881,7 +870,7 @@ fn js_html_image_get_complete(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _
 
 /// img.addEventListener('load'|'error', callback) — maps to onload/onerror
 fn js_html_image_addEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));
@@ -904,7 +893,7 @@ fn js_html_image_addEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 
 /// img.removeEventListener('load'|'error', callback) — clears onload/onerror
 fn js_html_image_removeEventListener(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_image) orelse return zqjs.UNDEFINED;
     const self: *HTMLImageElement = @ptrCast(@alignCast(ptr));

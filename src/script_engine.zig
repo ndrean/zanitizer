@@ -748,13 +748,8 @@ pub const ScriptEngine = struct {
     }
 
     pub fn processJobs(self: *ScriptEngine) void {
-        while (true) {
-            // Run pending Jobs (Promises/Microtasks)
-            // returns < 0 if exception, 0 if no jobs, > 0 if job executed
-            var ctx: ?*qjs.JSContext = self.ctx.ptr;
-            const ret = qjs.JS_ExecutePendingJob(self.rt.ptr, &ctx);
-            if (ret <= 0) break;
-        }
+        const js_polyfills = @import("js_polyfills.zig");
+        js_polyfills.drainMicrotasksGCSafe(self.rt.ptr, self.ctx.ptr);
     }
 
     /// [host] Process all <script> tags in the document (Inline and Remote)
@@ -1092,7 +1087,7 @@ fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
 }
 
 fn js_native_loadPage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // Extract the engine from the context backpack!
@@ -1165,23 +1160,7 @@ pub fn js_flush(
     _: c_int,
     _: [*c]qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
-    const rt = qjs.JS_GetRuntime(ctx_ptr);
-    var ctx_out: ?*qjs.JSContext = ctx_ptr;
-
-    // Drain all pending jobs (microtasks/promises)
-    var iterations: u32 = 0;
-    const max_iterations: u32 = 10000; // Safety limit
-    const deadline = std.time.milliTimestamp() + 5000; // 5s wall-clock limit
-
-    while (iterations < max_iterations) : (iterations += 1) {
-        const ret = qjs.JS_ExecutePendingJob(rt, &ctx_out);
-        if (ret <= 0) break; // No more jobs or error
-        // Check wall-clock timeout every 100 iterations
-        if (iterations % 100 == 0 and std.time.milliTimestamp() > deadline) {
-            std.debug.print("[flush] wall-clock timeout after {d} iterations\n", .{iterations});
-            break;
-        }
-    }
-
+    const js_polyfills = @import("js_polyfills.zig");
+    js_polyfills.drainMicrotasksGCSafe(qjs.JS_GetRuntime(ctx_ptr), ctx_ptr);
     return zqjs.UNDEFINED;
 }

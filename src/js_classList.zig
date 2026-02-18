@@ -26,7 +26,7 @@ pub fn add(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const el = getElement(ctx, this_val) catch |err| {
@@ -56,7 +56,7 @@ pub fn remove(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
@@ -81,7 +81,7 @@ pub fn toggle(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
@@ -110,7 +110,7 @@ pub fn contains(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
 
@@ -131,7 +131,7 @@ pub fn replace(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
@@ -158,7 +158,7 @@ pub fn item(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
@@ -191,7 +191,7 @@ pub fn get_length(
     _: c_int,
     _: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
 
@@ -215,7 +215,7 @@ pub fn get_value(
     _: c_int,
     _: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
 
@@ -230,7 +230,7 @@ pub fn set_value(
     argc: c_int,
     argv: [*c]w.Value,
 ) callconv(.c) w.Value {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     const el = getElement(ctx, this_val) catch return ctx.throwTypeError("'this' is not a DOMTokenList");
 

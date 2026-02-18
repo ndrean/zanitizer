@@ -125,7 +125,7 @@ fn bindAsyncInternal(
             argc: c_int,
             argv: [*c]qjs.JSValue,
         ) callconv(.c) qjs.JSValue {
-            const ctx = zqjs.Context{ .ptr = ctx_ptr };
+            const ctx = zqjs.Context.from(ctx_ptr);
             const rc = RuntimeContext.get(ctx);
             const loop = rc.loop;
 

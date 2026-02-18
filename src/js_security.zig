@@ -447,7 +447,7 @@ pub fn js_secure_module_loader(
             defer qjs.JS_FreeValue(ctx, exception);
 
             // Print exception details
-            const w_ctx = zqjs.Context{ .ptr = ctx };
+            const w_ctx = zqjs.Context.from(ctx);
             _ = w_ctx.checkAndPrintException();
             return null;
         }
@@ -759,9 +759,9 @@ test "module normalize: remote HTTPS URL passes through" {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Module loader: end-to-end via ScriptEngine (needs full runtime)
-// ---------------------------------------------------------------------------
+// // ---------------------------------------------------------------------------
+// // Module loader: end-to-end via ScriptEngine (needs full runtime)
+// // ---------------------------------------------------------------------------
 
 test "module loader: import traversal escape blocked" {
     const alloc = testing.allocator;

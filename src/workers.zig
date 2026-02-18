@@ -84,7 +84,7 @@ pub fn workerFetch(allocator: std.mem.Allocator, ctx: *FetchContext) void {
 }
 
 pub fn js_fetch(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     if (argc < 1) return ctx.throwTypeError("URL required");
 
     const url_str = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;

@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  </head>
+  <body>
+    <div id="map" style="width: 800px; height: 600px"></div>
+
+    <script>
+      async function runLeaflet() {
+        console.log("[Test] Booting Leaflet...");
+
+        const map = L.map("map", {
+          zoomControl: false,
+          attributionControl: false,
+        }).setView([51.505, -0.09], 13);
+
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(
+          map,
+        );
+
+        // Let Leaflet finish its tile layout calculation
+        // await new Promise((resolve) => setTimeout(resolve, 50));
+
+        console.log("\nDOM EXTRACTION---");
+
+        const tiles = document.querySelectorAll("img.leaflet-tile");
+
+        if (tiles.length === 0) {
+          console.log("Failed: No tiles found.");
+          return;
+        }
+
+        console.log(`Leaflet injected ${tiles.length} map tiles`);
+
+        const mapData = Array.from(tiles).map((img, index) => {
+          const src = img.getAttribute("src") || "";
+          const style = img.getAttribute("style") || "";
+          console.log(`Tile ${index + 1}: ${src}`);
+          console.log(`  Style: ${style}`);
+          return {
+            url: src,
+            x: parseInt(img.style.left || 0, 10),
+            y: parseInt(img.style.top || 0, 10),
+            w: parseInt(img.style.width || 256, 10),
+            h: parseInt(img.style.height || 256, 10),
+          };
+        });
+
+        console.log("Downloading tiles and generating PDF...");
+        const pdf = new PDFDocument();
+        pdf.addPage(800, 600);
+        for (const tile of mapData) {
+          try {
+            const res = await fetch(tile.url);
+            const buffer = await res.arrayBuffer();
+            pdf.drawImageFromBuffer(buffer, tile.x, tile.y, tile.w, tile.h);
+            console.log(`  Drawn tile at (${tile.x}, ${tile.y})`);
+          } catch (e) {
+            console.log(`  - Failed to download tile: ${tile.url}`);
+          }
+        }
+
+        pdf.save("london_map.pdf");
+        console.log("🌍 'london_map.pdf' has been generated");
+      }
+
+      runLeaflet();
+    </script>
+  </body>
+</html>

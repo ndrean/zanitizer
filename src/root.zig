@@ -668,7 +668,31 @@ pub const stringEquals = search.stringEquals;
 const testing = std.testing;
 
 test {
-    std.testing.refAllDecls(@This());
+    // Explicitly reference test-bearing modules (not refAllDecls which is too broad)
+    _ = @import("modules/core.zig");
+    _ = @import("modules/parsing.zig");
+    _ = @import("modules/sanitizer.zig");
+    _ = @import("modules/sanitizer_css.zig");
+    _ = @import("modules/sanitizer_test_vectors.zig");
+    _ = @import("modules/html_spec.zig");
+    _ = @import("modules/html_tags.zig");
+    _ = @import("modules/simple_search.zig");
+    _ = @import("modules/attributes.zig");
+    _ = @import("modules/text_content.zig");
+    _ = @import("modules/normalize.zig");
+    _ = @import("modules/fragment_template.zig");
+    _ = @import("modules/url.zig");
+    _ = @import("modules/styles.zig");
+    _ = @import("modules/class_list.zig");
+    _ = @import("modules/encoding.zig");
+    _ = @import("modules/chunks.zig");
+    _ = @import("modules/cleaner.zig");
+    _ = @import("modules/node_types.zig");
+    _ = @import("modules/serializer.zig");
+    _ = @import("modules/css_selectors.zig");
+    _ = @import("sanitizer_config.zig");
+    _ = @import("js_security.zig");
+    _ = @import("js_bytecode.zig");
 }
 
 pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {

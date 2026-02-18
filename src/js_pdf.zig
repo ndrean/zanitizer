@@ -11,6 +11,19 @@ const hpdf = @cImport({
     @cInclude("hpdf.h");
 });
 
+extern fn stbi_load_from_memory(
+    buffer: [*]const u8,
+    len: c_int,
+    x: *c_int,
+    y: *c_int,
+    channels_in_file: *c_int,
+    desired_channels: c_int,
+) ?[*]u8;
+
+fn stbiw_free(ptr: ?*anyopaque) void {
+    if (ptr) |p| std.c.free(p);
+}
+
 // Safe Error Handling
 export fn pdfErrorHandler(error_no: hpdf.HPDF_STATUS, detail_no: hpdf.HPDF_STATUS, user_data: ?*anyopaque) void {
     _ = user_data;
@@ -24,6 +37,7 @@ pub const PDFDocument = struct {
     font: hpdf.HPDF_Font = null,
     allocator: std.mem.Allocator,
     global_font: hpdf.HPDF_Font = null,
+    current_font_size: f32 = 12.0,
 
     pub fn init(allocator: std.mem.Allocator) !*PDFDocument {
         const doc = hpdf.HPDF_New(&pdfErrorHandler, null);
@@ -83,9 +97,12 @@ pub fn install(ctx: zqjs.Context) !void {
         js_utils.defineMethod(ctx, proto, "addPage", js_pdf_addPage, 0);
         js_utils.defineMethod(ctx, proto, "moveTo", js_pdf_moveTo, 2);
         js_utils.defineMethod(ctx, proto, "lineTo", js_pdf_lineTo, 2);
+        js_utils.defineMethod(ctx, proto, "setDrawColor", js_pdf_setDrawColor, 3);
         js_utils.defineMethod(ctx, proto, "stroke", js_pdf_stroke, 0);
+        js_utils.defineMethod(ctx, proto, "strokeRect", js_pdf_strokeRect, 4);
         js_utils.defineMethod(ctx, proto, "drawImage", js_pdf_drawImage, 5);
         js_utils.defineMethod(ctx, proto, "toArrayBuffer", js_pdf_toArrayBuffer, 0);
+        js_utils.defineMethod(ctx, proto, "drawImageFromBuffer", js_drawImageFromBuffer, 5);
         js_utils.defineMethod(ctx, proto, "loadFont", js_pdf_loadFont, 2);
         js_utils.defineMethod(ctx, proto, "setFont", js_pdf_setFont, 2);
         js_utils.defineMethod(ctx, proto, "measureText", js_pdf_measureText, 1);
@@ -116,7 +133,7 @@ fn js_pdf_document_constructor(ctx_ptr: ?*qjs.JSContext, new_target: qjs.JSValue
     _ = argc;
     _ = argv; // no arguments for `new PDFDocument()`
 
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // Enforce the 'new' keyword
@@ -163,9 +180,9 @@ fn pdf_document_finalizer(_: ?*qjs.JSRuntime, val: zqjs.Value) callconv(.c) void
 fn js_pdf_addPage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     _ = argc;
     _ = argv;
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     // Create page and set default size (A4)
     self.current_page = hpdf.HPDF_AddPage(self.doc);
@@ -175,7 +192,7 @@ fn js_pdf_addPage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
     self.page_height = hpdf.HPDF_Page_GetHeight(self.current_page);
 
     // Set default font size so text works immediately
-    _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.font, 12.0);
+    _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.font, self.current_font_size);
 
     return zqjs.UNDEFINED;
 }
@@ -183,9 +200,9 @@ fn js_pdf_addPage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 // --- CANVAS API MOCKS ---
 
 fn js_pdf_fillText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 3) return zqjs.UNDEFINED;
 
@@ -210,9 +227,9 @@ fn js_pdf_fillText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 
 fn js_pdf_save(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (argc < 1) return zqjs.UNDEFINED;
 
@@ -226,9 +243,9 @@ fn js_pdf_save(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, arg
 
 // in Canvas, (0,0) is TopLeft but BottomLeft in PDF => invert Y-Axis
 fn js_pdf_moveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 2) return zqjs.UNDEFINED;
 
@@ -245,9 +262,9 @@ fn js_pdf_moveTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, a
 
 // in Canvas, (0,0) is TopLeft but BottomLeft in PDF => invert Y-Axis
 fn js_pdf_lineTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 2) return zqjs.UNDEFINED;
 
@@ -262,11 +279,52 @@ fn js_pdf_lineTo(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, a
     return zqjs.UNDEFINED;
 }
 
+fn js_pdf_setDrawColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
+
+    if (self.current_page == null or argc < 1) return zqjs.UNDEFINED;
+
+    var r: f32 = 0;
+    var g: f32 = 0;
+    var b: f32 = 0;
+
+    if (argc >= 3) {
+        // Handle setDrawColor(255, 0, 0)
+        var r_f64: f64 = 0;
+        var g_f64: f64 = 0;
+        var b_f64: f64 = 0;
+
+        _ = qjs.JS_ToFloat64(ctx.ptr, &r_f64, argv[0]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &g_f64, argv[1]);
+        _ = qjs.JS_ToFloat64(ctx.ptr, &b_f64, argv[2]);
+
+        // LibHaru expects 0.0 to 1.0 floats
+        r = @floatCast(r_f64 / 255.0);
+        g = @floatCast(g_f64 / 255.0);
+        b = @floatCast(b_f64 / 255.0);
+    } else {
+        // Handle setDrawColor("#FF0000")
+        const style_str = ctx.toZString(argv[0]) catch return zqjs.UNDEFINED;
+        defer ctx.freeZString(style_str);
+
+        const rgb = parseHexToRGB(style_str);
+        r = rgb.r;
+        g = rgb.g;
+        b = rgb.b;
+    }
+
+    _ = hpdf.HPDF_Page_SetRGBStroke(self.current_page, r, g, b);
+
+    return zqjs.UNDEFINED;
+}
+
 // in Canvas, (0,0) is TopLeft but BottomLeft in PDF => invert Y-Axis
 fn js_pdf_stroke(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page != null) {
         _ = hpdf.HPDF_Page_Stroke(self.current_page);
@@ -283,18 +341,56 @@ fn js_pdf_loadFont(_: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSVa
 
 // real size, but ❗️ fake font: pdf.setFont("CustomFont", 24)
 fn js_pdf_setFont(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
-    if (self.current_page == null or argc < 2) return zqjs.UNDEFINED;
+    if (argc < 1) return zqjs.UNDEFINED;
 
-    // We ignore argv[0] (the font name) and only care about argv[1] (the size)
     var size: f64 = 12.0;
-    _ = qjs.JS_ToFloat64(ctx.ptr, &size, argv[1]);
 
-    // Apply the requested size to our hardcoded embedded Roboto font
-    _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.font, @floatCast(size));
+    // Support both pdf.setFont(24) and pdf.setFont("Roboto", 24)
+    if (argc == 1) {
+        _ = qjs.JS_ToFloat64(ctx.ptr, &size, argv[0]);
+    } else {
+        _ = qjs.JS_ToFloat64(ctx.ptr, &size, argv[1]);
+    }
+
+    // Save the size globally so addPage() can inherit it
+    if (size > 0) {
+        self.current_font_size = @floatCast(size);
+    }
+
+    // If a page already exists, apply it immediately
+    if (self.current_page != null) {
+        _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.font, self.current_font_size);
+    }
+
+    return zqjs.UNDEFINED;
+}
+
+fn js_pdf_strokeRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
+
+    if (self.current_page == null or argc < 4) return zqjs.UNDEFINED;
+
+    var x: f64 = 0;
+    var y: f64 = 0;
+    var w: f64 = 0;
+    var h: f64 = 0;
+
+    _ = qjs.JS_ToFloat64(ctx.ptr, &x, argv[0]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &y, argv[1]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &w, argv[2]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &h, argv[3]);
+
+    // Canvas Y-axis inversion: PDF origin is bottom-left
+    const pdf_y = self.page_height - @as(f32, @floatCast(y)) - @as(f32, @floatCast(h));
+
+    _ = hpdf.HPDF_Page_Rectangle(self.current_page, @floatCast(x), pdf_y, @floatCast(w), @floatCast(h));
+    _ = hpdf.HPDF_Page_Stroke(self.current_page);
 
     return zqjs.UNDEFINED;
 }
@@ -302,9 +398,9 @@ fn js_pdf_setFont(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 // --- GRAPHICS STATE ---
 
 fn js_pdf_saveGraphicsState(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page != null) {
         // Pushes the current clipping and styling state to the stack
@@ -314,9 +410,9 @@ fn js_pdf_saveGraphicsState(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: 
 }
 
 fn js_pdf_restoreGraphicsState(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page != null) {
         // Pops the state, returning the PDF to normal drawing mode
@@ -327,9 +423,9 @@ fn js_pdf_restoreGraphicsState(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 
 // --- SHAPES & CLIPPING ---
 fn js_pdf_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 5) return zqjs.UNDEFINED;
 
@@ -361,9 +457,9 @@ fn js_pdf_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv
     return zqjs.UNDEFINED;
 }
 // fn js_pdf_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-//     const ctx = zqjs.Context{ .ptr = ctx_ptr };
+//     const ctx = zqjs.Context.from(ctx_ptr);
 //     const rc = RuntimeContext.get(ctx);
-//     const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+//     const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
 //     if (self.current_page == null or argc < 5) return zqjs.UNDEFINED;
 
@@ -392,9 +488,9 @@ fn js_pdf_arc(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv
 // }
 
 fn js_pdf_clip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page != null) {
         // Set the clipping region
@@ -407,9 +503,9 @@ fn js_pdf_clip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c
 }
 
 fn js_pdf_drawImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 5) return zqjs.UNDEFINED;
 
@@ -465,10 +561,53 @@ fn js_pdf_drawImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
     return zqjs.UNDEFINED;
 }
 
-fn js_pdf_toArrayBuffer(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+// --- drawImageFromBuffer(arrayBuffer, x, y, w, h) ---
+fn js_drawImageFromBuffer(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
+
+    if (self.current_page == null or argc < 5) return zqjs.UNDEFINED;
+
+    // 1. Extract the raw ArrayBuffer from JS
+    var buf_len: usize = 0;
+    const buf_ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &buf_len, argv[0]);
+    if (buf_ptr == null) return zqjs.UNDEFINED;
+
+    // 2. Extract Coordinates
+    var x: f64 = 0;
+    var y: f64 = 0;
+    var w_val: f64 = 0;
+    var h_val: f64 = 0;
+    _ = qjs.JS_ToFloat64(ctx.ptr, &x, argv[1]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &y, argv[2]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &w_val, argv[3]);
+    _ = qjs.JS_ToFloat64(ctx.ptr, &h_val, argv[4]);
+
+    // 3. Decode the PNG/JPEG from memory using stb_image
+    var img_w: c_int = 0;
+    var img_h: c_int = 0;
+    var channels: c_int = 0;
+
+    // Force 3 channels (RGB) because PDFs usually don't need alpha for map tiles
+    const pixels = stbi_load_from_memory(buf_ptr, @intCast(buf_len), &img_w, &img_h, &channels, 3);
+    if (pixels == null) return zqjs.UNDEFINED; // Silently skip broken tiles
+    defer stbiw_free(pixels);
+
+    // 4. Load raw pixels into LibHaru (Bypassing the disabled LibPNG!)
+    const pdf_img = hpdf.HPDF_LoadRawImageFromMem(self.doc, pixels, @intCast(img_w), @intCast(img_h), hpdf.HPDF_CS_DEVICE_RGB, 8);
+
+    // 5. Y-axis inversion and draw
+    const pdf_y = self.page_height - @as(f32, @floatCast(y)) - @as(f32, @floatCast(h_val));
+    _ = hpdf.HPDF_Page_DrawImage(self.current_page, pdf_img, @floatCast(x), pdf_y, @floatCast(w_val), @floatCast(h_val));
+
+    return zqjs.UNDEFINED;
+}
+
+fn js_pdf_toArrayBuffer(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     // 1. Tell LibHaru to compile the PDF into its internal memory stream
     if (hpdf.HPDF_SaveToStream(self.doc) != hpdf.HPDF_OK) {
@@ -495,9 +634,9 @@ fn js_pdf_toArrayBuffer(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_in
 // --- measureText(text) → { width } ---
 
 fn js_pdf_measureText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 1) return zqjs.UNDEFINED;
 
@@ -523,7 +662,7 @@ fn parseHexToRGB(str: []const u8) struct { r: f32, g: f32, b: f32 } {
 }
 
 fn js_pdf_get_fillStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const val = ctx.getPropertyStr(this_val, "__fillStyle");
     if (ctx.isUndefined(val)) {
         ctx.freeValue(val);
@@ -533,9 +672,9 @@ fn js_pdf_get_fillStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_in
 }
 
 fn js_pdf_set_fillStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (argc < 1) return zqjs.UNDEFINED;
 
@@ -553,7 +692,7 @@ fn js_pdf_set_fillStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 
 fn js_pdf_get_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const val = ctx.getPropertyStr(this_val, "__strokeStyle");
     if (ctx.isUndefined(val)) {
         ctx.freeValue(val);
@@ -563,9 +702,9 @@ fn js_pdf_get_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_
 }
 
 fn js_pdf_set_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (argc < 1) return zqjs.UNDEFINED;
 
@@ -584,9 +723,9 @@ fn js_pdf_set_strokeStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 // --- fillRect(x, y, w, h) ---
 
 fn js_pdf_fillRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 4) return zqjs.UNDEFINED;
 
@@ -610,9 +749,9 @@ fn js_pdf_fillRect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 // --- setLineWidth(w) ---
 
 fn js_pdf_setLineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context{ .ptr = ctx_ptr };
+    const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const self: *PDFDocument = @ptrCast(@alignCast(qjs.JS_GetOpaque(this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED));
+    const self = ctx.getOpaqueAs(PDFDocument, this_val, rc.classes.pdf_document) orelse return zqjs.UNDEFINED;
 
     if (self.current_page == null or argc < 1) return zqjs.UNDEFINED;
 

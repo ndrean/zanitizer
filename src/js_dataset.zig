@@ -30,7 +30,7 @@ fn exoticGetProperty(
     receiver: qjs.JSValue,
 ) callconv(.c) qjs.JSValue {
     _ = receiver;
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     // Get the element from opaque data
     const el = getElement(ctx, obj) catch return w.UNDEFINED;
@@ -62,7 +62,7 @@ fn exoticSetProperty(
 ) callconv(.c) c_int {
     _ = receiver;
     _ = flags;
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     // Get the element from opaque data
     const el = getElement(ctx, obj) catch return 0;
@@ -90,7 +90,7 @@ fn exoticDeleteProperty(
     obj: qjs.JSValue,
     prop: qjs.JSAtom,
 ) callconv(.c) c_int {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     // Get the element from opaque data
     const el = getElement(ctx, obj) catch return 0;
@@ -114,7 +114,7 @@ fn exoticHasProperty(
     obj: qjs.JSValue,
     prop: qjs.JSAtom,
 ) callconv(.c) c_int {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     // Get the element from opaque data
     const el = getElement(ctx, obj) catch return 0;
@@ -138,7 +138,7 @@ fn exoticGetOwnProperty(
     obj: qjs.JSValue,
     prop: qjs.JSAtom,
 ) callconv(.c) c_int {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
 
     // Get the element from opaque data
     const el = getElement(ctx, obj) catch return 0;
@@ -172,7 +172,7 @@ fn exoticGetOwnPropertyNames(
     plen: [*c]u32,
     obj: qjs.JSValue,
 ) callconv(.c) c_int {
-    const ctx = w.Context{ .ptr = ctx_ptr };
+    const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
     // Get the element from opaque data
