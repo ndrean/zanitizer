@@ -146,6 +146,7 @@ In the terminal, you see:
 **[Example of dual primitives]** We create a DOM and query it in pur Zig and then using embedded JavaScript:
 
 In this example, we first parse the HTML file with `DOMParser.parseFromString()` and then we can query the "VDOM" in Zig with `z.querySelector()` and get the content with `textContent_zc()`.
+<details><summary>Use parser.parseFromString </summary>
 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -174,8 +175,11 @@ pub fn main() !void {
 const std = @import("std");
 const z = @import("zexplorer");
 ```
+</details>
 
 Then, we run a JavaScript snippet that knows about the "vDOM". Indeed, zexplorer brings in a default `document` to which the JavaScript code accesses via a globalThis `document`. We use the engine `z.ScriptEngine`  and the `loadHTML()` and `evalModule()` methods.
+
+<details><summary>With a JavaScript snippet</summary>
 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -190,7 +194,7 @@ pub fn main() !void {
   var engine = try z.ScriptEngine.init(gpa, sandbox_root);
   defer engine.deinit();
 
-  const js = 
+  const js =
     \\const innerText = document.querySelector("p").textContent;
     \\console.log("[JS]", innerText);
     ;
@@ -203,6 +207,8 @@ pub fn main() !void {
 const std = @import("std");
 const z = @import("zexplorer");
 ```
+
+</details>
 
 You build and execute the _main.zig_ file via the "run" step:
 
@@ -237,6 +243,8 @@ document.head.appendChild(script);
 
 In the _main.zig_ file, we use the `z.ScriptEngine` to load the JS code `engine.evalModule()` and then execute it with `engine.executeScripts()`. We take care of all the memory allocations:
 
+<details><summary>Using engine.evalModule() and engine.executeScripts()</summary>
+
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
@@ -263,6 +271,8 @@ pub fn main() !void {
 const std = @import("std");
 const z = @import("zexplorer");
 ```
+
+</details>
 
 You build and execute the _main.zig_ file via the "run" step:
 
@@ -309,6 +319,8 @@ The output in the terminal:
 
 Your _main.zig_  file contains:
 
+<details><summary>Using ScriptEngine.loadPage()</summary>
+
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
@@ -330,6 +342,8 @@ pub fn main() !void {
 const std = @import("std");
 const z = @import("zexplorer");
 ```
+
+</details>
 
 You build and execute _main.zig_:
 
@@ -360,6 +374,7 @@ We scrap <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scri
 
 You can scrap the Vercel website with this JavaScript snippet that mimics `Puppeteer`'s API.
 
+
 ```js
 // vercel.js
 
@@ -385,6 +400,8 @@ async function testVercel() {
 ```
 
 You pass it to the engine:
+
+<details><summary>Using engine.Eval() and engine.evalAsyncAs()</summary>
 
 ```zig
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -430,6 +447,8 @@ pub fn main() !void {
     );
 }
 ```
+
+</details>
 
 and you get your data back in 1s:
 
