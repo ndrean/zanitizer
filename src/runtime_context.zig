@@ -67,6 +67,7 @@ pub const RuntimeContext = struct {
         image: zqjs.ClassID = 0,
         html_image: zqjs.ClassID = 0,
         pdf_document: zqjs.ClassID = 0,
+        local_storage: std.StringHashMap([]const u8),
     } = .{},
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,

@@ -81,6 +81,12 @@ if (!globalThis.Element.prototype.createSVGRect) {
   };
 }
 
+globalThis.Range.prototype.createContextualFragment = function (htmlString) {
+  const template = document.createElement("template");
+  template.innerHTML = htmlString;
+  return template.content; // Returns a DocumentFragment
+};
+
 if (!globalThis.Element.prototype.createSVGMatrix) {
   globalThis.Element.prototype.createSVGMatrix = function () {
     return new SVGMatrix();

@@ -489,5 +489,4 @@ pub fn install(ctx: w.Context) !void {
     ;
     const eh_result = qjs.JS_Eval(ctx.ptr, event_handler_polyfill, event_handler_polyfill.len, "<polyfill:events>", qjs.JS_EVAL_TYPE_GLOBAL);
     ctx.freeValue(eh_result);
-
 }

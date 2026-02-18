@@ -380,6 +380,14 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "__native_generateRoutePng", ctx.newCFunction(js_compositor.js_generateRoutePng, "generateRoutePng", 5));
 
         // HTMLElement constructor is now exposed in init() before polyfills
+
+        {
+            const crypto_obj = ctx.newObject();
+            const get_rand_fn = ctx.newCFunction(js_crypto_getRandomValues, "getRandomValues", 1);
+            // (In JS, this is: crypto.getRandomValues = function...)
+            try ctx.setPropertyStr(crypto_obj, "getRandomValues", get_rand_fn);
+            try ctx.setPropertyStr(global, "crypto", crypto_obj);
+        }
     }
 
     fn createDocumentAPI(self: *DOMBridge, global: w.Value, _: w.ClassID) !void {
@@ -2105,4 +2113,56 @@ fn js_HTMLElement_get_href(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, 
 }
 fn js_HTMLElement_set_href(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     return reflectedAttrSetter(.{ .ptr = ctx_ptr }, this_val, argv, "href");
+}
+
+fn js_localStorage_setItem(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 2) return w.UNDEFINED;
+
+    const key = ctx.toZString(argv[0]) catch return w.UNDEFINED;
+    const val = ctx.toZString(argv[1]) catch {
+        ctx.freeZString(key);
+        return w.UNDEFINED;
+    };
+
+    // Duplicate strings so they live in the hash map
+    const key_dup = rc.allocator.dupe(u8, key) catch return w.UNDEFINED;
+    const val_dup = rc.allocator.dupe(u8, val) catch return w.UNDEFINED;
+
+    ctx.freeZString(key);
+    ctx.freeZString(val);
+
+    // Free old value if overwriting
+    if (rc.local_storage.fetchPut(key_dup, val_dup) catch null) |kv| {
+        rc.allocator.free(kv.key);
+        rc.allocator.free(kv.value);
+    }
+
+    return w.UNDEFINED;
+}
+
+// TODO
+// js_localStoarge_getItem
+// js_localStorage_removeItem
+// js_localStorage_clear
+//  + put on global object in `installAPIs()`
+
+fn js_crypto_getRandomValues(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 1) return w.UNDEFINED;
+
+    const ctx = w.Context.from(ctx_ptr);
+
+    // Extract the raw memory pointer from the JS Uint8Array/TypedArray
+    const typed_arr = ctx.getTypedArrayBuffer(argv[0]) catch return w.UNDEFINED;
+    defer ctx.freeValue(typed_arr.buffer);
+
+    const full_buffer_slice = ctx.getArrayBuffer(typed_arr.buffer) catch return w.UNDEFINED;
+
+    const target_slice = full_buffer_slice[typed_arr.byte_offset .. typed_arr.byte_offset + typed_arr.byte_length];
+    // fill the range
+    std.crypto.random.bytes(target_slice);
+
+    // Return the same array back to JS
+    return ctx.dupValue(argv[0]);
 }

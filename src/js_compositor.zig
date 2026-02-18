@@ -119,6 +119,7 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
 
     const master_u8: [*]const u8 = @ptrCast(master_buffer.ptr);
     if (filename) |fname| {
+        std.debug.print("[Compositor] Saving final image to {s}...\n", .{fname});
         return saveToDisk(fname, master_u8, page_width, page_height);
     } else {
         return encodeToArrayBuffer(ctx, master_u8, page_width, page_height);

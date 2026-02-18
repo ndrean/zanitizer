@@ -2,7 +2,7 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-<img src="https://github.com.ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="400", height="400" >
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="400", height="400" >
 
 [WIP]
 `zexplorer`  is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
@@ -10,7 +10,7 @@
 The engine includes an ES6 JavaScript runtime. It embeds enough Web API surface to run framework code: it is tested successfully against some [js-framework-benchmark repos](https://github.com/krausest/js-framework-benchmark) in particular `React`, `Preact`, `SolidJS`, `Vue` and `Svelte`.
 It is also tested against the `Vercel` demo site for scrapping it.
 
-It can also render images (PNG, JPEG, WEBP) and return PDF. Check the examples of rendering `ChartJS` and `Leaflet` map embedded in an SVG template as a PDF.
+It can also render images (PNG, JPEG, WEBP) and return PDF. Check the examples of rendering `ChartJS`, `D3` and `Leaflet` map embedded in an SVG template as a PDF.
 
 - You can compose JavaScript snippets and submit them to the engine. You don't need to know or use advanced Zig to use it, but you may need to install Zig to compile your implementation.
 - You can also submit an HTML file: the engine will parse the HTML and CSS into a real DOM and execute ES6 code in JavaScript against it—with an event loop, timers, fetch, and workers—without a browser.
@@ -934,6 +934,142 @@ const ScriptEngine = z.ScriptEngine;
 The result is:
 
 <https://github.com/ndrean/zexplorer/blob/main/images/RouteReport.pdf>
+
+---
+
+### Render D3.js to PNG
+
+<details><summary>HTML & JavaScript snippet to render a pie chart</summary>
+
+```html
+<!doctype html>
+<html>
+  <head>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+  </head>
+  <body>
+    <div id="chart" style="width: 800px; height: 600px"></div>
+
+    <script>
+      // D3 strictly requires createElementNS. TODO?
+      if (!document.createElementNS) {
+        document.createElementNS = function (ns, name) {
+          return document.createElement(name);
+        };
+      }
+
+      if (!globalThis.Element.prototype.setAttributeNS) {
+        globalThis.Element.prototype.setAttributeNS = function (
+          namespace,
+          name,
+          value,
+        ) {
+          // ignore the namespace URI and just set the attribute name/value
+          this.setAttribute(name, value);
+        };
+      }
+
+      if (!globalThis.Element.prototype.getAttributeNS) {
+        globalThis.Element.prototype.getAttributeNS = function (
+          namespace,
+          name,
+        ) {
+          return this.getAttribute(name);
+        };
+      }
+
+      async function runDrawD3Chart() {
+        console.log("[Test] Booting D3.js Engine...");
+
+        const width = 800;
+        const height = 600;
+        const margin = 40;
+        const radius = Math.min(width, height) / 2 - margin;
+
+        // Setup the SVG canvas
+        const svg = d3
+          .select("#chart")
+          .append("svg")
+          .attr("width", width)
+          .attr("height", height)
+          // Crucial for ThorVG!
+          .attr("xmlns", "http://www.w3.org/2000/svg")
+          .append("g")
+          .attr("transform", `translate(${width / 2},${height / 2})`);
+
+        const data = {
+          "In Transit": 45,
+          Delivered: 120,
+          Delayed: 15,
+          Maintenance: 5,
+        };
+
+        // Color scale
+        const color = d3
+          .scaleOrdinal()
+          .domain(Object.keys(data))
+          .range(["#3b82f6", "#22c55e", "#ef4444", "#f59e0b"]);
+
+        // the pie slices
+        const pie = d3.pie().value((d) => d[1]);
+        const data_ready = pie(Object.entries(data));
+
+        // Shape generator for the arcs (Donut chart)
+        const arcGenerator = d3
+          .arc()
+          .innerRadius(radius * 0.5) // This makes it a donut!
+          .outerRadius(radius);
+
+        // Build the SVG DOM elements!
+        svg
+          .selectAll("path")
+          .data(data_ready)
+          .join("path")
+          .attr("d", arcGenerator)
+          .attr("fill", (d) => color(d.data[0]))
+          .attr("stroke", "white")
+          .style("stroke-width", "4px");
+
+        // text labels
+        svg
+          .selectAll("text")
+          .data(data_ready)
+          .join("text")
+          .text((d) => d.data[0])
+          .attr("transform", (d) => `translate(${arcGenerator.centroid(d)})`)
+          .style("text-anchor", "middle")
+          .style("font-family", "sans-serif")
+          .style("font-size", "16px")
+          .style("fill", "#ffffff")
+          .style("font-weight", "bold");
+
+        // Extract the SVG string
+        const svgElement = document.querySelector("#chart svg");
+        const svgString = svgElement ? svgElement.outerHTML : "";
+
+        // Send to Zig Compositor (just the SVG saved as PNG)
+        zexplorer.generateRoutePng(
+          [], // Empty tiles array
+          svgString,
+          "D3_Chart_report.png",
+          width,
+          height,
+        );
+
+        console.log("🟢 Chart Report generated");
+      }
+
+      runDrawD3Chart().catch((e) =>
+        console.error("Error:", e.message, e.stack),
+      );
+    </script>
+  </body>
+</html>
+```
+
+</details>
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/D3_Chart_report.png>
 
 ---
 
