@@ -10,18 +10,6 @@
 
       const root = document.getElementById("root");
 
-      // ============================================================
-      // IMPORTANT: Must run with --release=fast
-      //   zig build example -Dname=test_preact_hooks --release=fast
-      //
-      // Debug mode causes stack overflow due to:
-      // - Smaller QuickJS stack size
-      // - No inlining/tail-call optimization
-      // - Preact's recursive VDOM diffing exhausts the stack
-      //
-      // With --release=fast: All features work (nested, hooks, onclick)
-      // ============================================================
-
       let globalSetCount = null;
 
       // Nested component: Button with onclick prop
@@ -66,15 +54,23 @@
         if (btn) {
           console.log("[JS] Testing onclick prop...");
           for (let i = 0; i < 3; i++) {
-            setTimeout(() => btn.dispatchEvent(new Event("click")), (i + 1) * 100);
+            setTimeout(
+              () => btn.dispatchEvent(new Event("click")),
+              (i + 1) * 100,
+            );
           }
           setTimeout(() => {
-            console.log("[JS] Final count:", document.getElementById("count-display")?.textContent);
+            console.log(
+              "[JS] Final count:",
+              document.getElementById("count-display")?.textContent,
+            );
           }, 500);
         }
       } catch (e) {
         console.log("[JS] ERROR:", e.message);
-        console.log("[JS] TIP: Run with --release=fast to avoid stack overflow");
+        console.log(
+          "[JS] TIP: Run with --release=fast to avoid stack overflow",
+        );
       }
     </script>
   </body>

@@ -1190,6 +1190,80 @@ You can run bundled JSX code in zexplorer. It is a two-step process.
 
 <details><summary>React code + test</summary>
 
+```js
+
+import React, { useState, useMemo, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+
+const Item = ({ value }) => {
+  return <li className="item">Value: <strong>{value}</strong></li>;
+};
+
+const List = ({ onlyEven }) => {
+  const allNumbers = [1, 2, 3, 4, 5, 6, 7];
+
+  // useMemo ensures we only filter when 'onlyEven' changes
+  const displayedNumbers = useMemo(() => {
+    console.log(`[React] Calculating filter (Even: ${onlyEven})`);
+    if (onlyEven) {
+      return allNumbers.filter(n => n % 2 === 0);
+    }
+    return allNumbers;
+  }, [onlyEven]);
+
+  return (
+    <ul id="list-container">
+      {displayedNumbers.map(n => <Item key={n} value={n} />)}
+    </ul>
+  );
+};
+
+const App = () => {
+  const [onlyEven, setOnlyEven] = useState(false);
+  const [renderCount, setRenderCount] = useState(1);
+
+  useEffect(() => {
+    console.log("[React] 👍 App Mounted");
+  }, []);
+
+
+  return (
+    <div style={{ padding: 20, fontFamily: 'sans-serif' }}>
+      <h1>Zexplorer Memo Test</h1>
+
+      {/* Control Panel */}
+      <div style={{ marginBottom: 15 }}>
+        <button
+          id="btn-toggle"
+          onClick={() => setOnlyEven(prev => !prev)}
+        >
+          {onlyEven ? "Show All" : "Show Even Only"}
+        </button>
+
+        <button
+          id="btn-force"
+          onClick={() => setRenderCount(c => c + 1)}
+          style={{ marginLeft: 10 }}
+        >
+          Force Re-render ({renderCount})
+        </button>
+      </div>
+
+      <p>Status: {onlyEven ? "Filtering Active" : "Showing All"}</p>
+
+      {/* Nested List */}
+      <List onlyEven={onlyEven} />
+    </div>
+  );
+};
+
+const rootNode = document.getElementById('root');
+if (rootNode) {
+  const root = createRoot(rootNode);
+  root.render(<App />);
+}
+```
+
 ```sh
 bun run build_react.js   # produces dist/app.js
 zig build example -Dname=test_react -Doptimize=ReleaseFast
@@ -1201,15 +1275,96 @@ The test simulates clicks via `dispatchEvent` and verifies that `useMemo` works 
 
 ### Preact with `html` template strings
 
+<details><summary>Preact code + test</summary>
+
+```html
+<html>
+  <body>
+    <h1>Preact Demo - Nested Components Test</h1>
+    <div id="root"></div>
+    <script type="module">
+      import { h, render } from "preact";
+      import { useState } from "preact/hooks";
+
+      console.log("[JS] Preact + Hooks loaded");
+
+      const root = document.getElementById("root");
+
+      let globalSetCount = null;
+
+      // Nested component: Button with onclick prop
+      const Button = ({ id, children, onClick }) => {
+        console.log("[JS] Button component render");
+        return h("button", { id, onclick: onClick }, children);
+      };
+
+      // Nested component: Counter display
+      const CountDisplay = ({ count }) => {
+        console.log("[JS] CountDisplay render, count =", count);
+        return h("p", { id: "count-display" }, `Count: ${count}`);
+      };
+
+      // Parent component with nested children + useState
+      const App = () => {
+        const [count, setCount] = useState(0);
+        globalSetCount = setCount;
+        console.log("[JS] App render, count =", count);
+
+        const handleClick = () => {
+          console.log("[JS] onclick prop triggered!");
+          setCount((c) => c + 1);
+        };
+
+        return h(
+          "div",
+          { class: "app" },
+          h("h1", null, "Preact Counter"),
+          h(CountDisplay, { count }),
+          h(Button, { id: "increment-btn", onClick: handleClick }, "+1"),
+        );
+      };
+
+      try {
+        render(h(App), root);
+        console.log("[JS] Rendered successfully!");
+        console.log("[JS] innerHTML:", root.innerHTML);
+
+        // Test onclick via dispatchEvent
+        const btn = document.getElementById("increment-btn");
+        if (btn) {
+          console.log("[JS] Testing onclick prop...");
+          for (let i = 0; i < 3; i++) {
+            setTimeout(
+              () => btn.dispatchEvent(new Event("click")),
+              (i + 1) * 100,
+            );
+          }
+          setTimeout(() => {
+            console.log(
+              "[JS] Final count:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }, 500);
+        }
+      } catch (e) {
+        console.log("[JS] ERROR:", e.message);
+        console.log(
+          "[JS] TIP: Run with --release=fast to avoid stack overflow",
+        );
+      }
+    </script>
+  </body>
+</html>
+
+```
+
+</details>
+
 ```sh
+
 zig build example -Dname=test_htm -Doptimize=ReleaseFast
 ```
 
-<details><summary>Preact/htm imports via CDN, compiled to bytecode at startup</summary>
-
-Uses `htm/preact/standalone` with `useState` and `dispatchEvent` for click simulation. The engine pre-compiles CDN imports to bytecode.
-
-</details>
 
 ### SolidJS templated with `html`
 
@@ -1219,7 +1374,98 @@ zig build example -Dname=test_solidjs --release=fast
 
 <details><summary>SolidJS with createSignal, createEffect, and setInterval</summary>
 
-Imports `solid-js` and `solid-js/web` from CDN. Uses `createSignal` for reactive state and `setInterval` to simulate periodic clicks. The signal-triggered DOM updates are verified in the output.
+```html
+<html>
+  <body>
+    <h1>Testing CDN import: SolidJS (Nested Components)</h1>
+    <div id="root"></div>
+    <script type="module">
+      import { createSignal, createEffect, onMount } from "solid-js";
+      import { render } from "solid-js/web";
+      import html from "solid-js/html";
+
+      console.log("[JS] SolidJS loaded");
+      const root = document.getElementById("root");
+
+      // --- Nested Components ---
+      // Note: solid-js/html's dynamicProperty wraps ALL function-valued
+      // component props as reactive getters (calls them on access).
+      // Unlike JSX (where Babel distinguishes signal accessors from
+      // regular functions), html templates treat all functions as
+      // reactive accessors. So we pass event handlers wrapped in an
+      // object to avoid auto-calling.
+
+      const Button = (props) => {
+        const handleClick = () => props.actions.increment();
+        return html`
+          <button type="button" id="btn" onclick=${handleClick}>
+            ${props.children}
+          </button>
+        `;
+      };
+
+      function Counter(props) {
+        createEffect(() => {
+          console.log("[JS] Effect: count =", props.count);
+        });
+
+        return html`
+          <div class="counter-app">
+            <h2>SolidJS Counter (Nested)</h2>
+            <p id="count-display">Count: ${() => props.count}</p>
+            <${Button} actions=${props.actions} children=${"👍 +1"} />
+          </div>
+        `;
+      }
+
+      const App = () => {
+        const [localCount, setLocalCount] = createSignal(0);
+        // Wrap handlers in an object so dynamicProperty doesn't
+        // auto-call them (objects are not functions)
+        const actions = { increment: () => setLocalCount((c) => c + 1) };
+
+        onMount(() => {
+          console.log("[JS] App mounted");
+          console.log("[JS] initial innerHTML:", root.innerHTML);
+        });
+
+        return html`<${Counter} count=${localCount} actions=${actions} />`;
+      };
+
+      try {
+        render(() => html`<${App} />`, root);
+        console.log("[JS] First render:", root.innerHTML);
+
+        // Simulate periodic clicks
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          const btn = document.getElementById("btn");
+          if (btn) {
+            console.log("[JS] dispatching click", iterations);
+            btn.dispatchEvent(new Event("click", { bubbles: true }));
+          }
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+            console.log(
+              "[JS] Final:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }
+        }, 100);
+      } catch (e) {
+        console.log("[JS] SolidJS Error:", e.message);
+        if (e.stack)
+          console.log(
+            "[JS] Stack:",
+            e.stack.split("\n").slice(0, 5).join("\n"),
+          );
+      }
+    </script>
+  </body>
+</html>
+```
 
 </details>
 
