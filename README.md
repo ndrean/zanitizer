@@ -1477,7 +1477,95 @@ zig build example -Dname=test_vue --release=fast
 
 <details><summary>Vue 3 with ref, template compiler, and dispatchEvent</summary>
 
-Uses Vue 3's template compiler with `ref()` for reactive state. Simulates clicks via `setInterval` + `dispatchEvent`. Requires `SVGElement` and `Element` polyfills for Vue's mount detection.
+```html
+<html>
+  <body>
+    <h1>Testing CDN import: Vue 3 (Template Compiler)</h1>
+    <div id="root"></div>
+    <script type="module">
+      // Vue checks for browser globals during mount
+      if (typeof SVGElement === "undefined") {
+        globalThis.SVGElement = class SVGElement {};
+      }
+      if (typeof Element === "undefined") {
+        globalThis.Element = class Element {};
+      }
+
+      // import Vue from "vue";
+
+      // const { createApp, ref, compile } = Vue;
+      import { createApp, ref, compile } from "vue";
+
+      console.log("[JS] Vue 3 loaded (template compiler path)");
+      console.log("[JS] createApp:", typeof createApp);
+      console.log("[JS] ref:", typeof ref);
+
+      // const root = document.getElementById("root");
+
+      const Counter = {
+        setup() {
+          const count = ref(0);
+          const increment = () => {
+            console.log("[JS] Button clicked!");
+            count.value++;
+          };
+          return { count, increment };
+        },
+        template: `
+          <div class="counter-app">
+            <h2>Vue Counter (Template)</h2>
+            <p id="count-display">Count: {{ count }}</p>
+            <button id="increment-btn" @click="increment">+1</button>
+          </div>
+        `,
+      };
+
+      try {
+        // First, manually compile the template to see what the compiler outputs
+        // if (typeof compile === "function") {
+        //   const result = compile(Counter.template);
+        //   console.log("[JS] Compiled render code:", result.toString());
+        // } else {
+        //   console.log("[JS] compile function not available");
+        // }
+
+        const app = createApp(Counter);
+        const root = document.getElementById("root");
+
+        app.mount("#root");
+        console.log("[JS] First render:", root.innerHTML);
+        // __flush();
+
+        // simulate periodic clicks
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          const btn = document.getElementById("increment-btn");
+          if (btn) {
+            btn.dispatchEvent(new Event("click", { bubbles: true }));
+            // __flush();
+          }
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+            console.log(
+              "[JS] Final:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }
+        }, 100);
+      } catch (e) {
+        console.log("[JS] Vue Error:", e.message);
+        if (e.stack)
+          console.log(
+            "[JS] Stack:",
+            e.stack.split("\n").slice(0, 5).join("\n"),
+          );
+      }
+    </script>
+  </body>
+</html>
+```
 
 </details>
 

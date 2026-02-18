@@ -3,17 +3,6 @@
     <h1>Testing CDN import: Vue 3 (Template Compiler)</h1>
     <div id="root"></div>
     <script type="module">
-      // ============================================================
-      // Vue 3 with TEMPLATE COMPILER
-      //
-      // Uses template strings instead of h() render functions.
-      // This exercises: createComment, splitText, cloneNode,
-      // createDocumentFragment, nodeName, nodeType, insertAdjacentHTML.
-      //
-      // IMPORTANT: Run with --release=fast
-      //   zig build example -Dname=test_vue -Doptimize=ReleaseFast
-      // ============================================================
-
       // Vue checks for browser globals during mount
       if (typeof SVGElement === "undefined") {
         globalThis.SVGElement = class SVGElement {};
