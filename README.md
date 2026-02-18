@@ -1069,7 +1069,7 @@ The result is:
 
 </details>
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/D3_Chart_report.png>
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/D3_Chart_report.png" alt="d3 char" with="600" height="400">
 
 ---
 
