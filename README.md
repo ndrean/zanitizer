@@ -55,7 +55,7 @@ A native Zig engine that wires together purpose-built C/C++ libraries — no run
 | Images     | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
 | SVG        | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
 | PDF        | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
-| Text       | stb_truetype                                                                                    | Font rendering (Roboto preloaded)   |
+| Text       | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)   |
 | Network    | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
 
 Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 8MB footprint, 2ms cold start.
