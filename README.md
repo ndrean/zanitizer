@@ -5,7 +5,9 @@
 **Run standard JavaScript against a real DOM — without a browser.**
 Feed it HTML, get back structured data, PNG, JPEG, WEBP, SVG, or PDF.
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="400" height="400" style="display: block; margin: 0 auto;"/>
+<p align="center">
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="500" height="500" />
+</p>
 
 `zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
 
