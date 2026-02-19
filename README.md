@@ -1,83 +1,133 @@
-# zexplorer: native lightweight serverless DOM & JS execution engine with builtin  sanitization pipeline
+# zexplorer
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="400", height="400" >
+**Run standard JavaScript against a real DOM — without a browser.**
+Feed it HTML, get back structured data, PNG, JPEG, WEBP, SVG, or PDF.
 
-[WIP]
-`zexplorer`  is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="400" height="400"/>
 
-The engine includes an ES6 JavaScript runtime. It embeds enough Web API surface to run framework code: it is tested successfully against some [js-framework-benchmark repos](https://github.com/krausest/js-framework-benchmark) in particular `React`, `Preact`, `SolidJS`, `Vue` and `Svelte`.
-It is also tested against the `Vercel` demo site for scrapping it.
+`zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
 
-It can also render images (PNG, JPEG, WEBP) and return PDF. Check the examples of rendering `ChartJS`, `D3` and `Leaflet` map embedded in an SVG template as a PDF.
+**CLI: WIP** — planned interface:
 
-- You can compose JavaScript snippets and submit them to the engine. You don't need to know or use advanced Zig to use it, but you may need to install Zig to compile your implementation.
-- You can also submit an HTML file: the engine will parse the HTML and CSS into a real DOM and execute ES6 code in JavaScript against it—with an event loop, timers, fetch, and workers—without a browser.
-- It includes a built-in DOM+CSS sanitizer (optional).
-- It can run custom native Zig computations alongside JS.
-- It has image processing capabilities via the Canvas API: it takes an SVG, PNG, or JPEG, and can add text via the Canvas API to deliver OG images (in PNG, JPEG) or deliver PDF.
+```sh
+# Scrape a React site
+zxp scrape https://demo.vercel.store --selector "a[href^='/product/']" -f json
 
-It outputs cleaned structured HTML or extracted data, without a browser, either to the file system or to stdout.
+# Render a D3 chart to PNG — copy-paste from the D3 docs, get a PNG
+zxp render chart.html -o chart.png
 
-Built on the shoulders of giants: [lexbor](https://lexbor.com/) for blazing-fast DOM and CSS parsing, [quickJS-ng](https://quickjs-ng.github.io/quickjs/) for full ES6 execution, [stb_image](https://github.com/nothings/stb) for PNG/JPEG decoding, [libwebp](https://github.com/webmproject/libwebp) for WebP decoding and encoding, `stb_image_writer` for PNG/JPEG encoding and `stb_truetype` for text, [thorvg](https://github.com/thorvg/thorvg) for full SVG rasterizing, [libharu](https://github.com/libharu/libharu) for PDF encoding and [libcurl bindings](https://github.com/jiacai2050/zig-curl).
+# Generate OG images from a Figma SVG template + data
+zxp render og-template.html --data posts.json --out "og-{slug}.png"
 
-By providing a minimal DOM environment for running JS outside of a browser, it can be loosely compared to [JSDOM](https://github.com/jsdom/jsdom) with [DOMPurify](https://github.com/cure53/DOMPurify) built-in, or `dom-canvas` or `Vercel/Satori` - but running at native speed with fast cold boot and sandboxed filesystem, at the cost of much thinner Web API coverage.
+# Sanitize untrusted HTML
+curl https://sketchy.site | zxp sanitize -
 
-## What Problem Does This Solve?
+# Clean a local HTML file with its CSS
+zxp sanitize dirty.html --css style.css -o clean.html
+```
 
-This engine aims to be lightweight and fast. Use it when you need to:
+Today, zexplorer is used as a **Zig library**. All the examples below work now.
 
-- **Sanitize untrusted HTML & CSS** at scale (emails, user content)
-- **Render web components** server-side without a browser
-- **Test client frameworks** (React, Vue, Solid) in milliseconds
-- **Templating & Static Site Generation** - no async needed, pure speed.
-- **Process HTML pipelines** with native Zig performance
-- **render _static_ Images** (`PNG`, `JPEG`, `WEBP`, `SVG`) and compose or layer via the Canvas API to render PNG, JEPG, WEB or PDF. It uses the preloaded default `Roboto`font.
+> Cold start: 2ms. Memory: 8MB. No dependencies. Single binary.
 
-## What about Security?
+---
 
-If you plan to use your own code, you can happily by-pass the sanitization. This also removes the Network safety runtime checks. You are in control.
+## What can it do?
 
-❗️ Note that the filesystem access (files) is always sandboxed to the root folder you declare, and HTTPS is enforced for remote module loading sources (eg CDN imorts or JavaScript chunks).
+- **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
+- **Render** — take any HTML+JS (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
+- **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
+- **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
+- **Run JS** — execute ES6 scripts against a real DOM with fetch, timers, workers, and an event loop.
 
-> [!IMPORTANT]
-> If you plan to use untrusted code, consider the following:
-> 
-> Care has been taken to make this engine safe.  However, `zexplorer` does not provide a secure execution boundary for untrusted tenants; it **assumes process-level isolation** by running inside an already-isolated environment such as a  disposable microVM or container with no shared state between runs.
+## How is it built?
+
+A native Zig engine that wires together purpose-built C/C++ libraries — no runtime dependencies:
+
+| Layer      | Library                                                                                         | Role                                |
+| ---------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| DOM & CSS  | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors  |
+| JavaScript | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT) |
+| Images     | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
+| SVG        | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
+| PDF        | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
+| Text       | stb_truetype                                                                                    | Font rendering (Roboto preloaded)   |
+| Network    | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
+
+Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 8MB footprint, 2ms cold start.
+
+## Tested against js-framework-benchmark
+
+The engine runs real framework code from [js-framework-benchmark](https://github.com/krausest/js-framework-benchmark): React 19, Preact, SolidJS, Vue 3, Svelte 5, plus vanilla JS and D3/Chart.js/Leaflet.
+
+| Feature           | zexplorer                 | JSDOM           | Puppeteer       |
+| ----------------- | ------------------------- | --------------- | --------------- |
+| Startup time      | 2ms                       | ~30ms           | ~500ms          |
+| DOM sanitization  | Built-in, DOM & CSS-aware | Needs DOMPurify | Browser context |
+| Memory footprint  | 8MB                       | ~50MB           | ~200MB          |
+| Web API coverage  | ~40% (essential)          | ~90%            | 100%            |
+| JavaScript engine | QuickJS (bytecode)        | Node.js V8      | Chrome V8       |
+
+## What it is not
+
+- Not a `Node.js` or `Bun` alternative — no persistent event I/O
+- Not a headless browser — no layout engine, no visual rendering
+- Not a full Web API implementation — ~40% coverage, focused on what frameworks actually need
+- Not a multi-tenant platform — assumes process-level isolation (microVM/container)
+
+## Security
+
+If you use your own trusted code, you can skip sanitization entirely. For untrusted content:
 
 > [!NOTE]
+> All layers are _best-effort_ — see [SECURITY.md](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md) for full details.
 >
-> All layers below are _best-effort_ — see [SECURITY.md]([SECURITY.md](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md)) for full details.
->
-> - **Content sanitization** — DOM+CSS-aware: stylesheets, inline styles, iframes, SVG/MathML, DOM clobbering, URI schemas, XSS/mXSS. Tested against [H5SC](https://github.com/cure53/H5SC), [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [PortSwigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet), and [DOMPurify](https://github.com/cure53/DOMPurify). It is optional: trusted code can skip it.
-> - **Filesystem sandbox** — kernel-enforced `openat()` with symlink blocking, traversal rejection, cross-device check, 16-level depth limit.
-> - **Network hardening** — timeouts, redirect/size limits, protocol restrictions, SSRF pre-flight filtering (enforced in sanitize mode; dev can access localhost if sanitization is off).
-> - **Module loading** — HTTPS-only remote imports, sandboxed local paths, SRI integrity checks, 5 MB size cap.
-> - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines, max DOM-tree walking.
+> - **Content sanitization** — DOM+CSS-aware: stylesheets, inline styles, iframes, SVG/MathML, DOM clobbering, URI schemas, XSS/mXSS. Tested against [H5SC](https://github.com/cure53/H5SC), [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [PortSwigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet), and [DOMPurify](https://github.com/cure53/DOMPurify).
+> - **Filesystem sandbox** — kernel-enforced `openat()` with symlink blocking, traversal rejection, cross-device check.
+> - **Network hardening** — timeouts, redirect/size limits, SSRF pre-flight filtering, HTTPS-only remote imports.
+> - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines.
 
-**TL;DR**:
-It is designed to safely parse, transform, and sanitize untrusted HTML & CSS and short-lived JavaScript inside an isolated environment.
+---
 
-## What it does not have or is not
+## Showcase
 
-- no persistent event I/O (has event loop, fetch, timers, but short-lived)
-- not a `Node.js` or `bun` alternative,
-- not a streaming or long-running async runtime,
-- a full Web API implementation,
-- a secure multi-tenant execution platform.
-- a headless browser replacement: not a real browser automation tool.
-  
-## How it compares?
+### Scrape a Vercel site in under 1s
 
-| Feature           | zexplorer                | JSDOM           | Puppeteer       |
-| ----------------- | ------------------------ | --------------- | --------------- |
-| Startup time      | 2ms                      | ~30ms           | ~500ms          |
-| DOM sanitization  | Built-in, DOM & CSSaware | Needs DOMPurify | Browser context |
-| Memory footprint  | 8MB                      | ~50MB           | ~200MB          |
-| Web API coverage  | ~40% (essential)         | ~90%            | 100%            |
-| JavaScript engine | QuickJS (bytecode)       | Node.js V8      | Chrome V8       |
-| Security model    | OS process               | Node.js process | OS process      |
+Scrape <https://demo.vercel.store> — 12 HTTP requests, 42 scripts hydrated, structured data extracted:
+
+```js
+await zexplorer.goto("https://demo.vercel.store");
+await zexplorer.waitForSelector("a[href^='/product/']");
+
+const links = document.querySelectorAll("a[href^='/product/']");
+const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
+const items = unique.map(href => {
+  const el = document.querySelector(`a[href='${href}']`);
+  return el.textContent.trim();
+});
+console.log(items);
+return items;
+```
+
+```txt
+0.17s user 0.14s system 37% cpu 0.835 total
+
+["Acme Circles T-Shirt$20.00USD", "Acme Drawstring Bag$12.00USD", ...]
+```
+
+See the [full Vercel example](#scrape-a-vercel-site) below.
+
+### Generate a Leaflet map PDF report
+
+Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map with an SVG template, and output a multi-layered PDF — all in one shot:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo-vercel-store.png" alt="vercel" width="400" height="280"> <https://github.com/ndrean/zexplorer/blob/main/images/RouteReport.pdf>
+
+See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-and-output-a-pdf) below.
+
+---
 
 ## Quick start
 
@@ -85,9 +135,6 @@ How to use `zexplorer` ?
 
 - as a Zig library to run JS code
 - via the CLI: WIP
-  - `zxp sanitize -dhtml=index.html -dss=stylesheet.css -djs=index.js -dfile=index_cleaned.html`
-  - `zxp to_svg -dtemp=index.js -dsource=example.svg -dfile=final.svg`
-  - `zxp run -djs=index.js -dout=stdout`
 
 ### Hello world
 
@@ -362,9 +409,9 @@ The output is as expected:
     ...
 ```
 
-### Scrap a Vercel site
+### Scrape a Vercel site
 
-We scrap <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scripts in order to hydrate the first SSR rendered page.
+We scrape <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scripts in order to hydrate the first SSR rendered page.
 
 <details><summary>Preview demo.vercel.store</summary>
 
@@ -611,7 +658,7 @@ The output confirms that the whole page is sanitized:
 
 ### Generate OG images from SVG templates
 
-We display two examples shows that `zexplorer` overlaps partially [node-canvas](https://github.com/Automattic/node-canvas) and [Vercel/satori](https://github.com/vercel/satori)  (no JSX but `React` can be loaded) but is very lightweight and limited.
+We display two examples that show that `zexplorer` overlaps partially [node-canvas](https://github.com/Automattic/node-canvas) and [Vercel/satori](https://github.com/vercel/satori)  (no JSX but `React` can be loaded) but is very lightweight and limited.
 
 Given this SVG (designed in Figma):
 
@@ -970,33 +1017,6 @@ The result is:
     <div id="chart" style="width: 800px; height: 600px"></div>
 
     <script>
-      // D3 strictly requires createElementNS. TODO?
-      if (!document.createElementNS) {
-        document.createElementNS = function (ns, name) {
-          return document.createElement(name);
-        };
-      }
-
-      if (!globalThis.Element.prototype.setAttributeNS) {
-        globalThis.Element.prototype.setAttributeNS = function (
-          namespace,
-          name,
-          value,
-        ) {
-          // ignore the namespace URI and just set the attribute name/value
-          this.setAttribute(name, value);
-        };
-      }
-
-      if (!globalThis.Element.prototype.getAttributeNS) {
-        globalThis.Element.prototype.getAttributeNS = function (
-          namespace,
-          name,
-        ) {
-          return this.getAttribute(name);
-        };
-      }
-
       async function runDrawD3Chart() {
         console.log("[Test] Booting D3.js Engine...");
 
@@ -1615,38 +1635,91 @@ Source:
 - [Vanilla-2-non-keyd](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/vanillajs-3/src/Main.js)
 - [Vanilla-3-k](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/vanillajs-3/src/Main.js)
 - [bau](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/bau/main.js)
-- [Comp(*) Solid](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid/src/main.jsx)
-- [Temp(**) Solid](https://github.com/ndrean/zexplorer/src/examples/js-bench-solid.js)
-- [Svelte5](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/svelte/src/App.svelte) (compiled with `svelte/compiler`, bundled with Bun)
-- [React19](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx)
-- [Preact](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx) (same source, built with preact/compat)
-- [Vue3](https://github.com/ndrean/zexplorer/src/examples/js-bench-vue3.js)
+
 
 Ref: browser Vanilla
 
-| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] | [bau] | [Comp(*) Solid] | [Temp(**) Solid] | [Svelte5] | [React19^] | [Preact^^] | Vue3(***) |
-| ---------------- | ---- | --------- | ------------ | --------- | ----- | --------------- | ---------------- | --------- | ---------- | ---------- | --------- |
-| Create 1k        | 22.0 | 3.08      | 1.65         | 1.67      | 1.97  | 18.5            | 16.7             | 26.0      | 105.0      | 157.8      | 54.7      |
-| Replace 1k       | 24.4 | 3.03      | 2.46         | 2.73      | 1.94  | 17.0            | 17.6             | 26.9      | 106.2      | 159.1      | 55.2      |
-| Partial Up (10k) | 9.5  | 2.82      | 8.86         | 7.92      | 5.40  | 7.0             | 138.4            | 8.7       | 128.6      | 166.0      | 205.2     |
-| Select Row       | 2.2  | 0.02      | 0.02         | 0.01      | 0.01  | 3.7             | 127.9            | 3.0       | 47.2       | 5.9        | 199.2     |
-| Swap Rows        | 11.7 | 0.05      | 0.09         | 0.11      | 0.01  | 1.2             | 10.3             | 1.1       | 37.1       | 4.9        | 21.7      |
-| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      | 0.00  | 0.5             | 10.8             | 0.7       | 5.1        | 4.9        | 20.5      |
-| Create 10k       | 229  | 28.71     | 16.06        | 16.15     | 19.03 | 143.5           | 142.0            | 422.1     | 3601.9     | 5670.4     | 473.2     |
-| Append 1k        | 25.6 | 3.48      | 4.28         | 4.10      | 2.06  | 16.5            | 173.7            | 22.8      | 154.9      | 121.4      | 245.8     |
-| Clear            | 9.0  | 4.21      | 6.08         | 5.66      | 0.01  | 32.8            | 23.7             | 9.1       | 92.7       | 10.3       | 37.8      |
-| --               | --   | --        | --           | --        | --    | --              | --               | --        | --         | --         | --        |
-| Total Engine     | --   | 78        | 84           | 82        | 57    | 486             | 1087             | 954       | 8715       | 8255       | 2086      |
+| Test             | Ref  | [V1-keyd] | [V2-nonKeyd] | [V3-keyd] |     | [bau] |
+| ---------------- | ---- | --------- | ------------ | --------- | --- | ----- |
+| Create 1k        | 22.0 | 3.08      | 1.65         | 1.67      |     | 1.97  |
+| Replace 1k       | 24.4 | 3.03      | 2.46         | 2.73      |     | 1.94  |
+| Partial Up (10k) | 9.5  | 2.82      | 8.86         | 7.92      |     | 5.40  |
+| Select Row       | 2.2  | 0.02      | 0.02         | 0.01      |     | 0.01  |
+| Swap Rows        | 11.7 | 0.05      | 0.09         | 0.11      |     | 0.01  |
+| Remove Row       | 9.2  | 0.01      | 0.05         | 0.05      |     | 0.00  |
+| Create 10k       | 229  | 28.71     | 16.06        | 16.15     |     | 19.03 |
+| Append 1k        | 25.6 | 3.48      | 4.28         | 4.10      |     | 2.06  |
+| Clear            | 9.0  | 4.21      | 6.08         | 5.66      |     | 0.01  |
+| --               | --   | --        | --           | --        | --  | --    |
+| Total Engine     | --   | 78        | 84           | 82        |     | 57    |
+
+**[Lit-html](https://github.com/krausest/js-framework-benchmark/tree/master/frameworks/non-keyed/lit-html)**
+
+| Test                 | Lit-html |
+| -------------------- | -------- |
+| Create 1k            | 16.7 ms  |
+| Replace 1k           | 4.4 ms   |
+| Partial Update (10k) | 28.6 ms  |
+| Select Row           | 25.9 ms  |
+| Swap Rows            | 2.8 ms   |
+| Remove Row           | 3.9 ms   |
+| Create 10k           | 164.6 ms |
+| Append 1k            | 54.1 ms  |
+| Clear                | 13.2 ms  |
+| Total engine (c)     | 597ms    |
+
+(c) CDN import
+
+- [Comp(*) Solid](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid/src/main.jsx)
+- [Temp(**) Solid](https://github.com/ndrean/zexplorer/src/examples/js-bench-solid.js)
+- [Svelte5](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/svelte/src/App.svelte) (compiled with `svelte/compiler`, bundled with Bun)
+- [Vue3](https://github.com/ndrean/zexplorer/src/examples/js-bench-vue3.js)
+- 
+
+| Test             | Ref  | Solid (*) | Solid (**) | Svelte5  | Vue3 (***) |
+| ---------------- | ---- | --------- | ---------- | -------- | ---------- |
+|                  |      | compiled  | templated  | compiled | templated  |
+| ---------------- | ---- | --------  | ---------  | -------- | ---------- |
+| Create 1k        | 22.0 | 18.5      | 16.7       | 26.0     | 54.7       |
+| Replace 1k       | 24.4 | 17.0      | 17.6       | 26.9     | 55.2       |
+| Partial Up (10k) | 9.5  | 7.0       | 138.4      | 8.7      | 205.2      |
+| Select Row       | 2.2  | 3.7       | 127.9      | 3.0      | 199.2      |
+| Swap Rows        | 11.7 | 1.2       | 10.3       | 1.1      | 21.7       |
+| Remove Row       | 9.2  | 0.5       | 10.8       | 0.7      | 20.5       |
+| Create 10k       | 229  | 143.5     | 142.0      | 422.1    | 473.2      |
+| Append 1k        | 25.6 | 16.5      | 173.7      | 22.8     | 245.8      |
+| Clear            | 9.0  | 32.8      | 23.7       | 9.1      | 37.8       |
+| -----            | ---  | --        | --         | --       | --         |
+| Total Engine     | --   | 486       | 1087       | 954      | 2086 (***) |
 
 (*) compiled JSX->JS with `bun`
+
+(**) templated with `html` and using `map` instead of `For`
+
+(***) CDN + templated
+
+**[React familly - vDOM]**
+
+- [React19](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx)
+- [Preact](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/react-hooks/src/main.jsx) (same source, built with preact/compat)
+
+| Test             | React19^ | Preact^^ |
+| ---------------- | -------- | -------- |
+| Create 1k        | 105.0    | 157.8    |
+| Replace 1k       | 106.2    | 159.1    |
+| Partial Up (10k) | 128.6    | 166.0    |
+| Select Row       | 47.2     | 5.9      |
+| Swap Rows        | 37.1     | 4.9      |
+| Remove Row       | 5.1      | 4.9      |
+| Create 10k       | 3601.9   | 5670.4   |
+| Append 1k        | 154.9    | 121.4    |
+| Clear            | 92.7     | 10.3     |
+| --               | --       | --       |
+| Total Engine     | 8715     | 8255     |
 
 (^) React production build (`process.env.NODE_ENV = "production"`)
 
 (^^) Preact/compat production build (same JSX source as React, aliased via build plugin)
-
-(**) templated with `html` and using `map` instead of `For`
-
-(***) templated
 
 Svelte 5's compiled approach generates direct imperative DOM operations (no VDOM), making it the fastest compiled framework on QuickJS — on par with Compiled Solid for 1k operations and significantly faster than React/Preact/Vue. Preact is lighter than React (3KB vs 45KB) but its microtask-scheduled rendering creates more GC pressure at scale. React's fiber architecture pays off for partial updates where its diffing skips unchanged subtrees more efficiently.
 
@@ -1947,9 +2020,9 @@ List of implemented server and Web API and examples
 - `Sanitizer`. (`setHTML` or parseHTMLUnsafe to be aliased?)
 - log and printing helpers: `prettyPrint`, `printDoc`, `printDocStruct`, `saveDOM` (to file).
 
+- `crypto.getRandomValues` via Zig `std.crypto.random`
+- `localStorage` (`getItem`, `setItem`, `removeItem`, `clear`) backed by a Zig HashMap
 - TODO: `alert`, `prompt`, `confirm` : implement dumb versions
-- TODO: `crypto` via Zig
-- TODO: Storage (simple HashMap)
 
 
 
@@ -2011,7 +2084,7 @@ async function renderTemplate(svgText, data) {
 ```
 
 ```zig
-// src/examples/test_svg_raseter.zig
+// src/examples/test_svg_raster.zig
 
 fn testSvgTemplateFromJS(allocator: std.mem.Allocator, sbr: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, sbr);
@@ -2062,7 +2135,7 @@ The result is:
 ---
 
 
-<details><summary>uppload a file: POST a Blob</summary>
+<details><summary>Upload a file: POST a Blob</summary>
 
 Create a filetext blob and append it to a formData object and upload to the test endpoint `httpbin` (it returns the data it received).
 
@@ -2485,7 +2558,7 @@ And the Zig code to run this snippet:
 
 <details><summary>Import JavaScript libraries: es-toolkit</summary>
 
-Download the `es-toolikt` library:
+Download the `es-toolkit` library:
 
 ```sh
  curl -L https://cdn.jsdelivr.net/npm/es-toolkit@1.43.0/+esm  -o es-toolkit.min.js
@@ -2532,7 +2605,7 @@ AbortError, Mutex, Semaphore, TimeoutError, after, ary, ... zip, zipObject, zipW
 -----------------------------------------
 ```
 
-The Zig code ot run this:
+The Zig code to run this:
 
 ```zig
 fn importModule(allocator: std.mem.Allocator) !void {
@@ -2595,7 +2668,7 @@ sequenceDiagram
 
 You have a few methods available.
 
-1. You  create a document with `createDocument()` and populate it with `inserHTML(doc, html)`
+1. You  create a document with `createDocument()` and populate it with `insertHTML(doc, html)`
 2. The `parseHTML(allocator, "")` creates a `<head>` and a `<body>` element and replaces BODY innerContent with the nodes created by the parsing of the given string.
 3. The engine `doc  = DOMParser.parseFromString()`
 

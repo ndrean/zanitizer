@@ -235,14 +235,14 @@ fn getAttributeValue(allocator: std.mem.Allocator, attr: *DomAttr) ![]u8 {
 /// [attributes] Get first attribute of an HTMLElement
 ///
 /// Returns a DomAttr
-fn getFirstAttribute(element: *z.HTMLElement) ?*DomAttr {
+pub fn getFirstAttribute(element: *z.HTMLElement) ?*DomAttr {
     return lxb_dom_element_first_attribute_noi(element);
 }
 
 /// [attributes] Get next attribute in the list gives an attribute
 ///
 /// Returns a DomAttr
-fn getNextAttribute(attr: *DomAttr) ?*DomAttr {
+pub fn getNextAttribute(attr: *DomAttr) ?*DomAttr {
     return lxb_dom_element_next_attribute_noi(attr);
 }
 

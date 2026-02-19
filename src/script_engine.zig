@@ -745,6 +745,32 @@ pub const ScriptEngine = struct {
             _ = self.ctx.checkAndPrintException(); // Runtime error during execution
             return error.JSException;
         }
+        if (self.ctx.isPromise(result)) {
+            self.processJobs(); // Flush microtasks so the module finishes
+
+            if (self.ctx.promiseState(result) == .Rejected) {
+                const reason = self.ctx.promiseResult(result);
+                defer self.ctx.freeValue(reason);
+
+                std.debug.print("\n🔥 FATAL: ES Module Promise Rejected!\n", .{});
+
+                // Try to extract the error message
+                if (self.ctx.toCString(reason)) |str| {
+                    defer self.ctx.freeCString(str);
+                    std.debug.print("Reason: {s}\n", .{std.mem.span(str)});
+                } else |_| {}
+
+                // Try to extract the stack trace
+                const stack = self.ctx.getPropertyStr(reason, "stack");
+                defer self.ctx.freeValue(stack);
+                if (self.ctx.toCString(stack)) |stack_str| {
+                    defer self.ctx.freeCString(stack_str);
+                    std.debug.print("Stack:\n{s}\n", .{std.mem.span(stack_str)});
+                } else |_| {}
+
+                return error.JSException;
+            }
+        }
     }
 
     pub fn processJobs(self: *ScriptEngine) void {
@@ -773,9 +799,7 @@ pub const ScriptEngine = struct {
 
         std.debug.print("[Engine] Found {d} scripts to execute\n", .{scripts.len});
 
-        // ================================================================
-        // PHASE 1: Collect metadata & submit parallel fetches
-        // ================================================================
+        // 1: Collect metadata & submit parallel fetches
         const buffers = try ScriptBuffers.init(self.allocator, scripts.len);
         defer buffers.deinit();
 
@@ -897,9 +921,7 @@ pub const ScriptEngine = struct {
             }
         }
 
-        // ================================================================
-        // PHASE 2: Execute scripts in document order
-        // ================================================================
+        // 2: Execute scripts in document order
         for (scripts, 0..) |script, i| {
             const meta = metas[i];
 
@@ -922,6 +944,7 @@ pub const ScriptEngine = struct {
                 self.runModule(code, filename) catch |err| {
                     z.print("Module execution failed: {any}\n", .{err});
                 };
+                // self.processJobs();
             } else {
                 if (!self.ctx.isUndefined(doc_obj)) {
                     const script_js = DOMBridge.wrapNode(self.ctx, z.elementToNode(script)) catch zqjs.NULL;
@@ -946,6 +969,21 @@ pub const ScriptEngine = struct {
             std.debug.print("[Engine] Script {d}/{d} done\n", .{ i + 1, scripts.len });
         }
         std.debug.print("[Engine] All {d} scripts executed\n", .{scripts.len});
+
+        const val = try self.ctx.eval("__dispatchLoadEvent()", "<lifecycle>", .{});
+        defer self.ctx.freeValue(val);
+        self.processJobs();
+
+        // Fire DOMContentLoaded — frameworks (HTMX, Alpine, etc.) register listeners
+        // during script evaluation and expect this event to trigger initialization.
+        // _ = self.eval(
+        //     \\document.readyState = "interactive";
+        //     \\document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+        //     \\document.readyState = "complete";
+        //     \\window.dispatchEvent(new Event("load"));
+        // , "<dom-ready>", .global) catch |err| {
+        //     std.debug.print("[Engine] DOMContentLoaded dispatch error: {}\n", .{err});
+        // };
     }
 
     /// Scans the DOM for <link rel="stylesheet"> and loads them.

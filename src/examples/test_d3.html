@@ -7,33 +7,6 @@
     <div id="chart" style="width: 800px; height: 600px"></div>
 
     <script>
-      // D3 requires createElementNS.
-      if (!document.createElementNS) {
-        document.createElementNS = function (ns, name) {
-          return document.createElement(name);
-        };
-      }
-
-      if (!globalThis.Element.prototype.setAttributeNS) {
-        globalThis.Element.prototype.setAttributeNS = function (
-          namespace,
-          name,
-          value,
-        ) {
-          // Ignore the namespace URI and just set the attribute name/value
-          this.setAttribute(name, value);
-        };
-      }
-
-      if (!globalThis.Element.prototype.getAttributeNS) {
-        globalThis.Element.prototype.getAttributeNS = function (
-          namespace,
-          name,
-        ) {
-          return this.getAttribute(name);
-        };
-      }
-
       async function runDrawD3Chart() {
         console.log("[Test] Booting D3.js Engine...");
 

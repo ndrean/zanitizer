@@ -1167,6 +1167,14 @@ pub fn parentElement(element: *z.HTMLElement) ?*z.HTMLElement {
     return null;
 }
 
+pub fn getRootNode(node: *z.DomNode) *z.DomNode {
+    var curr = node;
+    while (z.parentNode(curr)) |parent| {
+        curr = parent;
+    }
+    return curr;
+}
+
 /// [core] Next sibling of node
 pub fn nextSibling(node: *z.DomNode) ?*z.DomNode {
     return lxb_dom_node_next_noi(node);

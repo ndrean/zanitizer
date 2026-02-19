@@ -170,10 +170,13 @@ pub const DOMBridge = struct {
             js_utils.defineMethod(ctx, el_proto, "querySelector", js_querySelector, 1);
             js_utils.defineMethod(ctx, el_proto, "querySelectorAll", js_querySelectorAll, 1);
             js_utils.defineMethod(ctx, el_proto, "matches", js_matches, 1);
+            js_utils.defineMethod(ctx, el_proto, "closest", js_closest, 1);
             js_utils.defineMethod(ctx, el_proto, "insertAdjacentHTML", js_insertAdjacentHTML, 2);
             js_utils.defineMethod(ctx, el_proto, "insertAdjacentElement", js_insertAdjacentElement, 2);
             js_utils.defineMethod(ctx, el_proto, "focus", js_focus, 0);
             js_utils.defineMethod(ctx, el_proto, "getBoundingClientRect", js_HTMLElement_getBoundingClientRect, 0);
+            js_utils.defineMethod(ctx, el_proto, "getAttributeNames", js_getAttributeNames, 0);
+            js_utils.defineMethod(ctx, el_proto, "hasAttributes", js_hasAttributes, 0);
 
             // Accessor properties (getter + setter)
             js_utils.defineAccessor(ctx, el_proto, "innerHTML", js_get_innerHTML, js_set_innerHTML);
@@ -185,6 +188,7 @@ pub const DOMBridge = struct {
             // Getter-only properties
             js_utils.defineGetter(ctx, el_proto, "clientWidth", js_HTMLElement_clientWidth);
             js_utils.defineGetter(ctx, el_proto, "clientHeight", js_HTMLElement_clientHeight);
+            js_utils.defineGetter(ctx, el_proto, "attributes", js_get_attributes);
 
             // Inheritance: HTMLElement -> Node
             {
@@ -204,6 +208,10 @@ pub const DOMBridge = struct {
             // Override createElement to handle canvas elements
             const create_elem_fn = ctx.newCFunction(js_createElement_with_canvas, "createElement", 1);
             try ctx.setPropertyStr(doc_proto, "createElement", create_elem_fn);
+
+            // Native importNode — properly handles ownerDocument adoption (Lit needs this)
+            const import_node_fn = ctx.newCFunction(js_importNode, "importNode", 2);
+            try ctx.setPropertyStr(doc_proto, "importNode", import_node_fn);
 
             {
                 const parent_proto = ctx.getClassProto(rc.classes.dom_node);
@@ -249,27 +257,39 @@ pub const DOMBridge = struct {
             try ctx.setPropertyStr(html_element_ctor, "prototype", html_element_proto);
             try ctx.setPropertyStr(global, "HTMLElement", html_element_ctor);
 
-            // Node — Svelte uses Object.getOwnPropertyDescriptor(Node.prototype, 'firstChild')
-            const node_ctor = ctx.newObject();
-            // getClassProto returns a ref; setPropertyStr consumes it
-            try ctx.setPropertyStr(node_ctor, "prototype", ctx.getClassProto(rc.classes.dom_node));
-            // Standard node type constants
-            try ctx.setPropertyStr(node_ctor, "ELEMENT_NODE", ctx.newInt32(1));
-            try ctx.setPropertyStr(node_ctor, "TEXT_NODE", ctx.newInt32(3));
-            try ctx.setPropertyStr(node_ctor, "COMMENT_NODE", ctx.newInt32(8));
-            try ctx.setPropertyStr(node_ctor, "DOCUMENT_NODE", ctx.newInt32(9));
-            try ctx.setPropertyStr(node_ctor, "DOCUMENT_FRAGMENT_NODE", ctx.newInt32(11));
-            try ctx.setPropertyStr(global, "Node", node_ctor);
+            // Node — callable constructor so `instanceof Node` works.
+            // Svelte uses Object.getOwnPropertyDescriptor(Node.prototype, 'firstChild')
+            {
+                const node_ctor = ctx.newCFunction2(js_illegal_constructor, "Node", 0, z.qjs.JS_CFUNC_constructor, 0);
+                try ctx.setPropertyStr(node_ctor, "prototype", ctx.getClassProto(rc.classes.dom_node));
+                try ctx.setPropertyStr(node_ctor, "ELEMENT_NODE", ctx.newInt32(1));
+                try ctx.setPropertyStr(node_ctor, "TEXT_NODE", ctx.newInt32(3));
+                try ctx.setPropertyStr(node_ctor, "COMMENT_NODE", ctx.newInt32(8));
+                try ctx.setPropertyStr(node_ctor, "DOCUMENT_NODE", ctx.newInt32(9));
+                try ctx.setPropertyStr(node_ctor, "DOCUMENT_FRAGMENT_NODE", ctx.newInt32(11));
+                try ctx.setPropertyStr(global, "Node", node_ctor);
+            }
 
             // Text — Svelte checks Object.isExtensible(Text.prototype)
-            const text_ctor = ctx.newObject();
-            try ctx.setPropertyStr(text_ctor, "prototype", ctx.getClassProto(rc.classes.dom_node));
-            try ctx.setPropertyStr(global, "Text", text_ctor);
+            {
+                const text_ctor = ctx.newCFunction2(js_illegal_constructor, "Text", 0, z.qjs.JS_CFUNC_constructor, 0);
+                try ctx.setPropertyStr(text_ctor, "prototype", ctx.getClassProto(rc.classes.dom_node));
+                try ctx.setPropertyStr(global, "Text", text_ctor);
+            }
 
             // Element — Svelte patches Element.prototype with __click, __className etc.
-            const element_ctor = ctx.newObject();
-            try ctx.setPropertyStr(element_ctor, "prototype", ctx.getClassProto(rc.classes.html_element));
-            try ctx.setPropertyStr(global, "Element", element_ctor);
+            {
+                const element_ctor = ctx.newCFunction2(js_illegal_constructor, "Element", 0, z.qjs.JS_CFUNC_constructor, 0);
+                try ctx.setPropertyStr(element_ctor, "prototype", ctx.getClassProto(rc.classes.html_element));
+                try ctx.setPropertyStr(global, "Element", element_ctor);
+            }
+
+            // Document
+            {
+                const doc_ctor = ctx.newCFunction2(js_illegal_constructor, "Document", 0, z.qjs.JS_CFUNC_constructor, 0);
+                try ctx.setPropertyStr(doc_ctor, "prototype", ctx.getClassProto(rc.classes.document));
+                try ctx.setPropertyStr(global, "Document", doc_ctor);
+            }
         }
 
         // Web APIs classes
@@ -384,9 +404,17 @@ pub const DOMBridge = struct {
         {
             const crypto_obj = ctx.newObject();
             const get_rand_fn = ctx.newCFunction(js_crypto_getRandomValues, "getRandomValues", 1);
-            // (In JS, this is: crypto.getRandomValues = function...)
             try ctx.setPropertyStr(crypto_obj, "getRandomValues", get_rand_fn);
             try ctx.setPropertyStr(global, "crypto", crypto_obj);
+        }
+
+        {
+            const ls_obj = ctx.newObject();
+            try ctx.setPropertyStr(ls_obj, "getItem", ctx.newCFunction(js_localStorage_getItem, "getItem", 1));
+            try ctx.setPropertyStr(ls_obj, "setItem", ctx.newCFunction(js_localStorage_setItem, "setItem", 2));
+            try ctx.setPropertyStr(ls_obj, "removeItem", ctx.newCFunction(js_localStorage_removeItem, "removeItem", 1));
+            try ctx.setPropertyStr(ls_obj, "clear", ctx.newCFunction(js_localStorage_clear, "clear", 0));
+            try ctx.setPropertyStr(global, "localStorage", ls_obj);
         }
     }
 
@@ -823,9 +851,18 @@ pub fn dispatchEvent(
 
                 for (listeners.items) |l| {
                     if (ev_struct.stop_immediate) break;
-                    // Pass the JS Event Object
-                    const ret = ctx.call(l.callback, js_this, &.{js_event});
-                    ctx.freeValue(ret);
+                    // DOM spec: listener can be a function OR an object with handleEvent method
+                    if (ctx.isFunction(l.callback)) {
+                        const ret = ctx.call(l.callback, js_this, &.{js_event});
+                        ctx.freeValue(ret);
+                    } else if (ctx.isObject(l.callback)) {
+                        const handle_fn = ctx.getPropertyStr(l.callback, "handleEvent");
+                        defer ctx.freeValue(handle_fn);
+                        if (ctx.isFunction(handle_fn)) {
+                            const ret = ctx.call(handle_fn, l.callback, &.{js_event});
+                            ctx.freeValue(ret);
+                        }
+                    }
                 }
             }
         }
@@ -866,15 +903,18 @@ fn js_reportResult(
 }
 
 // HTMLElement constructor (throws - elements cannot be constructed directly)
-fn js_HTMLElement_constructor(
+/// Shared "Illegal constructor" — browsers throw when you `new Node()`, `new Element()`, etc.
+fn js_illegal_constructor(
     ctx_ptr: ?*z.qjs.JSContext,
     _: zqjs.Value,
     _: c_int,
     _: [*c]z.qjs.JSValue,
 ) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);
-    return ctx.throwTypeError("Illegal constructor: HTMLElement cannot be constructed directly");
+    return ctx.throwTypeError("Illegal constructor");
 }
+
+const js_HTMLElement_constructor = js_illegal_constructor;
 
 // --- NATIVE CALLBACKS (Using Wrapper API) ---
 fn js_querySelector(
@@ -993,6 +1033,72 @@ fn js_matches(
     const result = bridge.css_engine.matches(el, selector_str) catch return w.EXCEPTION;
 
     return ctx.newBool(result);
+}
+
+fn js_closest(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.NULL;
+
+    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse {
+        return ctx.throwTypeError("closest() called on non-Element");
+    };
+
+    const selector_str = ctx.toZString(argv[0]) catch return w.NULL;
+    defer ctx.freeZString(selector_str);
+
+    const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+    const result = bridge.css_engine.closest(el, selector_str) catch return w.NULL;
+
+    if (result) |found| {
+        return DOMBridge.wrapElement(ctx, found) catch return w.NULL;
+    }
+    return w.NULL;
+}
+
+fn js_getAttributeNames(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+
+    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse {
+        return ctx.throwTypeError("getAttributeNames() called on non-Element");
+    };
+
+    const arr = ctx.newArray();
+    var iter = z.iterateAttributes(el);
+    var i: u32 = 0;
+    while (iter.next()) |pair| {
+        const name_val = ctx.newString(pair.name);
+        _ = ctx.setPropertyUint32(arr, i, name_val) catch {};
+        i += 1;
+    }
+    return arr;
+}
+
+fn js_hasAttributes(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    _: c_int,
+    _: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+
+    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse {
+        return ctx.throwTypeError("hasAttributes() called on non-Element");
+    };
+
+    return if (z.hasAttributes(el)) w.TRUE else w.FALSE;
 }
 
 fn js_getElementsByTagName(
@@ -1118,11 +1224,42 @@ fn js_insertBefore(
     else
         null;
 
+    // DEBUG: trace ALL insertBefore calls + verify comment parentNode after
+    {
+        const parent_tag = if (z.nodeToElement(parent)) |pe| z.tagName_zc(pe) else "#node";
+        const child_tag = switch (z.nodeType(new_child)) {
+            .element => if (z.nodeToElement(new_child)) |ce| z.tagName_zc(ce) else "?el",
+            .text => "#text",
+            .comment => "#comment",
+            .document_fragment => "#fragment",
+            else => "#other",
+        };
+        z.print("[Zig insertBefore] {s} into {s} (ref={s})\n", .{ child_tag, parent_tag, if (ref_child != null) "node" else "null" });
+    }
+
     if (z.parentNode(new_child)) |_| {
         z.removeNode(new_child);
     }
 
     if (z.nodeType(new_child) == .document_fragment) {
+        // DEBUG: list all fragment children before moving
+        {
+            const parent_tag = if (z.nodeToElement(parent)) |pe| z.tagName_zc(pe) else "#node";
+            var dbg_child = z.firstChild(new_child);
+            var idx: u32 = 0;
+            while (dbg_child) |dc| : (idx += 1) {
+                const ct = switch (z.nodeType(dc)) {
+                    .element => if (z.nodeToElement(dc)) |dce| z.tagName_zc(dce) else "?el",
+                    .text => "#text",
+                    .comment => "#comment",
+                    .document_fragment => "#frag",
+                    else => "#other",
+                };
+                z.print("[Zig insertBefore] FRAG child [{d}] = {s} into {s}\n", .{ idx, ct, parent_tag });
+                dbg_child = z.nextSibling(dc);
+            }
+        }
+
         var frag_child = z.firstChild(new_child);
         while (frag_child) |fc| {
             const next = z.nextSibling(fc);
@@ -1131,6 +1268,19 @@ fn js_insertBefore(
                 return ctx.throwTypeError("NotFoundError: refChild is not a child of parent");
             frag_child = next;
         }
+
+        // DEBUG: verify comment nodes have proper parentNode after fragment move
+        {
+            var vc = z.firstChild(parent);
+            while (vc) |vn| {
+                if (z.nodeType(vn) == .comment) {
+                    const has_parent = z.parentNode(vn) != null;
+                    z.print("[Zig insertBefore] VERIFY: comment parentNode={s}\n", .{if (has_parent) "OK" else "NULL!"});
+                }
+                vc = z.nextSibling(vn);
+            }
+        }
+
         return DOMBridge.wrapNode(ctx, new_child) catch return w.EXCEPTION;
     }
 
@@ -1169,6 +1319,20 @@ fn js_appendChild_manual(
 
     // Check if child is a DocumentFragment
     const child_type = z.nodeType(child);
+
+    // DEBUG: trace ALL appendChild calls
+    {
+        const parent_tag = if (z.nodeToElement(parent)) |pe| z.tagName_zc(pe) else "#node";
+        const child_tag = switch (child_type) {
+            .element => if (z.nodeToElement(child)) |ce| z.tagName_zc(ce) else "?element",
+            .text => "#text",
+            .comment => "#comment",
+            .document_fragment => "#fragment",
+            else => "#other",
+        };
+        z.print("[Zig appendChild] {s} into {s}\n", .{ child_tag, parent_tag });
+    }
+
     if (child_type == .document_fragment) {
         // Move all children from fragment to parent
         var frag_child = z.firstChild(child);
@@ -1195,6 +1359,65 @@ fn js_appendChild_manual(
 
         return DOMBridge.wrapNode(ctx, child) catch return w.EXCEPTION;
     }
+}
+
+/// document.importNode(node, deep) — clones a node and adopts it into this document.
+/// Unlike cloneNode, this properly sets ownerDocument on the clone.
+/// Critical for Lit which uses importNode to clone template content.
+fn js_importNode(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) zqjs.Value {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+
+    if (argc < 1) return ctx.throwTypeError("importNode requires at least 1 argument");
+
+    // 'this' is the document
+    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
+        return ctx.throwTypeError("importNode called on non-Document object");
+
+    // First argument: node to import
+    const node = DOMBridge.unwrapNode(ctx, argv[0]) orelse
+        return ctx.throwTypeError("First argument must be a Node");
+
+    // Second argument: deep (default false)
+    const deep = if (argc >= 2) z.qjs.JS_ToBool(ctx_ptr, argv[1]) != 0 else false;
+
+    // Use lexbor's native importNode which handles ownerDocument adoption
+    const result = z.importNode(node, doc, deep) orelse
+        return ctx.throwTypeError("importNode failed");
+
+    // DEBUG: walk imported node subtree to check for comments
+    if (z.nodeType(result) == .document_fragment) {
+        std.debug.print("[importNode] cloned fragment subtree:\n", .{});
+        const Walker = struct {
+            fn walk(n: *z.DomNode, depth: u32) void {
+                var child = z.firstChild(n);
+                while (child) |c| {
+                    const nt = z.nodeType(c);
+                    const ind = @min(depth * 2, 20);
+                    const spc: [20]u8 = .{' '} ** 20;
+                    if (nt == .comment) {
+                        std.debug.print("[importNode] {s}COMMENT: {s}\n", .{ spc[0..ind], z.textContent_zc(c) });
+                    } else if (nt == .element) {
+                        const t = if (z.nodeToElement(c)) |ce| z.tagName_zc(ce) else "?";
+                        std.debug.print("[importNode] {s}<{s}>\n", .{ spc[0..ind], t });
+                    } else if (nt == .text) {
+                        std.debug.print("[importNode] {s}#text\n", .{spc[0..ind]});
+                    }
+                    walk(c, depth + 1);
+                    child = z.nextSibling(c);
+                }
+            }
+        };
+        Walker.walk(result, 1);
+    }
+
+    return DOMBridge.wrapNode(ctx, result) catch return w.EXCEPTION;
 }
 
 /// Synchronous fetch + eval for dynamically inserted <script src="...">.
@@ -1635,20 +1858,21 @@ fn js_insertAdjacentHTML(
     // Parse via setInnerHTML on a temp element in the MAIN document.
     // This uses lxb_html_element_inner_html_set which internally calls
     // lxb_html_document_parse_fragment(doc, &element->element, ...) so the
-    // context element determines HTML5 parsing rules (table context, select, etc.)
-    // We use the SAME TAG as the target for correct parsing context (spec-compliant).
     const target_node = z.elementToNode(el);
-    const doc = z.ownerDocument(target_node);
-    const tag = z.tagName_zc(el);
 
-    const temp_el = z.createElement(doc, tag) catch {
-        return ctx.throwInternalError("insertAdjacentHTML: createElement failed");
+    // Parse via a temp document to avoid CSS watcher crashes.
+    // The main document has CSS event watchers that segfault when
+    // lxb_html_element_inner_html_set encounters <style> elements
+    // during fragment parsing. A fresh temp document has no watchers.
+    const temp_doc = z.parseHTML(rc.allocator, final_html) catch {
+        return ctx.throwInternalError("insertAdjacentHTML: parseHTML failed");
     };
-    z.setInnerHTML(temp_el, final_html) catch {
-        return ctx.throwInternalError("insertAdjacentHTML: setInnerHTML failed");
-    };
+    defer z.destroyDocument(temp_doc);
 
-    const temp_node = z.elementToNode(temp_el);
+    const temp_body = z.bodyElement(temp_doc) orelse {
+        return ctx.throwInternalError("insertAdjacentHTML: no body in temp doc");
+    };
+    const temp_node = z.elementToNode(temp_body);
 
     // Move children from temp element to the correct position
     if (std.ascii.eqlIgnoreCase(position_str, "beforeend")) {
@@ -1830,6 +2054,20 @@ fn js_set_innerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
     const el = unwrapElement(ctx, this_val, "Setter called on object that is not an HTMLElement") orelse return w.EXCEPTION;
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
+
+    // DEBUG: trace innerHTML setter on templates
+    {
+        const tag = z.tagName_zc(el);
+        if (std.mem.eql(u8, tag, "TEMPLATE")) {
+            const len = val_str.len;
+            const show = if (len > 300) val_str[0..300] else val_str;
+            std.debug.print("\n[Zig innerHTML] TEMPLATE set ({d} chars):\n{s}\n", .{ len, show });
+
+            // Check if this is actually a template element
+            const is_template = z.elementToTemplate(el) != null;
+            std.debug.print("[Zig innerHTML] isTemplate={}, tag={s}\n", .{ is_template, z.tagName_zc(el) });
+        }
+    }
 
     if (rc.sanitize_enabled) {
         const sanitizer_mod = @import("modules/sanitizer.zig");
@@ -2053,6 +2291,34 @@ fn js_HTMLElement_clientHeight(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSVal
     return ctx.newInt32(800);
 }
 
+/// element.attributes getter — returns a NamedNodeMap-like array of {name, value} Attr objects.
+/// HTMX iterates this with `elt.attributes[i].name` to find hx-on:* handlers.
+fn js_get_attributes(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse {
+        return ctx.throwTypeError("attributes called on non-Element");
+    };
+
+    // Walk lexbor's attribute linked list
+    var attr = z.firstAttribute(el);
+    const arr = ctx.newArray();
+    var i: u32 = 0;
+    while (attr) |a| : (i += 1) {
+        const name_zc = z.getAttributeName_zc(a);
+        const value_zc = z.getAttributeValue_zc(a);
+
+        const obj = ctx.newObject();
+        ctx.setPropertyStr(obj, "name", ctx.newString(name_zc)) catch {};
+        ctx.setPropertyStr(obj, "value", ctx.newString(value_zc)) catch {};
+
+        ctx.setPropertyUint32(arr, i, obj) catch {};
+        attr = z.nextAttribute(a);
+    }
+    ctx.setPropertyStr(arr, "length", ctx.newInt32(@intCast(i))) catch {};
+    return arr;
+}
+
 /// getBoundingClientRect() — returns rect based on element dimensions (headless: no layout)
 fn js_HTMLElement_getBoundingClientRect(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);
@@ -2142,11 +2408,47 @@ fn js_localStorage_setItem(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c
     return w.UNDEFINED;
 }
 
-// TODO
-// js_localStoarge_getItem
-// js_localStorage_removeItem
-// js_localStorage_clear
-//  + put on global object in `installAPIs()`
+fn js_localStorage_getItem(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.NULL;
+
+    const key = ctx.toZString(argv[0]) catch return w.NULL;
+    defer ctx.freeZString(key);
+
+    if (rc.local_storage.get(key)) |val| {
+        return ctx.newString(val);
+    }
+    return w.NULL;
+}
+
+fn js_localStorage_removeItem(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return w.UNDEFINED;
+
+    const key = ctx.toZString(argv[0]) catch return w.UNDEFINED;
+    defer ctx.freeZString(key);
+
+    if (rc.local_storage.fetchRemove(key)) |kv| {
+        rc.allocator.free(kv.key);
+        rc.allocator.free(kv.value);
+    }
+    return w.UNDEFINED;
+}
+
+fn js_localStorage_clear(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const rc = RuntimeContext.get(w.Context.from(ctx_ptr));
+
+    var it = rc.local_storage.iterator();
+    while (it.next()) |entry| {
+        rc.allocator.free(entry.key_ptr.*);
+        rc.allocator.free(entry.value_ptr.*);
+    }
+    rc.local_storage.clearRetainingCapacity();
+
+    return w.UNDEFINED;
+}
 
 fn js_crypto_getRandomValues(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     if (argc < 1) return w.UNDEFINED;

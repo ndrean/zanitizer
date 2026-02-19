@@ -102,11 +102,9 @@ const T = struct {
         \\// Boolean Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    return ctx.newBool(z.hasAttribute(el, "{s}"));
         \\}}
         \\
@@ -116,11 +114,9 @@ const T = struct {
         \\// Boolean Setter for {s}
         \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    const val = qjs.JS_ToBool(ctx_ptr, argv[0]) != 0;
         \\    if (val) {{
         \\        z.setAttribute(el, "{s}", "") catch return w.EXCEPTION;
@@ -139,11 +135,9 @@ const T = struct {
         \\// Reflected String Getter for {s} -> {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    const val_opt = z.getAttribute(rc.allocator, el, "{s}") catch return w.EXCEPTION;
         \\    if (val_opt) |val| {{
         \\        defer rc.allocator.free(val);
@@ -158,11 +152,9 @@ const T = struct {
         \\// Reflected String Setter for {s} -> {s}
         \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(val_str);
         \\    z.setAttribute(el, "{s}", val_str) catch return w.EXCEPTION;
@@ -176,7 +168,7 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
         \\    const result = {s}(node);
         \\    return DOMBridge.wrapDocument(ctx, result) catch w.EXCEPTION;
@@ -189,7 +181,7 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
         \\    const result = {s}(node);
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
@@ -203,12 +195,12 @@ const T = struct {
         \\// Property Getter for parentNode (special handling for documents)
         \\pub fn js_get_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{ .ptr = ctx_ptr };
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\
         \\    // Documents have no parent - return null to prevent infinite loop
-        \\    if (qjs.JS_GetOpaque(this_val, rc.classes.document) != null or
-        \\        qjs.JS_GetOpaque(this_val, rc.classes.owned_document) != null)
+        \\    if (ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) != null or
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) != null)
         \\    {
         \\        return w.NULL;
         \\    }
@@ -228,7 +220,7 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
         \\    const result = {s}(node);
         \\    return ctx.newString(result);
@@ -240,7 +232,7 @@ const T = struct {
         \\// Property Setter for {s}
         \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(val_str);
@@ -259,12 +251,27 @@ const T = struct {
     const NODE_METHOD_VOID =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    {s}
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    {s}
         \\    {s}(node{s});
         \\    return w.UNDEFINED;
+        \\}}
+        \\
+    ;
+    // ========================================================================
+    // NODE METHOD - Node (getRootNode)
+    // ========================================================================
+    const NODE_METHOD_NODE =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    const ctx = w.Context.from(ctx_ptr);
+        \\    {s}
+        \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
+        \\    {s}
+        \\    const result = {s}(node{s});
+        \\    return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;
         \\}}
         \\
     ;
@@ -275,7 +282,7 @@ const T = struct {
     const NODE_METHOD_OPT_NODE =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    {s}
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    {s}
@@ -292,7 +299,7 @@ const T = struct {
     const NODE_METHOD_BOOL =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    if (argc < 1) return w.EXCEPTION;
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    const other = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument must be a Node");
@@ -308,7 +315,7 @@ const T = struct {
     const NODE_METHOD_UINT16 =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    if (argc < 1) return w.EXCEPTION;
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    const other = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("Argument must be a Node");
@@ -324,7 +331,7 @@ const T = struct {
     const NODE_METHOD_OPT_NODE_2ARGS =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    if (argc < 2) return w.EXCEPTION;
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
         \\    const arg1 = DOMBridge.unwrapNode(ctx, argv[0]) orelse return ctx.throwTypeError("First argument must be a Node");
@@ -343,11 +350,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
         \\    const result = {s}(rc.allocator, el) catch return w.EXCEPTION;
         \\    defer rc.allocator.free(result);
         \\    return ctx.newString(result);
@@ -359,11 +364,9 @@ const T = struct {
         \\// Property Setter for {s}
         \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
         \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(val_str);
         \\    {s}(el, val_str) catch |err| {{
@@ -382,11 +385,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
         \\    const result = {s}(el);
         \\    return ctx.newString(result);
         \\}}
@@ -397,11 +398,9 @@ const T = struct {
         \\// Property Setter for {s}
         \\pub fn js_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Setter called on object that is not an HTMLElement");
         \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(val_str);
         \\    {s}(el, val_str) catch |err| {{
@@ -420,11 +419,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
         \\    const result = {s}(el);
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
         \\    return w.NULL;
@@ -439,11 +436,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an HTMLElement");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
         \\    const result = {s}(el);
         \\    if (result) |e| return DOMBridge.wrapElement(ctx, e) catch w.EXCEPTION;
         \\    return w.NULL;
@@ -457,12 +452,10 @@ const T = struct {
     const ELEMENT_METHOD_VOID_ERROR =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    {s}
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    {s}
         \\    {s}(el{s}) catch |err| {{
         \\        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
@@ -480,17 +473,32 @@ const T = struct {
     const ELEMENT_METHOD_OPT_STRING =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(arg_str);
         \\    const result = {s}(el, arg_str);
         \\    if (result) |str| return ctx.newString(str);
         \\    return w.NULL;
+        \\}}
+        \\
+    ;
+
+    // ========================================================================
+    // ELEMENT METHOD - Boolean (hasAttribute)
+    // ========================================================================
+    const ELEMENT_METHOD_BOOL =
+        \\/// Generated wrapper for {s}
+        \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
+        \\    const ctx = w.Context.from(ctx_ptr);
+        \\    const rc = RuntimeContext.get(ctx);
+        \\    {s}
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
+        \\    {s}
+        \\    const result = {s}(el{s});
+        \\    return ctx.newBool(result);
         \\}}
         \\
     ;
@@ -502,14 +510,12 @@ const T = struct {
     const DOC_METHOD_ELEMENT_2STR =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 2) return w.EXCEPTION;
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const arg1 = if (!ctx.isNull(argv[0]) and !ctx.isUndefined(argv[0]))
         \\        ctx.toZString(argv[0]) catch return w.EXCEPTION
         \\    else
@@ -533,14 +539,12 @@ const T = struct {
     const DOC_METHOD_ELEMENT =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(arg_str);
         \\    const result = {s}(doc, arg_str) catch |err| {{
@@ -559,14 +563,12 @@ const T = struct {
     const DOC_METHOD_NODE =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(arg_str);
         \\    const result = {s}(doc, arg_str) catch |err| {{
@@ -586,13 +588,11 @@ const T = struct {
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const result = {s}(doc) catch |err| {{
         \\        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
         \\        std.debug.print("JS Binding Error: {{}}\n", .{{err}});
@@ -607,10 +607,9 @@ const T = struct {
         \\// Property Getter for {s} -> DOMTokenList
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
+        \\    const ptr = ctx.getOpaque(this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Not an HTMLElement");
         \\    // Create the proxy object attached to the same pointer
         \\    const obj = ctx.newObjectClass(rc.classes.dom_token_list);
         \\    _ = qjs.JS_SetOpaque(obj, ptr);
@@ -623,10 +622,9 @@ const T = struct {
         \\// Property Getter for {s} -> DOMStringMap
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return ctx.throwTypeError("Not an HTMLElement");
+        \\    const ptr = ctx.getOpaque(this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Not an HTMLElement");
         \\    // Create the DOMStringMap proxy object attached to the same element pointer
         \\    const obj = ctx.newObjectClass(rc.classes.dom_string_map);
         \\    _ = qjs.JS_SetOpaque(obj, ptr);
@@ -641,14 +639,12 @@ const T = struct {
     const DOC_METHOD_OPT_ELEMENT =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(arg_str);
         \\    const result = {s}(doc, arg_str);
@@ -665,13 +661,11 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const result = {s}(doc);
         \\    if (result) |el| return DOMBridge.wrapElement(ctx, el) catch w.EXCEPTION;
         \\    return w.NULL;
@@ -683,13 +677,11 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const doc: *z.HTMLDocument = blk: {{
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
-        \\        if (qjs.JS_GetOpaque(this_val, rc.classes.owned_document)) |ptr| break :blk @ptrCast(@alignCast(ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
+        \\        ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.owned_document) orelse
         \\        return ctx.throwTypeError("Method called on object that is not a Document");
-        \\    }};
         \\    const result = {s}(doc);
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
         \\    return w.NULL;
@@ -704,11 +696,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
-        \\    const ev: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+        \\    const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
         \\    const result = {s}(ev);
         \\    return ctx.newString(result);
         \\}}
@@ -722,11 +712,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
-        \\    const ev: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+        \\    const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
         \\    const result = {s}(ev);
         \\    return ctx.newBool(result);
         \\}}
@@ -740,11 +728,9 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
-        \\    const ev: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+        \\    const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
         \\    const result = {s}(ev);
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
         \\    return w.NULL;
@@ -759,11 +745,9 @@ const T = struct {
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.event);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not an Event");
-        \\    const ev: *z.events.DomEvent = @ptrCast(@alignCast(ptr));
+        \\    const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
         \\    {s}(ev);
         \\    return w.UNDEFINED;
         \\}}
@@ -776,12 +760,10 @@ const T = struct {
     const PARSER_METHOD_OWNED_DOC =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.dom_parser);
-        \\    if (ptr == null) return ctx.throwTypeError("Object is not a DOMParser");
-        \\    const parser: *z.DOMParser = @ptrCast(@alignCast(ptr));
+        \\    const parser = ctx.getOpaqueAs(z.DOMParser, this_val, rc.classes.dom_parser) orelse return ctx.throwTypeError("Object is not a DOMParser");
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(arg_str);
         \\    const result = {s}(parser, arg_str) catch |err| {{
@@ -803,7 +785,7 @@ const T = struct {
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = this_val;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
@@ -827,7 +809,7 @@ const T = struct {
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv; _ = this_val;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    const global = ctx.getGlobalObject();
         \\    defer ctx.freeValue(global);
@@ -835,9 +817,7 @@ const T = struct {
         \\    defer ctx.freeValue(doc_obj);
         \\    const native_doc = ctx.getPropertyStr(doc_obj, "_native_doc");
         \\    defer ctx.freeValue(native_doc);
-        \\    const doc_ptr = qjs.JS_GetOpaque(native_doc, rc.classes.document);
-        \\    if (doc_ptr == null) return w.EXCEPTION;
-        \\    const doc: *z.HTMLDocument = @ptrCast(@alignCast(doc_ptr));
+        \\    const doc = ctx.getOpaqueAs(z.HTMLDocument, native_doc, rc.classes.document) orelse return w.EXCEPTION;
         \\    const result = {s}(doc);
         \\    if (result) |n| return DOMBridge.wrapNode(ctx, n) catch w.EXCEPTION;
         \\    return w.NULL;
@@ -852,7 +832,7 @@ const T = struct {
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node (or unwrap failed)");
         \\    const result = {s}(node);
@@ -869,7 +849,7 @@ const T = struct {
     const NODE_METHOD_EVENT_LISTENER =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 2) return w.EXCEPTION;
         \\    const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
@@ -893,7 +873,7 @@ const T = struct {
     const NODE_METHOD_DISPATCH_EVENT =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
         \\    const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
@@ -916,7 +896,7 @@ const T = struct {
         \\// Property Getter for {s}
         \\pub fn js_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
         \\    const result = {s}(node);
         \\    if (result) |el| return DOMBridge.wrapElement(ctx, el) catch w.EXCEPTION;
@@ -931,12 +911,10 @@ const T = struct {
     const ELEMENT_METHOD_ALLOC_STRING_VOID =
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
         \\    if (argc < 1) return w.EXCEPTION;
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    const arg_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(arg_str);
         \\    {s}(rc.allocator, el, arg_str) catch |err| {{
@@ -953,11 +931,9 @@ const T = struct {
         \\/// Generated wrapper for {s}
         \\pub fn js_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.html_element);
-        \\    if (ptr == null) return w.EXCEPTION;
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
         \\    const result = {s}(rc.allocator, el) catch |err| {{
         \\        if (@errorReturnTrace()) |trace| std.debug.dumpStackTrace(trace.*);
         \\        std.debug.print("JS Binding Error: {{}}\n", .{{err}});
@@ -1008,11 +984,9 @@ const T = struct {
         \\// CSS Property Getter: style.{s}
         \\pub fn js_css_get_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc; _ = argv;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.css_style_decl);
-        \\    if (ptr == null) return ctx.throwTypeError("Not a CSSStyleDeclaration");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
         \\    const val = z.getComputedStyle(rc.allocator, el, "{s}") catch return w.EXCEPTION;
         \\    defer if (val) |v| rc.allocator.free(v);
         \\    if (val) |v| return ctx.newString(v);
@@ -1025,11 +999,9 @@ const T = struct {
         \\// CSS Property Setter: style.{s} = value
         \\pub fn js_css_set_{s}(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {{
         \\    _ = argc;
-        \\    const ctx = w.Context{{ .ptr = ctx_ptr }};
+        \\    const ctx = w.Context.from(ctx_ptr);
         \\    const rc = RuntimeContext.get(ctx);
-        \\    const ptr = qjs.JS_GetOpaque(this_val, rc.classes.css_style_decl);
-        \\    if (ptr == null) return ctx.throwTypeError("Not a CSSStyleDeclaration");
-        \\    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+        \\    const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
         \\    const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
         \\    defer ctx.freeZString(val_str);
         \\    z.setStyleProperty(rc.allocator, el, "{s}", val_str) catch return w.EXCEPTION;
@@ -1063,6 +1035,7 @@ const Pattern = enum {
     node_prop_string_zc,
     node_method_void,
     node_method_opt_node,
+    node_method_node,
     node_method_bool,
     node_method_uint16,
     node_method_opt_node_2args,
@@ -1074,6 +1047,7 @@ const Pattern = enum {
     element_prop_opt_element,
     element_method_void_error,
     element_method_opt_string,
+    element_method_bool,
     element_method_alloc_void,
     element_method_alloc_string,
     element_prop_dom_token_list,
@@ -1163,6 +1137,7 @@ fn classifyBinding(b: anytype) Pattern {
                 break :blk switch (b.return_type) {
                     .void_type, .void_with_error => .element_method_void_error,
                     .optional_string => .element_method_opt_string,
+                    .boolean => .element_method_bool,
                     else => .unknown,
                 };
             },
@@ -1186,6 +1161,7 @@ fn classifyBinding(b: anytype) Pattern {
                 }
                 break :blk switch (b.return_type) {
                     .void_type => .node_method_void,
+                    .node => .node_method_node,
                     .optional_node => .node_method_opt_node,
                     .boolean => .node_method_bool,
                     .uint32 => .node_method_uint16, // Use uint32 for u16 returns
@@ -1371,7 +1347,7 @@ fn generateBinding(writer: anytype, b: anytype) !void {
             try writer.print(T.STRING_ATTR_SETTER, .{ name, attr, name, attr });
         },
         .node_prop_document => {
-             try writer.print(T.NODE_PROP_DOCUMENT_GETTER, .{ name, name, b.getter });
+            try writer.print(T.NODE_PROP_DOCUMENT_GETTER, .{ name, name, b.getter });
         },
         .node_prop_opt_node => {
             // Special case for parentNode - needs document check to prevent infinite loop
@@ -1395,6 +1371,12 @@ fn generateBinding(writer: anytype, b: anytype) !void {
             const extra_args = formatExtraArgsNode(b.args);
             const extra_extract = extractExtraArgsNode(b.args);
             try writer.print(T.NODE_METHOD_VOID, .{ b.zig_func_name, name, argc_check, extra_extract, b.zig_func_name, extra_args });
+        },
+        .node_method_node => {
+            const argc_check = if (countJsArgs(b.args) > 0) "if (argc < 1) return w.EXCEPTION;" else "_ = argc; _ = argv;";
+            const extra_args = formatExtraArgsNode(b.args);
+            const extra_extract = extractExtraArgsNode(b.args);
+            try writer.print(T.NODE_METHOD_NODE, .{ b.zig_func_name, name, argc_check, extra_extract, b.zig_func_name, extra_args });
         },
         .node_method_opt_node => {
             const argc_check = if (countJsArgs(b.args) > 0) "if (argc < 1) return w.EXCEPTION;" else "_ = argc; _ = argv;";
@@ -1450,6 +1432,13 @@ fn generateBinding(writer: anytype, b: anytype) !void {
         .element_method_opt_string => {
             try writer.print(T.ELEMENT_METHOD_OPT_STRING, .{ b.zig_func_name, name, b.zig_func_name });
         },
+        .element_method_bool => {
+            const argc_check = getArgcCheck(countJsArgs(b.args));
+            const extra_args = formatExtraArgsElement(b.args);
+            const extra_extract = extractExtraArgsElement(b.args);
+            try writer.print(T.ELEMENT_METHOD_BOOL, .{ b.zig_func_name, name, argc_check, extra_extract, b.zig_func_name, extra_args });
+        },
+
         .element_method_alloc_void => {
             try writer.print(T.ELEMENT_METHOD_ALLOC_STRING_VOID, .{ b.zig_func_name, name, b.zig_func_name });
         },

@@ -97,6 +97,36 @@ pub fn setInnerHTML(element: *z.HTMLElement, content: []const u8) !void {
     if (z.elementToTemplate(element)) |template| {
         const frag_node = z.templateContent(template);
         const el_node = z.elementToNode(element);
+
+        // DEBUG: Walk entire subtree to find comment nodes
+        const DebugWalker = struct {
+            fn walk(node: *z.DomNode, depth: u32) void {
+                var child = z.firstChild(node);
+                while (child) |c| {
+                    const nt = z.nodeType(c);
+                    const indent = @min(depth * 2, 20);
+                    const spaces: [20]u8 = .{' '} ** 20;
+                    std.debug.print("[setInnerHTML] {s}{s}", .{ spaces[0..indent], @tagName(nt) });
+                    if (nt == .comment or nt == .text) {
+                        const data: ?[]const u8 = blk: { break :blk z.textContent_zc(c); };
+                        if (data) |d| {
+                            const show = if (d.len > 50) d[0..50] else d;
+                            std.debug.print(": \"{s}\"", .{show});
+                        }
+                    } else if (nt == .element) {
+                        if (z.nodeToElement(c)) |ce| {
+                            std.debug.print(": <{s}>", .{z.tagName_zc(ce)});
+                        }
+                    }
+                    std.debug.print("\n", .{});
+                    walk(c, depth + 1);
+                    child = z.nextSibling(c);
+                }
+            }
+        };
+        std.debug.print("[setInnerHTML] Full template subtree:\n", .{});
+        DebugWalker.walk(el_node, 0);
+
         var child = z.firstChild(el_node);
         while (child != null) {
             const next = z.nextSibling(child.?);

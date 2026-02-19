@@ -1,0 +1,54 @@
+function click(selector) {
+  const el = document.querySelector(selector);
+  if (!el) {
+    console.log("❌ Not found: " + selector);
+    return;
+  }
+  el.dispatchEvent("click");
+}
+
+function measure(name, fn) {
+  const start = performance.now();
+  fn();
+  const end = performance.now();
+  console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
+}
+
+// --- Benchmark Suite ---
+
+console.log("\n🚀 Starting Lit-HTML Benchmark\n");
+
+// 1. Create 1,000 rows
+measure("Create 1k", () => click("#run"));
+
+// Replace all rows
+measure("Replace 1k", () => click("#run"));
+
+// Partial Update
+// Setup 10k first
+click("#runlots");
+measure("Partial Update (10k)", () => click("#update"));
+
+// Select Row
+measure("Select Row", () => click("tbody tr:nth-child(2) a"));
+
+// Swap Rows
+click("#run"); // Reset to 1k
+measure("Swap Rows", () => click("#swaprows"));
+
+// Remove Row
+measure("Remove Row", () => click("tbody tr:nth-child(2) span.glyphicon-remove"));
+
+// Create 10,000 Rows
+measure("Create 10k", () => click("#runlots"));
+
+// Append 1,000 Rows
+measure("Append 1k", () => click("#add"));
+
+// Clear Rows
+measure("Clear", () => click("#clear"));
+
+// sanity check
+const count = document.querySelectorAll("tr").length;
+if (count !== 0) console.log(`❌ Leaked Rows: ${count}`);
+else console.log(`✅ Clean Run`);

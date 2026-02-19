@@ -10,6 +10,19 @@ if (typeof self === "undefined") {
 // navigator is set in Zig (js_polyfills.install) with a full Chrome-like userAgent
 window.devicePixelRatio = window.devicePixelRatio || 1;
 
+// ShadowRoot stub — HTMX checks `instanceof ShadowRoot` during DOM processing.
+// No real shadow DOM support, just prevent ReferenceError.
+if (typeof globalThis.ShadowRoot === "undefined") {
+  globalThis.ShadowRoot = class ShadowRoot {};
+}
+
+// Document readyState — starts as "loading", frameworks check this to decide
+// whether to init immediately or wait for DOMContentLoaded.
+// The script engine fires DOMContentLoaded after all scripts execute.
+if (typeof document !== "undefined" && !document.readyState) {
+  document.readyState = "loading";
+}
+
 function applyLocationPolyfill(urlStr) {
   try {
     const parsedUrl = new URL(urlStr);
@@ -46,6 +59,25 @@ function applyLocationPolyfill(urlStr) {
   }
 }
 
+// Namespace-aware attribute stubs: lexbor doesn't track XML namespaces,
+// so we ignore the namespace URI and delegate to the plain attribute API.
+// Needed by D3, Snap.svg, and any library that builds SVG via the DOM.
+if (!globalThis.Element.prototype.setAttributeNS) {
+  globalThis.Element.prototype.setAttributeNS = function (ns, name, value) {
+    this.setAttribute(name, value);
+  };
+}
+if (!globalThis.Element.prototype.getAttributeNS) {
+  globalThis.Element.prototype.getAttributeNS = function (ns, name) {
+    return this.getAttribute(name);
+  };
+}
+if (!globalThis.Element.prototype.removeAttributeNS) {
+  globalThis.Element.prototype.removeAttributeNS = function (ns, name) {
+    this.removeAttribute(name);
+  };
+}
+
 globalThis.SVGRect = function () {
   this.x = 0;
   this.y = 0;
@@ -53,7 +85,7 @@ globalThis.SVGRect = function () {
   this.height = 0;
 };
 
-// 2. Attach it to all Elements (safest headless fallback)
+// Attach it to all Elements (safest headless fallback)
 if (!globalThis.Element.prototype.createSVGRect) {
   globalThis.Element.prototype.createSVGRect = function () {
     return new SVGRect();
@@ -98,6 +130,75 @@ if (!globalThis.Element.prototype.createSVGMatrix) {
 if (!globalThis.Element.prototype.getBBox) {
   globalThis.Element.prototype.getBBox = function () {
     return new SVGRect();
+  };
+}
+
+// XPathEvaluator — HTMX 2.x uses XPath to find elements with hx-on:* attributes.
+// We implement a minimal evaluator that handles starts-with(name(), "prefix") patterns
+// by walking the DOM tree and checking attribute names. This covers HTMX's single query.
+globalThis.XPathEvaluator =
+  globalThis.XPathEvaluator ||
+  (() => {
+    function parseAttrPrefixes(expr) {
+      const prefixes = [];
+      const re = /starts-with\s*\(\s*name\s*\(\s*\)\s*,\s*"([^"]+)"\s*\)/g;
+      let m;
+      while ((m = re.exec(expr)) !== null) prefixes.push(m[1]);
+      return prefixes;
+    }
+
+    function walkElements(root, prefixes) {
+      const results = [];
+      const all = root.querySelectorAll("*");
+      for (let j = 0; j < all.length; j++) {
+        const node = all[j];
+        if (!node.attributes) continue;
+        for (let i = 0; i < node.attributes.length; i++) {
+          const attrName = node.attributes[i].name;
+          for (const pfx of prefixes) {
+            if (attrName.startsWith(pfx)) {
+              results.push(node);
+              i = node.attributes.length;
+              break;
+            }
+          }
+        }
+      }
+      return results;
+    }
+
+    function makeResult(nodes) {
+      let idx = 0;
+      return {
+        snapshotLength: nodes.length,
+        snapshotItem: (i) => nodes[i] || null,
+        iterateNext: () => (idx < nodes.length ? nodes[idx++] : null),
+      };
+    }
+
+    class XPathEvaluator {
+      createExpression(expr) {
+        const prefixes = parseAttrPrefixes(expr);
+        return {
+          evaluate: (contextNode) =>
+            makeResult(
+              prefixes.length ? walkElements(contextNode, prefixes) : [],
+            ),
+        };
+      }
+      evaluate(expr, contextNode) {
+        const prefixes = parseAttrPrefixes(expr);
+        return makeResult(
+          prefixes.length ? walkElements(contextNode, prefixes) : [],
+        );
+      }
+    }
+    return XPathEvaluator;
+  })();
+if (!document.evaluate) {
+  const evaluator = new XPathEvaluator();
+  document.evaluate = function (expr, contextNode) {
+    return evaluator.evaluate(expr, contextNode);
   };
 }
 
@@ -155,6 +256,43 @@ window.IntersectionObserver =
 window.scrollTo = window.scrollTo || function () {};
 window.scrollBy = window.scrollBy || function () {};
 
+// // --- DocumentFragment Unpacker Polyfill ---
+// // C-based DOM engines often drop parent pointers for Comment/Text nodes
+// // when appending DocumentFragments. This unpacks them in pure JS to guarantee
+// // the C-bridge correctly links every single Lit marker node!
+// (function () {
+//   const proto = globalThis.Node
+//     ? globalThis.Node.prototype
+//     : globalThis.Element.prototype;
+
+//   const origAppend = proto.appendChild;
+//   if (origAppend) {
+//     proto.appendChild = function (child) {
+//       if (child && child.nodeType === 11) {
+//         // 11 = DocumentFragment
+//         while (child.firstChild) {
+//           origAppend.call(this, child.firstChild);
+//         }
+//         return child;
+//       }
+//       return origAppend.call(this, child);
+//     };
+//   }
+
+//   const origInsert = proto.insertBefore;
+//   if (origInsert) {
+//     proto.insertBefore = function (child, ref) {
+//       if (child && child.nodeType === 11) {
+//         while (child.firstChild) {
+//           origInsert.call(this, child.firstChild, ref);
+//         }
+//         return child;
+//       }
+//       return origInsert.call(this, child, ref);
+//     };
+//   }
+// })();
+
 globalThis.zexplorer = {
   fs: {
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
@@ -173,6 +311,12 @@ globalThis.zexplorer = {
       execute_scripts: true,
       load_stylesheets: true,
     });
+    if (
+      globalThis.customElements &&
+      typeof customElements.upgradeAll === "function"
+    ) {
+      customElements.upgradeAll();
+    }
 
     // Drain the microtask queue so React/Vue can mount
     if (typeof __native_flush === "function") __native_flush();
@@ -224,3 +368,256 @@ globalThis.zexplorer = {
     },
   },
 };
+
+// WebComponents
+// if (
+//   !Object.getOwnPropertyDescriptor(globalThis.Node.prototype, "isConnected")
+// ) {
+//   Object.defineProperty(globalThis.Node.prototype, "isConnected", {
+//     get() {
+//       return true;
+//     },
+//   });
+// }
+
+// 1. ShadowRoot stub — Fallback for attachShadow
+if (!globalThis.Element.prototype.attachShadow) {
+  globalThis.Element.prototype.attachShadow = function (options) {
+    this.shadowRoot = this;
+    return this;
+  };
+}
+
+// 2. The Headless HTMLElement Base with Constructor Hijacking
+let upgradingElement = null;
+
+class HeadlessHTMLElement {
+  constructor() {
+    // If we are currently upgrading an element, hijack the constructor!
+    // The 'new' keyword will abort creating a ghost JS object and instead
+    // return the native C-backed Lexbor node directly to LitElement.
+    if (upgradingElement) {
+      const el = upgradingElement;
+      upgradingElement = null;
+      return el;
+    }
+  }
+}
+if (globalThis.Element) {
+  Object.setPrototypeOf(
+    HeadlessHTMLElement.prototype,
+    globalThis.Element.prototype,
+  );
+}
+globalThis.HTMLElement = HeadlessHTMLElement;
+
+// 2. The Custom Elements Registry
+globalThis.customElements = {
+  _registry: new Map(),
+
+  define(tagName, constructorClass) {
+    const name = tagName.toUpperCase();
+    this._registry.set(name, constructorClass);
+    if (globalThis.document && document.readyState === "complete") {
+      this.__upgradeElements(document.body, name, constructorClass);
+    }
+  },
+
+  get(tagName) {
+    return this._registry.get(tagName.toUpperCase());
+  },
+
+  upgradeAll() {
+    console.log("UPGRADEALL");
+    if (!globalThis.document || !document.body) return;
+    this._registry.forEach((constructorClass, tagName) => {
+      this.__upgradeElements(document.body, tagName, constructorClass);
+    });
+  },
+
+  __upgradeElements(rootNode, tagName, constructorClass) {
+    const elements = rootNode.querySelectorAll(tagName.toLowerCase());
+
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (el.__isUpgraded) continue;
+      console.log(el);
+
+      // Step 1: Morph the prototype
+      Object.setPrototypeOf(el, constructorClass.prototype);
+
+      // Step 2: The Constructor Hijack!
+      // This forces LitElement to initialize all its internal reactive Symbols
+      // and microtasks directly onto the native C-backed Lexbor node!
+      upgradingElement = el;
+      try {
+        // This invokes HeadlessHTMLElement, which returns 'el'!
+        const instance = new constructorClass();
+        if (instance !== el) {
+          // Fallback in case super() wasn't called properly
+          Object.assign(el, instance);
+        }
+      } catch (err) {
+        console.log(`[WC] Constructor failed for ${tagName}:`, err.message);
+      } finally {
+        upgradingElement = null;
+      }
+
+      el.__isUpgraded = true;
+
+      // Step 3: Feed HTML attributes into Lit
+      if (
+        constructorClass.observedAttributes &&
+        typeof el.attributeChangedCallback === "function"
+      ) {
+        constructorClass.observedAttributes.forEach((attr) => {
+          if (el.hasAttribute(attr)) {
+            el.attributeChangedCallback(attr, null, el.getAttribute(attr));
+          }
+        });
+      }
+
+      // Step 4: Fire the Web Component lifecycle
+      if (typeof el.connectedCallback === "function") {
+        el.connectedCallback();
+      }
+    }
+  },
+};
+
+globalThis.CSSStyleSheet =
+  globalThis.CSSStyleSheet ||
+  class CSSStyleSheet {
+    replaceSync() {}
+    replace() {
+      return Promise.resolve(this);
+    }
+  };
+
+// Ensure Document exists so prototype access doesn't crash
+if (!globalThis.Document) globalThis.Document = class Document {};
+
+// Stub adoptedStyleSheets to safely bypass the modern CSS engine
+if (!globalThis.Document.prototype.adoptedStyleSheets) {
+  Object.defineProperty(globalThis.Document.prototype, "adoptedStyleSheets", {
+    get: () => [],
+    set: () => {},
+  });
+  Object.defineProperty(globalThis.Element.prototype, "adoptedStyleSheets", {
+    get: () => [],
+    set: () => {},
+  });
+}
+
+globalThis.__dispatchLoadEvent = function () {
+  // 1. Tell JS the document is fully parsed
+  Object.defineProperty(Object.getPrototypeOf(document), "readyState", {
+    get: () => "complete",
+    configurable: true,
+  });
+
+  // 2. Upgrade all custom elements that were parsed
+  if (globalThis.customElements) {
+    customElements.upgradeAll();
+  }
+
+  // 3. Fire standard browser events for libraries like HTMX
+  document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  window.dispatchEvent(new Event("load"));
+};
+
+// Hook 1: Override createElement
+const originalCreateElement = document.createElement.bind(document);
+
+document.createElement = function (tagName) {
+  const el = originalCreateElement(tagName);
+  const CustomClass = customElements.get(tagName);
+
+  if (CustomClass) {
+    Object.setPrototypeOf(el, CustomClass.prototype);
+    el.__isUpgraded = true;
+    // Note: connectedCallback usually fires when appended to the document,
+    // so you might hook into `appendChild` to fire it perfectly,
+    // but doing it here works for most headless scripts.
+  }
+  return el;
+};
+
+// importNode is now a native binding in dom_bridge.zig
+// Uses lexbor's lxb_dom_document_import_node for proper ownerDocument adoption
+
+// node.append()
+if (!globalThis.Element.prototype.append) {
+  const appendFn = function (...nodes) {
+    for (const node of nodes) {
+      this.appendChild(
+        typeof node === "string" ? document.createTextNode(node) : node,
+      );
+    }
+  };
+  globalThis.Element.prototype.append = appendFn;
+  globalThis.DocumentFragment.prototype.append = appendFn;
+}
+
+// Missing ES22 methods
+// 1. Array/String .at() (Extremely common cause of "not a function" in modern Lit)
+if (!Array.prototype.at) {
+  const atFn = function (n) {
+    n = Math.trunc(n) || 0;
+    if (n < 0) n += this.length;
+    if (n < 0 || n >= this.length) return undefined;
+    return this[n];
+  };
+  Object.defineProperty(Array.prototype, "at", {
+    value: atFn,
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(String.prototype, "at", {
+    value: atFn,
+    writable: true,
+    configurable: true,
+  });
+}
+
+// 2. String.prototype.replaceAll
+if (!String.prototype.replaceAll) {
+  String.prototype.replaceAll = function (str, newStr) {
+    if (
+      Object.prototype.toString.call(str).toLowerCase() === "[object regexp]"
+    ) {
+      return this.replace(str, newStr);
+    }
+    return this.replace(
+      new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
+      newStr,
+    );
+  };
+}
+
+// 3. String.prototype.matchAll (Used heavily by template parsers)
+if (!String.prototype.matchAll) {
+  String.prototype.matchAll = function* (regex) {
+    const globalRegex = new RegExp(
+      regex,
+      regex.flags.includes("g") ? regex.flags : regex.flags + "g",
+    );
+    let match;
+    while ((match = globalRegex.exec(this)) !== null) {
+      yield match;
+    }
+  };
+}
+
+// 4. Object.hasOwn (Replaces hasOwnProperty in ES2022)
+if (!Object.hasOwn) {
+  Object.defineProperty(Object, "hasOwn", {
+    value: function (obj, prop) {
+      if (obj == null)
+        throw new TypeError("Cannot convert undefined or null to object");
+      return Object.prototype.hasOwnProperty.call(Object(obj), prop);
+    },
+    configurable: true,
+    writable: true,
+  });
+}

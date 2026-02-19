@@ -67,8 +67,8 @@ pub const RuntimeContext = struct {
         image: zqjs.ClassID = 0,
         html_image: zqjs.ClassID = 0,
         pdf_document: zqjs.ClassID = 0,
-        local_storage: std.StringHashMap([]const u8),
     } = .{},
+    local_storage: std.StringHashMap([]const u8) = undefined,
     // for data coming from JS to Zig
     last_result: ?zqjs.Value = null,
 
@@ -91,6 +91,7 @@ pub const RuntimeContext = struct {
             .sandbox = sandbox,
             .sandbox_root = sandbox_root,
             .blob_registry = std.StringHashMap(z.qjs.JSValue).init(allocator),
+            .local_storage = std.StringHashMap([]const u8).init(allocator),
             .global_font = null,
         };
 
@@ -134,6 +135,14 @@ pub const RuntimeContext = struct {
             f.deinit();
         }
         self.blob_registry.deinit();
+
+        var ls_it = self.local_storage.iterator();
+        while (ls_it.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.local_storage.deinit();
+
         self.allocator.destroy(self);
         z.print("\n⌛️ RT destroyed --------\n\n", .{});
     }

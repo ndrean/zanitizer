@@ -267,6 +267,27 @@ fn js_get_currentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int,
     return DOMBridge.wrapNode(ctx, self.current_node) catch return w.EXCEPTION;
 }
 
+/// Property setter: TreeWalker.currentNode
+fn js_set_currentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+
+    // 1. Get the TreeWalker instance
+    const self = getPtr(TreeWalkerObject, this_val, rc.classes.tree_walker) orelse
+        return ctx.throwTypeError("Not a TreeWalker");
+
+    if (argc < 1) return ctx.throwTypeError("Requires 1 argument");
+
+    // 2. Unwrap the Node passed from JS
+    const new_node = DOMBridge.unwrapNode(ctx, argv[0]) orelse
+        return ctx.throwTypeError("Value must be a Node");
+
+    // 3. Update the internal pointer!
+    self.current_node = new_node;
+
+    return w.UNDEFINED;
+}
+
 /// Property getter: TreeWalker.root
 fn js_get_root(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);
@@ -285,9 +306,7 @@ fn js_get_whatToShow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_int, 
     return qjs.JS_NewUint32(ctx.ptr, self.what_to_show);
 }
 
-// ============================================================================
-// BOILERPLATE
-// ============================================================================
+// ===-------------
 
 fn getPtr(comptime T: type, val: qjs.JSValue, class_id: qjs.JSClassID) ?*T {
     const ptr = qjs.JS_GetOpaque(val, class_id);
@@ -339,7 +358,7 @@ pub const TreeWalkerBridge = struct {
         {
             const atom = qjs.JS_NewAtom(ctx.ptr, "currentNode");
             const get_fn = qjs.JS_NewCFunction2(ctx.ptr, js_get_currentNode, "get_currentNode", 0, qjs.JS_CFUNC_generic, 0);
-            const set_fn = w.UNDEFINED;
+            const set_fn = qjs.JS_NewCFunction2(ctx.ptr, js_set_currentNode, "set_currentNode", 1, qjs.JS_CFUNC_generic, 0);
             _ = qjs.JS_DefinePropertyGetSet(ctx.ptr, proto, atom, get_fn, set_fn, qjs.JS_PROP_CONFIGURABLE | qjs.JS_PROP_ENUMERABLE);
             qjs.JS_FreeAtom(ctx.ptr, atom);
         }

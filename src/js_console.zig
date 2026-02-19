@@ -84,6 +84,44 @@ pub fn js_console_print(
     return w.UNDEFINED;
 }
 
+pub fn js_console_assert(
+    ctx_ptr: ?*qjs.JSContext,
+    _: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    // console.assert(condition, ...data) — if condition is falsy, print "Assertion failed: " + data
+    if (argc >= 1 and qjs.JS_ToBool(ctx_ptr, argv[0]) != 0) {
+        return w.UNDEFINED; // condition is truthy, do nothing
+    }
+
+    const ctx = w.Context.from(ctx_ptr);
+
+    var buf: [4096]u8 = undefined;
+    var sw = std.fs.File.stdout().writer(&buf);
+    const stdout: Stdout = &sw.interface;
+
+    const global = ctx.getGlobalObject();
+    defer ctx.freeValue(global);
+    const json_obj = ctx.getPropertyStr(global, "JSON");
+    defer ctx.freeValue(json_obj);
+    const stringify_fn = ctx.getPropertyStr(json_obj, "stringify");
+    defer ctx.freeValue(stringify_fn);
+
+    stdout.print("Assertion failed:", .{}) catch {};
+
+    // Print remaining arguments (skip argv[0] which is the condition)
+    var i: usize = 1;
+    while (i < @as(usize, @intCast(argc))) : (i += 1) {
+        stdout.print(" ", .{}) catch {};
+        printValue(ctx, argv[i], stringify_fn, stdout);
+    }
+    stdout.print("\n", .{}) catch {};
+    stdout.flush() catch {};
+
+    return w.UNDEFINED;
+}
+
 pub fn install(ctx: w.Context) !void {
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
@@ -103,6 +141,9 @@ pub fn install(ctx: w.Context) !void {
 
     const info_fn = ctx.newCFunction(js_console_print, "info", 1);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, console, "info", info_fn);
+
+    const assert_fn = ctx.newCFunction(js_console_assert, "assert", 1);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, console, "assert", assert_fn);
 
     // Attach console to global
     _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "console", console);

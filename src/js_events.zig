@@ -161,6 +161,33 @@ pub fn getDefaultPrevented(ev: *DomEvent) bool {
     return ev.default_prevented;
 }
 
+/// [JS] new CustomEvent(type, eventInit) — same as Event but with `detail` property
+pub fn customEventConstructor(
+    ctx_ptr: ?*qjs.JSContext,
+    new_target: qjs.JSValue,
+    argc: c_int,
+    argv: [*c]qjs.JSValue,
+) callconv(.c) qjs.JSValue {
+    // Delegate to Event constructor for the base object
+    const obj = constructor(ctx_ptr, new_target, argc, argv);
+    if (qjs.JS_IsException(obj)) return obj;
+
+    // Extract `detail` from eventInit and set it on the object
+    const ctx = w.Context.from(ctx_ptr);
+    if (argc > 1) {
+        const options = argv[1];
+        if (ctx.isObject(options)) {
+            const detail_val = ctx.getPropertyStr(options, "detail");
+            ctx.setPropertyStr(obj, "detail", detail_val) catch {};
+            // detail_val ownership transferred to setPropertyStr
+        }
+    } else {
+        ctx.setPropertyStr(obj, "detail", w.NULL) catch {};
+    }
+
+    return obj;
+}
+
 pub const EventBridge = struct {
     pub fn install(ctx: w.Context) !void {
         const rc = RuntimeContext.get(ctx);
@@ -186,7 +213,12 @@ pub const EventBridge = struct {
 
         // Global
         const global = ctx.getGlobalObject();
-        defer ctx.freeValue(global); // TODO Leak??
+        defer ctx.freeValue(global);
         try ctx.setPropertyStr(global, "Event", ctor);
+
+        // CustomEvent — same class, separate constructor that adds `detail`
+        const custom_ctor = ctx.newCFunction2(customEventConstructor, "CustomEvent", 1, qjs.JS_CFUNC_constructor, 0);
+        ctx.setConstructor(custom_ctor, proto);
+        try ctx.setPropertyStr(global, "CustomEvent", custom_ctor);
     }
 };

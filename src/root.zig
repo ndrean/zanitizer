@@ -250,6 +250,7 @@ pub const removeChild = lxb.removeChild;
 pub const destroyNode = lxb.destroyNode;
 // pub const destroyElement = lxb.destroyElement;
 
+pub const getRootNode = lxb.getRootNode;
 pub const documentRoot = lxb.documentRoot;
 pub const ownerDocument = lxb.ownerDocument;
 pub const bodyElement = lxb.bodyElement;
@@ -601,6 +602,8 @@ pub const getAttribute_zc = attrs.getAttribute_zc;
 pub const iterateDomAttributes = attrs.iterateDomAttributes;
 pub const getAttributeName_zc = attrs.getAttributeName_zc;
 pub const getAttributeValue_zc = attrs.getAttributeValue_zc;
+pub const firstAttribute = attrs.getFirstAttribute;
+pub const nextAttribute = attrs.getNextAttribute;
 
 pub const setAttribute = attrs.setAttribute;
 pub const setClassName = attrs.setClassName;

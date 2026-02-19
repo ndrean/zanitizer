@@ -1,0 +1,53 @@
+<html>
+  <head>
+    <script type="module">
+      import { LitElement, html } from "https://esm.sh/lit?dev";
+
+      class ZexplorerBadge extends LitElement {
+        static get properties() {
+          return {
+            status: { type: String },
+            engine: { type: String },
+          };
+        }
+
+        // constructor() {
+        //   console.log("CONSTRUCTOR");
+        //   super();
+        //   this.status = "Loading...";
+        //   this.engine = "Zig";
+        // }
+
+        // LitElement natively handles the Shadow DOM fake we set up!
+        createRenderRoot() {
+          return this; // Force Light DOM for headless rendering
+        }
+
+        connectedCallback() {
+          console.log("CB");
+          super.connectedCallback();
+          if (!this.status) this.status = "Loading...";
+          if (!this.engine) this.engine = "Zig";
+          globalThis.myActiveBadge = this;
+        }
+
+        render() {
+          console.log("RENDER");
+          return html`
+            <div
+              style="background: black; color: #f7a41d; padding: 10px; font-family: monospace;"
+            >
+              [${this.engine}] Status: <span>${this.status}</span>
+            </div>
+          `;
+        }
+      }
+
+      customElements.define("zxp-badge", ZexplorerBadge);
+    </script>
+  </head>
+
+  <body>
+    <zxp-badge status="ONLINE" engine="Lexbor+QuickJS"></zxp-badge>
+  </body>
+</html>

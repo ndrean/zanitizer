@@ -1,0 +1,28 @@
+<html>
+  <head>
+    <script>
+      class StatusBadge extends HTMLElement {
+        connectedCallback() {
+          const status = this.getAttribute("status") || "unknown";
+          const color = status === "ok" ? "green" : "red";
+          // Because we mapped shadowRoot to 'this', this just renders normal DOM!
+          this.attachShadow({ mode: "open" });
+          // render synchronously
+          this.shadowRoot.innerHTML = `
+          <div style="background: ${color}; color: white; padding: 5px;">
+            Status: ${status.toUpperCase()}
+          </div>
+          `;
+          console.log("Connected");
+        }
+      }
+
+      customElements.define("status-badge", StatusBadge);
+    </script>
+  </head>
+  <body>
+    <status-badge status="ok"></status-badge>
+
+    <!--<script>customElements.upgradeAll();</script>-->
+  </body>
+</html>

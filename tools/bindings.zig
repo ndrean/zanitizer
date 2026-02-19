@@ -173,6 +173,14 @@ pub const bindings = [_]BindingSpec{
     // insertBefore: manual binding in dom_bridge.zig (optional refChild parameter)
 
     .{
+        .name = "getRootNode",
+        .zig_func_name = "z.getRootNode",
+        .kind = .method,
+        .args = &.{.this_node},
+        .return_type = .node,
+        .prop_this = .this_node,
+    },
+    .{
         .name = "remove",
         .zig_func_name = "z.removeNode",
         .kind = .method,
@@ -221,6 +229,13 @@ pub const bindings = [_]BindingSpec{
         .kind = .method,
         .args = &.{ .this_element, .string },
         .return_type = .void_with_error,
+    },
+    .{
+        .name = "hasAttribute",
+        .zig_func_name = "z.hasAttribute",
+        .kind = .method,
+        .args = &.{ .this_element, .string },
+        .return_type = .boolean,
     },
 
     // Element
