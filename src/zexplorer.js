@@ -293,7 +293,43 @@ window.scrollBy = window.scrollBy || function () {};
 //   }
 // })();
 
-globalThis.zexplorer = {
+// --- htm: JSX-like tagged templates for real DOM (no VDOM) ---
+// htm parser (https://github.com/developit/htm, ~500 bytes)
+var __htm_build=function(a,o,l,n){var i;o[0]=0;for(var t=1;t<o.length;t++){var e=o[t++],u=o[t]?(o[0]|=e?1:2,l[o[t++]]):o[++t];e===3?n[0]=u:e===4?n[1]=Object.assign(n[1]||{},u):e===5?(n[1]=n[1]||{})[o[++t]]=u:e===6?n[1][o[++t]]+=u+"":e?(i=a.apply(u,__htm_build(a,u,l,["",null])),n.push(i),u[0]?o[0]|=2:(o[t-2]=0,o[t]=i)):n.push(u)}return n},__htm_cache=new Map;
+function __htm_tag(a){var o=__htm_cache.get(this);return o||(o=new Map,__htm_cache.set(this,o)),(o=__htm_build(this,o.get(a)||(o.set(a,o=function(l){for(var n,i,t=1,e="",u="",s=[0],b=function(f){t===1&&(f||(e=e.replace(/^\s*\n\s*|\s*\n\s*$/g,"")))?s.push(0,f,e):t===3&&(f||e)?(s.push(3,f,e),t=2):t===2&&e==="..."&&f?s.push(4,f,0):t===2&&e&&!f?s.push(5,0,!0,e):t>=5&&((e||!f&&t===5)&&(s.push(t,0,e,i),t=6),f&&(s.push(t,f,0,i),t=6)),e=""},c=0;c<l.length;c++){c&&(t===1&&b(),b(c));for(var g=0;g<l[c].length;g++)n=l[c][g],t===1?n==="<"?(b(),s=[s],t=3):e+=n:t===4?e==="--"&&n===">"?(t=1,e=""):e=n+e[0]:u?n===u?u="":e+=n:n==='"'||n==="'"?u=n:n===">"?(b(),t=1):t&&(n==="="?(t=5,i=e,e=""):n==="/"&&(t<5||l[c][g+1]===">")?(b(),t===3&&(s=s[0]),t=s,(s=s[0]).push(2,0,t),t=0):n===" "||n==="\t"||n==="\n"||n==="\r"?(b(),t=2):e+=n),t===3&&e==="!--"&&(t=4,s=s[0])}return b(),s}(a)),o),arguments,[])).length>1?o:o[0]}
+
+// h() creates real Lexbor DOM elements
+function __zexplorer_h(tag, props, ...children) {
+  const el = document.createElement(tag);
+  if (props) {
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "style" && typeof v === "object") {
+        const css = Object.entries(v)
+          .map(([p, val]) => {
+            const kebab = p.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+            return `${kebab}:${val}`;
+          })
+          .join(";");
+        el.setAttribute("style", css);
+      } else {
+        el.setAttribute(k, v);
+      }
+    }
+  }
+  for (const child of children.flat(Infinity)) {
+    if (child == null || child === false) continue;
+    if (typeof child === "string" || typeof child === "number") {
+      el.appendChild(document.createTextNode(String(child)));
+    } else if (child instanceof Node) {
+      el.appendChild(child);
+    }
+  }
+  return el;
+}
+
+globalThis.zxp = {
+  h: __zexplorer_h,
+  html: __htm_tag.bind(__zexplorer_h),
   fs: {
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
   },
@@ -352,6 +388,10 @@ globalThis.zexplorer = {
       width,
       height,
     );
+  },
+
+  paintDOM(node, outputPath) {
+    return __paintDOM(node, outputPath);
   },
 
   pdf: {

@@ -201,9 +201,10 @@ const ProcessCtx = struct {
 ///
 /// Uses a buffered stdout writer for efficient output. ANSI colors for TTY.
 pub fn prettyPrint(allocator: std.mem.Allocator, node: *z.DomNode) !void {
-    // First, apply aggressive minification for clean TTY display
+    // Apply whitespace minification for clean TTY display, but preserve comments
+    // (comments are used as markers by frameworks like Lit/lit-html)
     if (z.nodeToElement(node)) |element| {
-        z.minifyDOMForDisplay(allocator, element) catch {};
+        z.minifyDOMForDisplayPreserveComments(allocator, element) catch {};
     }
 
     var stdout_buffer: [4096]u8 = undefined;

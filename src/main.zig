@@ -140,9 +140,9 @@ fn vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const script =
         \\async function testVercel() {
         \\  try {
-        \\      await zexplorer.goto("https://demo.vercel.store");
+        \\      await zxp.goto("https://demo.vercel.store");
         // \\      __flush();
-        \\      await zexplorer.waitForSelector("a[href^='/product/']");
+        \\      await zxp.waitForSelector("a[href^='/product/']");
         \\      const links = document.querySelectorAll("a[href^='/product/']");
         \\      const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
         \\      const items = unique.map(href => {
@@ -196,11 +196,11 @@ fn preview_vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
     const script =
         \\async function testVercel() {
         \\  try {
-        \\      await zexplorer.goto("https://next-preview.vercel.app");
+        \\      await zxp.goto("https://next-preview.vercel.app");
         // \\      console.log(document.body.innerHTML);
         \\      return document.body.innerHTML;
         \\
-        // \\      await zexplorer.waitForSelector("[data-slate-string]", 5000);
+        // \\      await zxp.waitForSelector("[data-slate-string]", 5000);
         // \\      const results = document.querySelectorAll("[data-slate-string]");
         // \\      const result =  [...results].map((node) => node.textContent).filter((txt) => txt.includes("x-vercel-id"));
         // \\      console.log(result);
@@ -234,7 +234,7 @@ fn generate_pdf(_: std.mem.Allocator, _: []const u8) !void {
         \\const finalSvg = template.replace("{{total}}", "$4560.00");
 
         // Generates a crisp PDF in ~40ms using native LibHaru
-        \\await zexplorer.pdf.generate(finalSvg, "./output_invoice.pdf");
+        \\await zxp.pdf.generate(finalSvg, "./output_invoice.pdf");
         \\console.log("Invoice generated!");
     ;
     _ = js;

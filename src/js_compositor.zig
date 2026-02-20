@@ -1,5 +1,6 @@
 const std = @import("std");
 const z = @import("root.zig");
+const yoga = @import("yoga.zig");
 const RuntimeContext = z.RuntimeContext;
 const qjs = z.qjs;
 const w = z.wrapper;
@@ -10,6 +11,32 @@ const stbi_write = @cImport({
     @cInclude("stb_image_write.h");
 });
 const thorvg = z.thorvg;
+const Tvg_Canvas = thorvg.Tvg_Canvas;
+const Tvg_Paint = thorvg.Tvg_Paint;
+extern "c" fn tvg_engine_init(threads: c_uint) c_int;
+extern "c" fn tvg_engine_term() c_int;
+extern "c" fn tvg_swcanvas_create(op: c_uint) ?*Tvg_Canvas;
+extern "c" fn tvg_canvas_destroy(canvas: *Tvg_Canvas) c_int;
+extern "c" fn tvg_swcanvas_set_target(canvas: *Tvg_Canvas, buffer: [*]u32, stride: u32, w_: u32, h_: u32, cs: c_uint) c_int;
+extern "c" fn tvg_canvas_add(canvas: *Tvg_Canvas, paint: *Tvg_Paint) c_int;
+extern "c" fn tvg_canvas_draw(canvas: *Tvg_Canvas, clear: bool) c_int;
+extern "c" fn tvg_canvas_sync(canvas: *Tvg_Canvas) c_int;
+extern "c" fn tvg_shape_new() ?*Tvg_Paint;
+extern "c" fn tvg_shape_append_rect(paint: *Tvg_Paint, x: f32, y: f32, w_: f32, h_: f32, rx: f32, ry: f32, cw: bool) c_int;
+extern "c" fn tvg_shape_set_fill_color(paint: *Tvg_Paint, r: u8, g: u8, b: u8, a: u8) c_int;
+extern "c" fn tvg_font_load_data(name: [*c]const u8, data: [*]const u8, size: u32, mimetype: [*c]const u8, copy: bool) c_int;
+extern "c" fn tvg_text_new() ?*Tvg_Paint;
+extern "c" fn tvg_text_set_text(paint: *Tvg_Paint, text: [*c]const u8) c_int;
+extern "c" fn tvg_text_set_font(paint: *Tvg_Paint, name: [*c]const u8) c_int;
+extern "c" fn tvg_text_set_size(paint: *Tvg_Paint, size: f32) c_int;
+extern "c" fn tvg_text_set_color(paint: *Tvg_Paint, r: u8, g: u8, b: u8) c_int;
+extern "c" fn tvg_paint_translate(paint: *Tvg_Paint, x: f32, y: f32) c_int;
+extern "c" fn tvg_paint_get_aabb(paint: *Tvg_Paint, x: *f32, y: *f32, w_: *f32, h_: *f32) c_int;
+
+const default_font_data = @embedFile("fonts/Roboto-Regular.ttf");
+const FONT_SIZE: f32 = 16.0;
+const CHAR_WIDTH: f32 = 9.0; // approximate monospace width at 16px
+const LINE_HEIGHT: f32 = 22.0;
 
 extern fn stbi_write_png_to_mem(
     pixels: [*]const u8,
@@ -22,6 +49,524 @@ extern fn stbi_write_png_to_mem(
 
 fn stbiw_free(ptr: ?*anyopaque) void {
     if (ptr) |p| std.c.free(p);
+}
+
+// =============================================================================
+// Yoga Layout Integration
+// =============================================================================
+
+/// Context stored on each Yoga node to link back to the DOM element
+const NodeInfo = struct {
+    dom_node: *z.DomNode,
+    text_content: []const u8, // concatenated textContent of this element
+    bg_color: [4]u8, // RGBA
+    fg_color: [3]u8, // RGB
+    font_size: f32,
+    measured_width: f32 = 0, // ThorVG-measured text width (for leaf text elements)
+    measured_height: f32 = 0,
+};
+
+/// Measure callback for leaf elements with text — Yoga calls this for intrinsic size
+fn textMeasure(
+    node: yoga.c.YGNodeConstRef,
+    width: f32,
+    width_mode: yoga.c.YGMeasureMode,
+    _: f32,
+    _: yoga.c.YGMeasureMode,
+) callconv(.c) yoga.c.YGSize {
+    const info: *const NodeInfo = @ptrCast(@alignCast(yoga.c.YGNodeGetContext(node)));
+    const natural_w = if (info.measured_width > 0) info.measured_width else blk: {
+        const text_len: f32 = @floatFromInt(info.text_content.len);
+        break :blk text_len * CHAR_WIDTH;
+    };
+    const natural_h = if (info.measured_height > 0) info.measured_height else LINE_HEIGHT;
+
+    const result_w = switch (width_mode) {
+        yoga.c.YGMeasureModeExactly => width,
+        yoga.c.YGMeasureModeAtMost => @min(natural_w, width),
+        else => natural_w,
+    };
+
+    return .{ .width = result_w, .height = natural_h };
+}
+
+/// Recursively collect all textContent from a DOM subtree (like JS .textContent)
+fn collectTextContent(node: *z.DomNode, allocator: std.mem.Allocator) []const u8 {
+    var buf = std.ArrayList(u8).initCapacity(allocator, 64) catch return "";
+    collectTextContentInner(node, &buf, allocator);
+    // Collapse whitespace
+    const raw = buf.items;
+    const collapsed = collapseWhitespace(allocator, raw) orelse return "";
+    return collapsed;
+}
+
+fn collectTextContentInner(node: *z.DomNode, buf: *std.ArrayList(u8), allocator: std.mem.Allocator) void {
+    const nt = z.nodeType(node);
+    if (nt == .text) {
+        const text = z.nodeValue_zc(node);
+        buf.appendSlice(allocator, text) catch {};
+        return;
+    }
+    var child = z.firstChild(node);
+    while (child) |c_node| : (child = z.nextSibling(c_node)) {
+        collectTextContentInner(c_node, buf, allocator);
+    }
+}
+
+/// Check if an element has any non-inline element children.
+/// Known inline elements are treated as text; everything else (including
+/// custom elements) is block-level and triggers child recursion.
+fn hasBlockChildren(node: *z.DomNode) bool {
+    var child = z.firstChild(node);
+    while (child) |c_node| : (child = z.nextSibling(c_node)) {
+        if (z.nodeType(c_node) == .element) {
+            if (z.nodeToElement(c_node)) |el| {
+                if (!isInlineElement(z.tagName_zc(el))) return true;
+            }
+        }
+    }
+    return false;
+}
+
+fn isInlineElement(tag: []const u8) bool {
+    // Lexbor returns uppercase tag names
+    const inline_tags = [_][]const u8{
+        "SPAN", "A", "STRONG", "EM", "B", "I", "U", "S", "CODE", "KBD",
+        "VAR", "SAMP", "MARK", "SMALL", "SUB", "SUP", "ABBR", "CITE",
+        "Q", "DFN", "TIME", "DATA", "RUBY", "RT", "RP", "BDI", "BDO",
+        "WBR", "LABEL", "OUTPUT",
+    };
+    for (inline_tags) |it| {
+        if (std.mem.eql(u8, tag, it)) return true;
+    }
+    return false;
+}
+
+/// Build a Yoga tree from the DOM. Only element nodes become Yoga nodes.
+/// Leaf elements (no element children) get their textContent measured as a whole.
+fn buildYogaTree(
+    dom_node: *z.DomNode,
+    allocator: std.mem.Allocator,
+) ?yoga.Node {
+    const nt = z.nodeType(dom_node);
+    if (nt != .element) return null;
+
+    const yg = yoga.nodeNew();
+
+    const info = allocator.create(NodeInfo) catch return null;
+    info.* = .{
+        .dom_node = dom_node,
+        .text_content = "",
+        .bg_color = .{ 0, 0, 0, 0 },
+        .fg_color = .{ 0, 0, 0 },
+        .font_size = FONT_SIZE,
+    };
+
+    // Parse inline style and apply tag defaults
+    if (z.nodeToElement(dom_node)) |el| {
+        const tag = z.tagName_zc(el);
+
+        if (z.getAttribute_zc(el, "style")) |style_str| {
+            if (style_str.len > 0) {
+                applyInlineStyle(yg, info, style_str);
+            }
+        }
+
+        // Table row defaults: flex-direction row
+        if (std.mem.eql(u8, tag, "TR")) {
+            yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+        }
+    }
+
+    yoga.setContext(yg, info);
+
+    if (hasBlockChildren(dom_node)) {
+        // Has element children → recurse into them
+        var child_idx: usize = 0;
+        var child = z.firstChild(dom_node);
+        while (child) |c_node| : (child = z.nextSibling(c_node)) {
+            if (buildYogaTree(c_node, allocator)) |child_yg| {
+                yoga.insertChild(yg, child_yg, child_idx);
+                child_idx += 1;
+            }
+        }
+    } else {
+        // Leaf element → collect all text, measure it, use as intrinsic size
+        const text = collectTextContent(dom_node, allocator);
+        if (text.len > 0) {
+            info.text_content = text;
+            const measured = measureText(allocator, text, info.font_size);
+            info.measured_width = measured.w;
+            info.measured_height = measured.h;
+            yoga.setNodeType(yg, yoga.NODE_TYPE_TEXT);
+            yoga.setMeasureFunc(yg, textMeasure);
+        }
+    }
+
+    return yg;
+}
+
+/// Parse a CSS inline style string and apply properties to a Yoga node
+fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
+    var iter = std.mem.splitSequence(u8, style, ";");
+    while (iter.next()) |decl| {
+        const trimmed = std.mem.trim(u8, decl, " \t\n\r");
+        if (trimmed.len == 0) continue;
+
+        const colon = std.mem.indexOfScalar(u8, trimmed, ':') orelse continue;
+        const prop = std.mem.trim(u8, trimmed[0..colon], " \t");
+        const val = std.mem.trim(u8, trimmed[colon + 1 ..], " \t");
+
+        if (std.mem.eql(u8, prop, "display")) {
+            if (std.mem.eql(u8, val, "flex")) {
+                yoga.setDisplay(yg, yoga.DISPLAY_FLEX);
+            } else if (std.mem.eql(u8, val, "none")) {
+                yoga.setDisplay(yg, yoga.DISPLAY_NONE);
+            }
+        } else if (std.mem.eql(u8, prop, "flex-direction")) {
+            if (std.mem.eql(u8, val, "row")) {
+                yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+            } else if (std.mem.eql(u8, val, "column")) {
+                yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_COLUMN);
+            } else if (std.mem.eql(u8, val, "row-reverse")) {
+                yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW_REVERSE);
+            } else if (std.mem.eql(u8, val, "column-reverse")) {
+                yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_COLUMN_REVERSE);
+            }
+        } else if (std.mem.eql(u8, prop, "justify-content")) {
+            if (std.mem.eql(u8, val, "center")) {
+                yoga.setJustifyContent(yg, yoga.JUSTIFY_CENTER);
+            } else if (std.mem.eql(u8, val, "flex-start")) {
+                yoga.setJustifyContent(yg, yoga.JUSTIFY_FLEX_START);
+            } else if (std.mem.eql(u8, val, "flex-end")) {
+                yoga.setJustifyContent(yg, yoga.JUSTIFY_FLEX_END);
+            } else if (std.mem.eql(u8, val, "space-between")) {
+                yoga.setJustifyContent(yg, yoga.JUSTIFY_SPACE_BETWEEN);
+            } else if (std.mem.eql(u8, val, "space-around")) {
+                yoga.setJustifyContent(yg, yoga.JUSTIFY_SPACE_AROUND);
+            }
+        } else if (std.mem.eql(u8, prop, "align-items")) {
+            if (std.mem.eql(u8, val, "center")) {
+                yoga.setAlignItems(yg, yoga.ALIGN_CENTER);
+            } else if (std.mem.eql(u8, val, "flex-start")) {
+                yoga.setAlignItems(yg, yoga.ALIGN_FLEX_START);
+            } else if (std.mem.eql(u8, val, "flex-end")) {
+                yoga.setAlignItems(yg, yoga.ALIGN_FLEX_END);
+            } else if (std.mem.eql(u8, val, "stretch")) {
+                yoga.setAlignItems(yg, yoga.ALIGN_STRETCH);
+            }
+        } else if (std.mem.eql(u8, prop, "flex-wrap")) {
+            if (std.mem.eql(u8, val, "wrap")) {
+                yoga.setFlexWrap(yg, yoga.WRAP_WRAP);
+            } else if (std.mem.eql(u8, val, "nowrap")) {
+                yoga.setFlexWrap(yg, yoga.WRAP_NO_WRAP);
+            }
+        } else if (std.mem.eql(u8, prop, "flex-grow")) {
+            if (parseFloat(val)) |v| yoga.setFlexGrow(yg, v);
+        } else if (std.mem.eql(u8, prop, "flex-shrink")) {
+            if (parseFloat(val)) |v| yoga.setFlexShrink(yg, v);
+        } else if (std.mem.eql(u8, prop, "width")) {
+            applyDimension(yg, val, yoga.setWidth, yoga.setWidthPercent);
+        } else if (std.mem.eql(u8, prop, "height")) {
+            applyDimension(yg, val, yoga.setHeight, yoga.setHeightPercent);
+        } else if (std.mem.eql(u8, prop, "min-width")) {
+            applyDimension(yg, val, yoga.setMinWidth, null);
+        } else if (std.mem.eql(u8, prop, "min-height")) {
+            applyDimension(yg, val, yoga.setMinHeight, null);
+        } else if (std.mem.eql(u8, prop, "max-width")) {
+            applyDimension(yg, val, yoga.setMaxWidth, null);
+        } else if (std.mem.eql(u8, prop, "max-height")) {
+            applyDimension(yg, val, yoga.setMaxHeight, null);
+        } else if (std.mem.eql(u8, prop, "padding")) {
+            if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_ALL, v);
+        } else if (std.mem.eql(u8, prop, "padding-left")) {
+            if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_LEFT, v);
+        } else if (std.mem.eql(u8, prop, "padding-right")) {
+            if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_RIGHT, v);
+        } else if (std.mem.eql(u8, prop, "padding-top")) {
+            if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_TOP, v);
+        } else if (std.mem.eql(u8, prop, "padding-bottom")) {
+            if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_BOTTOM, v);
+        } else if (std.mem.eql(u8, prop, "margin")) {
+            if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_ALL, v);
+        } else if (std.mem.eql(u8, prop, "margin-left")) {
+            if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_LEFT, v);
+        } else if (std.mem.eql(u8, prop, "margin-right")) {
+            if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_RIGHT, v);
+        } else if (std.mem.eql(u8, prop, "margin-top")) {
+            if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_TOP, v);
+        } else if (std.mem.eql(u8, prop, "margin-bottom")) {
+            if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_BOTTOM, v);
+        } else if (std.mem.eql(u8, prop, "gap")) {
+            if (parsePixelValue(val)) |v| yoga.setGap(yg, yoga.c.YGGutterAll, v);
+        } else if (std.mem.eql(u8, prop, "background") or std.mem.eql(u8, prop, "background-color")) {
+            if (parseCSSColor(val)) |clr| {
+                info.bg_color = clr;
+            }
+        } else if (std.mem.eql(u8, prop, "color")) {
+            if (parseCSSColor(val)) |clr| {
+                info.fg_color = .{ clr[0], clr[1], clr[2] };
+            }
+        } else if (std.mem.eql(u8, prop, "font-family")) {
+            // monospace hint — adjust char width
+            if (std.mem.indexOf(u8, val, "monospace") != null) {
+                info.font_size = FONT_SIZE;
+            }
+        } else if (std.mem.eql(u8, prop, "font-size")) {
+            if (parsePixelValue(val)) |v| {
+                info.font_size = v;
+            }
+        }
+    }
+}
+
+fn applyDimension(
+    yg: yoga.Node,
+    val: []const u8,
+    set_px: fn (yoga.Node, f32) void,
+    set_pct: ?fn (yoga.Node, f32) void,
+) void {
+    if (std.mem.endsWith(u8, val, "%")) {
+        if (set_pct) |setter| {
+            if (parseFloat(val[0 .. val.len - 1])) |v| setter(yg, v);
+        }
+    } else if (std.mem.eql(u8, val, "auto")) {
+        // auto is the default, nothing to set
+    } else {
+        if (parsePixelValue(val)) |v| set_px(yg, v);
+    }
+}
+
+fn parsePixelValue(val: []const u8) ?f32 {
+    // Strip "px" suffix if present
+    const num = if (std.mem.endsWith(u8, val, "px"))
+        val[0 .. val.len - 2]
+    else
+        val;
+    return parseFloat(num);
+}
+
+fn parseFloat(s: []const u8) ?f32 {
+    return std.fmt.parseFloat(f32, s) catch null;
+}
+
+/// Measure text dimensions using ThorVG (requires engine + font already loaded)
+fn measureText(allocator: std.mem.Allocator, text: []const u8, font_size: f32) struct { w: f32, h: f32 } {
+    const paint = tvg_text_new() orelse return .{ .w = 0, .h = 0 };
+
+    const c_str = allocator.dupeZ(u8, text) catch return .{ .w = 0, .h = 0 };
+    defer allocator.free(c_str);
+
+    _ = tvg_text_set_font(paint, "Roboto");
+    _ = tvg_text_set_size(paint, font_size);
+    _ = tvg_text_set_text(paint, c_str.ptr);
+
+    var bx: f32 = 0;
+    var by: f32 = 0;
+    var bw: f32 = 0;
+    var bh: f32 = 0;
+    const rc = tvg_paint_get_aabb(paint, &bx, &by, &bw, &bh);
+    if (rc == 0) {
+        // aabb returns (x, y) origin + (w, h) size; total extent = origin + size
+        return .{ .w = bx + bw, .h = by + bh };
+    }
+    return .{ .w = 0, .h = 0 };
+}
+
+/// Collapse whitespace CSS-style: runs of whitespace → single space.
+/// Returns null on allocation failure. Returns empty slice if all whitespace.
+fn collapseWhitespace(allocator: std.mem.Allocator, raw: []const u8) ?[]const u8 {
+    // Quick check: is it all whitespace?
+    const trimmed = std.mem.trim(u8, raw, " \n\r\t");
+    if (trimmed.len == 0) return "";
+
+    var buf = allocator.alloc(u8, raw.len) catch return null;
+    var len: usize = 0;
+    var in_ws = false;
+    for (raw) |ch| {
+        if (ch == ' ' or ch == '\n' or ch == '\r' or ch == '\t') {
+            if (!in_ws) {
+                buf[len] = ' ';
+                len += 1;
+                in_ws = true;
+            }
+        } else {
+            buf[len] = ch;
+            len += 1;
+            in_ws = false;
+        }
+    }
+    return buf[0..len];
+}
+
+/// Parse simple CSS color values (named colors, #hex)
+fn parseCSSColor(val: []const u8) ?[4]u8 {
+    // Named colors
+    if (std.mem.eql(u8, val, "black")) return .{ 0, 0, 0, 255 };
+    if (std.mem.eql(u8, val, "white")) return .{ 255, 255, 255, 255 };
+    if (std.mem.eql(u8, val, "red")) return .{ 255, 0, 0, 255 };
+    if (std.mem.eql(u8, val, "green")) return .{ 0, 128, 0, 255 };
+    if (std.mem.eql(u8, val, "blue")) return .{ 0, 0, 255, 255 };
+    if (std.mem.eql(u8, val, "transparent")) return .{ 0, 0, 0, 0 };
+
+    // #RGB or #RRGGBB
+    if (val.len > 0 and val[0] == '#') {
+        const hex = val[1..];
+        if (hex.len == 3) {
+            const r = parseHexNibble(hex[0]) orelse return null;
+            const g = parseHexNibble(hex[1]) orelse return null;
+            const b = parseHexNibble(hex[2]) orelse return null;
+            return .{ r | (r << 4), g | (g << 4), b | (b << 4), 255 };
+        } else if (hex.len == 6) {
+            const r = parseHexByte(hex[0..2]) orelse return null;
+            const g = parseHexByte(hex[2..4]) orelse return null;
+            const b = parseHexByte(hex[4..6]) orelse return null;
+            return .{ r, g, b, 255 };
+        }
+    }
+    return null;
+}
+
+fn parseHexNibble(ch: u8) ?u8 {
+    if (ch >= '0' and ch <= '9') return ch - '0';
+    if (ch >= 'a' and ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' and ch <= 'F') return ch - 'A' + 10;
+    return null;
+}
+
+fn parseHexByte(hex: *const [2]u8) ?u8 {
+    const hi = parseHexNibble(hex[0]) orelse return null;
+    const lo = parseHexNibble(hex[1]) orelse return null;
+    return (hi << 4) | lo;
+}
+
+/// Walk the Yoga tree after layout and paint each node using ThorVG
+fn paintYogaTree(
+    yg: yoga.Node,
+    canvas: *Tvg_Canvas,
+    parent_x: f32,
+    parent_y: f32,
+    parent_fg: [3]u8,
+    allocator: std.mem.Allocator,
+) void {
+    const info: *const NodeInfo = @ptrCast(@alignCast(yoga.getContext(yg) orelse return));
+    const x = parent_x + yoga.getLeft(yg);
+    const y = parent_y + yoga.getTop(yg);
+    const node_w = yoga.getWidth(yg);
+    const node_h = yoga.getHeight(yg);
+
+    // Determine text color: inherit from parent if not explicitly set
+    const fg = if (info.fg_color[0] != 0 or info.fg_color[1] != 0 or info.fg_color[2] != 0)
+        info.fg_color
+    else
+        parent_fg;
+
+    // Paint background rectangle if element has one
+    if (info.bg_color[3] > 0) {
+        const shape = tvg_shape_new() orelse return;
+        _ = tvg_shape_append_rect(shape, x, y, node_w, node_h, 4, 4, true);
+        _ = tvg_shape_set_fill_color(shape, info.bg_color[0], info.bg_color[1], info.bg_color[2], info.bg_color[3]);
+        _ = tvg_canvas_add(canvas, shape);
+    }
+
+    // Paint text content if this is a leaf element with text
+    if (info.text_content.len > 0) {
+        const text_paint = tvg_text_new() orelse return;
+        const c_string = allocator.dupeZ(u8, info.text_content) catch return;
+        defer allocator.free(c_string);
+
+        _ = tvg_text_set_font(text_paint, "Roboto");
+        _ = tvg_text_set_size(text_paint, info.font_size);
+        _ = tvg_text_set_text(text_paint, c_string.ptr);
+        _ = tvg_text_set_color(text_paint, fg[0], fg[1], fg[2]);
+        _ = tvg_paint_translate(text_paint, x, y);
+        _ = tvg_canvas_add(canvas, text_paint);
+    }
+
+    // Paint children
+    const child_count = yoga.getChildCount(yg);
+    for (0..child_count) |i| {
+        const child_yg = yoga.getChild(yg, i);
+        paintYogaTree(child_yg, canvas, x, y, fg, allocator);
+    }
+}
+
+// =============================================================================
+// Public JS API
+// =============================================================================
+
+pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    if (argc < 1) return w.UNDEFINED;
+
+    const rc = RuntimeContext.get(ctx);
+
+    // 1. Extract the Lexbor DOM Node from the JS Argument (Arg 0)
+    var ptr = ctx.getOpaque(argv[0], rc.classes.html_element);
+    if (ptr == null) ptr = ctx.getOpaque(argv[0], rc.classes.dom_node);
+    if (ptr == null) {
+        std.debug.print("[Compositor] FATAL: Arg 0 is not a valid DOM Node!\n", .{});
+        return w.UNDEFINED;
+    }
+    const root_node: *z.DomNode = @ptrCast(@alignCast(ptr));
+
+    // 2. Optional filename (Arg 1) — if provided, save to disk; otherwise return ArrayBuffer
+    var filename: ?[]const u8 = null;
+    if (argc >= 2 and ctx.isString(argv[1])) {
+        filename = ctx.toZString(argv[1]) catch null;
+    }
+
+    const page_width: u32 = 800;
+    const page_height: u32 = 600;
+
+    // 3. Initialize ThorVG early (needed for text measurement during tree build)
+    _ = tvg_engine_init(0);
+    defer _ = tvg_engine_term();
+    _ = tvg_font_load_data("Roboto", default_font_data.ptr, default_font_data.len, "ttf", false);
+
+    // 4. Build Yoga layout tree from DOM (arena-allocated)
+    var arena = std.heap.ArenaAllocator.init(rc.allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    const yg_root = buildYogaTree(root_node, arena_alloc) orelse {
+        std.debug.print("[Compositor] Failed to build Yoga tree\n", .{});
+        return w.UNDEFINED;
+    };
+    defer yoga.nodeFreeRecursive(yg_root);
+
+    // Set root to fill the page
+    yoga.setWidth(yg_root, @floatFromInt(page_width));
+    yoga.setHeight(yg_root, @floatFromInt(page_height));
+
+    // 5. Calculate layout
+    yoga.calculateLayout(yg_root, @floatFromInt(page_width), @floatFromInt(page_height), yoga.DIRECTION_LTR);
+
+    // 6. Allocate pixel buffer
+    const master_buffer = rc.allocator.alloc(u32, page_width * page_height) catch return w.UNDEFINED;
+    defer rc.allocator.free(master_buffer);
+    @memset(master_buffer, 0xFFFFFFFF); // white background
+
+    const canvas = tvg_swcanvas_create(0) orelse return w.UNDEFINED;
+    defer _ = tvg_canvas_destroy(canvas);
+
+    _ = tvg_swcanvas_set_target(canvas, master_buffer.ptr, page_width, page_width, page_height, 2);
+
+    // 7. Paint the Yoga tree
+    std.debug.print("[Compositor] Painting with Yoga layout...\n", .{});
+    paintYogaTree(yg_root, canvas, 0, 0, .{ 0, 0, 0 }, arena_alloc);
+
+    // 8. Render and save
+    _ = tvg_canvas_draw(canvas, false);
+    _ = tvg_canvas_sync(canvas);
+
+    const master_u8: [*]const u8 = @ptrCast(master_buffer.ptr);
+    if (filename) |fname| {
+        defer ctx.freeZString(fname);
+        return saveToDisk(fname, master_u8, page_width, page_height);
+    } else {
+        return encodeToArrayBuffer(ctx, master_u8, page_width, page_height);
+    }
 }
 
 pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -41,20 +586,15 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
         600;
 
     // 1. Allocate the Master ARGB Buffer
-    // ThorVG defaults to ARGB8888 for software canvases
     const buffer_size = page_width * page_height;
     const master_buffer = rc.allocator.alloc(u32, buffer_size) catch {
         std.debug.print("[Compositor] FATAL: Could not allocate Master Buffer!\n", .{});
         return w.UNDEFINED;
     };
     defer rc.allocator.free(master_buffer);
-
-    // Fill with white background
     @memset(master_buffer, 0xFFFFFFFF);
 
-    // ---------------------------------------------------------
     // PHASE 1: Draw the Map Tiles (via stb_image)
-    // ---------------------------------------------------------
     const js_tiles = argv[0];
     const len_val = ctx.getPropertyStr(js_tiles, "length");
     defer ctx.freeValue(len_val);
@@ -92,23 +632,17 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
         }
     }
 
-    // ---------------------------------------------------------
     // PHASE 2: Overlay the GeoJSON SVG (via ThorVG)
-    // ---------------------------------------------------------
     const svg_str = ctx.toZString(argv[1]) catch return w.UNDEFINED;
     defer ctx.freeZString(svg_str);
 
-    // Use the safe Zig API — rasterizes SVG into RGBA pixels
     const svg_pixels = thorvg.rasterizeSVG(rc.allocator, svg_str, page_width, page_height) catch return w.UNDEFINED;
     defer rc.allocator.free(svg_pixels);
 
-    // Alpha-composite SVG overlay onto master buffer
     const svg_u32: [*]const u32 = @ptrCast(@alignCast(svg_pixels.ptr));
     alphaComposite(master_buffer, svg_u32, buffer_size);
 
-    // ---------------------------------------------------------
-    // PHASE 3: Encode PNG (in-memory or to disk)
-    // ---------------------------------------------------------
+    // PHASE 3: Encode PNG
     var filename: ?[]const u8 = null;
     if (argc >= 3 and ctx.isString(argv[2])) {
         filename = ctx.toZString(argv[2]) catch null;
@@ -126,7 +660,10 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
     }
 }
 
-/// Blit a decoded RGBA tile onto the master ARGB buffer at (tile_x, tile_y).
+// =============================================================================
+// Pixel helpers (unchanged)
+// =============================================================================
+
 fn blitTile(
     master: []u32,
     page_w: u32,
@@ -150,14 +687,12 @@ fn blitTile(
                 const g = px[src_idx + 1];
                 const b = px[src_idx + 2];
 
-                // Pack as ABGR little-endian (matches STB PNG output)
                 master[dst_idx] = 0xFF000000 | (@as(u32, b) << 16) | (@as(u32, g) << 8) | @as(u32, r);
             }
         }
     }
 }
 
-/// Alpha-composite an ABGR overlay onto the master ARGB buffer.
 fn alphaComposite(master: []u32, overlay: [*]const u32, count: usize) void {
     for (0..count) |i| {
         const src = overlay[i];
@@ -177,9 +712,7 @@ fn alphaComposite(master: []u32, overlay: [*]const u32, count: usize) void {
     }
 }
 
-/// Encode master buffer to PNG and return as JS ArrayBuffer.
 fn encodeToArrayBuffer(ctx: w.Context, master_u8: [*]const u8, width: u32, height: u32) w.Value {
-    std.debug.print("[Compositor] Generating PNG in memory...\n", .{});
     var out_len: c_int = 0;
 
     const png_c_ptr = stbi_write_png_to_mem(
@@ -191,18 +724,15 @@ fn encodeToArrayBuffer(ctx: w.Context, master_u8: [*]const u8, width: u32, heigh
         &out_len,
     );
 
-    if (png_c_ptr) |ptr| {
-        defer stbiw_free(ptr);
-        const js_buffer = ctx.newArrayBufferCopy(ptr[0..@intCast(out_len)]);
-        std.debug.print("[Compositor] Returning {} bytes to JS.\n", .{out_len});
-        return js_buffer;
+    if (png_c_ptr) |png_ptr| {
+        defer stbiw_free(png_ptr);
+        return ctx.newArrayBufferCopy(png_ptr[0..@intCast(out_len)]);
     } else {
         std.debug.print("[Compositor] Failed to encode PNG to memory!\n", .{});
         return w.UNDEFINED;
     }
 }
 
-/// Save master buffer to disk as PNG.
 fn saveToDisk(fname: []const u8, master_u8: [*]const u8, width: u32, height: u32) w.Value {
     std.debug.print("[Compositor] Saving final image to {s}...\n", .{fname});
 

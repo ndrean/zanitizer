@@ -35,8 +35,8 @@ pub fn install(ctx: zqjs.Context) !void {
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
 
-    // Create the zexplorer.fs namespace
-    const zexplorer_obj = ctx.getPropertyStr(global, "zexplorer");
+    // Create the zxp.fs namespace
+    const zexplorer_obj = ctx.getPropertyStr(global, "zxp");
     defer ctx.freeValue(zexplorer_obj);
 
     const fs_obj = ctx.newObject();

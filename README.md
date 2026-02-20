@@ -6,7 +6,7 @@
 Feed it HTML, get back structured data, PNG, JPEG, WEBP, SVG, or PDF.
 
 <p align="center">
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="500" height="500" />
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
 </p>
 
 `zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
@@ -48,21 +48,22 @@ Today, zexplorer is used as a **Zig library**. All the examples below work now.
 
 A native Zig engine that wires together purpose-built C/C++ libraries — no runtime dependencies:
 
-| Layer      | Library                                                                                         | Role                                |
-| ---------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
-| DOM & CSS  | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors  |
-| JavaScript | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT) |
-| Images     | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
-| SVG        | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
-| PDF        | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
-| Text       | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)   |
-| Network    | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
+| Layer            | Library                                                                                         | Role                                |
+| ---------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| DOM & CSS        | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors  |
+| JavaScript       | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT) |
+| Images           | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
+| SVG              | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
+| PDF              | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
+| Text             | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)   |
+| Network          | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
+| Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                  |
 
 Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 8MB footprint, 2ms cold start.
 
 ## Tested against js-framework-benchmark
 
-The engine runs real framework code from [js-framework-benchmark](https://github.com/krausest/js-framework-benchmark): React 19, Preact, SolidJS, Vue 3, Svelte 5, plus vanilla JS and D3/Chart.js/Leaflet.
+The engine runs real framework code from [js-framework-benchmark](https://github.com/krausest/js-framework-benchmark): React 19, Preact, SolidJS, Vue 3, Svelte 5, Lit-html.
 
 | Feature           | zexplorer                 | JSDOM           | Puppeteer       |
 | ----------------- | ------------------------- | --------------- | --------------- |

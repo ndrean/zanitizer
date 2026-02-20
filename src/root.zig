@@ -4,8 +4,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 // =======================================================================
-// === ThorVG bindings
+// === Yoga bindings
+pub const yoga = @import("yoga.zig");
+
 // =======================================================================
+// === ThorVG bindings
 
 pub const thorvg = @import("thorvg.zig");
 // NanoSVG — extern struct to access width/height without C shim
@@ -19,7 +22,7 @@ pub const NSVGrasterizer = opaque {};
 
 // ============================================================================
 // === QuickJS-ng bindings
-// ============================================================================
+
 pub const qjs = @cImport({
     @cInclude("quickjs.h");
 });
@@ -349,6 +352,7 @@ pub const isWhitespaceOnly = norm.isWhitespaceOnly;
 pub const minifyDOM = norm.minifyDOM;
 pub const minifyDOMwithOptions = norm.minifyDOMwithOptions;
 pub const minifyDOMForDisplay = norm.minifyDOMForDisplay;
+pub const minifyDOMForDisplayPreserveComments = norm.minifyDOMForDisplayPreserveComments;
 pub const MinifyOptions = norm.MinifyOptions;
 
 // String based minification

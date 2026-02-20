@@ -200,6 +200,24 @@ pub fn minifyDOMForDisplay(allocator: std.mem.Allocator, root_elt: *z.HTMLElemen
     );
 }
 
+/// Like minifyDOMForDisplay but preserves comment nodes (used by Lit, lit-html, etc.)
+pub fn minifyDOMForDisplayPreserveComments(allocator: std.mem.Allocator, root_elt: *z.HTMLElement) (std.mem.Allocator.Error || z.Err)!void {
+    var context = MinifyContext.init(allocator, .{ .skip_comments = false });
+    defer context.deinit();
+
+    z.simpleWalk(
+        z.elementToNode(root_elt),
+        aggressiveCollectorCallback,
+        &context,
+    );
+
+    try minifyPostWalkOperations(
+        allocator,
+        &context,
+        .{ .skip_comments = false },
+    );
+}
+
 pub const MinifyOptions = struct {
     skip_comments: bool = false, // Whether to remove comments
     // Note: Special elements (<pre>, <code>, <script>, <style>, <textarea>) are always preserved
@@ -351,10 +369,11 @@ fn aggressiveCollectorCallback(node: *z.DomNode, ctx: ?*anyopaque) callconv(.c) 
 
     switch (z.nodeType(node)) {
         .comment => {
-            // Always remove comments for clean display
-            context_ptr.nodes_to_remove.append(context_ptr.alloc(), node) catch {
-                return z._STOP;
-            };
+            if (context_ptr.options.skip_comments) {
+                context_ptr.nodes_to_remove.append(context_ptr.alloc(), node) catch {
+                    return z._STOP;
+                };
+            }
         },
         .element => {
             if (z.isTemplate(node)) {

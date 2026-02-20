@@ -17,6 +17,7 @@ extern "c" fn tvg_engine_init(threads: c_uint) c_int;
 extern "c" fn tvg_engine_term() c_int;
 extern "c" fn tvg_swcanvas_create(op: c_uint) ?*Tvg_Canvas;
 extern "c" fn tvg_canvas_destroy(canvas: *Tvg_Canvas) c_int;
+extern "c" fn tvg_shape_set_fill_color(paint: *Tvg_Paint, r: u8, g: u8, b: u8, a: u8) c_int;
 extern "c" fn tvg_swcanvas_set_target(canvas: *Tvg_Canvas, buffer: [*]u32, stride: u32, w: u32, h: u32, cs: c_uint) c_int;
 extern "c" fn tvg_canvas_add(canvas: *Tvg_Canvas, paint: *Tvg_Paint) c_int;
 extern "c" fn tvg_canvas_draw(canvas: *Tvg_Canvas, clear: bool) c_int;
@@ -756,7 +757,6 @@ fn js_html_image_set_src(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_i
     } else if (std.mem.startsWith(u8, src_str, "blob:")) {
         if (rc.blob_registry.get(src_str)) |blob_val| {
             if (ctx.getOpaqueAs(js_blob.BlobObject, blob_val, rc.classes.blob)) |blob| {
-
                 if (self.bitmap) |b| b.deinit();
 
                 if (Image.initFromMemory(self.allocator, blob.data)) |new_img| {

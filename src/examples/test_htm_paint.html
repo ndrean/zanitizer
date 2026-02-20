@@ -1,0 +1,41 @@
+<html>
+  <head>
+    <script>
+      const { html } = zxp;
+      const name = "Zexplorer";
+      const version = "0.1.0";
+      const features = ["Lexbor DOM", "QuickJS", "Yoga Layout", "ThorVG"];
+
+      const card = html`
+        <div style=${{
+          background: "#1a1a2e",
+          color: "#e0e0e0",
+          padding: "20px",
+        }}>
+          <div style=${{
+            background: "#16213e",
+            padding: "10px",
+            color: "#f7a41d",
+          }}>
+            ${name} v${version}
+          </div>
+          <ul style=${{ padding: "10px" }}>
+            ${features.map(
+              (f) => html`
+                <li style=${{
+                  background: "#0f3460",
+                  padding: "5px",
+                  margin: "4px",
+                  color: "#e94560",
+                }}>${f}</li>
+              `
+            )}
+          </ul>
+        </div>
+      `;
+
+      document.body.appendChild(card);
+    </script>
+  </head>
+  <body></body>
+</html>

@@ -65,10 +65,42 @@ compile_module "htm-standalone" \
     "https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.mjs" \
     "htm-preact-standalone"
 
+# htm + DOM h() bridge (built by Bun, no Preact VDOM overhead)
+compile_local() {
+    local name="$1"
+    local src_file="$2"
+    local output="$3"
+
+    local bc_file="$BYTECODE_DIR/${output}.bc"
+
+    echo ""
+    echo "Processing: $name (local)"
+    echo "  Source: $src_file"
+
+    if [ ! -f "$src_file" ]; then
+        echo "  Error: $src_file not found. Run: cd src/examples/zexp-frams && bun run build_htm.js"
+        return
+    fi
+
+    echo "  Compiling to bytecode..."
+    if qjsc -c -o "$bc_file" "$src_file" 2>/dev/null; then
+        local size=$(wc -c < "$bc_file" | tr -d ' ')
+        local src_size=$(wc -c < "$src_file" | tr -d ' ')
+        echo "  Done: $bc_file ($size bytes, source was $src_size bytes)"
+    else
+        echo "  Warning: qjsc failed for $name"
+    fi
+}
+
+compile_local "htm-dom" \
+    "src/examples/vendor/htm.js" \
+    "htm-dom"
+
 echo ""
 echo "=== Bytecode Generation Complete ==="
 echo ""
 echo "To use in Zig, add to js_bytecode.zig:"
 echo '  .{ "preact", @embedFile("../vendor/bytecode/preact.bc") },'
+echo '  .{ "htm", @embedFile("../vendor/bytecode/htm-dom.bc") },'
 echo ""
 ls -la "$BYTECODE_DIR"

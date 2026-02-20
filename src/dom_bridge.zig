@@ -399,6 +399,8 @@ pub const DOMBridge = struct {
         // Compositor: generateRoutePng(mapData, svgString, filename)
         try ctx.setPropertyStr(global, "__native_generateRoutePng", ctx.newCFunction(js_compositor.js_generateRoutePng, "generateRoutePng", 5));
 
+        try ctx.setPropertyStr(global, "__paintDOM", ctx.newCFunction(js_compositor.js_paintDOM, "paintDOM", 5));
+
         // HTMLElement constructor is now exposed in init() before polyfills
 
         {
@@ -1224,42 +1226,11 @@ fn js_insertBefore(
     else
         null;
 
-    // DEBUG: trace ALL insertBefore calls + verify comment parentNode after
-    {
-        const parent_tag = if (z.nodeToElement(parent)) |pe| z.tagName_zc(pe) else "#node";
-        const child_tag = switch (z.nodeType(new_child)) {
-            .element => if (z.nodeToElement(new_child)) |ce| z.tagName_zc(ce) else "?el",
-            .text => "#text",
-            .comment => "#comment",
-            .document_fragment => "#fragment",
-            else => "#other",
-        };
-        z.print("[Zig insertBefore] {s} into {s} (ref={s})\n", .{ child_tag, parent_tag, if (ref_child != null) "node" else "null" });
-    }
-
     if (z.parentNode(new_child)) |_| {
         z.removeNode(new_child);
     }
 
     if (z.nodeType(new_child) == .document_fragment) {
-        // DEBUG: list all fragment children before moving
-        {
-            const parent_tag = if (z.nodeToElement(parent)) |pe| z.tagName_zc(pe) else "#node";
-            var dbg_child = z.firstChild(new_child);
-            var idx: u32 = 0;
-            while (dbg_child) |dc| : (idx += 1) {
-                const ct = switch (z.nodeType(dc)) {
-                    .element => if (z.nodeToElement(dc)) |dce| z.tagName_zc(dce) else "?el",
-                    .text => "#text",
-                    .comment => "#comment",
-                    .document_fragment => "#frag",
-                    else => "#other",
-                };
-                z.print("[Zig insertBefore] FRAG child [{d}] = {s} into {s}\n", .{ idx, ct, parent_tag });
-                dbg_child = z.nextSibling(dc);
-            }
-        }
-
         var frag_child = z.firstChild(new_child);
         while (frag_child) |fc| {
             const next = z.nextSibling(fc);
@@ -1267,18 +1238,6 @@ fn js_insertBefore(
             _ = z.jsInsertBefore(parent, fc, ref_child) catch
                 return ctx.throwTypeError("NotFoundError: refChild is not a child of parent");
             frag_child = next;
-        }
-
-        // DEBUG: verify comment nodes have proper parentNode after fragment move
-        {
-            var vc = z.firstChild(parent);
-            while (vc) |vn| {
-                if (z.nodeType(vn) == .comment) {
-                    const has_parent = z.parentNode(vn) != null;
-                    z.print("[Zig insertBefore] VERIFY: comment parentNode={s}\n", .{if (has_parent) "OK" else "NULL!"});
-                }
-                vc = z.nextSibling(vn);
-            }
         }
 
         return DOMBridge.wrapNode(ctx, new_child) catch return w.EXCEPTION;
@@ -1390,32 +1349,6 @@ fn js_importNode(
     // Use lexbor's native importNode which handles ownerDocument adoption
     const result = z.importNode(node, doc, deep) orelse
         return ctx.throwTypeError("importNode failed");
-
-    // DEBUG: walk imported node subtree to check for comments
-    if (z.nodeType(result) == .document_fragment) {
-        std.debug.print("[importNode] cloned fragment subtree:\n", .{});
-        const Walker = struct {
-            fn walk(n: *z.DomNode, depth: u32) void {
-                var child = z.firstChild(n);
-                while (child) |c| {
-                    const nt = z.nodeType(c);
-                    const ind = @min(depth * 2, 20);
-                    const spc: [20]u8 = .{' '} ** 20;
-                    if (nt == .comment) {
-                        std.debug.print("[importNode] {s}COMMENT: {s}\n", .{ spc[0..ind], z.textContent_zc(c) });
-                    } else if (nt == .element) {
-                        const t = if (z.nodeToElement(c)) |ce| z.tagName_zc(ce) else "?";
-                        std.debug.print("[importNode] {s}<{s}>\n", .{ spc[0..ind], t });
-                    } else if (nt == .text) {
-                        std.debug.print("[importNode] {s}#text\n", .{spc[0..ind]});
-                    }
-                    walk(c, depth + 1);
-                    child = z.nextSibling(c);
-                }
-            }
-        };
-        Walker.walk(result, 1);
-    }
 
     return DOMBridge.wrapNode(ctx, result) catch return w.EXCEPTION;
 }
@@ -2054,20 +1987,6 @@ fn js_set_innerHTML(ctx_ptr: ?*z.qjs.JSContext, this_val: zqjs.Value, argc: c_in
     const el = unwrapElement(ctx, this_val, "Setter called on object that is not an HTMLElement") orelse return w.EXCEPTION;
     const val_str = ctx.toZString(argv[0]) catch return w.EXCEPTION;
     defer ctx.freeZString(val_str);
-
-    // DEBUG: trace innerHTML setter on templates
-    {
-        const tag = z.tagName_zc(el);
-        if (std.mem.eql(u8, tag, "TEMPLATE")) {
-            const len = val_str.len;
-            const show = if (len > 300) val_str[0..300] else val_str;
-            std.debug.print("\n[Zig innerHTML] TEMPLATE set ({d} chars):\n{s}\n", .{ len, show });
-
-            // Check if this is actually a template element
-            const is_template = z.elementToTemplate(el) != null;
-            std.debug.print("[Zig innerHTML] isTemplate={}, tag={s}\n", .{ is_template, z.tagName_zc(el) });
-        }
-    }
 
     if (rc.sanitize_enabled) {
         const sanitizer_mod = @import("modules/sanitizer.zig");

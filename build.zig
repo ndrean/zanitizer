@@ -9,6 +9,7 @@ const Paths = struct {
     nanosvg_src: std.Build.LazyPath,
     libwebp_src: std.Build.LazyPath,
     thorvg_src: std.Build.LazyPath,
+    yoga_src: std.Build.LazyPath,
     miniz_src: std.Build.LazyPath,
     libharu_include: std.Build.LazyPath,
     fake_zlib: std.Build.LazyPath,
@@ -19,6 +20,7 @@ const Libraries = struct {
     qjs: *std.Build.Step.Compile,
     webp: *std.Build.Step.Compile,
     thorvg: *std.Build.Step.Compile,
+    yoga: *std.Build.Step.Compile,
     miniz: *std.Build.Step.Compile,
     haru: *std.Build.Step.Compile,
     zexplorer: *std.Build.Step.Compile,
@@ -36,6 +38,7 @@ pub fn build(b: *std.Build) void {
         .nanosvg_src = b.path("src/c"),
         .libwebp_src = b.path("vendor/libwebp/src"),
         .thorvg_src = b.path("vendor/thorvg"),
+        .yoga_src = b.path("vendor/yoga"),
         .miniz_src = b.path("vendor/miniz"),
         .libharu_include = b.path("vendor/libharu/include"),
         .fake_zlib = b.path("vendor/fake_zlib"),
@@ -46,6 +49,7 @@ pub fn build(b: *std.Build) void {
         .qjs = buildQuickJS(b, target, optimize, paths),
         .webp = buildLibWebP(b, target, optimize, paths),
         .thorvg = buildThorVG(b, target, optimize, paths),
+        .yoga = buildYoga(b, target, optimize, paths),
         .miniz = buildMiniz(b, target, optimize, paths),
         .haru = buildLibHaru(b, target, optimize, paths),
         .zexplorer = buildZexplorerLib(b, target, optimize, paths),
@@ -55,6 +59,7 @@ pub fn build(b: *std.Build) void {
     libs.zexplorer.linkLibrary(libs.qjs);
     libs.zexplorer.linkLibrary(libs.webp);
     libs.zexplorer.linkLibrary(libs.thorvg);
+    libs.zexplorer.linkLibrary(libs.yoga);
     libs.zexplorer.linkLibrary(libs.miniz);
     libs.zexplorer.linkLibrary(libs.haru);
 
@@ -172,6 +177,53 @@ fn buildLibWebP(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
         .files = &.{ "sharpyuv.c", "sharpyuv_cpu.c", "sharpyuv_csp.c", "sharpyuv_dsp.c", "sharpyuv_gamma.c", "sharpyuv_neon.c", "sharpyuv_sse2.c" },
         .flags = &.{"-O3"},
     });
+    return lib;
+}
+
+fn buildYoga(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .name = "yoga",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    lib.linkLibC();
+    lib.linkLibCpp();
+
+    const yoga_flags = &.{
+        "-xc++",
+        "-std=c++20",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-Wno-everything",
+    };
+
+    // Yoga headers are included as <yoga/Yoga.h> so we add the parent dir
+    lib.addIncludePath(paths.yoga_src);
+
+    const yoga_src_dirs = [_][]const u8{
+        "vendor/yoga/yoga",
+        "vendor/yoga/yoga/algorithm",
+        "vendor/yoga/yoga/config",
+        "vendor/yoga/yoga/debug",
+        "vendor/yoga/yoga/event",
+        "vendor/yoga/yoga/node",
+    };
+
+    for (yoga_src_dirs) |dir_path| {
+        var dir = b.build_root.handle.openDir(dir_path, .{ .iterate = true }) catch |err| {
+            std.debug.panic("Failed to open dir {s}: {}", .{ dir_path, err });
+        };
+        defer dir.close();
+        var walker = dir.iterate();
+        while (walker.next() catch null) |entry| {
+            if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".cpp")) {
+                lib.addCSourceFile(.{
+                    .file = b.path(b.pathJoin(&.{ dir_path, entry.name })),
+                    .flags = yoga_flags,
+                });
+            }
+        }
+    }
     return lib;
 }
 
@@ -298,6 +350,7 @@ fn buildZexplorerModule(
     mod.linkLibrary(libs.qjs);
     mod.linkLibrary(libs.webp);
     mod.linkLibrary(libs.thorvg);
+    mod.linkLibrary(libs.yoga);
     mod.linkLibrary(libs.miniz);
     mod.linkLibrary(libs.haru);
     mod.addIncludePath(paths.quickjs_src);
@@ -306,6 +359,7 @@ fn buildZexplorerModule(
     mod.addIncludePath(paths.nanosvg_src);
     mod.addIncludePath(paths.libwebp_src);
     mod.addIncludePath(paths.thorvg_src);
+    mod.addIncludePath(paths.yoga_src);
     mod.addIncludePath(paths.miniz_src);
     mod.addIncludePath(paths.libharu_include);
     mod.addIncludePath(paths.fake_zlib);
@@ -324,6 +378,7 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
     artifact.addIncludePath(paths.nanosvg_src);
     artifact.addIncludePath(paths.libwebp_src);
     artifact.addIncludePath(paths.thorvg_src);
+    artifact.addIncludePath(paths.yoga_src);
     artifact.addIncludePath(paths.libharu_include);
     artifact.addIncludePath(paths.miniz_src);
     artifact.addIncludePath(paths.fake_zlib);
@@ -333,6 +388,7 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
     artifact.linkLibrary(libs.qjs);
     artifact.linkLibrary(libs.webp);
     artifact.linkLibrary(libs.thorvg);
+    artifact.linkLibrary(libs.yoga);
     artifact.linkLibrary(libs.miniz);
     artifact.linkLibrary(libs.haru);
 }
