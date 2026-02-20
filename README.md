@@ -2,8 +2,7 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-**Run standard JavaScript against a real DOM — without a browser.**
-Feed it HTML, get back structured data, PNG, JPEG, WEBP, SVG, or PDF.
+A native DOM + JS runtime with Flexbox layout and raster compositing for content pipelines: feed it HTML, SVG, ES2020 JavaSccript against a real DOM, and get back structured data, PNG, JPEG, WEBP, SVG, or PDF, without a browser.
 
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
@@ -59,16 +58,16 @@ zxp sanitize dirty.html --css style.css -o clean.html
 
 A native Zig engine that wires together purpose-built C/C++ libraries — no runtime dependencies:
 
-| Layer            | Library                                                                                         | Role                                |
-| ---------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
-| DOM & CSS        | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors  |
-| JavaScript       | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT) |
-| Images           | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
-| SVG              | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
-| PDF              | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
-| Text             | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)   |
-| Network          | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
-| Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                  |
+| Layer                    | Library                                                                                         | Role                                |
+| ------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
+| DOM & CSS                | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors  |
+| JavaScript               | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT) |
+| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
+| Raster rendering         | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
+| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
+| Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)   |
+| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
+| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                  |
 
 Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 8MB footprint, 2ms cold start.
 
