@@ -1,6 +1,15 @@
+//! Layout flow with `Yoga` & `Thorvg`
+//! - It traverses the Lexbor DOM , parses the inline CSS styles (like display: flex, padding, background)
+//! - maps them to `YGNode` properties
+//! - Uses custom measurement function `textMeasure()` using `ThorVG` to calculate the intrinsic size of text blocks
+//!
+//! Pass 2 (paintYogaTree): After calling `yoga.calculateLayout`, it
+//! - walks the calculated tree,
+//! - extracts the absolute X and Y coordinates (yoga.getLeft, yoga.getTop),
+//! - tells ThorVG to draw the rectangles and text exactly where Yoga positioned them
+
 const std = @import("std");
 const z = @import("root.zig");
-const yoga = @import("yoga.zig");
 const RuntimeContext = z.RuntimeContext;
 const qjs = z.qjs;
 const w = z.wrapper;
@@ -10,9 +19,15 @@ const stbi = @cImport({
 const stbi_write = @cImport({
     @cInclude("stb_image_write.h");
 });
+
+const yoga = z.yoga;
 const thorvg = z.thorvg;
 const Tvg_Canvas = thorvg.Tvg_Canvas;
 const Tvg_Paint = thorvg.Tvg_Paint;
+
+// =============================================================================
+// Thorvg C-API
+// =============================================================================
 extern "c" fn tvg_engine_init(threads: c_uint) c_int;
 extern "c" fn tvg_engine_term() c_int;
 extern "c" fn tvg_swcanvas_create(op: c_uint) ?*Tvg_Canvas;
@@ -131,10 +146,9 @@ fn hasBlockChildren(node: *z.DomNode) bool {
 fn isInlineElement(tag: []const u8) bool {
     // Lexbor returns uppercase tag names
     const inline_tags = [_][]const u8{
-        "SPAN", "A", "STRONG", "EM", "B", "I", "U", "S", "CODE", "KBD",
-        "VAR", "SAMP", "MARK", "SMALL", "SUB", "SUP", "ABBR", "CITE",
-        "Q", "DFN", "TIME", "DATA", "RUBY", "RT", "RP", "BDI", "BDO",
-        "WBR", "LABEL", "OUTPUT",
+        "SPAN", "A",    "STRONG", "EM",    "B",   "I",   "U",    "S",    "CODE",  "KBD",
+        "VAR",  "SAMP", "MARK",   "SMALL", "SUB", "SUP", "ABBR", "CITE", "Q",     "DFN",
+        "TIME", "DATA", "RUBY",   "RT",    "RP",  "BDI", "BDO",  "WBR",  "LABEL", "OUTPUT",
     };
     for (inline_tags) |it| {
         if (std.mem.eql(u8, tag, it)) return true;

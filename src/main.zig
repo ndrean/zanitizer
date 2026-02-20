@@ -47,10 +47,20 @@ pub fn setupSignalHandler() void {
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
 }
 
+pub const TargetFormat = enum {
+    binary_png,
+    binary_jpeg,
+    binary_pdf,
+    json_data,
+    raw_text,
+};
+
+var debug_gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = debug_gpa.allocator();
+    defer {
+        _ = .ok == debug_gpa.deinit();
+    }
 
     const sandbox_root = try std.fs.cwd().realpathAlloc(allocator, ".");
     defer allocator.free(sandbox_root);

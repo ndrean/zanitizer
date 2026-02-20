@@ -11,6 +11,19 @@ Feed it HTML, get back structured data, PNG, JPEG, WEBP, SVG, or PDF.
 
 `zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
 
+**TL;DR**
+
+> - Cold start: 2ms
+> - Memory: 10MB
+> - Zero dependencies. Single binary.
+> - Features JavaScript ES2020
+> - Embeds `Roboto-Regular` and `Arial` fonts
+> - JSX support via "tagged templates" with `htm` embedded
+> - SVG, PNG, JPEG, WEBP, PDF support
+> - Layout rendering (`Flexbox`)
+
+Today, `zexplorer` is used as a **Zig library**. Check the examples.
+
 **CLI: WIP** — planned interface:
 
 ```sh
@@ -30,19 +43,17 @@ curl https://sketchy.site | zxp sanitize -
 zxp sanitize dirty.html --css style.css -o clean.html
 ```
 
-Today, zexplorer is used as a **Zig library**. All the examples below work now.
-
-> Cold start: 2ms. Memory: 8MB. No dependencies. Single binary.
-
 ---
 
 ## What can it do?
 
 - **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
-- **Render** — take any HTML+JS (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
+- **Render** — take any HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
 - **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
 - **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
-- **Run JS** — execute ES6 scripts against a real DOM with fetch, timers, workers, and an event loop.
+- **Run JS** — execute ES2020 scripts against a real DOM with fetch, timers, workers, and an event loop.
+
+> ❗️No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
 
 ## How is it built?
 
@@ -1941,7 +1952,7 @@ The goal is to be as performant as [DOMPurify](https://github.com/cure53/DOMPuri
 
 This is a two phase process. We firstly parse the input into a real DocumentFragment. It walks the tree DOM and attributes, URIs and CSS (parsed & sanitized). It applies whitelist and [html_specs rules](https://github.com/ndrean/zexplorer/blob/main/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
 
-There are settings for the sanitizer (remove comments, remove/keep <script>, <style>, custom elements, allow framework attributes, embedded media with attributes in context...). Preset built-in modes are proposed but can be customized per run 
+There are settings for the sanitizer (remove comments, remove/keep `<script>`, `<style>`, custom elements, allow framework attributes, embedded media with attributes in context...). Preset built-in modes are proposed but can be customized per run 
 
 **TODO**: CL-args to run sanitization only with args
 
@@ -3173,9 +3184,11 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 - `quickjs` [License MIT](https://github.com/quickjs-ng/quickjs/blob/master/LICENSE)
 - `libwebp` [License BSD3](https://github.com/webmproject/libwebp/blob/main/COPYING)
 - `thorvg` [License MIT](https://github.com/thorvg/thorvg/blob/master/LICENSE)
+- `yoga` [License MIT](https://github.com/facebook/yoga/blob/main/LICENSE)
 - `stb_image` [License MIT](https://github.com/nothings/stb/blob/master/LICENSE)
 - `zig-quickjs` [License MIT](https://github.com/nDimensional/zig-quickjs/blob/main/LICENSE)
 - `zig-curl` [License MIT](https://github.com/jiacai2050/zig-curl/blob/main/LICENSE)
+- `htm`[htm](https://github.com/developit/htm/blob/master/LICENSE)
 
 ---
 
@@ -3187,21 +3200,27 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ───────────────────────────────────────────────────────────────────────────────
 Language            Files       Lines    Blanks  Comments       Code Complexity
 ───────────────────────────────────────────────────────────────────────────────
-Zig                   120      64,448     5,480     6,105     52,863      9,450
-JavaScript             23       2,459       253       165      2,041        205
-HTML                   20       5,190       494       152      4,544          0
-Markdown                5       2,662       647         0      2,015          0
-JSON                    3          32         0         0         32          0
-C                       1         210        34        39        137         29
+Zig                   179      81,092     7,497     7,766     65,829     10,895
+JavaScript             69       7,082       545       326      6,211      1,023
+HTML                   51       8,292       973       154      7,165          0
+SVG                     9         302        36        22        244          0
+Markdown                8       4,740     1,187         0      3,553          0
+JSON                    6       1,160         3         0      1,157          0
+JSX                     3         336        41         3        292          7
+Plain Text              3         346        57         0        289          0
+C                       2         341        55        72        214         61
+CSS                     2          24         2         0         22          0
 License                 1          21         4         0         17          0
-Plain Text              1         332        57         0        275          0
+Shell                   1         106        19        14         73          7
+Svelte                  1         181         6         0        175          3
+TypeScript              1           1         0         0          1          0
 ───────────────────────────────────────────────────────────────────────────────
-Total                 174      75,354     6,969     6,461     61,924      9,684
+Total                 336     104,024    10,425     8,357     85,242     11,996
 ───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $2,056,114
-Estimated Schedule Effort (organic) 18.09 months
-Estimated People Required (organic) 10.10
+Estimated Cost to Develop (organic) $2,875,952
+Estimated Schedule Effort (organic) 20.55 months
+Estimated People Required (organic) 12.44
 ───────────────────────────────────────────────────────────────────────────────
-Processed 3039412 bytes, 3.039 megabytes (SI)
+Processed 5152069 bytes, 5.152 megabytes (SI)
 ───────────────────────────────────────────────────────────────────────────────
 ```
