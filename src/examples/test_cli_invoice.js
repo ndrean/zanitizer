@@ -1,39 +1,37 @@
-// Invoice PDF Generator — SVG visual layer + real searchable PDF text
-//
-// The SVG template handles all decorative elements (header bar, accent stripe,
-// table borders, totals box, footer). Real PDF text is laid on top so it stays
-// searchable, selectable, and accessible in any PDF reader.
+// src/examples/generate_invoice.js
 
-async function handlePdfGenerationRequest(data) {
-  console.log("Generating invoice PDF...");
+// 1. Get the JSON data path from the CLI arguments (fallback to a default if testing)
+async function generateInvoice() {
+  const dataPath = zxp.args[0];
 
-  // --- 1. Load resources ---
+  // || "file://src/examples/test_cli_invoice_data.json";
+  console.log(`[JS] Loading invoice data from: ${dataPath}`);
+
+  const dataRes = await fetch(dataPath);
+  const data = await dataRes.json();
+
+  console.log(
+    `[JS] Generating invoice ${data.invoiceNumber} for ${data.company}...`,
+  );
+
   const templateRes = await fetch(
-    "file://src/examples/test_invoice_template.svg",
+    "file://src/examples/test_cli_invoice_template.svg",
   );
   const svgText = await templateRes.text();
-  console.log("SVG template loaded:", svgText.length, "chars");
 
   const logoRes = await fetch(data.logoUrl);
   const logoBlob = await logoRes.blob();
-  console.log("Logo loaded:", logoBlob.size, "bytes");
 
   // Rasterize SVG background and decode logo
   const svgBlob = new Blob([svgText], { type: "image/svg+xml" });
   const bgBitmap = await createImageBitmap(svgBlob);
-  console.log("SVG rasterized:", bgBitmap.width, "x", bgBitmap.height);
-
   const logoBitmap = await createImageBitmap(logoBlob);
-  console.log("Logo decoded:", logoBitmap.width, "x", logoBitmap.height);
 
-  // Create PDF and draw background layer ---
+  // Create PDF and draw background layer
   const pdf = new PDFDocument();
   pdf.addPage();
-
-  // Draw the SVG background (fills the entire A4 page)
   pdf.drawImage(bgBitmap, 0, 0, 595, 842);
 
-  // Draw logo in the header — circular clip like a profile avatar
   pdf.saveGraphicsState();
   pdf.arc(80, 60, 35, 0, 2 * Math.PI); // circle centered on the 70x70 logo area
   pdf.clip();
@@ -130,42 +128,4 @@ async function handlePdfGenerationRequest(data) {
   return pdf.toArrayBuffer();
 }
 
-// Default test data
-async function generateTestInvoice() {
-  try {
-    return await handlePdfGenerationRequest({
-      company: "Zexplorer Labs",
-      companyEmail: "billing@zexplorer.dev",
-      logoUrl: "https://github.com/ndrean.png",
-      invoiceNumber: "INV-2025-0042",
-      date: "2025-02-15",
-      dueDate: "2025-03-15",
-      customerName: "Linus Torvalds",
-      customerAddress: "1 Open Source Way, Portland OR",
-      customerEmail: "torvalds@linux-foundation.org",
-      taxRate: 0.2,
-      items: [
-        {
-          description: "Headless DOM Engine — Annual License",
-          qty: 1,
-          price: 2400.0,
-        },
-        {
-          description: "SVG Rasterization Add-on (ThorVG)",
-          qty: 1,
-          price: 800.0,
-        },
-        {
-          description: "PDF Generation Module (LibHaru)",
-          qty: 1,
-          price: 600.0,
-        },
-      ],
-    });
-  } catch (e) {
-    console.error("Invoice generation failed:", e);
-    if (e && e.message) console.error("  message:", e.message);
-    if (e && e.stack) console.error("  stack:", e.stack);
-    throw e;
-  }
-}
+generateInvoice();

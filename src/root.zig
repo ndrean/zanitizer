@@ -523,6 +523,7 @@ pub const isMathMLAttributeSafe = specs.isMathMLAttributeSafe;
 
 pub const initDocumentCSS = styles.initDocumentCSS;
 pub const destroyDocumentCSS = styles.destroyDocumentCSS;
+pub const destroyDocumentStylesheets = styles.destroyDocumentStylesheets;
 pub const createStylesheet = styles.createStylesheet;
 pub const destroyStylesheet = styles.destroyStylesheet;
 pub const parseStylesheet = styles.parseStylesheet;
@@ -724,6 +725,6 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
 /// Write directly to stdout (unbuffered). Use for program output
 /// (console.log, prettyPrint, etc). For debug diagnostics, use std.debug.print.
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    var w = std.fs.File.stdout().writer(&.{});
+    var w = std.fs.File.stderr().writer(&.{});
     w.interface.print(fmt, args) catch {};
 }

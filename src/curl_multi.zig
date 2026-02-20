@@ -262,14 +262,17 @@ pub const CurlMulti = struct {
     }
 
     pub fn deinit(self: *CurlMulti) void {
-        // Clean up any remaining pending requests
+        // Remove and clean up any remaining pending requests.
+        // libcurl requires curl_multi_remove_handle BEFORE curl_easy_cleanup.
         var it = self.pending.valueIterator();
         while (it.next()) |req| {
+            self.multi.removeHandle(req.*.easy.handle) catch {};
             req.*.deinit(self.allocator);
         }
         self.pending.deinit();
 
-        self.multi.deinit();
+        // zig-curl Multi.deinit() is a no-op — call curl_multi_cleanup directly.
+        _ = c.curl_multi_cleanup(self.multi.multi);
         self.allocator.destroy(self);
     }
 

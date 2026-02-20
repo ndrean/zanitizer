@@ -10,6 +10,7 @@
 #include <lexbor/css/rule.h>
 #include <lexbor/css/declaration.h>
 #include <lexbor/css/selectors/selectors.h>
+#include <lexbor/style/dom/interfaces/document.h>
 
 // ============================================================================
 // Stylesheet Access
@@ -128,4 +129,38 @@ void zexp_css_at_rule_get_prelude_offsets(lxb_css_rule_t *rule,
     lxb_css_rule_at_t *at = (lxb_css_rule_at_t*)rule;
     if (prelude_begin) *prelude_begin = at->prelude_begin;
     if (prelude_end) *prelude_end = at->prelude_end;
+}
+
+// ============================================================================
+// Document stylesheet cleanup
+// ============================================================================
+
+// Destroy all stylesheets attached to the document's CSS state.
+// lexbor_array_destroy() only frees the array pointer, not the individual
+// stylesheet objects. Each stylesheet has its own memory pool that must be
+// freed via lxb_css_stylesheet_destroy(sst, true).
+// Call this BEFORE lxb_dom_document_css_destroy() to avoid leaks.
+void zexp_destroy_document_stylesheets(lxb_dom_document_t *document)
+{
+    if (document == NULL || document->css == NULL) return;
+
+    lexbor_array_t *stylesheets = document->css->stylesheets;
+    if (stylesheets == NULL) return;
+
+    for (size_t i = 0; i < stylesheets->length; i++) {
+        lxb_css_stylesheet_t *sst = (lxb_css_stylesheet_t *)stylesheets->list[i];
+        if (sst == NULL) continue;
+
+        // Null out ALL occurrences of this pointer first to prevent double-free.
+        // The same stylesheet can appear multiple times if attached repeatedly
+        // (e.g. via repeated loadCSS calls).
+        for (size_t j = i; j < stylesheets->length; j++) {
+            if (stylesheets->list[j] == sst) {
+                stylesheets->list[j] = NULL;
+            }
+        }
+
+        (void) lxb_css_stylesheet_destroy(sst, true);
+    }
+    stylesheets->length = 0;
 }

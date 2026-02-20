@@ -1222,7 +1222,10 @@ pub const Sanitizer = struct {
     /// Internally: parse → sanitize → initDocumentCSS → loadStyleTags
     ///
     /// The returned document is fully set up with CSS engine initialized.
-    /// Caller must call z.destroyDocument(doc) when done.
+    /// Caller must clean up CSS state BEFORE destroyDocument (LIFO order):
+    ///   defer z.destroyDocument(doc);
+    ///   defer z.destroyDocumentCSS(doc);
+    ///   defer z.destroyDocumentStylesheets(doc);  // fires first
     pub fn parseHTML(self: *Self, html: []const u8) !*z.HTMLDocument {
         // 1. Parse HTML
         const doc = try z.parseHTML(self.allocator, html);

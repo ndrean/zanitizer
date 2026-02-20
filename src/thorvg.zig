@@ -36,7 +36,9 @@ extern "c" fn tvg_picture_load_data(paint: *Tvg_Paint, data: [*]const u8, size: 
 extern "c" fn tvg_picture_set_size(paint: *Tvg_Paint, w: f32, h: f32) Tvg_Result;
 extern "c" fn tvg_font_load_data(name: [*c]const u8, data: [*]const u8, size: u32, mimetype: [*c]const u8, copy: bool) Tvg_Result;
 
-const default_font_data = @embedFile("fonts/Arial.ttf");
+const roboto_regular = @embedFile("fonts/Roboto-Regular.ttf");
+const roboto_bold = @embedFile("fonts/Roboto-Bold.ttf");
+const roboto_italic = @embedFile("fonts/Roboto-Italic.ttf");
 
 // --- Safe Zig API ---
 pub fn rasterizeSVG(allocator: std.mem.Allocator, svg_text: []const u8, width: u32, height: u32) ![]u8 {
@@ -44,8 +46,8 @@ pub fn rasterizeSVG(allocator: std.mem.Allocator, svg_text: []const u8, width: u
     if (tvg_engine_init(0) != .Success) return error.ThorVGInitFailed;
     defer _ = tvg_engine_term();
 
-    // Register embedded font for SVG <text> rendering
-    _ = tvg_font_load_data("Arial", default_font_data.ptr, default_font_data.len, "ttf", false);
+    // Load embedded fonts for SVG <text> rendering
+    try loadEmbeddedFonts();
 
     // 2. Allocate Pixel Buffer (RGBA = 4 bytes per pixel)
     const pixels = try allocator.alloc(u8, width * height * 4);
@@ -72,4 +74,15 @@ pub fn rasterizeSVG(allocator: std.mem.Allocator, svg_text: []const u8, width: u
     _ = tvg_canvas_sync(canvas);
 
     return pixels;
+}
+
+/// Load all embedded Roboto font variants into the ThorVG engine.
+/// Must be called AFTER tvg_engine_init(). copy=false: data stays in binary.
+pub fn loadEmbeddedFonts() !void {
+    if (tvg_font_load_data("Roboto", roboto_regular.ptr, @intCast(roboto_regular.len), "ttf", false) != .Success)
+        return error.FontLoadFailed;
+    if (tvg_font_load_data("Roboto-Bold", roboto_bold.ptr, @intCast(roboto_bold.len), "ttf", false) != .Success)
+        return error.FontLoadFailed;
+    if (tvg_font_load_data("Roboto-Italic", roboto_italic.ptr, @intCast(roboto_italic.len), "ttf", false) != .Success)
+        return error.FontLoadFailed;
 }

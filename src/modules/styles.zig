@@ -62,6 +62,7 @@ extern "c" fn lxb_css_stylesheet_create(memory: ?*z.CssMemory) ?*z.CssStyleSheet
 extern "c" fn lxb_css_stylesheet_parse(sst: *z.CssStyleSheet, parser: *z.CssStyleParser, data: [*]const u8, length: usize) c_int;
 extern "c" fn lxb_css_stylesheet_destroy(sst: *z.CssStyleSheet, self_destroy: bool) void;
 extern "c" fn lxb_dom_document_stylesheet_attach(document: *z.DomDocument, sst: *z.CssStyleSheet) c_int;
+extern "c" fn zexp_destroy_document_stylesheets(document: *z.DomDocument) void;
 
 // ============================================================================
 // IMPLEMENTATION
@@ -73,6 +74,14 @@ pub fn initDocumentCSS(doc: *z.HTMLDocument, init_events: bool) !void {
 
 pub fn destroyDocumentCSS(doc: *z.HTMLDocument) void {
     lxb_dom_document_css_destroy(doc.asDom());
+}
+
+/// Destroy all stylesheets attached to the document CSS state.
+/// lexbor's lxb_dom_document_css_destroy only frees the array pointer,
+/// not the individual stylesheet objects (each has its own memory pool).
+/// Call this BEFORE destroyDocumentCSS.
+pub fn destroyDocumentStylesheets(doc: *z.HTMLDocument) void {
+    zexp_destroy_document_stylesheets(doc.asDom());
 }
 
 pub fn createCssStyleParser() !*z.CssStyleParser {

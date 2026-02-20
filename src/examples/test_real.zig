@@ -36,6 +36,9 @@ fn verboseApproach(allocator: std.mem.Allocator) !void {
     z.print("\n━━━ Step 2: Parse HTML ━━━\n", .{});
     const doc = try zan.parseHTML(html);
     defer z.destroyDocument(doc);
+    // zan.parseHTML internally calls initDocumentCSS + loadStyleTags → must clean up before destroyDocument
+    defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
     z.print("  const doc = try zan.parseHTML(html);\n", .{});
 
     z.print("\n━━━ Step 3: Sanitize external CSS ━━━\n", .{});
@@ -50,7 +53,7 @@ fn verboseApproach(allocator: std.mem.Allocator) !void {
 
     z.print("\n━━━ Step 5: Create stylesheet ━━━\n", .{});
     const sst = try z.createStylesheet();
-    defer z.destroyStylesheet(sst);
+    errdefer z.destroyStylesheet(sst); // attachStylesheet transfers ownership to doc
     z.print("  const sst = try z.createStylesheet();\n", .{});
 
     z.print("\n━━━ Step 6: Parse stylesheet ━━━\n", .{});
@@ -90,6 +93,9 @@ fn simplifiedApproach(allocator: std.mem.Allocator) !void {
     z.print("\n━━━ Step 2: Parse HTML (sanitize + CSS engine) ━━━\n", .{});
     const doc = try zan.parseHTML(html);
     defer z.destroyDocument(doc);
+    // zan.parseHTML internally calls initDocumentCSS + loadStyleTags → must clean up before destroyDocument
+    defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
     z.print("  const doc = try zan.parseHTML(html);\n", .{});
     z.print("  defer z.destroyDocument(doc);\n", .{});
 

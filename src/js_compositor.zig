@@ -39,16 +39,20 @@ extern "c" fn tvg_canvas_sync(canvas: *Tvg_Canvas) c_int;
 extern "c" fn tvg_shape_new() ?*Tvg_Paint;
 extern "c" fn tvg_shape_append_rect(paint: *Tvg_Paint, x: f32, y: f32, w_: f32, h_: f32, rx: f32, ry: f32, cw: bool) c_int;
 extern "c" fn tvg_shape_set_fill_color(paint: *Tvg_Paint, r: u8, g: u8, b: u8, a: u8) c_int;
-extern "c" fn tvg_font_load_data(name: [*c]const u8, data: [*]const u8, size: u32, mimetype: [*c]const u8, copy: bool) c_int;
 extern "c" fn tvg_text_new() ?*Tvg_Paint;
 extern "c" fn tvg_text_set_text(paint: *Tvg_Paint, text: [*c]const u8) c_int;
 extern "c" fn tvg_text_set_font(paint: *Tvg_Paint, name: [*c]const u8) c_int;
 extern "c" fn tvg_text_set_size(paint: *Tvg_Paint, size: f32) c_int;
 extern "c" fn tvg_text_set_color(paint: *Tvg_Paint, r: u8, g: u8, b: u8) c_int;
+extern "c" fn tvg_paint_unref(paint: *Tvg_Paint, free: bool) u16;
 extern "c" fn tvg_paint_translate(paint: *Tvg_Paint, x: f32, y: f32) c_int;
 extern "c" fn tvg_paint_get_aabb(paint: *Tvg_Paint, x: *f32, y: *f32, w_: *f32, h_: *f32) c_int;
+extern "c" fn tvg_picture_new() ?*Tvg_Paint;
+extern "c" fn tvg_picture_load_data(paint: *Tvg_Paint, data: [*]const u8, size: u32, mimetype: [*c]const u8, rpath: [*c]const u8, copy: bool) c_int;
+extern "c" fn tvg_picture_set_size(paint: *Tvg_Paint, w: f32, h: f32) c_int;
+extern "c" fn tvg_shape_set_stroke_width(paint: *Tvg_Paint, width: f32) c_int;
+extern "c" fn tvg_shape_set_stroke_color(paint: *Tvg_Paint, r: u8, g: u8, b: u8, a: u8) c_int;
 
-const default_font_data = @embedFile("fonts/Roboto-Regular.ttf");
 const FONT_SIZE: f32 = 16.0;
 const CHAR_WIDTH: f32 = 9.0; // approximate monospace width at 16px
 const LINE_HEIGHT: f32 = 22.0;
@@ -79,6 +83,12 @@ const NodeInfo = struct {
     font_size: f32,
     measured_width: f32 = 0, // ThorVG-measured text width (for leaf text elements)
     measured_height: f32 = 0,
+    img_data: ?[]const u8 = null, // raw file bytes for <img> elements
+    img_is_svg: bool = false, // true → pass "svg" mime to ThorVG, false → auto-detect (PNG/JPEG)
+    border_width: f32 = 0,
+    border_color: [4]u8 = .{ 0, 0, 0, 0 },
+    border_radius: f32 = 0,
+    text_align: enum { left, center, right } = .left,
 };
 
 /// Measure callback for leaf elements with text — Yoga calls this for intrinsic size
@@ -161,6 +171,7 @@ fn isInlineElement(tag: []const u8) bool {
 fn buildYogaTree(
     dom_node: *z.DomNode,
     allocator: std.mem.Allocator,
+    base_dir: []const u8,
 ) ?yoga.Node {
     const nt = z.nodeType(dom_node);
     if (nt != .element) return null;
@@ -176,19 +187,72 @@ fn buildYogaTree(
         .font_size = FONT_SIZE,
     };
 
-    // Parse inline style and apply tag defaults
+    // Parse computed style (cascade: <link>, <style>, inline) and apply tag defaults
     if (z.nodeToElement(dom_node)) |el| {
         const tag = z.tagName_zc(el);
 
-        if (z.getAttribute_zc(el, "style")) |style_str| {
-            if (style_str.len > 0) {
-                applyInlineStyle(yg, info, style_str);
+        // Use serializeElementStyles to get the full CSS cascade (not just inline style="")
+        const style_str = z.serializeElementStyles(allocator, el) catch null;
+        defer if (style_str) |s| allocator.free(s);
+        if (style_str) |s| {
+            if (s.len > 0) {
+                applyInlineStyle(yg, info, s);
             }
         }
 
         // Table row defaults: flex-direction row
         if (std.mem.eql(u8, tag, "TR")) {
             yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+        }
+
+        // <img> support: load file bytes and set Yoga dimensions
+        if (std.mem.eql(u8, tag, "IMG")) {
+            var img_loaded = false;
+            if (z.getAttribute_zc(el, "src")) |src| {
+                if (src.len > 0) {
+                    // Resolve src relative to base_dir
+                    const path = std.fs.path.join(allocator, &.{ base_dir, src }) catch src;
+                    if (std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024)) |data| {
+                        info.img_data = data;
+                        info.img_is_svg = std.mem.endsWith(u8, src, ".svg");
+
+                        // 1. HTML width/height attributes
+                        var attr_w: f32 = 0;
+                        var attr_h: f32 = 0;
+                        if (z.getAttribute_zc(el, "width")) |ws| attr_w = parseFloat(ws) orelse 0;
+                        if (z.getAttribute_zc(el, "height")) |hs| attr_h = parseFloat(hs) orelse 0;
+                        if (attr_w > 0) yoga.setWidth(yg, attr_w);
+                        if (attr_h > 0) yoga.setHeight(yg, attr_h);
+
+                        // 2. Natural size fallback via stbi (raster only)
+                        if (attr_w == 0 and attr_h == 0 and !info.img_is_svg) {
+                            var iw: c_int = 0;
+                            var ih: c_int = 0;
+                            var ic: c_int = 0;
+                            if (stbi.stbi_info_from_memory(data.ptr, @intCast(data.len), &iw, &ih, &ic) != 0) {
+                                yoga.setWidth(yg, @floatFromInt(iw));
+                                yoga.setHeight(yg, @floatFromInt(ih));
+                            }
+                        }
+                        img_loaded = true;
+                    } else |_| {
+                        std.debug.print("[Compositor] Failed to load image: {s}\n", .{path});
+                    }
+                }
+            }
+            // Alt-text fallback when image couldn't be loaded
+            if (!img_loaded) {
+                if (z.getAttribute_zc(el, "alt")) |alt| {
+                    if (alt.len > 0) {
+                        info.text_content = allocator.dupe(u8, alt) catch alt;
+                    }
+                }
+                // If no alt text either, reserve a minimum placeholder size
+                if (info.text_content.len == 0) {
+                    yoga.setMinWidth(yg, 64);
+                    yoga.setMinHeight(yg, 64);
+                }
+            }
         }
     }
 
@@ -199,14 +263,18 @@ fn buildYogaTree(
         var child_idx: usize = 0;
         var child = z.firstChild(dom_node);
         while (child) |c_node| : (child = z.nextSibling(c_node)) {
-            if (buildYogaTree(c_node, allocator)) |child_yg| {
+            if (buildYogaTree(c_node, allocator, base_dir)) |child_yg| {
                 yoga.insertChild(yg, child_yg, child_idx);
                 child_idx += 1;
             }
         }
     } else {
         // Leaf element → collect all text, measure it, use as intrinsic size
-        const text = collectTextContent(dom_node, allocator);
+        // (text_content may already be set by <img> alt-text fallback)
+        const text = if (info.text_content.len > 0)
+            info.text_content
+        else
+            collectTextContent(dom_node, allocator);
         if (text.len > 0) {
             info.text_content = text;
             const measured = measureText(allocator, text, info.font_size);
@@ -330,7 +398,66 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
             if (parsePixelValue(val)) |v| {
                 info.font_size = v;
             }
+        } else if (std.mem.eql(u8, prop, "border")) {
+            parseBorderShorthand(val, info);
+        } else if (std.mem.eql(u8, prop, "border-top") or
+            std.mem.eql(u8, prop, "border-right") or
+            std.mem.eql(u8, prop, "border-bottom") or
+            std.mem.eql(u8, prop, "border-left"))
+        {
+            parseBorderShorthand(val, info);
+        } else if (std.mem.eql(u8, prop, "border-width") or
+            std.mem.eql(u8, prop, "border-top-width") or
+            std.mem.eql(u8, prop, "border-right-width") or
+            std.mem.eql(u8, prop, "border-bottom-width") or
+            std.mem.eql(u8, prop, "border-left-width"))
+        {
+            if (parsePixelValue(val)) |v| info.border_width = @max(info.border_width, v);
+        } else if (std.mem.eql(u8, prop, "border-color") or
+            std.mem.eql(u8, prop, "border-top-color") or
+            std.mem.eql(u8, prop, "border-right-color") or
+            std.mem.eql(u8, prop, "border-bottom-color") or
+            std.mem.eql(u8, prop, "border-left-color"))
+        {
+            if (parseCSSColor(val)) |clr| info.border_color = clr;
+        } else if (std.mem.eql(u8, prop, "border-radius")) {
+            if (parsePixelValue(val)) |v| info.border_radius = v;
+        } else if (std.mem.eql(u8, prop, "text-align")) {
+            if (std.mem.eql(u8, val, "center")) {
+                info.text_align = .center;
+            } else if (std.mem.eql(u8, val, "right")) {
+                info.text_align = .right;
+            } else if (std.mem.eql(u8, val, "left")) {
+                info.text_align = .left;
+            }
+        } else if (std.mem.eql(u8, prop, "position")) {
+            if (std.mem.eql(u8, val, "absolute")) {
+                yoga.setPositionType(yg, yoga.POSITION_ABSOLUTE);
+            }
+        } else if (std.mem.eql(u8, prop, "top")) {
+            if (parsePixelValue(val)) |v| yoga.setPosition(yg, yoga.EDGE_TOP, v);
+        } else if (std.mem.eql(u8, prop, "right")) {
+            if (parsePixelValue(val)) |v| yoga.setPosition(yg, yoga.EDGE_RIGHT, v);
+        } else if (std.mem.eql(u8, prop, "bottom")) {
+            if (parsePixelValue(val)) |v| yoga.setPosition(yg, yoga.EDGE_BOTTOM, v);
+        } else if (std.mem.eql(u8, prop, "left")) {
+            if (parsePixelValue(val)) |v| yoga.setPosition(yg, yoga.EDGE_LEFT, v);
         }
+    }
+}
+
+/// Parse "1px solid #color" border shorthand — extracts width and color, ignores style keyword
+fn parseBorderShorthand(val: []const u8, info: *NodeInfo) void {
+    var iter = std.mem.splitScalar(u8, val, ' ');
+    while (iter.next()) |token| {
+        const t = std.mem.trim(u8, token, " \t");
+        if (t.len == 0) continue;
+        if (parsePixelValue(t)) |v| {
+            info.border_width = @max(info.border_width, v);
+        } else if (parseCSSColor(t)) |clr| {
+            info.border_color = clr;
+        }
+        // "solid", "dashed", "dotted" — ignored, we only render solid
     }
 }
 
@@ -367,6 +494,8 @@ fn parseFloat(s: []const u8) ?f32 {
 /// Measure text dimensions using ThorVG (requires engine + font already loaded)
 fn measureText(allocator: std.mem.Allocator, text: []const u8, font_size: f32) struct { w: f32, h: f32 } {
     const paint = tvg_text_new() orelse return .{ .w = 0, .h = 0 };
+    // Not added to canvas — must be freed manually (canvas_add transfers ownership).
+    defer _ = tvg_paint_unref(paint, true);
 
     const c_str = allocator.dupeZ(u8, text) catch return .{ .w = 0, .h = 0 };
     defer allocator.free(c_str);
@@ -475,12 +604,36 @@ fn paintYogaTree(
     else
         parent_fg;
 
-    // Paint background rectangle if element has one
-    if (info.bg_color[3] > 0) {
+    // Paint background rect and/or border on a single shape
+    if (info.bg_color[3] > 0 or info.border_width > 0) {
         const shape = tvg_shape_new() orelse return;
-        _ = tvg_shape_append_rect(shape, x, y, node_w, node_h, 4, 4, true);
-        _ = tvg_shape_set_fill_color(shape, info.bg_color[0], info.bg_color[1], info.bg_color[2], info.bg_color[3]);
+        const r = info.border_radius;
+        _ = tvg_shape_append_rect(shape, x, y, node_w, node_h, r, r, true);
+        if (info.bg_color[3] > 0) {
+            _ = tvg_shape_set_fill_color(shape, info.bg_color[0], info.bg_color[1], info.bg_color[2], info.bg_color[3]);
+        }
+        if (info.border_width > 0 and info.border_color[3] > 0) {
+            _ = tvg_shape_set_stroke_width(shape, info.border_width);
+            _ = tvg_shape_set_stroke_color(shape, info.border_color[0], info.border_color[1], info.border_color[2], info.border_color[3]);
+        }
         _ = tvg_canvas_add(canvas, shape);
+    }
+
+    // Content origin: offset by the node's computed padding
+    const pad_left = yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeLeft);
+    const pad_top = yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeTop);
+    const cx = x + pad_left;
+    const cy = y + pad_top;
+
+    // Paint <img> content using ThorVG picture
+    if (info.img_data) |img_data| {
+        if (tvg_picture_new()) |pic| {
+            const mime: [*c]const u8 = if (info.img_is_svg) "svg" else null;
+            _ = tvg_picture_load_data(pic, img_data.ptr, @intCast(img_data.len), mime, null, true);
+            _ = tvg_picture_set_size(pic, node_w - pad_left - yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeRight), node_h - pad_top - yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeBottom));
+            _ = tvg_paint_translate(pic, cx, cy);
+            _ = tvg_canvas_add(canvas, pic);
+        }
     }
 
     // Paint text content if this is a leaf element with text
@@ -493,7 +646,16 @@ fn paintYogaTree(
         _ = tvg_text_set_size(text_paint, info.font_size);
         _ = tvg_text_set_text(text_paint, c_string.ptr);
         _ = tvg_text_set_color(text_paint, fg[0], fg[1], fg[2]);
-        _ = tvg_paint_translate(text_paint, x, y);
+
+        // Apply text-align offset within the content area
+        const pad_right = yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeRight);
+        const content_w = node_w - pad_left - pad_right;
+        const tx = switch (info.text_align) {
+            .left => cx,
+            .center => cx + @max(0.0, (content_w - info.measured_width) / 2.0),
+            .right => cx + @max(0.0, content_w - info.measured_width),
+        };
+        _ = tvg_paint_translate(text_paint, tx, cy);
         _ = tvg_canvas_add(canvas, text_paint);
     }
 
@@ -536,14 +698,14 @@ pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv
     // 3. Initialize ThorVG early (needed for text measurement during tree build)
     _ = tvg_engine_init(0);
     defer _ = tvg_engine_term();
-    _ = tvg_font_load_data("Roboto", default_font_data.ptr, default_font_data.len, "ttf", false);
+    thorvg.loadEmbeddedFonts() catch {};
 
     // 4. Build Yoga layout tree from DOM (arena-allocated)
     var arena = std.heap.ArenaAllocator.init(rc.allocator);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
-    const yg_root = buildYogaTree(root_node, arena_alloc) orelse {
+    const yg_root = buildYogaTree(root_node, arena_alloc, rc.base_dir) orelse {
         std.debug.print("[Compositor] Failed to build Yoga tree\n", .{});
         return w.UNDEFINED;
     };

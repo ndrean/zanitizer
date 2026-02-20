@@ -1,0 +1,32 @@
+✅ Saved 104399 bytes to og_custom.png
+ is Awesome" by N. Drean
+nvironment; unsetting MallocStackLoggingDirectory environment variable
+leaks(52584) MallocStackLogging: could not tag MSL-related memory as no_footprint, so those pages will be included in process footprint - No such file or directory (2)
+leaks(52584) MallocStackLogging: recording malloc (and VM allocation) stacks using lite mode
+Process 52585 is not debuggable. Due to security restrictions, leaks can only show or save contents of readonly memory of restricted processes.
+
+Process:         zxp-ex [52585]
+Path:            /Users/USER/*/zxp-ex
+Load Address:    0x100e34000
+Identifier:      zxp-ex
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  leaks [52584]
+Target Type:     live task
+
+Date/Time:       2026-02-20 22:00:22.418 +0100
+Launch Time:     2026-02-20 22:00:20.971 +0100
+OS Version:      macOS 26.2 (25C56)
+Report Version:  7
+Analysis Tool:   /usr/bin/leaks
+
+Physical footprint:         18.5M
+Physical footprint (peak):  28.4M
+Idle exit:                  untracked
+----
+
+leaks Report Version: 4.0, multi-line stacks
+Process 52585: 963 nodes malloced for 129 KB
+Process 52585: 0 leaks for 0 total leaked bytes.
+

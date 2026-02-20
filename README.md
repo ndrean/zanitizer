@@ -2,7 +2,7 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-A native DOM + JS runtime with Flexbox layout and raster compositing for content pipelines: feed it HTML, SVG, ES2020 JavaSccript against a real DOM, and get back structured data, PNG, JPEG, WEBP, SVG, or PDF, without a browser.
+A native DOM + JS runtime with Flexbox layout and raster compositing for content pipelines: feed it HTML or SVG documents, or ES2020 JavaScript against a real DOM, and get back structured data, PNG, JPEG, WEBP, SVG, or PDF, without a browser.
 
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
@@ -23,7 +23,10 @@ A native DOM + JS runtime with Flexbox layout and raster compositing for content
 
 Today, `zexplorer` is used as a **Zig library**. Check the examples.
 
-**CLI: WIP** — planned interface:
+## The CLI Runner
+
+`zexplorer` operates as a generic CLI runner (`zxp`). The output format is entirely dictated by the command you use and what your JavaScript returns.
+
 
 ```sh
 # Scrape a React site
@@ -69,7 +72,7 @@ A native Zig engine that wires together purpose-built C/C++ libraries — no run
 | Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
 | Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                  |
 
-Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 8MB footprint, 2ms cold start.
+Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 10MB footprint, 2ms cold start.
 
 ## Tested against js-framework-benchmark
 
@@ -79,7 +82,7 @@ The engine runs real framework code from [js-framework-benchmark](https://github
 | ----------------- | ------------------------- | --------------- | --------------- |
 | Startup time      | 2ms                       | ~30ms           | ~500ms          |
 | DOM sanitization  | Built-in, DOM & CSS-aware | Needs DOMPurify | Browser context |
-| Memory footprint  | 8MB                       | ~50MB           | ~200MB          |
+| Memory footprint  | 10MB                      | ~50MB           | ~200MB          |
 | Web API coverage  | ~40% (essential)          | ~90%            | 100%            |
 | JavaScript engine | QuickJS (bytecode)        | Node.js V8      | Chrome V8       |
 

@@ -176,7 +176,7 @@ pub const ScriptEngine = struct {
         defer self.ctx.freeValue(global_obj);
 
         const keys_to_remove = [_][:0]const u8{
-            // "eval",
+            "eval",
             "Function",
             "WebAssembly", // not included in build
             "Atomics",
@@ -411,26 +411,26 @@ pub const ScriptEngine = struct {
         return js_marshall.jsToZig(self.allocator, self.ctx, val, T);
     }
 
-    /// Evaluates JS code that might return a Promise as .global
+    /// Evaluates async JS code, runs the event loop until the promise settles,
+    /// and returns the raw JS Value.
     ///
-    /// Runs the event loop until completion, checks for rejections, and marshals the result with the given type `T` that must match the type returned from JS.
-    pub fn evalAsyncAs(self: *ScriptEngine, allocator: std.mem.Allocator, comptime T: type, code: []const u8, name: []const u8) !T {
+    /// Caller OWNS the returned value!
+    pub fn evalAsync(self: *ScriptEngine, code: []const u8, name: []const u8) !zqjs.Value {
         const val = try self.eval(code, name, .global);
+
+        // Sync case
+        if (!self.ctx.isPromise(val)) {
+            return val; // settled, return
+        }
         defer self.ctx.freeValue(val);
 
-        // Handle the "Sync" case
-        if (!self.ctx.isPromise(val)) {
-            return js_marshall.jsToZig(allocator, self.ctx, val, T);
-        }
-
-        //  Poll event loop until promise settles (don't wait for full drain —
-        //  frameworks like Next.js leave timers/workers alive indefinitely).
+        // polling loop (loading ordered script chunks)
         var poll_count: u32 = 0;
         const max_polls: u32 = 100_000;
         while (poll_count < max_polls) : (poll_count += 1) {
             const ps = self.ctx.promiseState(val);
             if (ps != .Pending) break;
-            // Run one iteration of jobs + timers
+
             self.processJobs();
             _ = self.loop.processTimers() catch 0;
             _ = self.loop.processAsyncTasks();
@@ -438,22 +438,20 @@ pub const ScriptEngine = struct {
                 _ = cm.poll(0) catch .{ .running = 0, .completed = 0 };
             }
             self.loop.pollWorkers() catch {};
-            // Yield CPU if nothing happened this iteration
-            std.Thread.sleep(1_000_000); // 1ms
+            std.Thread.sleep(1_000_000);
         }
 
         const state = self.ctx.promiseState(val);
         switch (state) {
             .Pending => {
-                // deadlock
-                std.debug.print("⚠️  Script finished but Promise is still PENDING.\n", .{});
+                z.print("⚠️  Script finished but Promise is still PENDING.\n", .{});
                 return error.JSPromiseStuck;
             },
             .Rejected => {
                 const reason = self.ctx.promiseResult(val);
                 defer self.ctx.freeValue(reason);
 
-                // Diagnostic: identify the rejection value type
+                // rejection value type
                 if (self.ctx.isUndefined(reason)) {
                     std.debug.print("❌ JS Promise Rejected with: undefined\n", .{});
                     std.debug.print("   (catch block swallowed the error — check console output above)\n", .{});
@@ -467,42 +465,159 @@ pub const ScriptEngine = struct {
                 // Try direct toString first
                 if (self.ctx.toCString(reason)) |reason_str| {
                     defer self.ctx.freeCString(reason_str);
-                    std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(reason_str)});
+                    z.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(reason_str)});
                 } else |_| {
                     // Try .message then .stack for Error objects
                     const msg_prop = self.ctx.getPropertyStr(reason, "message");
                     defer self.ctx.freeValue(msg_prop);
                     if (self.ctx.toCString(msg_prop)) |msg_str| {
                         defer self.ctx.freeCString(msg_str);
-                        std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(msg_str)});
+                        z.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(msg_str)});
 
                         const stack_prop = self.ctx.getPropertyStr(reason, "stack");
                         defer self.ctx.freeValue(stack_prop);
                         if (self.ctx.toCString(stack_prop)) |stack_str| {
                             defer self.ctx.freeCString(stack_str);
-                            std.debug.print("   Stack: {s}\n", .{std.mem.span(stack_str)});
+                            z.print("   Stack: {s}\n", .{std.mem.span(stack_str)});
                         } else |_| {}
                     } else |_| {
                         if (self.ctx.isNull(reason)) {
-                            std.debug.print("❌ JS Promise Rejected with: null\n", .{});
+                            z.print("❌ JS Promise Rejected with: null\n", .{});
                         } else if (self.ctx.isObject(reason)) {
-                            std.debug.print("❌ JS Promise Rejected with: [object] (toString failed)\n", .{});
+                            z.print("❌ JS Promise Rejected with: [object] (toString failed)\n", .{});
                         } else {
-                            std.debug.print("❌ JS Promise Rejected with: (unknown type)\n", .{});
+                            z.print("❌ JS Promise Rejected with: (unknown type)\n", .{});
                         }
                     }
                 }
                 return error.JSPromiseRejected;
             },
             .Fulfilled => {
-                // 5. Success! Extract the value.
-                const result = self.ctx.promiseResult(val);
-                defer self.ctx.freeValue(result);
-
-                // 6. Marshal the inner result to Zig
-                return js_marshall.jsToZig(allocator, self.ctx, result, T);
+                // Return the raw JS value! Note: Caller must free it. !!!!! CHANGED
+                return self.ctx.promiseResult(val);
+                // const result = self.ctx.promiseResult(val);
+                // self.ctx.freeValue(val); // Free the promise itself
+                // return result;
             },
         }
+    }
+
+    pub fn evalAsyncAs(self: *ScriptEngine, allocator: std.mem.Allocator, comptime T: type, code: []const u8, name: []const u8) !T {
+        const raw_result = try self.evalAsync(code, name);
+        defer self.ctx.freeValue(raw_result);
+
+        return js_marshall.jsToZig(allocator, self.ctx, raw_result, T);
+    }
+
+    // /// Evaluates JS code that might return a Promise as .global
+    // ///
+    // /// Runs the event loop until completion, checks for rejections, and marshals the result with the given type `T` that must match the type returned from JS.
+    // pub fn evalAsyncAs(self: *ScriptEngine, allocator: std.mem.Allocator, comptime T: type, code: []const u8, name: []const u8) !T {
+    //     const val = try self.eval(code, name, .global);
+    //     defer self.ctx.freeValue(val);
+
+    //     // Handle the "Sync" case
+    //     if (!self.ctx.isPromise(val)) {
+    //         return js_marshall.jsToZig(allocator, self.ctx, val, T);
+    //     }
+
+    //     //  Poll event loop until promise settles (don't wait for full drain —
+    //     //  frameworks like Next.js leave timers/workers alive indefinitely).
+    //     var poll_count: u32 = 0;
+    //     const max_polls: u32 = 100_000;
+    //     while (poll_count < max_polls) : (poll_count += 1) {
+    //         const ps = self.ctx.promiseState(val);
+    //         if (ps != .Pending) break;
+    //         // Run one iteration of jobs + timers
+    //         self.processJobs();
+    //         _ = self.loop.processTimers() catch 0;
+    //         _ = self.loop.processAsyncTasks();
+    //         if (self.loop.curl_multi) |cm| {
+    //             _ = cm.poll(0) catch .{ .running = 0, .completed = 0 };
+    //         }
+    //         self.loop.pollWorkers() catch {};
+    //         // Yield CPU if nothing happened this iteration
+    //         std.Thread.sleep(1_000_000); // 1ms
+    //     }
+
+    //     const state = self.ctx.promiseState(val);
+    //     switch (state) {
+    //         .Pending => {
+    //             // deadlock
+    //             std.debug.print("⚠️  Script finished but Promise is still PENDING.\n", .{});
+    //             return error.JSPromiseStuck;
+    //         },
+    //         .Rejected => {
+    //             const reason = self.ctx.promiseResult(val);
+    //             defer self.ctx.freeValue(reason);
+
+    //             // Diagnostic: identify the rejection value type
+    //             if (self.ctx.isUndefined(reason)) {
+    //                 std.debug.print("❌ JS Promise Rejected with: undefined\n", .{});
+    //                 std.debug.print("   (catch block swallowed the error — check console output above)\n", .{});
+    //                 return error.JSPromiseRejected;
+    //             }
+
+    //             // Clear any pending exception before converting to string
+    //             const pending = self.ctx.getException();
+    //             if (!self.ctx.isNull(pending)) self.ctx.freeValue(pending);
+
+    //             // Try direct toString first
+    //             if (self.ctx.toCString(reason)) |reason_str| {
+    //                 defer self.ctx.freeCString(reason_str);
+    //                 std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(reason_str)});
+    //             } else |_| {
+    //                 // Try .message then .stack for Error objects
+    //                 const msg_prop = self.ctx.getPropertyStr(reason, "message");
+    //                 defer self.ctx.freeValue(msg_prop);
+    //                 if (self.ctx.toCString(msg_prop)) |msg_str| {
+    //                     defer self.ctx.freeCString(msg_str);
+    //                     std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(msg_str)});
+
+    //                     const stack_prop = self.ctx.getPropertyStr(reason, "stack");
+    //                     defer self.ctx.freeValue(stack_prop);
+    //                     if (self.ctx.toCString(stack_prop)) |stack_str| {
+    //                         defer self.ctx.freeCString(stack_str);
+    //                         std.debug.print("   Stack: {s}\n", .{std.mem.span(stack_str)});
+    //                     } else |_| {}
+    //                 } else |_| {
+    //                     if (self.ctx.isNull(reason)) {
+    //                         std.debug.print("❌ JS Promise Rejected with: null\n", .{});
+    //                     } else if (self.ctx.isObject(reason)) {
+    //                         std.debug.print("❌ JS Promise Rejected with: [object] (toString failed)\n", .{});
+    //                     } else {
+    //                         std.debug.print("❌ JS Promise Rejected with: (unknown type)\n", .{});
+    //                     }
+    //                 }
+    //             }
+    //             return error.JSPromiseRejected;
+    //         },
+    //         .Fulfilled => {
+    //             // 5. Success! Extract the value.
+    //             const result = self.ctx.promiseResult(val);
+    //             defer self.ctx.freeValue(result);
+
+    //             // 6. Marshal the inner result to Zig
+    //             return js_marshall.jsToZig(allocator, self.ctx, result, T);
+    //         },
+    //     }
+    // }
+
+    /// Evaluates the script, waits for promises, and calls JSON.stringify on the result.
+    pub fn evalAsyncAndStringify(self: *ScriptEngine, allocator: std.mem.Allocator, script: []const u8, filename: [:0]const u8) ![]const u8 {
+        // Evaluate and resolve promises
+        const val = try self.evalAsync(script, filename);
+        defer self.ctx.freeValue(val);
+
+        // Call QuickJS native JSON stringify
+        const json_val = self.ctx.jsonStringifySimple(val) catch return error.StringifyFailed;
+        defer self.ctx.freeValue(json_val);
+
+        // to Zig string
+        const z_str = try self.ctx.toZString(json_val);
+        defer self.ctx.freeZString(z_str);
+
+        return allocator.dupe(u8, z_str);
     }
 
     // Helper to expose C functions easily
@@ -584,6 +699,7 @@ pub const ScriptEngine = struct {
         // Calling this again is usually safe/no-op if already attached,
         // or updates the document if Lexbor tracks versioning.
         try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+        self.dom.stylesheet_attached = true;
     }
 
     // =========================================================================
@@ -610,7 +726,8 @@ pub const ScriptEngine = struct {
     pub fn loadPage(self: *ScriptEngine, html: []const u8, options: LoadPageOptions) !void {
         const bridge = self.dom;
 
-        // Store sanitization settings in RuntimeContext for use by innerHTML/outerHTML setters
+        // Store settings in RuntimeContext
+        self.rc.base_dir = options.base_dir;
         self.rc.sanitize_enabled = options.sanitize;
         self.rc.sanitize_options = options.sanitizer_options;
 
@@ -1097,6 +1214,18 @@ pub const ScriptEngine = struct {
         return std.mem.startsWith(u8, url, "http:") or
             std.mem.startsWith(u8, url, "https:") or
             std.mem.startsWith(u8, url, "//");
+    }
+
+    pub fn printMemoryUsage(self: *ScriptEngine) void {
+        var stats: z.qjs.JSMemoryUsage = undefined;
+        z.qjs.JS_ComputeMemoryUsage(self.rt.ptr, &stats);
+
+        std.debug.print("\n--- QuickJS Memory Stats ---\n", .{});
+        std.debug.print("Malloc count: {d}\n", .{stats.malloc_count});
+        std.debug.print("Malloc size:  {d} bytes\n", .{stats.malloc_size});
+        std.debug.print("JS Objects:   {d} (size: {d})\n", .{ stats.obj_count, stats.obj_size });
+        std.debug.print("JS Strings:   {d} (size: {d})\n", .{ stats.str_count, stats.str_size });
+        std.debug.print("----------------------------\n", .{});
     }
 };
 

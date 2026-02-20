@@ -108,6 +108,7 @@ fn pathway1_trusted_html(allocator: std.mem.Allocator) !void {
     // Step 2: Init CSS engine FIRST (will watch insertHTML)
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     // Step 3: Insert HTML (CSS engine sees style="" as it's parsed)
     try z.insertHTML(doc, html);
@@ -179,6 +180,7 @@ fn pathway2_untrusted_full_sanitize(allocator: std.mem.Allocator) !void {
 
     try z.initDocumentCSS(doc, false);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     // check if styles are present
     const div = try z.querySelector(allocator, doc, ".evil");
@@ -265,6 +267,7 @@ fn pathway3_sanitize_keep_styles(allocator: std.mem.Allocator) !void {
     // Step 6: NOW init CSS engine (sees only clean CSS)
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     const parser = try z.createCssStyleParser();
     defer z.destroyCssStyleParser(parser);
@@ -323,6 +326,7 @@ fn pathway4_external_css(allocator: std.mem.Allocator) !void {
 
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     // Insert HTML first (element must exist before stylesheet rules applied)
     try z.insertHTML(doc, "<html><body><div class='header'>Title</div></body></html>");
@@ -332,10 +336,10 @@ fn pathway4_external_css(allocator: std.mem.Allocator) !void {
     defer z.destroyCssStyleParser(parser);
 
     const sst = try z.createStylesheet();
-    defer z.destroyStylesheet(sst);
+    errdefer z.destroyStylesheet(sst);
 
     try z.parseStylesheet(sst, parser, clean_css);
-    try z.attachStylesheet(doc, sst);
+    try z.attachStylesheet(doc, sst); // transfers ownership to document
 
     // Step 4: Verify styles applied
     if (try z.querySelector(allocator, doc, ".header")) |el| {
@@ -359,6 +363,7 @@ fn pathway5_dynamic_styles(allocator: std.mem.Allocator) !void {
     // Must init CSS engine for dynamic styles to work
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     try z.insertHTML(doc, "<html><body><div id='box'>Box</div></body></html>");
 

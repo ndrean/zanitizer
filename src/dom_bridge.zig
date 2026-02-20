@@ -42,6 +42,7 @@ pub const DOMBridge = struct {
     css_engine: CssSelectorEngine, // CSS Selector Engine
     css_style_parser: *z.CssStyleParser,
     stylesheet: *z.CssStyleSheet,
+    stylesheet_attached: bool = false, // true after attachStylesheet — destroyDocumentStylesheets handles cleanup
 
     // (Lexbor owns the nodes, we just detach)
     fn domFinalizer(_: ?*z.qjs.JSRuntime, _: z.qjs.JSValue) callconv(.c) void {}
@@ -325,8 +326,6 @@ pub const DOMBridge = struct {
         // Calling it here on the empty doc causes corruption when the doc
         // is later re-parsed by insertHTML (lxb_html_document_parse).
         try z.insertHTML(doc, "<html><head></head><body></body></html>");
-        const parser = try z.createCssStyleParser();
-        errdefer z.destroyCssStyleParser(parser);
         const stylesheet = try z.createStylesheet();
         errdefer z.destroyStylesheet(stylesheet);
 
@@ -345,13 +344,23 @@ pub const DOMBridge = struct {
     }
 
     pub fn deinit(self: *DOMBridge) void {
+        // Destroy attached <style>-tag stylesheets before the document CSS state.
+        // lxb_dom_document_css_destroy() only frees the array pointer, NOT the
+        // individual stylesheet objects (each has its own memory pool).
+        z.destroyDocumentStylesheets(self.doc);
+        // Destroy document CSS state — pairs with initDocumentCSS() in loadPage.
+        // lxb_dom_document_css_destroy() is null-safe (no-op if not initialized).
+        z.destroyDocumentCSS(self.doc);
         z.destroyDocument(self.doc);
         const rc = RuntimeContext.get(self.ctx);
         rc.global_document = null;
 
         self.css_engine.deinit();
         z.destroyCssStyleParser(self.css_style_parser);
-        z.destroyStylesheet(self.stylesheet);
+        // Only destroy if not attached: destroyDocumentStylesheets already freed it if it was attached.
+        if (!self.stylesheet_attached) {
+            z.destroyStylesheet(self.stylesheet);
+        }
 
         var it_reg = self.registry.iterator();
         while (it_reg.next()) |node_entry| {

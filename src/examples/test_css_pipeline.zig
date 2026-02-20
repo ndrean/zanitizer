@@ -79,17 +79,18 @@ fn test1_external_stylesheet(allocator: std.mem.Allocator) !void {
 
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     const parser = try z.createCssStyleParser();
     defer z.destroyCssStyleParser(parser);
 
     const sst = try z.createStylesheet();
-    defer z.destroyStylesheet(sst);
+    errdefer z.destroyStylesheet(sst);
 
     const html = "<html><body><div class=\"header\">Hello</div><p>Paragraph</p></body></html>";
     try z.insertHTML(doc, html);
 
-    // Parse and attach the SANITIZED CSS
+    // Parse and attach the SANITIZED CSS (transfers ownership to document)
     try z.parseStylesheet(sst, parser, clean_css);
     try z.attachStylesheet(doc, sst);
 
@@ -170,9 +171,10 @@ fn test2_style_block_sanitization(allocator: std.mem.Allocator) !void {
     // 6. NOW init CSS engine (after sanitization!)
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
 
     const sst = try z.createStylesheet();
-    defer z.destroyStylesheet(sst);
+    errdefer z.destroyStylesheet(sst);
 
     // 7. Create parser and load style tags
     const parser = try z.createCssStyleParser();
@@ -180,7 +182,7 @@ fn test2_style_block_sanitization(allocator: std.mem.Allocator) !void {
     try z.parseStylesheet(sst, parser, cleaned_sst);
 
     try z.loadStyleTags(allocator, doc, parser);
-    try z.attachStylesheet(doc, sst); // Attach styles to root to propagate
+    try z.attachStylesheet(doc, sst); // Attach styles to root to propagate (transfers ownership)
 
     // 8. Verify computed styles work
     if (try z.querySelector(allocator, doc, ".safe")) |safe| {
@@ -306,6 +308,7 @@ fn test4_correct_vs_incorrect_order(allocator: std.mem.Allocator) !void {
         // ❌ Wrong: Init CSS engine first
         try z.initDocumentCSS(doc, true);
         defer z.destroyDocumentCSS(doc);
+        defer z.destroyDocumentStylesheets(doc);
 
         // Insert HTML - CSS engine is already watching
         try z.insertHTML(doc, html);
@@ -364,6 +367,7 @@ fn test4_correct_vs_incorrect_order(allocator: std.mem.Allocator) !void {
         // ✓ 3. NOW init CSS engine
         try z.initDocumentCSS(doc, true);
         defer z.destroyDocumentCSS(doc);
+        defer z.destroyDocumentStylesheets(doc);
 
         // ✓ 4. Load style tags - Lexbor parses the SANITIZED content
         const parser = try z.createCssStyleParser();

@@ -6,7 +6,7 @@ const EventLoop = @import("event_loop.zig").EventLoop;
 const DOMBridge = @import("dom_bridge.zig").DOMBridge;
 const js_security = @import("js_security.zig");
 const Font = @import("font.zig").Font;
-const default_font_data = @embedFile("fonts/Arial.ttf");
+const default_font_data = @embedFile("fonts/Roboto-Regular.ttf");
 const sanitizer_mod = @import("modules/sanitizer.zig");
 pub const SanitizeOptions = sanitizer_mod.SanitizeOptions;
 
@@ -23,6 +23,9 @@ pub const RuntimeContext = struct {
     payload: ?*anyopaque = null, // generic pointer to pass in/out of callbacks
     blob_registry: std.StringHashMap(z.qjs.JSValue), // "blob:uuid" (owned string) -> Blob Object (JSValue)
     global_font: ?*Font = null,
+
+    // Base directory for resolving relative asset paths (set by loadPage)
+    base_dir: []const u8 = ".",
 
     // Sanitization settings (set by loadPage when sanitize=true)
     // When enabled, innerHTML/outerHTML will sanitize content before insertion
@@ -144,7 +147,7 @@ pub const RuntimeContext = struct {
         self.local_storage.deinit();
 
         self.allocator.destroy(self);
-        z.print("\n⌛️ RT destroyed --------\n\n", .{});
+        // z.print("\n⌛️ RT destroyed --------\n\n", .{});
     }
 
     /// Retrieve this struct from the JS Context

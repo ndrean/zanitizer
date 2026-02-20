@@ -10,6 +10,7 @@ const Paths = struct {
     libwebp_src: std.Build.LazyPath,
     thorvg_src: std.Build.LazyPath,
     yoga_src: std.Build.LazyPath,
+    yoga_h: std.Build.LazyPath,
     miniz_src: std.Build.LazyPath,
     libharu_include: std.Build.LazyPath,
     fake_zlib: std.Build.LazyPath,
@@ -39,6 +40,7 @@ pub fn build(b: *std.Build) void {
         .libwebp_src = b.path("vendor/libwebp/src"),
         .thorvg_src = b.path("vendor/thorvg"),
         .yoga_src = b.path("vendor/yoga"),
+        .yoga_h = b.path("vendor/yoga/yoga"),
         .miniz_src = b.path("vendor/miniz"),
         .libharu_include = b.path("vendor/libharu/include"),
         .fake_zlib = b.path("vendor/fake_zlib"),
@@ -82,7 +84,7 @@ pub fn build(b: *std.Build) void {
     buildTests(b, target, optimize, paths, libs, curl_module);
 
     // Examples
-    buildExamples(b, target, optimize, paths, libs, zexplorer_module, curl_module);
+    // buildExamples(b, target, optimize, paths, libs, zexplorer_module, curl_module);
 
     // Documentation
     buildDocs(b, target, optimize);
@@ -249,16 +251,12 @@ fn buildThorVG(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bu
     lib.addConfigHeader(tvg_config);
 
     const tvg_flags = &.{
-        "-xc++",          "-std=c++14",
-        "-fno-exceptions", "-fno-rtti",
-        "-Wno-everything",
-        "-DTHORVG_SW_RASTER_SUPPORT=1",
-        "-DTHORVG_SVG_LOADER_SUPPORT=1",
-        "-DTHORVG_TTF_LOADER_SUPPORT=1",
-        "-DTHORVG_JPG_LOADER_SUPPORT=1",
-        "-DTHORVG_PNG_LOADER_SUPPORT=1",
-        "-DTHORVG_CAPI_BINDING_SUPPORT=1",
-        "-DTHORVG_THREAD_SUPPORT=1",
+        "-xc++",                           "-std=c++14",
+        "-fno-exceptions",                 "-fno-rtti",
+        "-Wno-everything",                 "-DTHORVG_SW_RASTER_SUPPORT=1",
+        "-DTHORVG_SVG_LOADER_SUPPORT=1",   "-DTHORVG_TTF_LOADER_SUPPORT=1",
+        "-DTHORVG_JPG_LOADER_SUPPORT=1",   "-DTHORVG_PNG_LOADER_SUPPORT=1",
+        "-DTHORVG_CAPI_BINDING_SUPPORT=1", "-DTHORVG_THREAD_SUPPORT=1",
     };
 
     const tvg_src_dirs = [_][]const u8{
@@ -322,6 +320,7 @@ fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     lib.addIncludePath(paths.libharu_include);
     lib.addIncludePath(paths.fake_zlib);
     lib.addIncludePath(b.path("vendor/libharu/include"));
+
     lib.linkLibC();
     lib.linkLibCpp();
     return lib;
@@ -364,6 +363,7 @@ fn buildZexplorerModule(
     mod.addIncludePath(paths.libharu_include);
     mod.addIncludePath(paths.fake_zlib);
     mod.addIncludePath(b.path("vendor/libharu/include"));
+    mod.addIncludePath(b.path("vendor/yoga/yoga"));
     mod.link_libc = true;
     mod.link_libcpp = true;
     return mod;
@@ -518,109 +518,109 @@ fn buildTests(
 // Examples
 // =============================================================================
 
-fn buildExamples(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    paths: Paths,
-    libs: Libraries,
-    zexplorer_module: *std.Build.Module,
-    curl_module: *std.Build.Module,
-) void {
-    const example_step = b.step("example", "Run an example from src/examples/");
-    const check_step = b.step("check", "Check examples compile (for ZLS)");
+// fn buildExamples(
+//     b: *std.Build,
+//     target: std.Build.ResolvedTarget,
+//     optimize: std.builtin.OptimizeMode,
+//     paths: Paths,
+//     libs: Libraries,
+//     zexplorer_module: *std.Build.Module,
+//     curl_module: *std.Build.Module,
+// ) void {
+//     const example_step = b.step("example", "Run an example from src/examples/");
+//     const check_step = b.step("check", "Check examples compile (for ZLS)");
 
-    const example_files = [_][]const u8{
-        "src/examples/extract_script_from_html.zig",
-        "src/examples/return_data_from_JS_into_zig.zig",
-        "src/examples/classlist.zig",
-        "src/examples/text_encoding.zig",
-        "src/examples/readable_stream_demo.zig",
-        "src/examples/formdata_upload_demo.zig",
-        "src/examples/disk_streaming_upload_demo.zig",
-        "src/examples/fs_demo.zig",
-        "src/examples/streaming_demo.zig",
-        "src/examples/file_reader.zig",
-        "src/examples/cdn_import.zig",
-        "src/examples/js-bench-1.zig",
-        "src/examples/js-bench-2.zig",
-        "src/examples/js-bench-20.zig",
-        "src/examples/js-bench-3.zig",
-        "src/examples/js-bench-bau.zig",
-        "src/examples/js-bench-vue.zig",
-        "src/examples/js-bench-react-h.zig",
-        "src/examples/js-bench-preact.zig",
-        "src/examples/js-bench-svelte.zig",
-        "src/examples/js-bench-solid.zig",
-        "src/examples/test-worker_zig.zig",
-        "src/examples/dom_purify.zig",
-        "src/examples/text_encoding.zig",
-        "src/examples/jsdom_zexplorer_speed_test.zig",
-        "src/examples/h5sc-test.zig",
-        "src/examples/blob_object_url.zig",
-        "src/examples/test_css_sanitization.zig",
-        "src/examples/test_css_pipeline.zig",
-        "src/examples/test_css_complete.zig",
-        "src/examples/test_real.zig",
-        "src/examples/test_all.zig",
-        "src/examples/test_canvas.zig",
-        "src/examples/test_example.zig",
-        "src/examples/test_image1.zig",
-        "src/examples/test_image2.zig",
-        "src/examples/test_image3.zig",
-        "src/examples/test_image4.zig",
-        "src/examples/dompurify_tests.zig",
-        "src/examples/test_svg_raster.zig",
-        "src/examples/test_og_generator.zig",
-        "src/examples/test_og_generator_v3.zig",
-        "src/examples/test_invoice_generator.zig",
-    };
+//     const example_files = [_][]const u8{
+//         "src/examples/extract_script_from_html.zig",
+//         "src/examples/return_data_from_JS_into_zig.zig",
+//         "src/examples/classlist.zig",
+//         "src/examples/text_encoding.zig",
+//         "src/examples/readable_stream_demo.zig",
+//         "src/examples/formdata_upload_demo.zig",
+//         "src/examples/disk_streaming_upload_demo.zig",
+//         "src/examples/fs_demo.zig",
+//         "src/examples/streaming_demo.zig",
+//         "src/examples/file_reader.zig",
+//         "src/examples/cdn_import.zig",
+//         "src/examples/js-bench-1.zig",
+//         "src/examples/js-bench-2.zig",
+//         "src/examples/js-bench-20.zig",
+//         "src/examples/js-bench-3.zig",
+//         "src/examples/js-bench-bau.zig",
+//         "src/examples/js-bench-vue.zig",
+//         "src/examples/js-bench-react-h.zig",
+//         "src/examples/js-bench-preact.zig",
+//         "src/examples/js-bench-svelte.zig",
+//         "src/examples/js-bench-solid.zig",
+//         "src/examples/test-worker_zig.zig",
+//         "src/examples/dom_purify.zig",
+//         "src/examples/text_encoding.zig",
+//         "src/examples/jsdom_zexplorer_speed_test.zig",
+//         "src/examples/h5sc-test.zig",
+//         "src/examples/blob_object_url.zig",
+//         "src/examples/test_css_sanitization.zig",
+//         "src/examples/test_css_pipeline.zig",
+//         "src/examples/test_css_complete.zig",
+//         "src/examples/test_real.zig",
+//         "src/examples/test_all.zig",
+//         "src/examples/test_canvas.zig",
+//         "src/examples/test_example.zig",
+//         "src/examples/test_image1.zig",
+//         "src/examples/test_image2.zig",
+//         "src/examples/test_image3.zig",
+//         "src/examples/test_image4.zig",
+//         "src/examples/dompurify_tests.zig",
+//         "src/examples/test_svg_raster.zig",
+//         "src/examples/test_og_generator.zig",
+//         "src/examples/test_og_generator_v3.zig",
+//         "src/examples/test_invoice_generator.zig",
+//     };
 
-    for (example_files) |example_file| {
-        const check_exe = b.addExecutable(.{
-            .name = "check-example",
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(example_file),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "curl", .module = curl_module },
-                    .{ .name = "zexplorer", .module = zexplorer_module },
-                },
-            }),
-        });
-        linkAllLibs(check_exe, paths, libs);
-        b.installArtifact(check_exe);
-        check_step.dependOn(&check_exe.step);
-    }
+//     for (example_files) |example_file| {
+//         const check_exe = b.addExecutable(.{
+//             .name = "check-example",
+//             .root_module = b.createModule(.{
+//                 .root_source_file = b.path(example_file),
+//                 .target = target,
+//                 .optimize = optimize,
+//                 .imports = &.{
+//                     .{ .name = "curl", .module = curl_module },
+//                     .{ .name = "zexplorer", .module = zexplorer_module },
+//                 },
+//             }),
+//         });
+//         linkAllLibs(check_exe, paths, libs);
+//         b.installArtifact(check_exe);
+//         check_step.dependOn(&check_exe.step);
+//     }
 
-    const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
+//     const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
 
-    if (example_name) |name| {
-        const example_exe = b.addExecutable(.{
-            .name = b.fmt("example-{s}", .{name}),
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "curl", .module = curl_module },
-                    .{ .name = "zexplorer", .module = zexplorer_module },
-                },
-            }),
-        });
-        linkAllLibs(example_exe, paths, libs);
-        b.installArtifact(example_exe);
+//     if (example_name) |name| {
+//         const example_exe = b.addExecutable(.{
+//             .name = b.fmt("example-{s}", .{name}),
+//             .root_module = b.createModule(.{
+//                 .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
+//                 .target = target,
+//                 .optimize = optimize,
+//                 .imports = &.{
+//                     .{ .name = "curl", .module = curl_module },
+//                     .{ .name = "zexplorer", .module = zexplorer_module },
+//                 },
+//             }),
+//         });
+//         linkAllLibs(example_exe, paths, libs);
+//         b.installArtifact(example_exe);
 
-        const run_example = b.addRunArtifact(example_exe);
-        run_example.step.dependOn(b.getInstallStep());
-        if (b.args) |args| run_example.addArgs(args);
-        example_step.dependOn(&run_example.step);
-    } else {
-        const list_examples = b.addSystemCommand(&.{ "sh", "-c", "echo 'Available examples:' && ls -1 src/examples/*.zig 2>/dev/null | sed 's|src/examples/||;s|\\.zig$||' | sed 's/^/  /' || echo '  (none found)'" });
-        example_step.dependOn(&list_examples.step);
-    }
-}
+//         const run_example = b.addRunArtifact(example_exe);
+//         run_example.step.dependOn(b.getInstallStep());
+//         if (b.args) |args| run_example.addArgs(args);
+//         example_step.dependOn(&run_example.step);
+//     } else {
+//         const list_examples = b.addSystemCommand(&.{ "sh", "-c", "echo 'Available examples:' && ls -1 src/examples/*.zig 2>/dev/null | sed 's|src/examples/||;s|\\.zig$||' | sed 's/^/  /' || echo '  (none found)'" });
+//         example_step.dependOn(&list_examples.step);
+//     }
+// }
 
 // =============================================================================
 // Documentation

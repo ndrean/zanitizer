@@ -34,9 +34,11 @@ pub const PDFDocument = struct {
     doc: hpdf.HPDF_Doc,
     current_page: hpdf.HPDF_Page = null,
     page_height: f32 = 0,
-    font: hpdf.HPDF_Font = null,
+    font: hpdf.HPDF_Font = null,         // Roboto-Regular
+    font_bold: hpdf.HPDF_Font = null,    // Roboto-Bold
+    font_italic: hpdf.HPDF_Font = null,  // Roboto-Italic
+    current_font: hpdf.HPDF_Font = null, // currently selected variant
     allocator: std.mem.Allocator,
-    global_font: hpdf.HPDF_Font = null,
     current_font_size: f32 = 12.0,
 
     pub fn init(allocator: std.mem.Allocator) !*PDFDocument {
@@ -47,23 +49,26 @@ pub const PDFDocument = struct {
         _ = hpdf.HPDF_UseUTFEncodings(doc);
         _ = hpdf.HPDF_SetCurrentEncoder(doc, "UTF-8");
 
-        const font_bytes = @embedFile("fonts/Roboto-Regular.ttf");
-        const font_name = hpdf.HPDF_LoadTTFontFromMemory(
-            doc,
-            font_bytes.ptr,
-            @intCast(font_bytes.len), // Size of the font array (cast to C unsigned int)
-            hpdf.HPDF_TRUE, // TRUE = Embed glyphs into the PDF
-        );
+        const loadFont = struct {
+            fn f(d: hpdf.HPDF_Doc, bytes: []const u8) ?hpdf.HPDF_Font {
+                const name = hpdf.HPDF_LoadTTFontFromMemory(d, bytes.ptr, @intCast(bytes.len), hpdf.HPDF_TRUE);
+                if (name == null) return null;
+                return hpdf.HPDF_GetFont(d, name, "UTF-8");
+            }
+        }.f;
 
-        if (font_name == null) {
-            return error.FontLoadFailed;
-        }
+        const font_regular = loadFont(doc, @embedFile("fonts/Roboto-Regular.ttf")) orelse return error.FontLoadFailed;
+        const font_bold    = loadFont(doc, @embedFile("fonts/Roboto-Bold.ttf"))    orelse return error.FontLoadFailed;
+        const font_italic  = loadFont(doc, @embedFile("fonts/Roboto-Italic.ttf"))  orelse return error.FontLoadFailed;
 
         const self = try allocator.create(PDFDocument);
         self.* = .{
             .doc = doc,
             .allocator = allocator,
-            .font = hpdf.HPDF_GetFont(doc, font_name, "UTF-8"),
+            .font = font_regular,
+            .font_bold = font_bold,
+            .font_italic = font_italic,
+            .current_font = font_regular,
         };
         return self;
     }
@@ -192,7 +197,7 @@ fn js_pdf_addPage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
     self.page_height = hpdf.HPDF_Page_GetHeight(self.current_page);
 
     // Set default font size so text works immediately
-    _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.font, self.current_font_size);
+    _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.current_font, self.current_font_size);
 
     return zqjs.UNDEFINED;
 }
@@ -339,7 +344,7 @@ fn js_pdf_loadFont(_: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSVa
     return zqjs.UNDEFINED;
 }
 
-// real size, but ❗️ fake font: pdf.setFont("CustomFont", 24)
+// pdf.setFont("Roboto-Bold", 24) or pdf.setFont(24)
 fn js_pdf_setFont(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
@@ -349,21 +354,29 @@ fn js_pdf_setFont(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 
     var size: f64 = 12.0;
 
-    // Support both pdf.setFont(24) and pdf.setFont("Roboto", 24)
     if (argc == 1) {
+        // pdf.setFont(24)
         _ = qjs.JS_ToFloat64(ctx.ptr, &size, argv[0]);
     } else {
+        // pdf.setFont("Roboto-Bold", 24) — select variant from name
         _ = qjs.JS_ToFloat64(ctx.ptr, &size, argv[1]);
+        const name = ctx.toZString(argv[0]) catch null;
+        if (name) |n| {
+            defer ctx.freeZString(n);
+            if (std.mem.indexOf(u8, n, "Bold") != null) {
+                self.current_font = self.font_bold;
+            } else if (std.mem.indexOf(u8, n, "Italic") != null) {
+                self.current_font = self.font_italic;
+            } else {
+                self.current_font = self.font;
+            }
+        }
     }
 
-    // Save the size globally so addPage() can inherit it
-    if (size > 0) {
-        self.current_font_size = @floatCast(size);
-    }
+    if (size > 0) self.current_font_size = @floatCast(size);
 
-    // If a page already exists, apply it immediately
     if (self.current_page != null) {
-        _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.font, self.current_font_size);
+        _ = hpdf.HPDF_Page_SetFontAndSize(self.current_page, self.current_font, self.current_font_size);
     }
 
     return zqjs.UNDEFINED;

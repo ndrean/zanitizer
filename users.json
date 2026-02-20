@@ -1,0 +1,21 @@
+{
+  "success": true,
+  "count": 3,
+  "users": [
+    {
+      "fullName": "Emily Johnson",
+      "email": "emily.johnson@x.dummyjson.com",
+      "scrapedAt": 1771597430624
+    },
+    {
+      "fullName": "Michael Williams",
+      "email": "michael.williams@x.dummyjson.com",
+      "scrapedAt": 1771597430624
+    },
+    {
+      "fullName": "Sophia Brown",
+      "email": "sophia.brown@x.dummyjson.com",
+      "scrapedAt": 1771597430624
+    }
+  ]
+}

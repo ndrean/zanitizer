@@ -26,9 +26,6 @@ extern "c" fn tvg_picture_new() ?*Tvg_Paint;
 extern "c" fn tvg_picture_load_data(paint: *Tvg_Paint, data: [*]const u8, size: u32, mimetype: [*c]const u8, rpath: [*c]const u8, copy: bool) c_int;
 extern "c" fn tvg_picture_set_size(paint: *Tvg_Paint, w: f32, h: f32) c_int;
 extern "c" fn tvg_picture_get_size(paint: *Tvg_Paint, w: *f32, h: *f32) c_int;
-extern "c" fn tvg_font_load_data(name: [*c]const u8, data: [*]const u8, size: u32, mimetype: [*c]const u8, copy: bool) c_int;
-
-const default_font_data = @embedFile("fonts/Arial.ttf");
 
 // nanosvg C bindings
 
@@ -130,8 +127,8 @@ pub const Image = struct {
         if (tvg_engine_init(0) != 0) return error.SvgRasterizerFailed;
         defer _ = tvg_engine_term();
 
-        // Register embedded font so SVG <text> elements can render
-        _ = tvg_font_load_data("Arial", default_font_data.ptr, default_font_data.len, "ttf", false);
+        // Register embedded fonts so SVG <text> elements can render
+        thorvg.loadEmbeddedFonts() catch {};
 
         // 2. Load SVG
         const picture = tvg_picture_new() orelse return error.SvgParseFailed;

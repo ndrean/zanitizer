@@ -179,6 +179,7 @@ fn stylesheet(allocator: std.mem.Allocator) !void {
 
     try z.initDocumentCSS(doc, true);
     defer z.destroyDocumentCSS(doc);
+    defer z.destroyDocumentStylesheets(doc);
     const parser = try z.createCssStyleParser();
     defer z.destroyCssStyleParser(parser);
     try z.loadStyleTags(allocator, doc, parser);
