@@ -112,7 +112,13 @@ fn textMeasure(
         else => natural_w,
     };
 
-    return .{ .width = result_w, .height = natural_h };
+    // If text wraps, estimate height proportionally (avoids ThorVG calls in C callback)
+    const result_h: f32 = if (result_w > 0 and natural_w > result_w) blk: {
+        const line_count = @ceil(natural_w / result_w);
+        break :blk line_count * natural_h;
+    } else natural_h;
+
+    return .{ .width = result_w, .height = result_h };
 }
 
 /// Recursively collect all textContent from a DOM subtree (like JS .textContent)
@@ -166,6 +172,34 @@ fn isInlineElement(tag: []const u8) bool {
     return false;
 }
 
+fn isRemoteUrl(url: []const u8) bool {
+    return std.mem.startsWith(u8, url, "https://") or
+        std.mem.startsWith(u8, url, "http://") or
+        std.mem.startsWith(u8, url, "//");
+}
+
+/// Synchronous HTTP GET; bytes are allocated from `allocator`. Returns null on error.
+fn fetchImageBytes(allocator: std.mem.Allocator, url: []const u8) ?[]const u8 {
+    var client: std.http.Client = .{ .allocator = allocator };
+    defer client.deinit();
+    var buf = std.Io.Writer.Allocating.init(allocator);
+    const resp = client.fetch(.{
+        .method = .GET,
+        .location = .{ .url = url },
+        .response_writer = &buf.writer,
+    }) catch |err| {
+        buf.deinit();
+        std.debug.print("[Compositor] Failed to fetch image {s}: {}\n", .{ url, err });
+        return null;
+    };
+    if (resp.status != .ok) {
+        buf.deinit();
+        std.debug.print("[Compositor] HTTP {} for image: {s}\n", .{ @intFromEnum(resp.status), url });
+        return null;
+    }
+    return buf.toOwnedSlice() catch null;
+}
+
 /// Build a Yoga tree from the DOM. Only element nodes become Yoga nodes.
 /// Leaf elements (no element children) get their textContent measured as a whole.
 fn buildYogaTree(
@@ -210,11 +244,27 @@ fn buildYogaTree(
             var img_loaded = false;
             if (z.getAttribute_zc(el, "src")) |src| {
                 if (src.len > 0) {
-                    // Resolve src relative to base_dir
-                    const path = std.fs.path.join(allocator, &.{ base_dir, src }) catch src;
-                    if (std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024)) |data| {
+                    // Load image: remote URLs are fetched; relative paths resolved to base_dir
+                    z.print("{s}\n", .{src});
+                    const maybe_data: ?[]const u8 = if (isRemoteUrl(src)) blk: {
+                        const url = if (std.mem.startsWith(u8, src, "//"))
+                            std.fmt.allocPrint(allocator, "https:{s}", .{src}) catch src
+                        else
+                            src;
+                        break :blk fetchImageBytes(allocator, url);
+                    } else blk: {
+                        const path = std.fs.path.join(allocator, &.{ base_dir, src }) catch src;
+                        break :blk std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024) catch {
+                            std.debug.print("[Compositor] Failed to load image: {s}\n", .{path});
+                            break :blk null;
+                        };
+                    };
+
+                    if (maybe_data) |data| {
                         info.img_data = data;
-                        info.img_is_svg = std.mem.endsWith(u8, src, ".svg");
+                        info.img_is_svg = std.mem.endsWith(u8, src, ".svg") or
+                            std.mem.endsWith(u8, src, ".svg?v=1") or
+                            std.mem.indexOf(u8, src, ".svg?") != null;
 
                         // 1. HTML width/height attributes
                         var attr_w: f32 = 0;
@@ -235,8 +285,6 @@ fn buildYogaTree(
                             }
                         }
                         img_loaded = true;
-                    } else |_| {
-                        std.debug.print("[Compositor] Failed to load image: {s}\n", .{path});
                     }
                 }
             }
@@ -516,6 +564,56 @@ fn measureText(allocator: std.mem.Allocator, text: []const u8, font_size: f32) s
     return .{ .w = 0, .h = 0 };
 }
 
+/// Split text into lines that fit within max_width at the given font_size.
+/// Each returned string is allocated from allocator. Caller owns the slice.
+fn wordWrapText(
+    allocator: std.mem.Allocator,
+    text: []const u8,
+    font_size: f32,
+    max_width: f32,
+) [][]const u8 {
+    var result: std.ArrayListUnmanaged([]const u8) = .empty;
+    var current: std.ArrayListUnmanaged(u8) = .empty;
+
+    var words = std.mem.tokenizeAny(u8, text, " \t\n\r");
+    while (words.next()) |word| {
+        const needs_sep = current.items.len > 0;
+        // Build candidate: current + " " + word
+        const cand_len = current.items.len + (if (needs_sep) @as(usize, 1) else 0) + word.len;
+        const cand = allocator.alloc(u8, cand_len) catch continue;
+        defer allocator.free(cand);
+        var ci: usize = 0;
+        @memcpy(cand[ci .. ci + current.items.len], current.items);
+        ci += current.items.len;
+        if (needs_sep) {
+            cand[ci] = ' ';
+            ci += 1;
+        }
+        @memcpy(cand[ci..], word);
+
+        const m = measureText(allocator, cand, font_size);
+        if (m.w <= max_width or current.items.len == 0) {
+            current.clearRetainingCapacity();
+            current.appendSlice(allocator, cand) catch {};
+        } else {
+            // Flush current line, start new one with this word
+            result.append(allocator, allocator.dupe(u8, current.items) catch "") catch {};
+            current.clearRetainingCapacity();
+            current.appendSlice(allocator, word) catch {};
+        }
+    }
+    if (current.items.len > 0) {
+        result.append(allocator, allocator.dupe(u8, current.items) catch "") catch {};
+    }
+    current.deinit(allocator);
+
+    if (result.items.len == 0) {
+        // Fallback: single line with original text
+        result.append(allocator, allocator.dupe(u8, text) catch "") catch {};
+    }
+    return result.toOwnedSlice(allocator) catch result.items;
+}
+
 /// Collapse whitespace CSS-style: runs of whitespace → single space.
 /// Returns null on allocation failure. Returns empty slice if all whitespace.
 fn collapseWhitespace(allocator: std.mem.Allocator, raw: []const u8) ?[]const u8 {
@@ -598,6 +696,16 @@ fn paintYogaTree(
     const node_w = yoga.getWidth(yg);
     const node_h = yoga.getHeight(yg);
 
+    // Guard against degenerate Yoga values.
+    // ThorVG's TO_SWCOORD does `int32(v * 64)` — overflows at v > ~33M.
+    // Use 100K as a safe cap; also skip zero/negative and NaN/Inf.
+    const MAX_TVG: f32 = 100_000.0;
+    if (!std.math.isFinite(x) or !std.math.isFinite(y) or
+        !std.math.isFinite(node_w) or !std.math.isFinite(node_h) or
+        @abs(x) > MAX_TVG or @abs(y) > MAX_TVG or
+        node_w <= 0 or node_w > MAX_TVG or
+        node_h <= 0 or node_h > MAX_TVG) return;
+
     // Determine text color: inherit from parent if not explicitly set
     const fg = if (info.fg_color[0] != 0 or info.fg_color[1] != 0 or info.fg_color[2] != 0)
         info.fg_color
@@ -629,34 +737,47 @@ fn paintYogaTree(
     if (info.img_data) |img_data| {
         if (tvg_picture_new()) |pic| {
             const mime: [*c]const u8 = if (info.img_is_svg) "svg" else null;
-            _ = tvg_picture_load_data(pic, img_data.ptr, @intCast(img_data.len), mime, null, true);
-            _ = tvg_picture_set_size(pic, node_w - pad_left - yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeRight), node_h - pad_top - yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeBottom));
-            _ = tvg_paint_translate(pic, cx, cy);
-            _ = tvg_canvas_add(canvas, pic);
+            const load_ok = tvg_picture_load_data(pic, img_data.ptr, @intCast(img_data.len), mime, null, true);
+            if (load_ok == 0) { // 0 = TVG_RESULT_SUCCESS
+                const pic_w = @max(1.0, node_w - pad_left - yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeRight));
+                const pic_h = @max(1.0, node_h - pad_top - yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeBottom));
+                _ = tvg_picture_set_size(pic, pic_w, pic_h);
+                _ = tvg_paint_translate(pic, cx, cy);
+                _ = tvg_canvas_add(canvas, pic);
+            } else {
+                // Unsupported format (webp, avif, etc.) or corrupt data — free and skip
+                _ = tvg_paint_unref(pic, true);
+            }
         }
     }
 
-    // Paint text content if this is a leaf element with text
+    // Paint text content — word-wrap to stay within the node's content width
     if (info.text_content.len > 0) {
-        const text_paint = tvg_text_new() orelse return;
-        const c_string = allocator.dupeZ(u8, info.text_content) catch return;
-        defer allocator.free(c_string);
-
-        _ = tvg_text_set_font(text_paint, "Roboto");
-        _ = tvg_text_set_size(text_paint, info.font_size);
-        _ = tvg_text_set_text(text_paint, c_string.ptr);
-        _ = tvg_text_set_color(text_paint, fg[0], fg[1], fg[2]);
-
-        // Apply text-align offset within the content area
         const pad_right = yoga.c.YGNodeLayoutGetPadding(yg, yoga.c.YGEdgeRight);
         const content_w = node_w - pad_left - pad_right;
-        const tx = switch (info.text_align) {
-            .left => cx,
-            .center => cx + @max(0.0, (content_w - info.measured_width) / 2.0),
-            .right => cx + @max(0.0, content_w - info.measured_width),
-        };
-        _ = tvg_paint_translate(text_paint, tx, cy);
-        _ = tvg_canvas_add(canvas, text_paint);
+        const max_w = if (content_w > 0) content_w else @as(f32, 800.0);
+
+        const lines = wordWrapText(allocator, info.text_content, info.font_size, max_w);
+        // Arena allocator owns all line strings — no manual free needed
+        for (lines, 0..) |line_text, li| {
+            const text_paint = tvg_text_new() orelse continue;
+            const c_string = allocator.dupeZ(u8, line_text) catch continue;
+
+            _ = tvg_text_set_font(text_paint, "Roboto");
+            _ = tvg_text_set_size(text_paint, info.font_size);
+            _ = tvg_text_set_text(text_paint, c_string.ptr);
+            _ = tvg_text_set_color(text_paint, fg[0], fg[1], fg[2]);
+
+            const line_measured = measureText(allocator, line_text, info.font_size);
+            const line_y = cy + @as(f32, @floatFromInt(li)) * LINE_HEIGHT;
+            const tx = switch (info.text_align) {
+                .left => cx,
+                .center => cx + @max(0.0, (content_w - line_measured.w) / 2.0),
+                .right => cx + @max(0.0, content_w - line_measured.w),
+            };
+            _ = tvg_paint_translate(text_paint, tx, line_y);
+            _ = tvg_canvas_add(canvas, text_paint);
+        }
     }
 
     // Paint children
@@ -686,14 +807,25 @@ pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv
     }
     const root_node: *z.DomNode = @ptrCast(@alignCast(ptr));
 
-    // 2. Optional filename (Arg 1) — if provided, save to disk; otherwise return ArrayBuffer
+    // 2. Optional width (Arg 1: number, default 800px)
+    //    Examples: zxp.paintDOM(el, 595)   // A4 at 72 DPI
+    //              zxp.paintDOM(el, 2480)  // A4 at 300 DPI (print)
+    const page_width: u32 = blk: {
+        if (argc >= 2 and !ctx.isString(argv[1])) {
+            var w_f64: f64 = 800;
+            if (qjs.JS_ToFloat64(ctx.ptr, &w_f64, argv[1]) == 0 and w_f64 > 0)
+                break :blk @as(u32, @intFromFloat(w_f64));
+        }
+        break :blk 800;
+    };
+
+    // Optional filename (Arg 1: string legacy, or Arg 2: string)
     var filename: ?[]const u8 = null;
     if (argc >= 2 and ctx.isString(argv[1])) {
         filename = ctx.toZString(argv[1]) catch null;
+    } else if (argc >= 3 and ctx.isString(argv[2])) {
+        filename = ctx.toZString(argv[2]) catch null;
     }
-
-    const page_width: u32 = 800;
-    const page_height: u32 = 600;
 
     // 3. Initialize ThorVG early (needed for text measurement during tree build)
     _ = tvg_engine_init(0);
@@ -711,12 +843,14 @@ pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv
     };
     defer yoga.nodeFreeRecursive(yg_root);
 
-    // Set root to fill the page
+    // Set root width; height is determined by content
     yoga.setWidth(yg_root, @floatFromInt(page_width));
-    yoga.setHeight(yg_root, @floatFromInt(page_height));
 
-    // 5. Calculate layout
-    yoga.calculateLayout(yg_root, @floatFromInt(page_width), @floatFromInt(page_height), yoga.DIRECTION_LTR);
+    // 5. Calculate layout — undefined height → Yoga computes natural content height
+    yoga.calculateLayout(yg_root, @floatFromInt(page_width), yoga.Undefined, yoga.DIRECTION_LTR);
+
+    // Read back computed height (always at least 1px)
+    const page_height: u32 = @max(1, @as(u32, @intFromFloat(@ceil(yoga.getHeight(yg_root)))));
 
     // 6. Allocate pixel buffer
     const master_buffer = rc.allocator.alloc(u32, page_width * page_height) catch return w.UNDEFINED;

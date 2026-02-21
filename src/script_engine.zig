@@ -793,13 +793,33 @@ pub const ScriptEngine = struct {
             if (!std.mem.eql(u8, rel, "stylesheet")) continue;
 
             const href = z.getAttribute_zc(link_el, "href") orelse continue;
+            const href_is_remote = isRemote(href);
+            const base_is_remote = isRemote(base_dir);
 
             var raw_css: []const u8 = undefined;
 
-            if (isRemote(href)) {
-                z.print("[Engine] Fetching remote CSS: {s}\n", .{href});
-                const remote_css = self.get(href) catch |err| {
-                    z.print("Failed to fetch CSS '{s}': {}\n", .{ href, err });
+            if (href_is_remote or base_is_remote) {
+                var fetch_url: []const u8 = href;
+
+                // Relative href → resolve against remote base_dir
+                if (!href_is_remote) {
+                    var parser = z.URLParser.create() catch continue;
+                    defer parser.destroy();
+
+                    var base_url = parser.parse(base_dir) catch continue;
+                    defer base_url.destroy();
+
+                    var target_url = parser.parseRelative(href, &base_url) catch continue;
+                    defer target_url.destroy();
+
+                    const resolved_str = target_url.toString(self.allocator) catch continue;
+                    path_owned = resolved_str;
+                    fetch_url = resolved_str;
+                }
+
+                z.print("[Engine] Fetching remote CSS: {s}\n", .{fetch_url});
+                const remote_css = self.get(fetch_url) catch |err| {
+                    z.print("Failed to fetch CSS '{s}': {}\n", .{ fetch_url, err });
                     continue;
                 };
                 css_owned = remote_css;
@@ -820,9 +840,39 @@ pub const ScriptEngine = struct {
                 raw_css = css_content;
             }
 
-            // Sanitize and load via Sanitizer
-            try san.loadStylesheet(self.dom.doc, raw_css);
+            // Sanitize CSS and get the clean text (strips dangerous properties,
+            // background-image: url(...), @import, etc.)
+            const clean_css = try san.sanitizeStylesheet(raw_css);
+            defer self.allocator.free(clean_css);
+
+            // Load sanitized CSS into Lexbor's engine
+            try self.loadCSS(clean_css);
+
+            // Replace the <link> with an inline <style> containing the sanitized CSS.
+            // This makes the sanitize output self-contained: convert can re-parse
+            // without re-fetching the original (potentially unsafe) URL.
+            // IMPORTANT: use clean_css, not raw_css — the inline text must be sanitized.
+            inlineLinkAsStyle(self.dom.doc, link_el, clean_css);
         }
+    }
+
+    /// Replace a <link rel="stylesheet"> element with a <style> element
+    /// containing the already-fetched-and-sanitized CSS text.
+    fn inlineLinkAsStyle(doc: *z.HTMLDocument, link_el: *z.HTMLElement, css: []const u8) void {
+        const link_node = z.elementToNode(link_el);
+        const parent = z.parentNode(link_node) orelse return;
+
+        // Create <style> element
+        const style_el = z.createElement(doc, "style") catch return;
+        const style_node = z.elementToNode(style_el);
+
+        // Create text node with the sanitized CSS and append to <style>
+        const text_node = z.createTextNode(doc, css) catch return;
+        z.appendChild(style_node, text_node);
+
+        // Insert <style> where <link> was, then remove <link>
+        z.insertBefore(link_node, style_node);
+        _ = z.removeChild(parent, link_node);
     }
 
     pub fn loadFileModule(self: *ScriptEngine, path: []const u8) !void {

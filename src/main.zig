@@ -104,7 +104,7 @@ pub fn main() !void {
                 format_override = args.next();
             } else if (std.mem.eql(u8, arg, "--pretty") or std.mem.eql(u8, arg, "-p")) {
                 pretty = true;
-            } else if (maybe_path == null and inline_code == null and !std.mem.startsWith(u8, arg, "-")) {
+            } else if (maybe_path == null and inline_code == null and (std.mem.eql(u8, arg, "-") or !std.mem.startsWith(u8, arg, "-"))) {
                 maybe_path = arg;
             } else {
                 try cli_args.append(gpa, arg);
@@ -122,7 +122,7 @@ pub fn main() !void {
                 return;
             };
             if (std.mem.eql(u8, path, "-")) {
-                var list: std.ArrayListUnmanaged(u8) = .empty;
+                var list: std.ArrayList(u8) = .empty;
                 errdefer list.deinit(gpa);
                 var buf: [8192]u8 = undefined;
                 while (true) {
@@ -147,17 +147,30 @@ pub fn main() !void {
 
         var engine = try z.ScriptEngine.init(gpa, sandbox_root);
         defer engine.deinit();
-        engine.printMemoryUsage();
+
+        if (is_debug) engine.printMemoryUsage();
 
         try runCliRequest(engine, script_content, script_filename, format, output_path, load_html_path, cli_args.items, pretty);
     } else if (std.mem.eql(u8, verb, "convert") or std.mem.eql(u8, verb, "sanitize")) {
         var maybe_path: ?[:0]const u8 = null;
+        var maybe_url: ?[]const u8 = null; // --url overrides base URL for stdin input
         var output_path: ?[]const u8 = null;
+        var width: u32 = 800; // viewport width in pixels (595=A4@72dpi, 2480=A4@300dpi)
+        var load_css: bool = true;
+        var load_scripts: bool = true;
 
         while (args.next()) |arg| {
             if (std.mem.eql(u8, arg, "-o")) {
                 output_path = args.next();
-            } else if (maybe_path == null and !std.mem.startsWith(u8, arg, "-")) {
+            } else if (std.mem.eql(u8, arg, "-w") or std.mem.eql(u8, arg, "--width")) {
+                if (args.next()) |val| width = std.fmt.parseInt(u32, val, 10) catch 800;
+            } else if (std.mem.eql(u8, arg, "--url") or std.mem.eql(u8, arg, "-u")) {
+                maybe_url = args.next();
+            } else if (std.mem.eql(u8, arg, "--no-css")) {
+                load_css = false;
+            } else if (std.mem.eql(u8, arg, "--no-scripts")) {
+                load_scripts = false;
+            } else if (maybe_path == null and (std.mem.eql(u8, arg, "-") or !std.mem.startsWith(u8, arg, "-"))) {
                 maybe_path = arg;
             }
         }
@@ -165,19 +178,22 @@ pub fn main() !void {
         const html_content = try readHtmlInput(gpa, maybe_path);
         defer gpa.free(html_content);
 
-        // Resolve <link> hrefs relative to the HTML file's own directory, not CWD.
-        const base_dir: []const u8 = if (maybe_path) |p|
-            std.fs.path.dirname(p) orelse "."
-        else
-            ".";
+        // Determine base URL/dir for resolving relative asset hrefs.
+        // Priority: --url flag > URL path input > file path dirname > "." (local stdin)
+        const base_dir: []const u8 =
+            if (maybe_url) |u| u else if (maybe_path) |p| blk: {
+                if (std.mem.startsWith(u8, p, "http://") or std.mem.startsWith(u8, p, "https://"))
+                    break :blk @as([]const u8, p); // URL input — use as base for relative resolution
+                break :blk std.fs.path.dirname(p) orelse "."; // local file
+            } else ".";
 
         var engine = try z.ScriptEngine.init(gpa, sandbox_root);
         defer engine.deinit();
 
         if (std.mem.eql(u8, verb, "convert")) {
-            try runConvert(engine, html_content, base_dir, output_path);
+            try runConvert(engine, html_content, base_dir, output_path, width, load_css, load_scripts);
         } else {
-            try runSanitize(engine, html_content, base_dir, output_path);
+            try runSanitize(engine, html_content, base_dir, output_path, load_css, load_scripts);
         }
     } else {
         z.print("❌ Unknown command: {s}\n", .{verb});
@@ -185,13 +201,13 @@ pub fn main() !void {
     }
 }
 
-fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[:0]const u8) ![]u8 {
+fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[]const u8) ![]u8 {
     const path = maybe_path orelse {
-        z.print("❌ Error: Missing HTML file path (or use - for stdin).\n", .{});
+        z.print("❌ Error: Missing HTML file path, URL, or use - for stdin.\n", .{});
         return error.MissingInput;
     };
     if (std.mem.eql(u8, path, "-")) {
-        var list: std.ArrayListUnmanaged(u8) = .empty;
+        var list: std.ArrayList(u8) = .empty;
         errdefer list.deinit(allocator);
         var buf: [8192]u8 = undefined;
         while (true) {
@@ -201,22 +217,55 @@ fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[:0]const u8) ![]u8 
         }
         return list.toOwnedSlice(allocator);
     }
+    if (std.mem.startsWith(u8, path, "http://") or std.mem.startsWith(u8, path, "https://")) {
+        var client: std.http.Client = .{ .allocator = allocator };
+        defer client.deinit();
+        var buf = std.Io.Writer.Allocating.init(allocator);
+        const resp = client.fetch(.{
+            .method = .GET,
+            .location = .{ .url = path },
+            .response_writer = &buf.writer,
+        }) catch |err| {
+            buf.deinit();
+            z.print("❌ Failed to fetch URL '{s}': {}\n", .{ path, err });
+            return error.FetchFailed;
+        };
+        if (resp.status != .ok) {
+            buf.deinit();
+            z.print("❌ HTTP {} fetching '{s}'\n", .{ @intFromEnum(resp.status), path });
+            return error.FetchFailed;
+        }
+        return buf.toOwnedSlice();
+    }
     return std.fs.cwd().readFileAlloc(allocator, path, 10 * 1024 * 1024);
 }
 
-fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8) !void {
-    try engine.loadPage(html, .{ .base_dir = base_dir });
+fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8, width: u32, load_css: bool, load_scripts: bool) !void {
+    try engine.loadPage(html, .{ .base_dir = base_dir, .load_stylesheets = load_css, .execute_scripts = load_scripts });
 
     const is_pdf = if (out_path) |p| std.mem.endsWith(u8, p, ".pdf") else false;
 
+    // Build script with the requested width.
+    // For PDF: render at requested width, read PNG height from header, scale to 595pt.
+    // PNG IHDR: bytes 16-19 = width, 20-23 = height (big-endian u32).
     const script = if (is_pdf)
-        \\const _imgBuf = zxp.paintDOM(document.body);
-        \\const _pdf = new PDFDocument();
-        \\_pdf.addPage();
-        \\_pdf.drawImageFromBuffer(_imgBuf, 0, 0, 595, 446);
-        \\_pdf.toArrayBuffer()
+        try std.fmt.allocPrint(engine.allocator,
+            \\const _imgBuf = zxp.paintDOM(document.body, {d});
+            \\const _view = new DataView(_imgBuf);
+            \\const _pxH = _view.getUint32(20, false);
+            \\const _pdfH = Math.round(_pxH * (595 / {d}));
+            \\const _pdf = new PDFDocument();
+            \\_pdf.addPage();
+            \\_pdf.drawImageFromBuffer(_imgBuf, 0, 0, 595, _pdfH);
+            \\_pdf.toArrayBuffer()
+        , .{ width, width })
     else
-        "zxp.paintDOM(document.body)";
+        try std.fmt.allocPrint(
+            engine.allocator,
+            "zxp.paintDOM(document.body, {d})",
+            .{width},
+        );
+    defer engine.allocator.free(script);
 
     const buffer = try engine.evalAsyncAs(engine.allocator, []const u8, script, "<convert>");
     defer engine.allocator.free(buffer);
@@ -229,8 +278,8 @@ fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out
     }
 }
 
-fn runSanitize(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8) !void {
-    try engine.loadPage(html, .{ .sanitize = true, .base_dir = base_dir });
+fn runSanitize(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8, load_css: bool, load_scripts: bool) !void {
+    try engine.loadPage(html, .{ .sanitize = true, .base_dir = base_dir, .load_stylesheets = load_css, .execute_scripts = load_scripts });
     const clean_html = try engine.evalAsyncAs(engine.allocator, []const u8, "document.documentElement.outerHTML", "<sanitize>");
     defer engine.allocator.free(clean_html);
     if (out_path) |p| {
@@ -261,7 +310,7 @@ fn runCliRequest(engine: *ScriptEngine, script: []const u8, filename: [:0]const 
     switch (format) {
         .binary_png, .binary_jpeg, .binary_pdf => {
             if (load_html_path) |html_path| {
-                const html = try std.fs.cwd().readFileAlloc(engine.allocator, html_path, 10 * 1024 * 1024);
+                const html = try readHtmlInput(engine.allocator, html_path);
                 defer engine.allocator.free(html);
                 try engine.loadHTML(html);
             } else {
@@ -360,6 +409,14 @@ fn printUsage() void {
         \\
         \\Options (convert/sanitize):
         \\  -o <file>            Output file path (default: stdout)
+        \\  -w, --width <px>     Viewport width in pixels (default: 800)
+        \\                         595  = A4 at 72 DPI  (screen/PDF quality)
+        \\                         1240 = A4 at 150 DPI (good quality)
+        \\                         2480 = A4 at 300 DPI (print quality)
+        \\  -u, --url <url>      Base URL for resolving relative assets
+        \\                         (required when piping HTML from stdin)
+        \\  --no-css             Skip loading external stylesheets
+        \\  --no-scripts         Skip executing <script> tags
         \\  -  as path           Read HTML from stdin
         \\
         \\Examples:
@@ -369,9 +426,11 @@ fn printUsage() void {
         \\  zxp render template.js -o poster.png
         \\  zxp render template.js -H base.html -o poster.png
         \\  zxp convert page.html -o screenshot.png
-        \\  zxp convert - < page.html > screenshot.png
+        \\  zxp convert https://example.com --width 595 -o screenshot.png
+        \\  curl https://example.com | zxp convert - --url https://example.com > screenshot.png
         \\  zxp sanitize dirty.html -o clean.html
-        \\  zxp sanitize - < dirty.html
+        \\  zxp sanitize https://amazon.com --no-css > amz.html
+        \\  curl https://ziggit.dev | zxp sanitize - --url https://ziggit.dev > clean.html
         \\
     , .{});
 }

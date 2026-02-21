@@ -2,13 +2,17 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-A native DOM + JS runtime with Flexbox layout and raster compositing for content pipelines: feed it HTML or SVG documents, or ES2020 JavaScript against a real DOM, and get back structured data, PNG, JPEG, WEBP, SVG, or PDF, without a browser.
+`zexplorer` is designed for document content pipelines that you control, not a general-purpose application runtime nor for rendering arbitrary public websites: a mini Swiss Army knife that runs fast, delivers, and dies.
+
+It is a native DOM + JS runtime with some layour rendering capabilities (**Flexbox** layout rendering and raster compositing).
+
+Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and get back structured data or a layout as PNG, JPEG, WEBP, SVG, or PDF, without a browser.
 
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
 </p>
 
-`zexplorer` is designed for content pipelines, not general-purpose application runtimes: a mini Swiss Army knife that runs fast, delivers, and dies.
+
 
 **TL;DR**
 
@@ -16,17 +20,15 @@ A native DOM + JS runtime with Flexbox layout and raster compositing for content
 > - Memory: 10MB
 > - Zero dependencies. Single binary.
 > - Features JavaScript ES2020
-> - Embeds `Roboto-Regular` and `Arial` fonts
+> - SVG, PNG, JPEG, WEBP, PDF support (A4)
 > - JSX support via "tagged templates" with `htm` embedded
-> - SVG, PNG, JPEG, WEBP, PDF support
-> - Layout rendering (`Flexbox`)
+> - Rendering of simple **flex** or table layouts only. ❗️ not arbitrary public websites using grid, modals, psueod-elements, media queries, `calc()` sizing, custom properties `var(--color)` or `position: fixed`...
 
-Today, `zexplorer` is used as a **Zig library**. Check the examples.
+`zexplorer` can be used as a **Zig library** to add native functionalities (check the examples.) or with the **CLI**.
 
 ## The CLI Runner
 
 `zexplorer` operates as a generic CLI runner (`zxp`). The output format is entirely dictated by the command you use and what your JavaScript returns.
-
 
 ```sh
 # Scrape a React site
@@ -43,6 +45,14 @@ curl https://sketchy.site | zxp sanitize -
 
 # Clean a local HTML file with its CSS
 zxp sanitize dirty.html --css style.css -o clean.html
+
+# Render a simple website with scree quality (default)
+curl https://example.com | zxp convert - -o example.png
+# Render with PDF quality (A4, 72 DPI <-> 595)
+curl https://example.com | ./zig-out/bin/zxp convert - --width 595 -o example.pdf
+# Print quality (A4 at 300 DPI <-> 2480)
+zxp convert page.html -w 2480 -o page.pdf
+
 ```
 
 ---
@@ -209,6 +219,7 @@ In the terminal, you see:
 **[Example of dual primitives]** We create a DOM and query it in pur Zig and then using embedded JavaScript:
 
 In this example, we first parse the HTML file with `DOMParser.parseFromString()` and then we can query the "VDOM" in Zig with `z.querySelector()` and get the content with `textContent_zc()`.
+
 <details><summary>Use parser.parseFromString </summary>
 
 ```zig
@@ -238,6 +249,7 @@ pub fn main() !void {
 const std = @import("std");
 const z = @import("zexplorer");
 ```
+
 </details>
 
 Then, we run a JavaScript snippet that knows about the "vDOM". Indeed, zexplorer brings in a default `document` to which the JavaScript code accesses via a globalThis `document`. We use the engine `z.ScriptEngine`  and the `loadHTML()` and `evalModule()` methods.
@@ -437,7 +449,6 @@ We scrape <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scr
 
 You can scrap the Vercel website with this JavaScript snippet that mimics `Puppeteer`'s API.
 
-
 ```js
 // vercel.js
 
@@ -532,143 +543,212 @@ and you get your data back in 1s:
 TODO
 
 ```sh
-.zxp --js=vercel.js --async=true --fmt=array --out=vercel_data.txt 
-# or --out=array if piping
+TODO
 ```
 
 ---
 
 ### Sanitize HTML & CSS
 
-We want to sanitize the following untrusted HTML that loads an external stylesheet, defines a `<style>` element, and injects via a `<script>` new HTMLElements with some inline styles. All three CSS vectors are sanitized and properly synchronized.
+Four CSS threat vectors are sanitized in a single pass — covering every way untrusted CSS can reach a document:
 
-<details><summary>HTML code</summary>
+| #   | Vector                                                                            | Example threat                                        |
+| --- | --------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| 1   | External stylesheet (`<link>`)                                                    | `background-image: url("evil.com")`                   |
+| 2   | `<style>` block                                                                   | `background: url(javascript:alert("xss"))`            |
+| 3   | Inline `style=""` attribute                                                       | `behavior: url(evil.htc)`                             |
+| 4   | JS DOM mutation (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `createElement`) | `background-image: url(evil.com)` injected at runtime |
+
+Vectors 1–3 are static (present in the HTML source). Vector 4 is dynamic — injected by JavaScript after parse.
+
+---
+
+#### Vectors 1–3: static CSS (`<link>`, `<style>`, inline)
+
+<details><summary>src/examples/test_example.css</summary>
+
+```css
+.untrusted {
+  color: red;
+  background-color: #ffe0e0;
+  font-size: 18px;
+  padding: 8px;
+  background-image: url("evil.com");  /* ← threat: exfiltration via image load */
+}
+.trusted {
+  color: darkgreen;
+  background-color: #e0ffe0;
+  font-size: 14px;
+  padding: 6px;
+}
+```
+
+</details>
+
+<details><summary>src/examples/test_example.html</summary>
 
 ```html
-<!-- src/examples/test_examples.html -->
 <html>
   <head>
-    <link rel="stylesheet" href="test_example.css" />
+    <link rel="stylesheet" href="test_example.css" />  <!-- vector 1 -->
     <style>
-      body {
-        margin: 10px;
-        padding: 5px;
-        background: url(javascript:alert("xss"));
-      }
+      body { margin: 10px; padding: 5px;
+             background: url(javascript:alert("xss")); } /* vector 2: threat */
+      .trusted { color: green; }
     </style>
     <script src="test_example.js"></script>
   </head>
   <body>
-    <div class="untrusted" onclick="alert(1)" style="font-size: 16px">
-      Click me
+    <div class="untrusted" onclick="alert(1)"           <!-- onclick: threat -->
+         style="font-size: 16px">                       <!-- vector 3 -->
+      red + pink bg from &lt;link&gt; | font-size 16px from inline | onclick removed
     </div>
-    <p class="untrusted" style="font-size: 12px">Follow me</p>
+    <p class="untrusted" style="font-size: 12px">
+      red + pink bg from &lt;link&gt; | font-size 12px from inline | bg-image threat stripped
+    </p>
+    <p class="trusted" style="padding: 20px">
+      darkgreen + green bg from &lt;link&gt; | color green from &lt;style&gt; block | padding from inline
+    </p>
   </body>
 </html>
 ```
+
 </details>
 
-with the following stylesheet:
+**Sanitize and render:**
 
-<details><summary>Stylesheet</summary>
+```sh
+zxp sanitize src/examples/test_example.html > sanitized.html
+zxp convert sanitized.html -o test_example_sanitized.png
+```
 
-```css
-/* src/examples/test_example.css */
-body {
-.untrusted {
-  color: red;
-  background-image: url("evil.com");
-}
+<!-- generated image: test_example_sanitized.png -->
+
+<details><summary>sanitized.html — annotated output</summary>
+
+```html
+<html><head>
+    <!-- ✓ vector 1: <link> replaced by inline <style>; background-image stripped -->
+    <style>.untrusted { color: red; background-color: #ffe0e0; font-size: 18px; padding: 8px }
+.trusted { color: darkgreen; background-color: #e0ffe0; font-size: 14px; padding: 6px }
+</style>
+    <!-- ✓ vector 2: background: url(javascript:...) stripped from <style> block -->
+    <style>body { margin: 10px; padding: 5px }
+.trusted { color: green }
+</style>
+    <!-- ✓ <script> removed (default) -->
+  </head>
+  <body>
+    <!-- ✓ onclick removed; vector 3 inline style preserved (font-size is safe) -->
+    <div class="untrusted" style="font-size: 16px">
+      red + pink bg from &lt;link&gt; | font-size 16px from inline | onclick removed
+    </div>
+    <p class="untrusted" style="font-size: 12px">
+      red + pink bg from &lt;link&gt; | font-size 12px from inline | bg-image threat stripped
+    </p>
+    <p class="trusted" style="padding: 20px">
+      darkgreen + green bg from &lt;link&gt; | color green from &lt;style&gt; block | padding from inline
+    </p>
+  </body>
+</html>
 ```
 
 </details>
 
-and the script:
+**Programmatic verification** — re-parse the sanitized output cold (no network, no external files) and confirm via `getComputedStyle`:
 
-<details><summary>JS code</summary>
-
-```js
-// src/examples/test_example.js
-const html1 = `<p id="js1" class="untrusted" style="padding: 8px; behavior: url(evil.htc);">insertAdjacentHTML</p>`;
-document.body.insertAdjacentHTML("beforeend", html1);
-```
-
-</details>
-
-We run the following `Zig` code to to sanitize the HTML and output the new DOM.
-
-<details><summary>Zig runner</summary>
+<details><summary>Zig verification (src/examples/test_example.zig)</summary>
 
 ```zig
-// src/examples/test_example.zig
+try engine.loadPage(@embedFile("test_example.html"), .{
+    .sanitize = true,
+    .base_dir = "src/examples",
+    .execute_scripts = true,
+    .load_stylesheets = true,
+    .sanitizer_options = .{ .remove_scripts = false },
+});
 
-const std = @import("std");
-const z = @import("zexplorer");
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+const doc = engine.dom.doc;
 
-pub fn main() !void {
-  const gpa = debug_allocator.allocator();
-  defer _ = debug_allocator.deinit();
+// vector 1 — external stylesheet: safe props survive, threat stripped
+if (z.querySelector(doc, ".untrusted")) |el| {
+    _ = try z.getComputedStyle(ta, el, "color");             // "red"      ✓ safe
+    _ = try z.getComputedStyle(ta, el, "background-color");  // "#ffe0e0"  ✓ safe
+    _ = try z.getComputedStyle(ta, el, "background-image");  // null       ✓ stripped
+}
 
-  const sbr = try std.fs.cwd().realpathAlloc(gpa, ".");
-  defer gpa.free(sbr);
-    
-  var engine = try ScriptEngine.init(gpa,sbr);
-  defer engine.deinit();
+// vector 2 — <style> block: safe props survive, js: url stripped
+if (z.querySelector(doc, "body")) |el| {
+    _ = try z.getComputedStyle(ta, el, "margin");            // "10px"     ✓ safe
+    _ = try z.getComputedStyle(ta, el, "background");        // null       ✓ stripped
+}
 
-  const cfg = z.LoadPageOptions{
-      .sanitize = sanitize,
-      .base_dir = "src/examples",
-      .execute_scripts = true,
-      .load_stylesheets = true,
-      .sanitizer_options = .{ .remove_scripts = false },
-      .run_loop = false, // no async code
-  };
-
-  // parse the HTML, load the external stylesheet, run the script, parse and sync the CSS styles to the DOM
-
-  try engine.loadPage(@embedFile("test_example.html"), cfg);
-
-  // print DOM to terminal
-
-  if (z.bodyElement(engine.dom.doc)) |body| {
-    const html = try z.outerHTML(c_alloc, body);
-    defer c_alloc.free(html);
-    std.debug.print("{s}\n\n", .{ html });
-  }
-    
-  //=== CSS test 
-
-  // test to see if P has the color "red" coming the class
-  if (z.getElementById(doc, "js1")) |p| {
-      const color = try z.getComputedStyle(ta, p, "color");
-      defer if (color) |c| ta.free(c);
-      std.debug.print("[Test] Confirm style set by class .untrusted on #js1: color={s} \n", .{color orelse "(none)"});
-  }
-
-  // save into a file
-  try printDOM(c_alloc, "example_cleaned.html")
+// vector 3 — inline style: safe font-size survives
+if (z.querySelector(doc, "div.untrusted")) |el| {
+    _ = try z.getComputedStyle(ta, el, "font-size");         // "16px"     ✓ safe
+    // onclick attribute removed:
+    std.debug.assert(z.getAttribute_zc(el, "onclick") == null);
 }
 ```
 
 </details>
 
-The output confirms that the whole page is sanitized:
+---
 
-<details><summary>Result</summary>
+#### Vector 4: JS DOM mutation
 
-```txt
-<body>
-  <div class="untrusted" style="font-size: 16px">
-    Click me
-  </div>
-  <p id="js1" class="untrusted" style="padding: 8px">insertAdjacentHTML</p>
-</body>
+JavaScript can inject HTML at runtime via `innerHTML`, `outerHTML`, `insertAdjacentHTML`, or `createElement` + `setAttribute`. Each mutation is intercepted and sanitized at the point of injection when `sanitize = true`.
 
-[Test] Confirm style set by class .untrusted on #js1: color= red
+<details><summary>src/examples/test_sanitize_injection.html</summary>
+
+```html
+<html>
+  <body>
+    <div id="t1"></div>
+    <div id="t2-placeholder"></div>
+    <div id="t3"></div>
+    <div id="t4-host"></div>
+    <script>
+      // Each injection carries a safe property (color:red) and a threat (background-image)
+      document.getElementById("t1").innerHTML =
+        '<p id="r1" style="color:red; background-image:url(evil.com)">innerHTML | red from inline | bg-image stripped</p>';
+
+      document.getElementById("t2-placeholder").outerHTML =
+        '<p id="r2" style="color:red; background-image:url(evil2.com)">outerHTML | red from inline | bg-image stripped</p>';
+
+      document.getElementById("t3").insertAdjacentHTML("beforeend",
+        '<p id="r3" style="color:red; background-image:url(evil3.com)">insertAdjacentHTML | red from inline | bg-image stripped</p>');
+
+      const p4 = document.createElement("p");
+      p4.id = "r4";
+      p4.setAttribute("style", "color:red; background-image:url(evil4.com)");
+      p4.textContent = "createElement + setAttribute | red from inline | bg-image stripped";
+      document.getElementById("t4-host").appendChild(p4);
+    </script>
+  </body>
+</html>
 ```
 
 </details>
+
+**Run (Zig API — sanitize + render):**
+
+```sh
+zig build example -Dname=test_sanitize_injection
+```
+
+<!-- generated image: test_sanitize_injection.png -->
+
+**Programmatic verification** (from `src/examples/test_sanitize_injection.zig`):
+
+```txt
+  [innerHTML]              style="color: red"   color ✓   bg-image (stripped) ✓   PASS
+  [outerHTML]              style="color: red"   color ✓   bg-image (stripped) ✓   PASS
+  [insertAdjacentHTML]     style="color: red"   color ✓   bg-image (stripped) ✓   PASS
+  [createElement+setAttribute]  style="color: red"   color ✓   bg-image (stripped) ✓   PASS
+```
+
+In all four cases: the safe property (`color: red`) reaches the computed style, the threat (`background-image: url(...)`) is stripped before the DOM is committed. The rendered image shows red text on a white background — no external image loads occurred.
 
 ---
 
@@ -3150,6 +3230,29 @@ zig build example -Dname=js-bench-preact && ./zig-out/bin/example-js-bench-preac
 
 ```sh
 zig build example -Dname=js-bench-preact && dsymutil ./zig-out/bin/example-js-bench-preact && lldb -b -o "run" -o "bt 20" -- ./zig-out/bin/example-js-bench-preact
+```
+
+Leaks:
+
+```sh
+cat > ./debug.entitlements <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.get-task-allow</key>
+    <true/>
+</dict>
+</plist>
+EOF
+```
+
+```sh
+codesign -s - --entitlements ./debug.entitlements --force ./zig-out/bin/zxp
+```
+
+```sh
+MallocStackLogging=1 leaks -atExit ./zig-out/bin/zxp -- sanitize src/examples/test_text_align.html -o sanitized.html > san_report.txt 2>&1
 ```
 
 #### url hash

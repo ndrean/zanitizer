@@ -83,8 +83,29 @@ pub fn build(b: *std.Build) void {
     // Tests
     buildTests(b, target, optimize, paths, libs, curl_module);
 
-    // Examples
-    // buildExamples(b, target, optimize, paths, libs, zexplorer_module, curl_module);
+    // Examples: zig build example -Dname=test_sanitize_injection
+    const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
+    if (example_name) |name| {
+        const example_step = b.step("example", "Run an example from src/examples/");
+        const example_exe = b.addExecutable(.{
+            .name = b.fmt("example-{s}", .{name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "curl", .module = curl_module },
+                    .{ .name = "zexplorer", .module = zexplorer_module },
+                },
+            }),
+        });
+        linkAllLibs(example_exe, paths, libs);
+        b.installArtifact(example_exe);
+        const run_example = b.addRunArtifact(example_exe);
+        run_example.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_example.addArgs(args);
+        example_step.dependOn(&run_example.step);
+    }
 
     // Documentation
     buildDocs(b, target, optimize);
@@ -403,7 +424,7 @@ fn buildMainExe(
     curl_module: *std.Build.Module,
 ) void {
     const exe = b.addExecutable(.{
-        .name = "zxp-ex",
+        .name = "zxp",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,

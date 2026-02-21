@@ -1802,19 +1802,22 @@ fn js_insertAdjacentHTML(
     // lxb_html_document_parse_fragment(doc, &element->element, ...) so the
     const target_node = z.elementToNode(el);
 
-    // Parse via a temp document to avoid CSS watcher crashes.
-    // The main document has CSS event watchers that segfault when
-    // lxb_html_element_inner_html_set encounters <style> elements
-    // during fragment parsing. A fresh temp document has no watchers.
-    const temp_doc = z.parseHTML(rc.allocator, final_html) catch {
-        return ctx.throwInternalError("insertAdjacentHTML: parseHTML failed");
+    // Parse via a temp <div> in the MAIN document using setInnerHTML.
+    // This ensures new elements get the correct owner_document (main doc),
+    // so getComputedStyle and CSS rule application work correctly.
+    // The sanitize path strips <style> tags before this point, so CSS
+    // watchers won't crash. For trusted content (no sanitize), <style>
+    // fragments are rare in insertAdjacentHTML usage.
+    const main_doc = z.ownerDocument(target_node);
+    const temp_div = z.createElement(main_doc, "div") catch {
+        return ctx.throwInternalError("insertAdjacentHTML: failed to create temp div");
     };
-    defer z.destroyDocument(temp_doc);
+    const temp_node = z.elementToNode(temp_div);
+    defer z.destroyNode(temp_node);
 
-    const temp_body = z.bodyElement(temp_doc) orelse {
-        return ctx.throwInternalError("insertAdjacentHTML: no body in temp doc");
+    z.setInnerHTML(temp_div, final_html) catch {
+        return ctx.throwInternalError("insertAdjacentHTML: setInnerHTML failed");
     };
-    const temp_node = z.elementToNode(temp_body);
 
     // Move children from temp element to the correct position
     if (std.ascii.eqlIgnoreCase(position_str, "beforeend")) {

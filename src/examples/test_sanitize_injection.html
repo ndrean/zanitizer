@@ -1,0 +1,31 @@
+<html>
+  <body>
+    <div id="t1"></div>
+    <div id="t2-placeholder"></div>
+    <div id="t3"></div>
+    <div id="t4-host"></div>
+    <script>
+      // Vector 1: innerHTML — HTML string parsed and injected
+      document.getElementById("t1").innerHTML =
+        '<p id="r1" style="color:red; background-image:url(evil.com)">innerHTML | red from inline style | bg-image threat stripped</p>';
+
+      // Vector 2: outerHTML — replaces the element itself
+      document.getElementById("t2-placeholder").outerHTML =
+        '<p id="r2" style="color:red; background-image:url(evil2.com)">outerHTML | red from inline style | bg-image threat stripped</p>';
+
+      // Vector 3: insertAdjacentHTML — parses and inserts HTML
+      document.getElementById("t3").insertAdjacentHTML(
+        "beforeend",
+        '<p id="r3" style="color:red; background-image:url(evil3.com)">insertAdjacentHTML | red from inline style | bg-image threat stripped</p>'
+      );
+
+      // Vector 4: createElement + setAttribute("style") + appendChild
+      // (no HTML parsing — sanitization must happen at setAttribute level)
+      const p4 = document.createElement("p");
+      p4.id = "r4";
+      p4.setAttribute("style", "color:red; background-image:url(evil4.com)");
+      p4.textContent = "createElement + setAttribute | red from inline style | bg-image threat stripped";
+      document.getElementById("t4-host").appendChild(p4);
+    </script>
+  </body>
+</html>
