@@ -356,7 +356,7 @@ If you use the library, you can run the Zig file:
 zig build example -Dname=teset_grid_1d
 ```
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.jpeg" alt="grid example" width="600" height="400">
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.jpeg" alt="grid example" width="500" height="400">
 
 
 ### Generate a Leaflet map PDF report
