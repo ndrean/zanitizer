@@ -383,7 +383,7 @@ pub const DOMParser = struct {
             return Err.ParserCreateFailed;
 
         if (lxb_html_parser_init(parser) != z._OK) {
-            std.debug.print("Failed to initialize HTML parser\n", .{});
+            std.debug.print("❌ Failed to initialize HTML parser\n", .{});
             _ = lxb_html_parser_destroy(parser);
             return Err.ParserInitFailed;
         }

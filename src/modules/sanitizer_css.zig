@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const specs = @import("html_spec.zig");
 const z = @import("../root.zig");
 
@@ -455,8 +456,8 @@ pub const CssSanitizer = struct {
         // Initialize parser if needed
         const parser = self.ensureParser() catch {
             // Fallback to simple filter if parser fails
-            if (comptime @import("builtin").mode == .Debug) {
-                std.debug.print("[CSS] Lexbor parser init failed, using string fallback\n", .{});
+            if (comptime builtin.mode == .Debug) {
+                std.debug.print("[CSS] ❌ Lexbor parser init failed, using string fallback\n", .{});
             }
             return try self.simpleCssFilter(input);
         };
@@ -468,14 +469,14 @@ pub const CssSanitizer = struct {
         const decl_list = lxb_css_declaration_list_parse(parser, input.ptr, input.len);
         if (decl_list == null) {
             // Parse failed - fallback to simple filter
-            if (comptime @import("builtin").mode == .Debug) {
-                std.debug.print("[CSS] Lexbor parse failed for: {s}..., using string fallback\n", .{input[0..@min(50, input.len)]});
+            if (comptime builtin.mode == .Debug) {
+                std.debug.print("[CSS] ❌ Lexbor parse failed for: {s}..., using string fallback\n", .{input[0..@min(50, input.len)]});
             }
             return try self.simpleCssFilter(input);
         }
         // Lexbor AST path active
-        if (comptime @import("builtin").mode == .Debug) {
-            std.debug.print("[CSS] Lexbor AST parsing: {s}...\n", .{input[0..@min(30, input.len)]});
+        if (comptime builtin.mode == .Debug) {
+            // std.debug.print("[CSS] Lexbor AST parsing: {s}...\n", .{input[0..@min(30, input.len)]});
         }
         defer _ = lxb_css_rule_declaration_list_destroy(decl_list.?, true);
 
@@ -685,8 +686,8 @@ pub const CssSanitizer = struct {
         // Try Lexbor AST first (uses its own parser to avoid state issues)
         return self.sanitizeStylesheetLexbor(input) catch {
             // Fallback to string-based parsing
-            if (comptime @import("builtin").mode == .Debug) {
-                std.debug.print("[CSS] Lexbor stylesheet failed, using string fallback\n", .{});
+            if (comptime builtin.mode == .Debug) {
+                std.debug.print("[CSS] ❌ Lexbor stylesheet failed, using string fallback\n", .{});
             }
             return self.sanitizeStylesheetStringBased(input);
         };
@@ -932,19 +933,19 @@ pub const CssSanitizer = struct {
         defer _ = lxb_css_stylesheet_destroy(sst, true);
 
         if (lxb_css_stylesheet_parse(sst, parser, input.ptr, input.len) != lxb_status_ok) {
-            if (comptime @import("builtin").mode == .Debug) {
-                std.debug.print("[CSS] Lexbor stylesheet parse failed\n", .{});
+            if (comptime builtin.mode == .Debug) {
+                std.debug.print("[CSS] ❌ Lexbor stylesheet parse failed\n", .{});
             }
             return error.LexborStylesheetFailed;
         }
 
         // Lexbor AST stylesheet path active
-        if (comptime @import("builtin").mode == .Debug) {
-            std.debug.print("[CSS] Lexbor AST stylesheet: {d} bytes\n", .{input.len});
+        if (comptime builtin.mode == .Debug) {
+            // std.debug.print("[CSS] Lexbor AST stylesheet: {d} bytes\n", .{input.len});
         }
 
         // Build result by walking the AST
-        var result: std.ArrayListUnmanaged(u8) = .empty;
+        var result: std.ArrayList(u8) = .empty;
         errdefer result.deinit(self.allocator);
 
         // Walk the rule tree using C shim to get root

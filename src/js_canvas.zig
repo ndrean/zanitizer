@@ -1005,7 +1005,7 @@ fn js_canvas_set_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
     // 2. Parse Float
     if (std.fmt.parseFloat(f32, size_str)) |size| {
         canvas.font_size = size;
-        // std.debug.print("✅ Font size set to: {d}px\n", .{size});
+        std.debug.print(" Font size set to: {d}px\n", .{size});
     } else |_| {
         std.debug.print("⚠️ Canvas: Invalid font size number: '{s}'\n", .{size_str});
     }

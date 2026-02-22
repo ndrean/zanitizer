@@ -1,12 +1,73 @@
-//! Layout flow with `Yoga` & `Thorvg`
-//! - It traverses the Lexbor DOM , parses the inline CSS styles (like display: flex, padding, background)
-//! - maps them to `YGNode` properties
-//! - Uses custom measurement function `textMeasure()` using `ThorVG` to calculate the intrinsic size of text blocks
+//! # Rendering pipeline — library responsibilities
 //!
-//! Pass 2 (paintYogaTree): After calling `yoga.calculateLayout`, it
-//! - walks the calculated tree,
-//! - extracts the absolute X and Y coordinates (yoga.getLeft, yoga.getTop),
-//! - tells ThorVG to draw the rectangles and text exactly where Yoga positioned them
+//! ## DECODERS  (compressed bytes → RGBA pixel buffer)
+//!
+//!   stb_image        PNG, JPEG, GIF, BMP … → RGBA u8 buffer     (js_image_thorvg.zig, js_compositor.zig, js_pdf.zig)
+//!   libwebp          WebP                  → RGBA u8 buffer     (js_image_thorvg.zig)
+//!   ThorVG           SVG                   → RGBA u32 buffer    (js_image_thorvg.zig via tvg_picture_load_data)
+//!
+//! ## CANVAS  (the central pixel accumulator — js_canvas.zig)
+//!
+//!   `Canvas.pixels` is the single RGBA framebuffer everything writes into.
+//!
+//!   Sources that feed pixels INTO the canvas:
+//!     drawImage(Image)     — blits a decoded Image (PNG/JPEG/WebP/SVG) pixel-by-pixel
+//!     paintDOM (below)     — compositor renders a full DOM subtree via Yoga+ThorVG then
+//!                            copies the ThorVG swcanvas buffer into Canvas.pixels
+//!
+//!   Text drawn ON the canvas (2D API path):
+//!     fillText / strokeText — stb_truetype  (font.zig, uses embedded Roboto-Regular.ttf)
+//!                             rasterises glyphs directly into Canvas.pixels
+//!
+//! ## THREE INDEPENDENT TEXT STACKS
+//!
+//!   1. stb_truetype   Canvas 2D API   canvas.fillText()   → glyphs blended into Canvas.pixels
+//!   2. ThorVG         Compositor      paintDOM() text      → glyphs into ThorVG swcanvas buffer
+//!   3. libharu        PDF API         pdf.fillText()       → vector text on PDF page
+//!
+//!   Each has its own font loading, glyph metrics, and output target. They never share state.
+//!
+//! ## COMPOSITOR  (DOM → pixel buffer, this file)
+//!
+//!   Pass 1 — buildYogaTree:   Lexbor DOM → Yoga layout nodes
+//!                              CSS parsed via serializeElementStyles → applyInlineStyle
+//!                              text measurement via ThorVG tvg_text_new (not added to canvas)
+//!
+//!   Pass 2 — paintYogaTree:   walks Yoga result, paints into a ThorVG swcanvas:
+//!                               backgrounds / borders via tvg_shape_new
+//!                               text           via tvg_text_new + tvg_text_set_font
+//!                               raster images  via tvg_picture_load_data (PNG/JPEG bytes)
+//!                               SVG images     via tvg_picture_load_data (SVG bytes)
+//!                               WebP images    decoded to RGBA first (stb_image), then fed as raw pixels
+//!
+//!   The ThorVG swcanvas buffer is then copied verbatim into the caller's Canvas.pixels.
+//!   Text in the compositor uses ThorVG fonts (thorvg.loadEmbeddedFonts), NOT stb_truetype.
+//!
+//! ## ENCODERS  (RGBA pixel buffer → compressed bytes)
+//!
+//!   stb_image_write  PNG    — stbi_write_png_to_mem           (js_canvas.zig)
+//!   stb_image_write  JPEG   — stbi_write_jpg_to_func          (js_canvas.zig)
+//!   libwebp          WebP   — WebPEncodeRGBA / LosslessRGBA   (js_canvas.zig)
+//!   libharu          PDF    — reads PNG IHDR for dimensions,
+//!                             draws PNG as image on an A4 page (main.zig / js_pdf.zig)
+//!
+//!   PDF text overlay (js_pdf.zig):
+//!     fillText / setFont — libharu HPDF_Page_ShowText, uses its own embedded Roboto copies
+//!     drawImageFromBuffer — stbi_load_from_memory (RGB, no alpha) → HPDF raw image
+//!
+//! ## SUMMARY TABLE
+//!
+//!   Library          Decode                    Encode / Draw
+//!   ─────────────────────────────────────────────────────────────────────────────
+//!   stb_image        PNG JPEG GIF BMP WebP*    —
+//!   stb_image_write  —                         PNG JPEG
+//!   libwebp          WebP                      WebP
+//!   ThorVG           SVG (vector)              shapes, text, images → swcanvas buffer
+//!   stb_truetype     —                         glyph raster → Canvas.pixels (2D API)
+//!   libharu          —                         PDF pages, text, raster images
+//!   Yoga             —                         CSS layout → absolute coordinates
+//!
+//!   * stb_image can decode WebP but libwebp is used directly for better fidelity / alpha support
 
 const std = @import("std");
 const z = @import("root.zig");
@@ -89,6 +150,9 @@ const NodeInfo = struct {
     border_color: [4]u8 = .{ 0, 0, 0, 0 },
     border_radius: f32 = 0,
     text_align: enum { left, center, right } = .left,
+    /// Number of equal-fr columns from `grid-template-columns: repeat(N, 1fr)`.
+    /// Non-zero means this element is a grid container mapped to flex-wrap.
+    grid_columns: u32 = 0,
 };
 
 /// Measure callback for leaf elements with text — Yoga calls this for intrinsic size
@@ -131,6 +195,7 @@ fn collectTextContent(node: *z.DomNode, allocator: std.mem.Allocator) []const u8
     return collapsed;
 }
 
+// Recursive collector
 fn collectTextContentInner(node: *z.DomNode, buf: *std.ArrayList(u8), allocator: std.mem.Allocator) void {
     const nt = z.nodeType(node);
     if (nt == .text) {
@@ -189,7 +254,7 @@ fn fetchImageBytes(allocator: std.mem.Allocator, url: []const u8) ?[]const u8 {
         .response_writer = &buf.writer,
     }) catch |err| {
         buf.deinit();
-        std.debug.print("[Compositor] Failed to fetch image {s}: {}\n", .{ url, err });
+        std.debug.print("[Compositor] ⚠️ Failed to fetch image {s}: {}\n", .{ url, err });
         return null;
     };
     if (resp.status != .ok) {
@@ -255,7 +320,7 @@ fn buildYogaTree(
                     } else blk: {
                         const path = std.fs.path.join(allocator, &.{ base_dir, src }) catch src;
                         break :blk std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024) catch {
-                            std.debug.print("[Compositor] Failed to load image: {s}\n", .{path});
+                            std.debug.print("⚠️ [Compositor] Failed to load image: {s}\n", .{path});
                             break :blk null;
                         };
                     };
@@ -316,6 +381,16 @@ fn buildYogaTree(
                 child_idx += 1;
             }
         }
+
+        // Grid repeat(N, 1fr): give each child a percentage width = 100/N.
+        // Applied after all children are inserted so the count is known.
+        if (info.grid_columns > 0 and child_idx > 0) {
+            const child_pct = 100.0 / @as(f32, @floatFromInt(info.grid_columns));
+            for (0..child_idx) |ci| {
+                const child_yg = yoga.getChild(yg, ci);
+                yoga.setWidthPercent(child_yg, child_pct);
+            }
+        }
     } else {
         // Leaf element → collect all text, measure it, use as intrinsic size
         // (text_content may already be set by <img> alt-text fallback)
@@ -336,8 +411,34 @@ fn buildYogaTree(
     return yg;
 }
 
+/// Parse "repeat(N, 1fr)" or "repeat(N, Xfr)" → N columns.
+/// Returns null for non-repeat values, named lines, auto, mixed track types, etc.
+/// Only equal-fr tracks are handled — anything else falls through to pass-through.
+fn parseRepeatNFr(val: []const u8) ?u32 {
+    const v = std.mem.trim(u8, val, " \t");
+    if (!std.mem.startsWith(u8, v, "repeat(")) return null;
+    const inner_start = "repeat(".len;
+    const paren_end = std.mem.lastIndexOfScalar(u8, v, ')') orelse return null;
+    if (paren_end <= inner_start) return null;
+    const inner = v[inner_start..paren_end];
+    const comma = std.mem.indexOfScalar(u8, inner, ',') orelse return null;
+    const n_str = std.mem.trim(u8, inner[0..comma], " \t");
+    const track = std.mem.trim(u8, inner[comma + 1 ..], " \t");
+    // Require an "fr" unit — equal-fraction tracks only.
+    if (std.mem.indexOf(u8, track, "fr") == null) return null;
+    return std.fmt.parseInt(u32, n_str, 10) catch null;
+}
+
 /// Parse a CSS inline style string and apply properties to a Yoga node
 fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
+    // Grid normalisation state — collected during the single pass, applied after the loop.
+    // `display: grid` maps to flex; the axis, wrap, and alignment are derived from the
+    // companion grid properties.
+    var is_grid = false;
+    var grid_columns: u32 = 0; // from repeat(N, 1fr)
+    var grid_auto_flow_col = false; // grid-auto-flow: column
+    var grid_place_items_center = false; // place-items: center
+
     var iter = std.mem.splitSequence(u8, style, ";");
     while (iter.next()) |decl| {
         const trimmed = std.mem.trim(u8, decl, " \t\n\r");
@@ -350,9 +451,21 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
         if (std.mem.eql(u8, prop, "display")) {
             if (std.mem.eql(u8, val, "flex")) {
                 yoga.setDisplay(yg, yoga.DISPLAY_FLEX);
+            } else if (std.mem.eql(u8, val, "grid")) {
+                // Defer actual Yoga calls — collect remaining grid props first.
+                is_grid = true;
             } else if (std.mem.eql(u8, val, "none")) {
                 yoga.setDisplay(yg, yoga.DISPLAY_NONE);
             }
+        } else if (std.mem.eql(u8, prop, "grid-template-columns")) {
+            grid_columns = parseRepeatNFr(val) orelse 0;
+        } else if (std.mem.eql(u8, prop, "grid-auto-flow")) {
+            grid_auto_flow_col = std.mem.eql(u8, val, "column");
+        } else if (std.mem.eql(u8, prop, "place-items")) {
+            // "place-items: <align> <justify>" shorthand; single-value = both axes.
+            // We support the common "center" case; others fall through.
+            const first_token = std.mem.trim(u8, std.mem.sliceTo(val, ' '), " \t");
+            grid_place_items_center = std.mem.eql(u8, first_token, "center");
         } else if (std.mem.eql(u8, prop, "flex-direction")) {
             if (std.mem.eql(u8, val, "row")) {
                 yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
@@ -408,7 +521,11 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
         } else if (std.mem.eql(u8, prop, "max-height")) {
             applyDimension(yg, val, yoga.setMaxHeight, null);
         } else if (std.mem.eql(u8, prop, "padding")) {
-            if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_ALL, v);
+            const bv = parseBoxShorthand(val);
+            if (bv.top) |v| yoga.setPadding(yg, yoga.EDGE_TOP, v);
+            if (bv.right) |v| yoga.setPadding(yg, yoga.EDGE_RIGHT, v);
+            if (bv.bottom) |v| yoga.setPadding(yg, yoga.EDGE_BOTTOM, v);
+            if (bv.left) |v| yoga.setPadding(yg, yoga.EDGE_LEFT, v);
         } else if (std.mem.eql(u8, prop, "padding-left")) {
             if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_LEFT, v);
         } else if (std.mem.eql(u8, prop, "padding-right")) {
@@ -418,7 +535,11 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
         } else if (std.mem.eql(u8, prop, "padding-bottom")) {
             if (parsePixelValue(val)) |v| yoga.setPadding(yg, yoga.EDGE_BOTTOM, v);
         } else if (std.mem.eql(u8, prop, "margin")) {
-            if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_ALL, v);
+            const bv = parseBoxShorthand(val);
+            if (bv.top) |v| yoga.setMargin(yg, yoga.EDGE_TOP, v);
+            if (bv.right) |v| yoga.setMargin(yg, yoga.EDGE_RIGHT, v);
+            if (bv.bottom) |v| yoga.setMargin(yg, yoga.EDGE_BOTTOM, v);
+            if (bv.left) |v| yoga.setMargin(yg, yoga.EDGE_LEFT, v);
         } else if (std.mem.eql(u8, prop, "margin-left")) {
             if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_LEFT, v);
         } else if (std.mem.eql(u8, prop, "margin-right")) {
@@ -492,6 +613,67 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
             if (parsePixelValue(val)) |v| yoga.setPosition(yg, yoga.EDGE_LEFT, v);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Grid → Flex normalisation (applied after all properties are collected)
+    // -------------------------------------------------------------------------
+    // Supported 1D patterns:
+    //   repeat(N, 1fr)          → flex-wrap row, children get 100/N % width
+    //   grid-auto-flow: column  → flex row (no wrap; items flow horizontally)
+    //   place-items: center     → align-items + justify-content center
+    //   gap                     → already handled above (Yoga native gap)
+    //
+    // Hard limits: 2D layout, grid-template-areas, mixed track types,
+    //              and child span > 1 are NOT supported.
+    if (is_grid) {
+        yoga.setDisplay(yg, yoga.DISPLAY_FLEX);
+
+        if (grid_auto_flow_col) {
+            // Items fill columns first (left→right) — map to flex row, no wrap.
+            yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+        } else if (grid_columns > 1) {
+            // N equal columns — map to wrapping flex row.
+            // Child widths (100/N %) are applied in buildYogaTree after children are built.
+            yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+            yoga.setFlexWrap(yg, yoga.WRAP_WRAP);
+        } else {
+            // Fallback: single-column or unrecognised template → column flex.
+            yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_COLUMN);
+        }
+
+        if (grid_place_items_center) {
+            yoga.setAlignItems(yg, yoga.ALIGN_CENTER);
+            yoga.setJustifyContent(yg, yoga.JUSTIFY_CENTER);
+        }
+
+        // Store column count so buildYogaTree can size children.
+        info.grid_columns = grid_columns;
+    }
+}
+
+/// Parse a CSS box shorthand (padding / margin) with 1–4 space-separated values.
+/// Returns .{ top, right, bottom, left } following standard CSS expansion rules:
+///   1 val  → all sides
+///   2 vals → top/bottom | left/right
+///   3 vals → top | left/right | bottom
+///   4 vals → top | right | bottom | left
+const BoxValues = struct { top: ?f32, right: ?f32, bottom: ?f32, left: ?f32 };
+fn parseBoxShorthand(val: []const u8) BoxValues {
+    var parts: [4]?f32 = .{ null, null, null, null };
+    var count: usize = 0;
+    var tokens = std.mem.tokenizeAny(u8, val, " \t");
+    while (tokens.next()) |tok| {
+        if (count >= 4) break;
+        parts[count] = parsePixelValue(tok);
+        count += 1;
+    }
+    return switch (count) {
+        1 => .{ .top = parts[0], .right = parts[0], .bottom = parts[0], .left = parts[0] },
+        2 => .{ .top = parts[0], .right = parts[1], .bottom = parts[0], .left = parts[1] },
+        3 => .{ .top = parts[0], .right = parts[1], .bottom = parts[2], .left = parts[1] },
+        4 => .{ .top = parts[0], .right = parts[1], .bottom = parts[2], .left = parts[3] },
+        else => .{ .top = null, .right = null, .bottom = null, .left = null },
+    };
 }
 
 /// Parse "1px solid #color" border shorthand — extracts width and color, ignores style keyword
@@ -640,17 +822,39 @@ fn collapseWhitespace(allocator: std.mem.Allocator, raw: []const u8) ?[]const u8
     return buf[0..len];
 }
 
-/// Parse simple CSS color values (named colors, #hex)
+/// Parse CSS color values: named keywords, #hex, rgb(), rgba().
+/// Covers all formats that Lexbor's serializer may emit.
 fn parseCSSColor(val: []const u8) ?[4]u8 {
-    // Named colors
-    if (std.mem.eql(u8, val, "black")) return .{ 0, 0, 0, 255 };
-    if (std.mem.eql(u8, val, "white")) return .{ 255, 255, 255, 255 };
-    if (std.mem.eql(u8, val, "red")) return .{ 255, 0, 0, 255 };
-    if (std.mem.eql(u8, val, "green")) return .{ 0, 128, 0, 255 };
-    if (std.mem.eql(u8, val, "blue")) return .{ 0, 0, 255, 255 };
-    if (std.mem.eql(u8, val, "transparent")) return .{ 0, 0, 0, 0 };
+    // CSS named colors (W3C basic + extended set most likely to appear)
+    const Named = struct { name: []const u8, rgba: [4]u8 };
+    const named_colors = [_]Named{
+        .{ .name = "black",   .rgba = .{ 0,   0,   0,   255 } },
+        .{ .name = "white",   .rgba = .{ 255, 255, 255, 255 } },
+        .{ .name = "red",     .rgba = .{ 255, 0,   0,   255 } },
+        .{ .name = "green",   .rgba = .{ 0,   128, 0,   255 } },
+        .{ .name = "blue",    .rgba = .{ 0,   0,   255, 255 } },
+        .{ .name = "yellow",  .rgba = .{ 255, 255, 0,   255 } },
+        .{ .name = "orange",  .rgba = .{ 255, 165, 0,   255 } },
+        .{ .name = "purple",  .rgba = .{ 128, 0,   128, 255 } },
+        .{ .name = "pink",    .rgba = .{ 255, 192, 203, 255 } },
+        .{ .name = "cyan",    .rgba = .{ 0,   255, 255, 255 } },
+        .{ .name = "magenta", .rgba = .{ 255, 0,   255, 255 } },
+        .{ .name = "gray",    .rgba = .{ 128, 128, 128, 255 } },
+        .{ .name = "grey",    .rgba = .{ 128, 128, 128, 255 } },
+        .{ .name = "silver",  .rgba = .{ 192, 192, 192, 255 } },
+        .{ .name = "brown",   .rgba = .{ 165, 42,  42,  255 } },
+        .{ .name = "navy",    .rgba = .{ 0,   0,   128, 255 } },
+        .{ .name = "teal",    .rgba = .{ 0,   128, 128, 255 } },
+        .{ .name = "lime",    .rgba = .{ 0,   255, 0,   255 } },
+        .{ .name = "maroon",  .rgba = .{ 128, 0,   0,   255 } },
+        .{ .name = "olive",   .rgba = .{ 128, 128, 0,   255 } },
+        .{ .name = "transparent", .rgba = .{ 0, 0, 0, 0 } },
+    };
+    for (named_colors) |nc| {
+        if (std.mem.eql(u8, val, nc.name)) return nc.rgba;
+    }
 
-    // #RGB or #RRGGBB
+    // #RGB, #RRGGBB, #RRGGBBAA
     if (val.len > 0 and val[0] == '#') {
         const hex = val[1..];
         if (hex.len == 3) {
@@ -663,8 +867,47 @@ fn parseCSSColor(val: []const u8) ?[4]u8 {
             const g = parseHexByte(hex[2..4]) orelse return null;
             const b = parseHexByte(hex[4..6]) orelse return null;
             return .{ r, g, b, 255 };
+        } else if (hex.len == 8) {
+            const r = parseHexByte(hex[0..2]) orelse return null;
+            const g = parseHexByte(hex[2..4]) orelse return null;
+            const b = parseHexByte(hex[4..6]) orelse return null;
+            const a = parseHexByte(hex[6..8]) orelse return null;
+            return .{ r, g, b, a };
         }
     }
+
+    // rgb(r, g, b) and rgba(r, g, b, a) — Lexbor may emit this format
+    const is_rgba = std.mem.startsWith(u8, val, "rgba(");
+    const is_rgb  = std.mem.startsWith(u8, val, "rgb(");
+    if (is_rgb or is_rgba) {
+        const paren_open  = std.mem.indexOfScalar(u8, val, '(') orelse return null;
+        const paren_close = std.mem.lastIndexOfScalar(u8, val, ')') orelse return null;
+        if (paren_close <= paren_open) return null;
+        const inner = val[paren_open + 1 .. paren_close];
+        // Split on commas; allow spaces
+        var parts: [4][]const u8 = undefined;
+        var count: usize = 0;
+        var it = std.mem.splitScalar(u8, inner, ',');
+        while (it.next()) |tok| {
+            if (count >= 4) break;
+            parts[count] = std.mem.trim(u8, tok, " \t");
+            count += 1;
+        }
+        if (count < 3) return null;
+        const r: u8 = @intFromFloat(@min(255.0, @max(0.0, parseFloat(parts[0]) orelse return null)));
+        const g: u8 = @intFromFloat(@min(255.0, @max(0.0, parseFloat(parts[1]) orelse return null)));
+        const b: u8 = @intFromFloat(@min(255.0, @max(0.0, parseFloat(parts[2]) orelse return null)));
+        const a: u8 = if (count >= 4) blk: {
+            const af = parseFloat(parts[3]) orelse 1.0;
+            // alpha may be 0..1 (float) or 0..255 (integer)
+            break :blk if (af <= 1.0)
+                @intFromFloat(@min(255.0, af * 255.0))
+            else
+                @intFromFloat(@min(255.0, af));
+        } else 255;
+        return .{ r, g, b, a };
+    }
+
     return null;
 }
 
@@ -895,7 +1138,7 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
     else
         600;
 
-    // 1. Allocate the Master ARGB Buffer
+    // Allocate the Master ARGB Buffer
     const buffer_size = page_width * page_height;
     const master_buffer = rc.allocator.alloc(u32, buffer_size) catch {
         std.debug.print("[Compositor] FATAL: Could not allocate Master Buffer!\n", .{});
@@ -904,7 +1147,7 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
     defer rc.allocator.free(master_buffer);
     @memset(master_buffer, 0xFFFFFFFF);
 
-    // PHASE 1: Draw the Map Tiles (via stb_image)
+    // Draw the Map Tiles (via stb_image)
     const js_tiles = argv[0];
     const len_val = ctx.getPropertyStr(js_tiles, "length");
     defer ctx.freeValue(len_val);
@@ -942,7 +1185,7 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
         }
     }
 
-    // PHASE 2: Overlay the GeoJSON SVG (via ThorVG)
+    // Overlay the GeoJSON SVG (via ThorVG)
     const svg_str = ctx.toZString(argv[1]) catch return w.UNDEFINED;
     defer ctx.freeZString(svg_str);
 
@@ -952,7 +1195,7 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
     const svg_u32: [*]const u32 = @ptrCast(@alignCast(svg_pixels.ptr));
     alphaComposite(master_buffer, svg_u32, buffer_size);
 
-    // PHASE 3: Encode PNG
+    // Encode PNG
     var filename: ?[]const u8 = null;
     if (argc >= 3 and ctx.isString(argv[2])) {
         filename = ctx.toZString(argv[2]) catch null;
@@ -971,8 +1214,7 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
 }
 
 // =============================================================================
-// Pixel helpers (unchanged)
-// =============================================================================
+// Pixel helpers
 
 fn blitTile(
     master: []u32,
@@ -1038,7 +1280,7 @@ fn encodeToArrayBuffer(ctx: w.Context, master_u8: [*]const u8, width: u32, heigh
         defer stbiw_free(png_ptr);
         return ctx.newArrayBufferCopy(png_ptr[0..@intCast(out_len)]);
     } else {
-        std.debug.print("[Compositor] Failed to encode PNG to memory!\n", .{});
+        std.debug.print("[Compositor] ⚠️ Failed to encode PNG to memory\n", .{});
         return w.UNDEFINED;
     }
 }
@@ -1056,7 +1298,7 @@ fn saveToDisk(fname: []const u8, master_u8: [*]const u8, width: u32, height: u32
     );
 
     if (result == 0) {
-        std.debug.print("[Compositor] Failed to write PNG to disk!\n", .{});
+        std.debug.print("[Compositor] ⚠️ Failed to write PNG to disk\n", .{});
     } else {
         std.debug.print("[Compositor] Saved to disk.\n", .{});
     }

@@ -375,13 +375,13 @@ pub const EventLoop = struct {
                     const ctx_ptr = self.rt.executePendingJob() catch |err| {
                         // JS job threw — log but don't kill the event loop
                         // (frameworks have unhandled rejections that aren't fatal)
-                        std.debug.print("[EventLoop] Job error: {any}\n", .{err});
+                        std.debug.print("[EventLoop] ⚠️ Job error: {any}\n", .{err});
                         continue;
                     };
                     if (ctx_ptr == null) break;
                 }
                 if (micro_count >= max_microtasks) {
-                    std.debug.print("[EventLoop] SAFETY: microtask drain hit {d} limit, yielding to timers/IO\n", .{max_microtasks});
+                    std.debug.print("[EventLoop] ⚠️ SAFETY: microtask drain hit {d} limit, yielding to timers/IO\n", .{max_microtasks});
                 }
             }
 

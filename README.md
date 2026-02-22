@@ -12,19 +12,17 @@ Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and g
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
 </p>
 
-
-
 **TL;DR**
 
 > - Cold start: 2ms
 > - Memory: 10MB
 > - Zero dependencies. Single binary.
 > - Features JavaScript ES2020
-> - SVG, PNG, JPEG, WEBP, PDF support (A4)
+> - SVG, PNG, JPEG, WEBP, PDF support
 > - JSX support via "tagged templates" with `htm` embedded
-> - Rendering of simple **flex** or table layouts only. ❗️ not arbitrary public websites using grid, modals, psueod-elements, media queries, `calc()` sizing, custom properties `var(--color)` or `position: fixed`...
+> - Rendering of simple **flex** or table layouts only. `grid-1d` is emulated ❗️ not arbitrary public websites using grid-2d, modals, position:fixed...
 
-`zexplorer` can be used as a **Zig library** to add native functionalities (check the examples.) or with the **CLI**.
+`zexplorer` can be used as a **Zig library** to add native functionalities or with the **CLI**.
 
 ## The CLI Runner
 
@@ -41,12 +39,12 @@ zxp render chart.html -o chart.png
 zxp render og-template.html --data posts.json --out "og-{slug}.png"
 
 # Sanitize untrusted HTML
-curl https://sketchy.site | zxp sanitize -
+curl https://sketchy.site | zxp sanitize - -o cleaned.html
 
 # Clean a local HTML file with its CSS
 zxp sanitize dirty.html --css style.css -o clean.html
 
-# Render a simple website with scree quality (default)
+# Render a simple website with screen quality (default)
 curl https://example.com | zxp convert - -o example.png
 # Render with PDF quality (A4, 72 DPI <-> 595)
 curl https://example.com | ./zig-out/bin/zxp convert - --width 595 -o example.pdf
@@ -115,6 +113,59 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 > - **Network hardening** — timeouts, redirect/size limits, SSRF pre-flight filtering, HTTPS-only remote imports.
 > - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines.
 
+### Sanitization model
+
+The sanitizer operates on the **live Lexbor DOM and CSS AST** — there is no serialize/re-parse step, so there is no parse-differential surface for mXSS. HTML character references are decoded by Lexbor at parse time, before the sanitizer sees any attribute value.
+
+The pipeline:
+
+```txt
+Raw HTML / SVG / CSS
+        │
+        ▼
+  Lexbor parse ── entities decoded, DOM + CSSOM built
+        │
+        ├─── DOM node tree ──────────────────────┐
+        │    walk every node                     │
+        │    • remove dangerous elements         │
+        │    • strip unsafe attributes           │    merge sanitized
+        │    • inline style → CSS sanitizer      │    CSS back into DOM
+        │                                        │
+        └─── CSS AST (stylesheets + style="") ──┘
+             • remove dangerous at-rules
+             • strip unsafe properties
+             • validate URIs structurally
+
+        ▼
+  Sanitized DOM — safe for rendering or serialization
+```
+
+**Policy decisions and known trade-offs:**
+
+| Threat                                                                                         | Policy                                                                                                                     | Rationale                                                                                                                                          | Gap / known trade-off                                                                                                                                 |
+| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<script>` tags                                                                                | Removed by default; configurable via `remove_scripts: bool`                                                                | Scripts execute in the QuickJS sandbox during `loadPage` — the sandbox is the boundary                                                             | When allowed, no CSP is generated; caller is responsible                                                                                              |
+| `on*` event handlers                                                                           | Always removed                                                                                                             | No legitimate use in sanitized output                                                                                                              | —                                                                                                                                                     |
+| `href="javascript:"`, `vbscript:`, `file:`                                                     | Blocked on all URL attributes (`href`, `src`, `action`, `poster`, `data`, …)                                               | These protocols execute code or access local files                                                                                                 | —                                                                                                                                                     |
+| `data:` URIs — non-image                                                                       | Blocked entirely                                                                                                           | `data:text/html`, `data:text/javascript` are direct XSS vectors                                                                                    | —                                                                                                                                                     |
+| `data:image/svg+xml`                                                                           | Blocked                                                                                                                    | SVG images can contain `<script>` and event handlers                                                                                               | —                                                                                                                                                     |
+| `data:image/*` — other                                                                         | Allowed only with `;base64` encoding **and** matching magic bytes                                                          | Non-base64 binary images are never legitimate; magic byte check (PNG/JPEG/WebP/GIF header) blocks mislabeled or polyglot payloads                  | `image/avif`, `image/bmp`, etc. have no magic checker — pass through on MIME type alone                                                               |
+| External image `src` (`https://…`)                                                             | Allowed                                                                                                                    | External images are legitimate content; blocking would break most pages                                                                            | Tracking pixels are a known consequence — this is a content policy decision, not a sanitizer decision                                                 |
+| `srcset` attribute                                                                             | Allowed without URL validation                                                                                             | `srcset` contains multiple space-separated URLs; browsers do not execute JavaScript from `srcset`                                                  | Known gap: a `javascript:` URL in `srcset` would pass through (browsers ignore it, but the string survives)                                           |
+| `//evil.com` protocol-relative                                                                 | Allowed                                                                                                                    | Protocol-relative URLs are legitimate for same-protocol assets                                                                                     | In HTTP contexts, loads HTTP even on an HTTPS page; caller should enforce CSP                                                                         |
+| `<style>` blocks                                                                               | CSS AST sanitized — dangerous at-rules (`@import`, `@namespace`) removed, unsafe properties stripped                       | Tokenized AST parsing: obfuscated `expression()` and `url(javascript:)` are structurally detected, not regex-matched                               | —                                                                                                                                                     |
+| External stylesheets (`<link>`)                                                                | Fetched, sanitized, inlined as `<style>` in the output                                                                     | The serialized output is self-contained; re-fetching the original URL would bypass sanitization                                                    | Only enforced in sanitize mode; SSRF limits apply to the fetch                                                                                        |
+| Inline `style=""`                                                                              | CSS sanitizer applied per-attribute                                                                                        | `background-image: url(evil.com)` is an exfiltration vector — stripped                                                                             | —                                                                                                                                                     |
+| JS DOM mutation (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `createElement+setAttribute`) | Sanitized post-mutation via the same CSS sanitizer pipeline                                                                | Mutations happen in the QuickJS sandbox; results are sanitized before the DOM is considered stable                                                 | —                                                                                                                                                     |
+| SVG `<foreignObject>`, `<feImage>`, `<animate>`, `<animateMotion>`, `<set>`, `<switch>`        | Blocked                                                                                                                    | `foreignObject` re-enters HTML parsing context (primary mXSS entry point); `feImage` loads external resources; animate* can trigger event handlers | —                                                                                                                                                     |
+| SVG `href` / `xlink:href`                                                                      | Fragment-only (`#id`) for most elements; `<image>` and `<a>` use standard URI validation                                   | External SVG resources via `<use href="external.svg#x">` load arbitrary SVG                                                                        | —                                                                                                                                                     |
+| MathML                                                                                         | Allowed in correct context with attribute allowlist; `href`, `xlink:href`, `on*` removed                                   | Prevents XSS via invalid MathML nesting or href abuse                                                                                              | —                                                                                                                                                     |
+| DOM clobbering (`id`, `name`)                                                                  | Values that shadow `window`/`document` properties filtered                                                                 | Prevents `id="cookie"` from overriding `document.cookie` etc.                                                                                      | —                                                                                                                                                     |
+| mXSS / obfuscated encoding                                                                     | Entity decoding happens at Lexbor parse time; `containsMxssPattern` run on all attribute values; CSS content AST-sanitized | No serialize/re-parse step means no parse-differential surface                                                                                     | Text nodes inside SVG `<title>`, `<desc>`, `<text>` are not pattern-checked — low risk because `foreignObject` (the main SVG escape hatch) is blocked |
+| `<iframe>`                                                                                     | Allowed only with `sandbox` attribute; `src` and `srcdoc` validated                                                        | Prevents loading of arbitrary external content                                                                                                     | `allow-scripts` in `sandbox` is blocked; other dangerous combinations not exhaustively validated                                                      |
+| Framework attributes (`v-html`, `ng-bind-html`, `x-html`, `:innerHTML`)                        | Removed by default; configurable via `allow_framework_attrs`                                                               | These attributes trigger HTML injection in their respective runtimes                                                                               | When allowed, values are checked against `DANGEROUS_JS_PATTERNS` but not fully sanitized                                                              |
+| CSP generation                                                                                 | Not provided                                                                                                               | CSP is a server/browser responsibility, not a DOM sanitizer responsibility                                                                         | Caller must set appropriate `Content-Security-Policy` headers when serving sanitized output                                                           |
+
 ---
 
 ## Showcase
@@ -144,6 +195,164 @@ return items;
 ```
 
 See the [full Vercel example](#scrape-a-vercel-site) below.
+
+### Render HTML as an image
+
+The engine lets you render some CSS properties.
+
+<details><summary>Example with grid-1d layout</summary>
+
+```html
+<html>
+  <head>
+    <style>
+      body {
+        background: #1e1e2e;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        width: 760px;
+      }
+
+      h3 {
+        color: #cba6f7;
+        font-size: 13px;
+      }
+
+      /* Test 1: 3 equal columns, wraps to 2 rows */
+      .grid-3col {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .grid-3col .cell {
+        background: #313244;
+        border: 1px solid #585b70;
+        border-radius: 6px;
+        padding: 16px;
+        color: #a6e3a1;
+        font-size: 14px;
+      }
+
+      /* Test 2: 4 equal columns with gap */
+      .grid-4col {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .grid-4col .cell {
+        background: #45475a;
+        border: 1px solid #6c7086;
+        border-radius: 4px;
+        padding: 12px;
+        color: #89dceb;
+        font-size: 13px;
+      }
+
+      /* Test 3: grid-auto-flow: column — items flow horizontally */
+      .grid-autoflow {
+        display: grid;
+        grid-auto-flow: column;
+        gap: 10px;
+      }
+      .grid-autoflow .badge {
+        background: #f38ba8;
+        border-radius: 4px;
+        padding: 8px 14px;
+        color: #1e1e2e;
+        font-size: 13px;
+      }
+
+      /* Test 4: place-items: center — single centred item */
+      .grid-center {
+        display: grid;
+        place-items: center;
+        background: #181825;
+        border: 1px solid #cba6f7;
+        border-radius: 8px;
+        height: 100px;
+      }
+      .grid-center .label {
+        background: #cba6f7;
+        border-radius: 4px;
+        padding: 10px 24px;
+        color: #1e1e2e;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Test 1: 3-column equal-fr, 6 items → 2 rows -->
+    <div>
+      <h3>repeat(3, 1fr) — 6 items, wraps to 2 rows</h3>
+      <div class="grid-3col">
+        <div class="cell">Column A</div>
+        <div class="cell">Column B</div>
+        <div class="cell">Column C</div>
+        <div class="cell">Row 2 — A</div>
+        <div class="cell">Row 2 — B</div>
+        <div class="cell">Row 2 — C</div>
+      </div>
+    </div>
+
+    <!-- Test 2: 4-column grid with gap, 8 items → 2 rows -->
+    <div>
+      <h3>repeat(4, 1fr) + gap: 8px — 8 items</h3>
+      <div class="grid-4col">
+        <div class="cell">Jan</div>
+        <div class="cell">Feb</div>
+        <div class="cell">Mar</div>
+        <div class="cell">Apr</div>
+        <div class="cell">May</div>
+        <div class="cell">Jun</div>
+        <div class="cell">Jul</div>
+        <div class="cell">Aug</div>
+      </div>
+    </div>
+
+    <!-- Test 3: grid-auto-flow: column → horizontal flex row -->
+    <div>
+      <h3>grid-auto-flow: column — horizontal strip</h3>
+      <div class="grid-autoflow">
+        <div class="badge">Alpha</div>
+        <div class="badge">Beta</div>
+        <div class="badge">Gamma</div>
+        <div class="badge">Delta</div>
+      </div>
+    </div>
+
+    <!-- Test 4: place-items: center → centered item in box -->
+    <div>
+      <h3>place-items: center</h3>
+      <div class="grid-center">
+        <div class="label" style="color: yellow">Centered content</div>
+      </div>
+    </div>
+  </body>
+</html>
+```
+
+</details>
+
+To obtain an image (JPEG here) that represents this HTML file, you can use the CLI:
+
+```sh
+zxp convert src/examples/test_grid_1d.html -w 595 -o test_grid_1d.jpeg
+
+# or in PDF if you prefer
+
+zxp convert src/examples/test_grid_1d.html -dpi 72 -o test_grid_1d.pdf
+```
+
+If you use the library, you can run the Zig file:
+
+```sh
+zig build example -Dname=teset_grid_1d
+```
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.png" alt="grid example" width="400" height="280">
+
 
 ### Generate a Leaflet map PDF report
 
@@ -197,11 +406,11 @@ const std = @import("std");
 const z = @import("zexplorer");
 ```
 
-The executable is named "zxp-ex". We build the _main.zig_ file (defined for you in _build.zig_ asa the "run" step), and execute it by using its name:
+The executable is named "zxp". We build the _main.zig_ file (defined for you in _build.zig_ asa the "run" step), and execute it by using its name:
 
 ```sh
 $> zig build run
-$> ./zig-out/bin/zxp-ex
+$> ./zig-out/bin/zxp
 ```
 
 In the terminal, you see:

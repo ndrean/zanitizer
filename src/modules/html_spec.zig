@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const z = @import("../root.zig");
+const imgv = @import("image_verify.zig");
 const Err = z.Err;
 const print = std.debug.print;
 
@@ -1121,7 +1122,10 @@ pub fn validateUri(value: []const u8) bool {
         if (startsWithIgnoreCase(trimmed, "data:text/html")) return false;
         if (startsWithIgnoreCase(trimmed, "data:text/xml")) return false;
 
-        return true;
+        // Verify that the base64 payload starts with the expected magic bytes
+        // for the claimed image type.  Also rejects non-base64 image data URIs
+        // (PNG/JPEG/WebP/GIF are binary — embedding without ;base64 is invalid).
+        return imgv.checkDataUri(trimmed);
     }
 
     // default Allow (http, https, relative, mailto, etc.)
@@ -2342,10 +2346,21 @@ test "regression: input type, checked, pattern, value attributes preserved" {
 }
 
 test "regression: data:image/* URIs allowed, data:image/svg blocked" {
-    // data:image/jpeg, data:image/png should be allowed
-    try testing.expect(validateUri("data:image/jpeg,abc123"));
-    try testing.expect(validateUri("data:image/png;base64,abc123"));
-    try testing.expect(validateUri("data:image/gif,abc"));
+    // Non-base64 binary image data URIs are rejected — binary formats must use base64.
+    try testing.expect(!validateUri("data:image/jpeg,abc123"));
+    try testing.expect(!validateUri("data:image/gif,abc"));
+
+    // Valid base64 with correct magic bytes — allowed.
+    // iVBORw0K... is the canonical base64 prefix of any PNG (\x89PNG\r\n\x1a\n).
+    try testing.expect(validateUri("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="));
+    // /9j/ is the canonical base64 prefix of JPEG (FF D8 FF).
+    try testing.expect(validateUri("data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAID"));
+    // R0lGOD is the canonical base64 prefix of GIF89a.
+    try testing.expect(validateUri("data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"));
+
+    // Mislabeled: base64 content whose magic doesn't match the claimed MIME type.
+    try testing.expect(!validateUri("data:image/png;base64,aGVsbG8gd29ybGQ=")); // base64("hello world") ≠ PNG
+    try testing.expect(!validateUri("data:image/jpeg;base64,aGVsbG8gd29ybGQ=")); // ≠ JPEG
 
     // data:image/svg should be blocked (can contain scripts)
     try testing.expect(!validateUri("data:image/svg+xml,<svg></svg>"));
@@ -2360,8 +2375,9 @@ test "regression: SVG image element is allowed with href validation" {
     // SVG <image> is allowed — dangerous hrefs are stripped by filterSvgAttributes
     try testing.expect(isSvgElementAllowed("image"));
     try testing.expect(!isSvgElementDangerous("image"));
-    // <image> uses validateUri (allows data:image/*, blocks javascript:)
-    try testing.expect(validateUri("data:image/png;base64,abc"));
+    // <image> uses validateUri (allows data:image/* with valid magic, blocks javascript:)
+    try testing.expect(validateUri("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="));
+    try testing.expect(!validateUri("data:image/png;base64,abc")); // too short / wrong magic
     try testing.expect(!validateUri("javascript:alert(1)"));
     // <use> uses validateSvgUri (fragment-only)
     try testing.expect(validateSvgUri("#myid"));

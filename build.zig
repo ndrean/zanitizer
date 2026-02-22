@@ -66,7 +66,10 @@ pub fn build(b: *std.Build) void {
     libs.zexplorer.linkLibrary(libs.haru);
 
     // Curl dependency
-    const dep_curl = b.dependency("curl", .{ .target = target, .optimize = optimize });
+    const dep_curl = b.dependency(
+        "curl",
+        .{ .target = target, .optimize = optimize },
+    );
     const curl_module = dep_curl.module("curl");
 
     // Zexplorer Zig module (root.zig + all C deps)
@@ -84,28 +87,7 @@ pub fn build(b: *std.Build) void {
     buildTests(b, target, optimize, paths, libs, curl_module);
 
     // Examples: zig build example -Dname=test_sanitize_injection
-    const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
-    if (example_name) |name| {
-        const example_step = b.step("example", "Run an example from src/examples/");
-        const example_exe = b.addExecutable(.{
-            .name = b.fmt("example-{s}", .{name}),
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
-                .target = target,
-                .optimize = optimize,
-                .imports = &.{
-                    .{ .name = "curl", .module = curl_module },
-                    .{ .name = "zexplorer", .module = zexplorer_module },
-                },
-            }),
-        });
-        linkAllLibs(example_exe, paths, libs);
-        b.installArtifact(example_exe);
-        const run_example = b.addRunArtifact(example_exe);
-        run_example.step.dependOn(b.getInstallStep());
-        if (b.args) |args| run_example.addArgs(args);
-        example_step.dependOn(&run_example.step);
-    }
+    buildExample(b, target, optimize, paths, libs, curl_module, zexplorer_module);
 
     // Documentation
     buildDocs(b, target, optimize);
@@ -351,14 +333,7 @@ fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
 // Zig Module & Targets
 // =============================================================================
 
-fn buildZexplorerModule(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    paths: Paths,
-    libs: Libraries,
-    curl_module: *std.Build.Module,
-) *std.Build.Module {
+fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module) *std.Build.Module {
     const mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -414,15 +389,7 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
     artifact.linkLibrary(libs.haru);
 }
 
-fn buildMainExe(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    paths: Paths,
-    libs: Libraries,
-    zexplorer_module: *std.Build.Module,
-    curl_module: *std.Build.Module,
-) void {
+fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, zexplorer_module: *std.Build.Module, curl_module: *std.Build.Module) void {
     const exe = b.addExecutable(.{
         .name = "zxp",
         .root_module = b.createModule(.{
@@ -452,13 +419,7 @@ fn buildMainExe(
 // Code Generators
 // =============================================================================
 
-fn buildCodeGenerators(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    paths: Paths,
-    libs: Libraries,
-) void {
+fn buildCodeGenerators(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries) void {
     // QuickJS bindings generator
     const gen_bindings = b.addExecutable(.{
         .name = "gen_bindings",
@@ -505,14 +466,7 @@ fn buildCodeGenerators(
 // Tests
 // =============================================================================
 
-fn buildTests(
-    b: *std.Build,
-    target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
-    paths: Paths,
-    libs: Libraries,
-    curl_module: *std.Build.Module,
-) void {
+fn buildTests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module) void {
     const lib_test = b.step("test", "Run unit tests");
 
     var unit_tests = b.addTest(.{
@@ -539,109 +493,30 @@ fn buildTests(
 // Examples
 // =============================================================================
 
-// fn buildExamples(
-//     b: *std.Build,
-//     target: std.Build.ResolvedTarget,
-//     optimize: std.builtin.OptimizeMode,
-//     paths: Paths,
-//     libs: Libraries,
-//     zexplorer_module: *std.Build.Module,
-//     curl_module: *std.Build.Module,
-// ) void {
-//     const example_step = b.step("example", "Run an example from src/examples/");
-//     const check_step = b.step("check", "Check examples compile (for ZLS)");
-
-//     const example_files = [_][]const u8{
-//         "src/examples/extract_script_from_html.zig",
-//         "src/examples/return_data_from_JS_into_zig.zig",
-//         "src/examples/classlist.zig",
-//         "src/examples/text_encoding.zig",
-//         "src/examples/readable_stream_demo.zig",
-//         "src/examples/formdata_upload_demo.zig",
-//         "src/examples/disk_streaming_upload_demo.zig",
-//         "src/examples/fs_demo.zig",
-//         "src/examples/streaming_demo.zig",
-//         "src/examples/file_reader.zig",
-//         "src/examples/cdn_import.zig",
-//         "src/examples/js-bench-1.zig",
-//         "src/examples/js-bench-2.zig",
-//         "src/examples/js-bench-20.zig",
-//         "src/examples/js-bench-3.zig",
-//         "src/examples/js-bench-bau.zig",
-//         "src/examples/js-bench-vue.zig",
-//         "src/examples/js-bench-react-h.zig",
-//         "src/examples/js-bench-preact.zig",
-//         "src/examples/js-bench-svelte.zig",
-//         "src/examples/js-bench-solid.zig",
-//         "src/examples/test-worker_zig.zig",
-//         "src/examples/dom_purify.zig",
-//         "src/examples/text_encoding.zig",
-//         "src/examples/jsdom_zexplorer_speed_test.zig",
-//         "src/examples/h5sc-test.zig",
-//         "src/examples/blob_object_url.zig",
-//         "src/examples/test_css_sanitization.zig",
-//         "src/examples/test_css_pipeline.zig",
-//         "src/examples/test_css_complete.zig",
-//         "src/examples/test_real.zig",
-//         "src/examples/test_all.zig",
-//         "src/examples/test_canvas.zig",
-//         "src/examples/test_example.zig",
-//         "src/examples/test_image1.zig",
-//         "src/examples/test_image2.zig",
-//         "src/examples/test_image3.zig",
-//         "src/examples/test_image4.zig",
-//         "src/examples/dompurify_tests.zig",
-//         "src/examples/test_svg_raster.zig",
-//         "src/examples/test_og_generator.zig",
-//         "src/examples/test_og_generator_v3.zig",
-//         "src/examples/test_invoice_generator.zig",
-//     };
-
-//     for (example_files) |example_file| {
-//         const check_exe = b.addExecutable(.{
-//             .name = "check-example",
-//             .root_module = b.createModule(.{
-//                 .root_source_file = b.path(example_file),
-//                 .target = target,
-//                 .optimize = optimize,
-//                 .imports = &.{
-//                     .{ .name = "curl", .module = curl_module },
-//                     .{ .name = "zexplorer", .module = zexplorer_module },
-//                 },
-//             }),
-//         });
-//         linkAllLibs(check_exe, paths, libs);
-//         b.installArtifact(check_exe);
-//         check_step.dependOn(&check_exe.step);
-//     }
-
-//     const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
-
-//     if (example_name) |name| {
-//         const example_exe = b.addExecutable(.{
-//             .name = b.fmt("example-{s}", .{name}),
-//             .root_module = b.createModule(.{
-//                 .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
-//                 .target = target,
-//                 .optimize = optimize,
-//                 .imports = &.{
-//                     .{ .name = "curl", .module = curl_module },
-//                     .{ .name = "zexplorer", .module = zexplorer_module },
-//                 },
-//             }),
-//         });
-//         linkAllLibs(example_exe, paths, libs);
-//         b.installArtifact(example_exe);
-
-//         const run_example = b.addRunArtifact(example_exe);
-//         run_example.step.dependOn(b.getInstallStep());
-//         if (b.args) |args| run_example.addArgs(args);
-//         example_step.dependOn(&run_example.step);
-//     } else {
-//         const list_examples = b.addSystemCommand(&.{ "sh", "-c", "echo 'Available examples:' && ls -1 src/examples/*.zig 2>/dev/null | sed 's|src/examples/||;s|\\.zig$||' | sed 's/^/  /' || echo '  (none found)'" });
-//         example_step.dependOn(&list_examples.step);
-//     }
-// }
+fn buildExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module, zexplorer_module: *std.Build.Module) void {
+    const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
+    if (example_name) |name| {
+        const example_step = b.step("example", "Run an example from src/examples/");
+        const example_exe = b.addExecutable(.{
+            .name = b.fmt("example-{s}", .{name}),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{
+                    .{ .name = "curl", .module = curl_module },
+                    .{ .name = "zexplorer", .module = zexplorer_module },
+                },
+            }),
+        });
+        linkAllLibs(example_exe, paths, libs);
+        b.installArtifact(example_exe);
+        const run_example = b.addRunArtifact(example_exe);
+        run_example.step.dependOn(b.getInstallStep());
+        if (b.args) |args| run_example.addArgs(args);
+        example_step.dependOn(&run_example.step);
+    }
+}
 
 // =============================================================================
 // Documentation

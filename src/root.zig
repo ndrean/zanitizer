@@ -698,6 +698,7 @@ test {
     _ = @import("modules/node_types.zig");
     _ = @import("modules/serializer.zig");
     _ = @import("modules/css_selectors.zig");
+    _ = @import("modules/image_verify.zig");
     _ = @import("sanitizer_config.zig");
     _ = @import("js_security.zig");
     _ = @import("js_bytecode.zig");

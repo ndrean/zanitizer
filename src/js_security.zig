@@ -7,67 +7,6 @@ const curl = @import("curl");
 const ImportMap = @import("js_import_map.zig").ImportMap;
 const ScriptEngine = @import("script_engine.zig").ScriptEngine;
 
-// pub fn openFileNoSymlinkEscape(sandbox: *Sandbox, rel_path: []const u8) !std.fs.File {
-//     var it = std.mem.splitScalar(u8, rel_path, '/');
-
-//     // Start at the sandbox root
-//     var current_dir = sandbox.dir;
-
-//     // Track directories we open so we can close them when we return
-//     // We use ArrayListUnmanaged as requested
-//     var opened_dirs: std.ArrayListUnmanaged(std.fs.Dir) = .empty;
-//     defer {
-//         for (opened_dirs.items) |*d| d.close();
-//         opened_dirs.deinit(sandbox.allocator);
-//     }
-
-//     var pending_component: ?[]const u8 = null;
-
-//     // 1. Walk the directories using standard openDir (which supports .no_follow)
-//     while (it.next()) |component| {
-//         if (component.len == 0) continue;
-
-//         // If we have a pending component, it means we found a NEW component after it.
-//         // Therefore, the PENDING component must be a directory. Open it.
-//         if (pending_component) |dir_name| {
-//             // openDir supports .no_follow in OpenDirOptions
-//             const next_dir = current_dir.openDir(dir_name, .{
-//                 .iterate = false,
-//                 .no_follow = true, // 🔐 BLOCK SYMLINKS
-//             }) catch |err| {
-//                 if (err == error.NotDir) return error.AccessDenied;
-//                 return err;
-//             };
-
-//             try opened_dirs.append(sandbox.allocator, next_dir);
-//             current_dir = next_dir;
-//         }
-
-//         pending_component = component;
-//     }
-
-//     // 2. Open the Final File using POSIX openat
-//     // We CANNOT use current_dir.openFile() because OpenFlags lacks .no_follow
-//     const filename = pending_component orelse return error.InvalidPath;
-
-//     // openat requires a null-terminated path
-//     const filename_z = try sandbox.allocator.dupeZ(u8, filename);
-//     defer sandbox.allocator.free(filename_z);
-
-//     // Construct flags using Zig 0.15.2 packed struct syntax
-//     // We assume std.posix.O maps to the struct definition you provided
-//     const flags = posix.O{
-//         .ACCMODE = .RDONLY,
-//         .NOFOLLOW = true, // 🔐 BLOCK SYMLINKS
-//         .CLOEXEC = true,
-//     };
-
-//     // Use the raw File Descriptor from the loop's current_dir
-//     const fd = try posix.openat(current_dir.fd, filename_z, flags, 0);
-
-//     return std.fs.File{ .handle = fd };
-// }
-
 pub fn openFileNoSymlinkEscape(sandbox: *Sandbox, rel_path: []const u8) !std.fs.File {
     var it = std.mem.splitScalar(u8, rel_path, '/');
 
@@ -230,7 +169,7 @@ pub fn js_secure_module_normalize(
     module_name: [*c]const u8,
     opaque_ptr: ?*anyopaque,
 ) callconv(.c) [*c]u8 {
-    z.print("[Zig] SECURE RESOLVER\n", .{});
+    std.debug.print("[Zig] SECURE RESOLVER\n", .{});
     const sandbox: *Sandbox = @ptrCast(@alignCast(opaque_ptr));
     const allocator = sandbox.allocator;
 
@@ -239,7 +178,7 @@ pub fn js_secure_module_normalize(
 
     // [IMPORT MAP] Check if this is a bare specifier with a mapping
     if (sandbox.import_map.resolve(name_slice)) |mapped_url| {
-        z.print("[Zig] Import map: {s} -> {s}\n", .{ name_slice, mapped_url });
+        std.debug.print("[Zig] Import map: {s} -> {s}\n", .{ name_slice, mapped_url });
         return qjs.js_strndup(ctx, mapped_url.ptr, mapped_url.len);
     }
 
@@ -281,7 +220,7 @@ pub fn js_secure_module_normalize(
         }
     }
 
-    // 3. THE FIX: Virtual Resolution
+    // 3. Virtual Resolution
     // We start with "/" to force Zig to do pure math, ignoring CWD.
     // "js/test" + "../vendor/lib.js" becomes "/js/vendor/lib.js"
     const resolved_absolute = std.fs.path.resolve(allocator, &.{ "/", base_dir, name_slice }) catch return null;
@@ -328,7 +267,7 @@ pub fn js_secure_module_loader(
     module_name: [*c]const u8,
     opaque_ptr: ?*anyopaque,
 ) callconv(.c) ?*qjs.JSModuleDef {
-    z.print("[Zig] SECURE  LOADER \n", .{});
+    std.debug.print("[Zig] SECURE  LOADER \n", .{});
     const sandbox: *Sandbox = @ptrCast(@alignCast(opaque_ptr));
     const allocator = sandbox.allocator;
     const name = std.mem.span(module_name);
@@ -795,5 +734,6 @@ test "module loader: nonexistent local module fails gracefully" {
     ;
 
     const val = engine.eval(script, "<missing-module>", .module);
+    // defer engine.ctx.freeValue(val);
     try testing.expect(val == error.EvalError or val == error.JSException);
 }

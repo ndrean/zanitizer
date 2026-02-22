@@ -485,7 +485,7 @@ fn handleStyleElement(context: *SanitizeContext, node: *z.DomNode) !c_int {
     // Sanitize the stylesheet content
     const sanitized_css = css_san.sanitizeStylesheet(original_css) catch |err| {
         // On sanitization error, remove the style element
-        std.debug.print("CSS sanitization error: {any}\n", .{err});
+        std.debug.print("🔴 CSS sanitization error: {any}\n", .{err});
         try context.addNodeToRemove(node);
         return z._CONTINUE;
     };
@@ -1428,7 +1428,8 @@ test "blocks dangerous data: URLs" {
     const html =
         \\<img src="data:text/html,<script>alert('xss')</script>" alt="bad">
         \\<a href="data:text/javascript,alert(1)">Bad</a>
-        \\<img src="data:image/png,base64,..." alt="good png">
+        // A real 1x1 PNG encoded as valid ;base64 — magic bytes match, must survive
+        \\<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==" alt="good png">
         \\<img src="data:image/svg+xml,<svg>...</svg>" alt="bad svg">
     ;
 
@@ -1443,9 +1444,8 @@ test "blocks dangerous data: URLs" {
     try testing.expect(std.mem.indexOf(u8, result, "data:text/html") == null);
     try testing.expect(std.mem.indexOf(u8, result, "data:text/javascript") == null);
     try testing.expect(std.mem.indexOf(u8, result, "data:image/svg") == null);
-    // Should allow image/png
-    try testing.expect(std.mem.indexOf(u8, result, "data:image/png") != null or
-        std.mem.indexOf(u8, result, "data:image/") != null);
+    // Should allow image/png with valid magic bytes
+    try testing.expect(std.mem.indexOf(u8, result, "iVBORw0K") != null);
 }
 
 test "removes style tags and dangerous inline styles" {
@@ -3602,7 +3602,7 @@ test "html5sec.org vectors" {
     };
     defer allocator.free(input);
 
-    std.debug.print("\n=== HTML5 Security Cheatsheet Test (Zig) ===\n", .{});
+    // std.debug.print("\n=== HTML5 Security Cheatsheet Test (Zig) ===\n", .{});
     // std.debug.print("Input size: {} bytes\n", .{input.len});
     // std.debug.print("Total vectors: 139\n\n", .{});
 

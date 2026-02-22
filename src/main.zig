@@ -164,6 +164,12 @@ pub fn main() !void {
                 output_path = args.next();
             } else if (std.mem.eql(u8, arg, "-w") or std.mem.eql(u8, arg, "--width")) {
                 if (args.next()) |val| width = std.fmt.parseInt(u32, val, 10) catch 800;
+            } else if (std.mem.eql(u8, arg, "--dpi")) {
+                if (args.next()) |val| {
+                    const dpi = std.fmt.parseInt(u32, val, 10) catch 72;
+                    // A4 = 210mm wide = 8.2677 inches → round(8.2677 * dpi)
+                    width = @intFromFloat(@round(8.2677 * @as(f32, @floatFromInt(dpi))));
+                }
             } else if (std.mem.eql(u8, arg, "--url") or std.mem.eql(u8, arg, "-u")) {
                 maybe_url = args.next();
             } else if (std.mem.eql(u8, arg, "--no-css")) {
@@ -409,10 +415,11 @@ fn printUsage() void {
         \\
         \\Options (convert/sanitize):
         \\  -o <file>            Output file path (default: stdout)
+        \\  --dpi <dpi>          A4 viewport width by DPI (default: 72)
+        \\                         72  → 595 px  (screen/PDF quality)
+        \\                         150 → 1240 px (good quality)
+        \\                         300 → 2480 px (print quality)
         \\  -w, --width <px>     Viewport width in pixels (default: 800)
-        \\                         595  = A4 at 72 DPI  (screen/PDF quality)
-        \\                         1240 = A4 at 150 DPI (good quality)
-        \\                         2480 = A4 at 300 DPI (print quality)
         \\  -u, --url <url>      Base URL for resolving relative assets
         \\                         (required when piping HTML from stdin)
         \\  --no-css             Skip loading external stylesheets
