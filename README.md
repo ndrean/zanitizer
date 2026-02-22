@@ -174,6 +174,9 @@ Raw HTML / SVG / CSS
 
 Scrape <https://demo.vercel.store> — 12 HTTP requests, 42 scripts hydrated, structured data extracted:
 
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo-vercel-store.png" alt="vercel" width="600" height="400"> 
+
+You prepare a JavaScript to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API:
 ```js
 await zexplorer.goto("https://demo.vercel.store");
 await zexplorer.waitForSelector("a[href^='/product/']");
@@ -187,6 +190,8 @@ const items = unique.map(href => {
 console.log(items);
 return items;
 ```
+
+The result is logged in the terminal:
 
 ```txt
 0.17s user 0.14s system 37% cpu 0.835 total
@@ -351,14 +356,14 @@ If you use the library, you can run the Zig file:
 zig build example -Dname=teset_grid_1d
 ```
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.png" alt="grid example" width="400" height="280">
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.jpeg" alt="grid example" width="400" height="280">
 
 
 ### Generate a Leaflet map PDF report
 
 Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map with an SVG template, and output a multi-layered PDF — all in one shot:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo-vercel-store.png" alt="vercel" width="400" height="280"> <https://github.com/ndrean/zexplorer/blob/main/images/RouteReport.pdf>
+<https://github.com/ndrean/zexplorer/blob/main/images/RouteReport.pdf>
 
 See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-and-output-a-pdf) below.
 
