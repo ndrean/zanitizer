@@ -149,6 +149,9 @@ const NodeInfo = struct {
     border_width: f32 = 0,
     border_color: [4]u8 = .{ 0, 0, 0, 0 },
     border_radius: f32 = 0,
+    /// Which border sides are active: bit0=top, bit1=right, bit2=bottom, bit3=left.
+    /// 0b1111 = all sides (uses rect stroke); partial = individual thin rects.
+    border_sides: u4 = 0,
     text_align: enum { left, center, right } = .left,
     /// Number of equal-fr columns from `grid-template-columns: repeat(N, 1fr)`.
     /// Non-zero means this element is a grid container mapped to flex-wrap.
@@ -212,12 +215,29 @@ fn collectTextContentInner(node: *z.DomNode, buf: *std.ArrayList(u8), allocator:
 /// Check if an element has any non-inline element children.
 /// Known inline elements are treated as text; everything else (including
 /// custom elements) is block-level and triggers child recursion.
+/// Exception: inline-tagged elements (e.g. <span>) with `background` or
+/// `display: block/inline-block` in their style attribute are promoted to
+/// block so they get their own Yoga node (coloured pill badges, etc.).
 fn hasBlockChildren(node: *z.DomNode) bool {
     var child = z.firstChild(node);
     while (child) |c_node| : (child = z.nextSibling(c_node)) {
         if (z.nodeType(c_node) == .element) {
             if (z.nodeToElement(c_node)) |el| {
-                if (!isInlineElement(z.tagName_zc(el))) return true;
+                const tag = z.tagName_zc(el);
+                if (!isInlineElement(tag)) return true;
+                // Inline-tagged element promoted to block if it has a visual box style
+                if (z.getAttribute_zc(el, "style")) |s| {
+                    if (std.mem.indexOf(u8, s, "background") != null or
+                        std.mem.indexOf(u8, s, "display: block") != null or
+                        std.mem.indexOf(u8, s, "display:block") != null or
+                        std.mem.indexOf(u8, s, "display: inline-block") != null or
+                        std.mem.indexOf(u8, s, "display:inline-block") != null or
+                        std.mem.indexOf(u8, s, "display: flex") != null or
+                        std.mem.indexOf(u8, s, "display:flex") != null)
+                    {
+                        return true;
+                    }
+                }
             }
         }
     }
@@ -243,15 +263,52 @@ fn isRemoteUrl(url: []const u8) bool {
         std.mem.startsWith(u8, url, "//");
 }
 
-/// Synchronous HTTP GET; bytes are allocated from `allocator`. Returns null on error.
-fn fetchImageBytes(allocator: std.mem.Allocator, url: []const u8) ?[]const u8 {
+/// Resolve a (possibly relative) src against a base URL or directory.
+/// Caller owns the returned slice.
+///   base = "https://example.com/foo/bar"  + src = "/_next/image?x=1" → "https://example.com/_next/image?x=1"
+///   base = "https://example.com/foo/"     + src = "img.png"          → "https://example.com/foo/img.png"
+///   base = "some/local/dir"               + src = "img.png"          → "some/local/dir/img.png"
+fn resolveUrl(allocator: std.mem.Allocator, base: []const u8, src: []const u8) ![]u8 {
+    if (isRemoteUrl(src)) return allocator.dupe(u8, src);
+    if (std.mem.startsWith(u8, src, "//"))
+        return std.fmt.allocPrint(allocator, "https:{s}", .{src});
+
+    if (isRemoteUrl(base)) {
+        if (std.mem.startsWith(u8, src, "/")) {
+            // Absolute path: keep only scheme+host from base
+            const after_scheme = (std.mem.indexOf(u8, base, "://") orelse return error.BadBase) + 3;
+            const host_end = std.mem.indexOfScalarPos(u8, base, after_scheme, '/') orelse base.len;
+            return std.fmt.allocPrint(allocator, "{s}{s}", .{ base[0..host_end], src });
+        }
+        // Relative path: resolve against base directory (strip trailing filename if any)
+        const dir_end = std.mem.lastIndexOfScalar(u8, base, '/') orelse base.len;
+        return std.fmt.allocPrint(allocator, "{s}/{s}", .{ base[0..dir_end], src });
+    }
+
+    // Local filesystem: simple path join
+    return std.fs.path.join(allocator, &.{ base, src });
+}
+
+/// Synchronous HTTP GET for an image.
+/// `referer` should be the page origin (e.g. "https://demo.vercel.store") so that
+/// same-site image proxies (like Next.js /_next/image) accept the request.
+/// Accept is restricted to formats our decoders support — avoids AVIF from Vary:Accept servers.
+fn fetchImageBytes(allocator: std.mem.Allocator, url: []const u8, referer: ?[]const u8) ?[]const u8 {
     var client: std.http.Client = .{ .allocator = allocator };
     defer client.deinit();
     var buf = std.Io.Writer.Allocating.init(allocator);
+
+    var headers_buf: [2]std.http.Header = .{
+        .{ .name = "Accept", .value = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml,*/*;q=0.5" },
+        .{ .name = "Referer", .value = referer orelse "" },
+    };
+    const headers: []const std.http.Header = if (referer != null) headers_buf[0..2] else headers_buf[0..1];
+
     const resp = client.fetch(.{
         .method = .GET,
         .location = .{ .url = url },
         .response_writer = &buf.writer,
+        .extra_headers = headers,
     }) catch |err| {
         buf.deinit();
         std.debug.print("[Compositor] ⚠️ Failed to fetch image {s}: {}\n", .{ url, err });
@@ -299,9 +356,30 @@ fn buildYogaTree(
             }
         }
 
+        // Inline-tagged elements (SPAN, A, STRONG, etc.) should never stretch to fill the
+        // parent's cross axis — they always shrink-wrap their content.
+        if (isInlineElement(tag)) {
+            yoga.setAlignSelf(yg, yoga.ALIGN_FLEX_START);
+        }
+
         // Table row defaults: flex-direction row
         if (std.mem.eql(u8, tag, "TR")) {
             yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+        }
+
+        // Inline <svg>: serialize to SVG string and pass to ThorVG — do NOT recurse into children.
+        // SVG-namespace elements have lowercase tag names in Lexbor (unlike HTML elements which are uppercase).
+        if (std.ascii.eqlIgnoreCase(tag, "svg")) {
+            if (z.getAttribute_zc(el, "width")) |ws| {
+                if (parseFloat(ws)) |v| yoga.setWidth(yg, v);
+            }
+            if (z.getAttribute_zc(el, "height")) |hs| {
+                if (parseFloat(hs)) |v| yoga.setHeight(yg, v);
+            }
+            if (z.outerHTML(allocator, el)) |svg_str| {
+                info.img_data = svg_str;
+                info.img_is_svg = true;
+            } else |_| {}
         }
 
         // <img> support: load file bytes and set Yoga dimensions
@@ -309,21 +387,26 @@ fn buildYogaTree(
             var img_loaded = false;
             if (z.getAttribute_zc(el, "src")) |src| {
                 if (src.len > 0) {
-                    // Load image: remote URLs are fetched; relative paths resolved to base_dir
-                    z.print("{s}\n", .{src});
-                    const maybe_data: ?[]const u8 = if (isRemoteUrl(src)) blk: {
-                        const url = if (std.mem.startsWith(u8, src, "//"))
-                            std.fmt.allocPrint(allocator, "https:{s}", .{src}) catch src
-                        else
-                            src;
-                        break :blk fetchImageBytes(allocator, url);
-                    } else blk: {
-                        const path = std.fs.path.join(allocator, &.{ base_dir, src }) catch src;
-                        break :blk std.fs.cwd().readFileAlloc(allocator, path, 32 * 1024 * 1024) catch {
-                            std.debug.print("⚠️ [Compositor] Failed to load image: {s}\n", .{path});
-                            break :blk null;
-                        };
-                    };
+                    // Derive origin from base_dir for use as Referer (e.g. "https://demo.vercel.store")
+                    const referer: ?[]const u8 = if (isRemoteUrl(base_dir)) blk: {
+                        const after_scheme = (std.mem.indexOf(u8, base_dir, "://") orelse break :blk null) + 3;
+                        const host_end = std.mem.indexOfScalarPos(u8, base_dir, after_scheme, '/') orelse base_dir.len;
+                        break :blk base_dir[0..host_end];
+                    } else null;
+
+                    // Resolve src against base_dir (handles relative, absolute-path, and protocol-relative)
+                    const resolved = resolveUrl(allocator, base_dir, src) catch null;
+                    defer if (resolved) |r| allocator.free(r);
+                    const maybe_data: ?[]const u8 = if (resolved) |r| blk: {
+                        if (isRemoteUrl(r)) {
+                            break :blk fetchImageBytes(allocator, r, referer);
+                        } else {
+                            break :blk std.fs.cwd().readFileAlloc(allocator, r, 32 * 1024 * 1024) catch {
+                                std.debug.print("⚠️ [Compositor] Failed to load image: {s}\n", .{r});
+                                break :blk null;
+                            };
+                        }
+                    } else null;
 
                     if (maybe_data) |data| {
                         info.img_data = data;
@@ -370,6 +453,9 @@ fn buildYogaTree(
     }
 
     yoga.setContext(yg, info);
+
+    // Inline SVG and <img> with loaded data are leaf nodes — don't recurse into DOM children
+    if (info.img_is_svg and info.img_data != null) return yg;
 
     if (hasBlockChildren(dom_node)) {
         // Has element children → recurse into them
@@ -451,11 +537,18 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
         if (std.mem.eql(u8, prop, "display")) {
             if (std.mem.eql(u8, val, "flex")) {
                 yoga.setDisplay(yg, yoga.DISPLAY_FLEX);
+                // CSS flex default direction is row; Yoga's default is column — must align them.
+                // An explicit flex-direction: column later in the cascade will override this.
+                yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
             } else if (std.mem.eql(u8, val, "grid")) {
                 // Defer actual Yoga calls — collect remaining grid props first.
                 is_grid = true;
             } else if (std.mem.eql(u8, val, "none")) {
                 yoga.setDisplay(yg, yoga.DISPLAY_NONE);
+            } else if (std.mem.eql(u8, val, "inline-block") or std.mem.eql(u8, val, "inline-flex")) {
+                // inline-block/inline-flex: behaves like block but shrinks to intrinsic width.
+                // Map to align-self: flex-start so the element doesn't stretch in the parent's cross axis.
+                yoga.setAlignSelf(yg, yoga.ALIGN_FLEX_START);
             }
         } else if (std.mem.eql(u8, prop, "grid-template-columns")) {
             grid_columns = parseRepeatNFr(val) orelse 0;
@@ -569,12 +662,19 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
             }
         } else if (std.mem.eql(u8, prop, "border")) {
             parseBorderShorthand(val, info);
-        } else if (std.mem.eql(u8, prop, "border-top") or
-            std.mem.eql(u8, prop, "border-right") or
-            std.mem.eql(u8, prop, "border-bottom") or
-            std.mem.eql(u8, prop, "border-left"))
-        {
+            info.border_sides = 0b1111;
+        } else if (std.mem.eql(u8, prop, "border-top")) {
             parseBorderShorthand(val, info);
+            info.border_sides |= 0b0001;
+        } else if (std.mem.eql(u8, prop, "border-right")) {
+            parseBorderShorthand(val, info);
+            info.border_sides |= 0b0010;
+        } else if (std.mem.eql(u8, prop, "border-bottom")) {
+            parseBorderShorthand(val, info);
+            info.border_sides |= 0b0100;
+        } else if (std.mem.eql(u8, prop, "border-left")) {
+            parseBorderShorthand(val, info);
+            info.border_sides |= 0b1000;
         } else if (std.mem.eql(u8, prop, "border-width") or
             std.mem.eql(u8, prop, "border-top-width") or
             std.mem.eql(u8, prop, "border-right-width") or
@@ -955,19 +1055,58 @@ fn paintYogaTree(
     else
         parent_fg;
 
-    // Paint background rect and/or border on a single shape
-    if (info.bg_color[3] > 0 or info.border_width > 0) {
+    // Paint background rect
+    if (info.bg_color[3] > 0) {
         const shape = tvg_shape_new() orelse return;
         const r = info.border_radius;
         _ = tvg_shape_append_rect(shape, x, y, node_w, node_h, r, r, true);
-        if (info.bg_color[3] > 0) {
-            _ = tvg_shape_set_fill_color(shape, info.bg_color[0], info.bg_color[1], info.bg_color[2], info.bg_color[3]);
-        }
-        if (info.border_width > 0 and info.border_color[3] > 0) {
-            _ = tvg_shape_set_stroke_width(shape, info.border_width);
-            _ = tvg_shape_set_stroke_color(shape, info.border_color[0], info.border_color[1], info.border_color[2], info.border_color[3]);
-        }
+        _ = tvg_shape_set_fill_color(shape, info.bg_color[0], info.bg_color[1], info.bg_color[2], info.bg_color[3]);
         _ = tvg_canvas_add(canvas, shape);
+    }
+
+    // Paint border — all 4 sides: rect stroke; individual sides: thin filled rects
+    if (info.border_sides > 0 and info.border_width > 0 and info.border_color[3] > 0) {
+        const bw = info.border_width;
+        const bc = info.border_color;
+        if (info.border_sides == 0b1111) {
+            // All sides: rect stroke (honours border_radius)
+            const shape = tvg_shape_new() orelse return;
+            const r = info.border_radius;
+            _ = tvg_shape_append_rect(shape, x, y, node_w, node_h, r, r, true);
+            _ = tvg_shape_set_stroke_width(shape, bw);
+            _ = tvg_shape_set_stroke_color(shape, bc[0], bc[1], bc[2], bc[3]);
+            _ = tvg_canvas_add(canvas, shape);
+        } else {
+            // Individual sides: thin filled rects (no radius)
+            if (info.border_sides & 0b0001 != 0) { // top
+                if (tvg_shape_new()) |s| {
+                    _ = tvg_shape_append_rect(s, x, y, node_w, bw, 0, 0, true);
+                    _ = tvg_shape_set_fill_color(s, bc[0], bc[1], bc[2], bc[3]);
+                    _ = tvg_canvas_add(canvas, s);
+                }
+            }
+            if (info.border_sides & 0b0010 != 0) { // right
+                if (tvg_shape_new()) |s| {
+                    _ = tvg_shape_append_rect(s, x + node_w - bw, y, bw, node_h, 0, 0, true);
+                    _ = tvg_shape_set_fill_color(s, bc[0], bc[1], bc[2], bc[3]);
+                    _ = tvg_canvas_add(canvas, s);
+                }
+            }
+            if (info.border_sides & 0b0100 != 0) { // bottom
+                if (tvg_shape_new()) |s| {
+                    _ = tvg_shape_append_rect(s, x, y + node_h - bw, node_w, bw, 0, 0, true);
+                    _ = tvg_shape_set_fill_color(s, bc[0], bc[1], bc[2], bc[3]);
+                    _ = tvg_canvas_add(canvas, s);
+                }
+            }
+            if (info.border_sides & 0b1000 != 0) { // left
+                if (tvg_shape_new()) |s| {
+                    _ = tvg_shape_append_rect(s, x, y, bw, node_h, 0, 0, true);
+                    _ = tvg_shape_set_fill_color(s, bc[0], bc[1], bc[2], bc[3]);
+                    _ = tvg_canvas_add(canvas, s);
+                }
+            }
+        }
     }
 
     // Content origin: offset by the node's computed padding

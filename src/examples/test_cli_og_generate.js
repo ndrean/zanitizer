@@ -1,9 +1,11 @@
 // src/examples/generate_og.js
 
 // 1. Read ammunition from the CLI, falling back to defaults
-const title = zxp.args[0] || "Headless Browser in Zig";
-const author = zxp.args[1] || "Default Author";
-const avatarUrl = zxp.args[2] || "https://github.com/torvalds.png";
+const template =
+  zxp.args[0] || "file://src/examples/test_og_generator_template.svg";
+const title = zxp.args[1] || "Headless Browser in Zig";
+const author = zxp.args[2] || "Default Author";
+const avatarUrl = zxp.args[3] || "https://github.com/torvalds.png";
 
 console.log(`[JS] Generating OG Image for: "${title}" by ${author}`);
 
@@ -14,9 +16,7 @@ async function generateOGImage() {
 
   const avatarDataUri = arrayBufferToBase64DataUri(avatarBuffer, contentType);
 
-  const templRes = await fetch(
-    "file://src/examples/test_og_generator_template_v3.svg",
-  );
+  const templRes = await fetch(template);
   const rawSvgTemplate = await templRes.text();
   const finalSvg = rawSvgTemplate
     .replace("{{AVATAR_B64}}", avatarDataUri)

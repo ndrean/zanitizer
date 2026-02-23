@@ -3,6 +3,7 @@ const z = @import("root.zig");
 const qjs = z.qjs;
 const w = z.wrapper;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const js_fetch_all = @import("js_fetch_all.zig");
 
 // btoa: Binary to ASCII (Base64 Encode)
 // Per spec, btoa treats each JS character as a Latin-1 byte (code point 0-255).
@@ -307,6 +308,10 @@ pub fn install(ctx: w.Context) !void {
     // arrayBufferToBase64DataUri: native base64 data URI encoding
     const ab_to_b64 = ctx.newCFunction(js_arrayBufferToBase64DataUri, "arrayBufferToBase64DataUri", 2);
     _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "arrayBufferToBase64DataUri", ab_to_b64);
+
+    // fetchAll: parallel HTTP fetcher using curl_multi
+    const fetch_all_fn = ctx.newCFunction(js_fetch_all.js_fetchAll, "fetchAll", 2);
+    _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "fetchAll", fetch_all_fn);
 
     // requestAnimationFrame / cancelAnimationFrame polyfill
     // Uses setTimeout(cb, 0) for immediate execution in headless environment

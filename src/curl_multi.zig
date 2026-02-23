@@ -38,6 +38,7 @@ pub fn hardenEasy(easy: curl.Easy) void {
     _ = c.curl_easy_setopt(handle, c.CURLOPT_MAXREDIRS, FETCH_MAX_REDIRECTS);
     _ = c.curl_easy_setopt(handle, c.CURLOPT_FOLLOWLOCATION, @as(c_long, 1));
     _ = c.curl_easy_setopt(handle, c.CURLOPT_PROTOCOLS_STR, "http,https");
+    _ = c.curl_easy_setopt(handle, c.CURLOPT_ACCEPT_ENCODING, ""); // "" = all supported (gzip, br, deflate); curl decompresses transparently
 }
 
 /// SSRF pre-flight check: returns true if the URL targets localhost, private

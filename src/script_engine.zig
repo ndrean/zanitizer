@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
@@ -21,6 +22,11 @@ const ScriptBuffers = @import("curl_multi.zig").ScriptBuffers;
 
 const Sanitizer = sanitizer_mod.Sanitizer;
 const SanitizeOptions = sanitizer_mod.SanitizeOptions;
+
+// Chunk-based HTML parsing API (used by streaming mode)
+extern "c" fn lxb_html_document_parse_chunk_begin(doc: *z.HTMLDocument) c_uint;
+extern "c" fn lxb_html_document_parse_chunk(doc: *z.HTMLDocument, chunk: [*:0]const u8, len: usize) c_uint;
+extern "c" fn lxb_html_document_parse_chunk_end(doc: *z.HTMLDocument) c_uint;
 
 const TIMEOUT_MS: i64 = 5000;
 const RUN_TIMEOUT_MS: i64 = 30_000; // 30s wall-clock limit for engine.run()
@@ -51,6 +57,10 @@ pub const LoadPageOptions = struct {
 
     /// Run event loop after loading (process timers, promises, etc.).
     run_loop: bool = false,
+
+    /// JS source injected into the global scope AFTER CSS but BEFORE page <script> tags.
+    /// Used by scrape mode to install the mobile browser profile before the page runs.
+    pre_script: ?[]const u8 = null,
 };
 
 /// avoid infinte loops like `white (true) {}` by setting a deadline
@@ -80,6 +90,7 @@ pub const ScriptEngine = struct {
     dom: DOMBridge, // VALUE!! to own the DOMBridge struct so DOMBridge deinit its content and ScriptEngine
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
     sandbox: js_security.Sandbox,
+    streaming_active: bool = false,
 
     // TODO: need to read the import_map as external
     const import_map_json = @embedFile("examples/cdn_import_map.json");
@@ -156,9 +167,12 @@ pub const ScriptEngine = struct {
         _ = try self.ctx.setPropertyStr(global, "__native_loadPage", self.ctx.newCFunction(js_native_loadPage, "loadPage", 2));
 
         const stdlib_code = @embedFile("zexplorer.js");
-        const eval_res = qjs.JS_Eval(self.ctx.ptr, stdlib_code.ptr, stdlib_code.len, "zexplorer.js", qjs.JS_EVAL_TYPE_GLOBAL);
-
-        if (qjs.JS_IsException(eval_res)) {
+        const eval_res = try self.ctx.eval(stdlib_code, "zexplorer.js", zqjs.Context.EvalFlags{
+            .type = .global,
+        });
+        // const eval_res = qjs.JS_Eval(self.ctx.ptr, stdlib_code.ptr, stdlib_code.len, "zexplorer.js", qjs.JS_EVAL_TYPE_GLOBAL);
+        if (self.ctx.isException(eval_res)) {
+            // if (qjs.JS_IsException(eval_res)) {
             std.debug.print("CRITICAL: Failed to load zexplorer.js standard library!\n", .{});
         }
         defer self.ctx.freeValue(eval_res);
@@ -509,105 +523,20 @@ pub const ScriptEngine = struct {
         return js_marshall.jsToZig(allocator, self.ctx, raw_result, T);
     }
 
-    // /// Evaluates JS code that might return a Promise as .global
-    // ///
-    // /// Runs the event loop until completion, checks for rejections, and marshals the result with the given type `T` that must match the type returned from JS.
-    // pub fn evalAsyncAs(self: *ScriptEngine, allocator: std.mem.Allocator, comptime T: type, code: []const u8, name: []const u8) !T {
-    //     const val = try self.eval(code, name, .global);
-    //     defer self.ctx.freeValue(val);
-
-    //     // Handle the "Sync" case
-    //     if (!self.ctx.isPromise(val)) {
-    //         return js_marshall.jsToZig(allocator, self.ctx, val, T);
-    //     }
-
-    //     //  Poll event loop until promise settles (don't wait for full drain —
-    //     //  frameworks like Next.js leave timers/workers alive indefinitely).
-    //     var poll_count: u32 = 0;
-    //     const max_polls: u32 = 100_000;
-    //     while (poll_count < max_polls) : (poll_count += 1) {
-    //         const ps = self.ctx.promiseState(val);
-    //         if (ps != .Pending) break;
-    //         // Run one iteration of jobs + timers
-    //         self.processJobs();
-    //         _ = self.loop.processTimers() catch 0;
-    //         _ = self.loop.processAsyncTasks();
-    //         if (self.loop.curl_multi) |cm| {
-    //             _ = cm.poll(0) catch .{ .running = 0, .completed = 0 };
-    //         }
-    //         self.loop.pollWorkers() catch {};
-    //         // Yield CPU if nothing happened this iteration
-    //         std.Thread.sleep(1_000_000); // 1ms
-    //     }
-
-    //     const state = self.ctx.promiseState(val);
-    //     switch (state) {
-    //         .Pending => {
-    //             // deadlock
-    //             std.debug.print("⚠️  Script finished but Promise is still PENDING.\n", .{});
-    //             return error.JSPromiseStuck;
-    //         },
-    //         .Rejected => {
-    //             const reason = self.ctx.promiseResult(val);
-    //             defer self.ctx.freeValue(reason);
-
-    //             // Diagnostic: identify the rejection value type
-    //             if (self.ctx.isUndefined(reason)) {
-    //                 std.debug.print("❌ JS Promise Rejected with: undefined\n", .{});
-    //                 std.debug.print("   (catch block swallowed the error — check console output above)\n", .{});
-    //                 return error.JSPromiseRejected;
-    //             }
-
-    //             // Clear any pending exception before converting to string
-    //             const pending = self.ctx.getException();
-    //             if (!self.ctx.isNull(pending)) self.ctx.freeValue(pending);
-
-    //             // Try direct toString first
-    //             if (self.ctx.toCString(reason)) |reason_str| {
-    //                 defer self.ctx.freeCString(reason_str);
-    //                 std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(reason_str)});
-    //             } else |_| {
-    //                 // Try .message then .stack for Error objects
-    //                 const msg_prop = self.ctx.getPropertyStr(reason, "message");
-    //                 defer self.ctx.freeValue(msg_prop);
-    //                 if (self.ctx.toCString(msg_prop)) |msg_str| {
-    //                     defer self.ctx.freeCString(msg_str);
-    //                     std.debug.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(msg_str)});
-
-    //                     const stack_prop = self.ctx.getPropertyStr(reason, "stack");
-    //                     defer self.ctx.freeValue(stack_prop);
-    //                     if (self.ctx.toCString(stack_prop)) |stack_str| {
-    //                         defer self.ctx.freeCString(stack_str);
-    //                         std.debug.print("   Stack: {s}\n", .{std.mem.span(stack_str)});
-    //                     } else |_| {}
-    //                 } else |_| {
-    //                     if (self.ctx.isNull(reason)) {
-    //                         std.debug.print("❌ JS Promise Rejected with: null\n", .{});
-    //                     } else if (self.ctx.isObject(reason)) {
-    //                         std.debug.print("❌ JS Promise Rejected with: [object] (toString failed)\n", .{});
-    //                     } else {
-    //                         std.debug.print("❌ JS Promise Rejected with: (unknown type)\n", .{});
-    //                     }
-    //                 }
-    //             }
-    //             return error.JSPromiseRejected;
-    //         },
-    //         .Fulfilled => {
-    //             // 5. Success! Extract the value.
-    //             const result = self.ctx.promiseResult(val);
-    //             defer self.ctx.freeValue(result);
-
-    //             // 6. Marshal the inner result to Zig
-    //             return js_marshall.jsToZig(allocator, self.ctx, result, T);
-    //         },
-    //     }
-    // }
-
-    /// Evaluates the script, waits for promises, and calls JSON.stringify on the result.
+    /// Evaluates the script, waits for promises, and serializes the result.
+    /// If the result is a JS string (e.g. outerHTML), it is returned raw.
+    /// Otherwise JSON.stringify is called (arrays, objects, numbers, etc.).
     pub fn evalAsyncAndStringify(self: *ScriptEngine, allocator: std.mem.Allocator, script: []const u8, filename: [:0]const u8) ![]const u8 {
         // Evaluate and resolve promises
         const val = try self.evalAsync(script, filename);
         defer self.ctx.freeValue(val);
+
+        // Raw string result (e.g. outerHTML) — return without JSON wrapping.
+        if (self.ctx.isString(val)) {
+            const z_str = try self.ctx.toZString(val);
+            defer self.ctx.freeZString(z_str);
+            return allocator.dupe(u8, z_str);
+        }
 
         // Call QuickJS native JSON stringify
         const json_val = self.ctx.jsonStringifySimple(val) catch return error.StringifyFailed;
@@ -667,18 +596,35 @@ pub const ScriptEngine = struct {
     pub fn loadHTML(self: *ScriptEngine, html: []const u8) !void {
         const bridge = self.dom;
 
-        // Trusted content: init CSS BEFORE parsing so lexbor's event
-        // watchers automatically pick up <style> and inline style=""
-        // as elements are created during the parse.
+        // Trusted content: init CSS BEFORE parsing so the style module's
+        // parse_cb fires for each </style> tag during lxb_html_document_parse,
+        // and done_cb (lxb_html_tree_end) applies all collected sheets at parse end.
+        // NOTE: tree builder uses _wo_events, so DOM watchers cannot fire during
+        // the full-document parse — inline style="" must be parsed manually after.
         try z.initDocumentCSS(bridge.doc, true);
-        try z.insertHTML(bridge.doc, html);
-        // try z.applySanitization(
-        //     self.allocator,
-        //     z.documentRoot(bridge.doc).?,
-        //     .strict,
-        // );
-        try z.loadStyleTags(self.allocator, bridge.doc, bridge.css_style_parser);
-        // try z.attachStylesheet(bridge.doc, bridge.stylesheet);
+
+        // Use the chunk API (instead of insertHTML) so we can set the scripting
+        // flag between parser creation (chunk_begin) and first chunk processing.
+        // chunk_begin lazily creates the parser via lxb_html_document_parser_prepare.
+        if (lxb_html_document_parse_chunk_begin(bridge.doc) != 0)
+            return error.ParseBeginFailed;
+
+        // Scripting enabled: <noscript> content is hidden from DOM, matching
+        // real browser behaviour. Must be set after chunk_begin (parser exists)
+        // and before any chunk is fed (parser hasn't started tokenizing yet).
+        z.documentSetScripting(bridge.doc, true);
+
+        const null_term = try self.allocator.dupeZ(u8, html);
+        defer self.allocator.free(null_term);
+        if (lxb_html_document_parse_chunk(bridge.doc, null_term, html.len) != 0)
+            return error.ParseChunkFailed;
+
+        // done_cb fires here (lxb_html_tree_end): all <style> sheets applied.
+        if (lxb_html_document_parse_chunk_end(bridge.doc) != 0)
+            return error.ParseEndFailed;
+
+        // Parse inline style="" attributes missed by _wo_events during full-doc parse:
+        try z.loadInlineStyles(self.allocator, bridge.doc);
     }
 
     /// Loads an external CSS string (like a .css file).
@@ -759,6 +705,12 @@ pub const ScriptEngine = struct {
             }
         }
 
+        // Inject pre_script (e.g. mobile browser profile) before page scripts see the globals
+        if (options.pre_script) |src| {
+            const r = try self.eval(src, "<pre-script>", .global);
+            self.ctx.freeValue(r);
+        }
+
         // Execute scripts if requested
         if (options.execute_scripts) {
             try self.executeScripts(self.allocator, options.base_dir);
@@ -768,6 +720,49 @@ pub const ScriptEngine = struct {
         if (options.run_loop) {
             try self.run();
         }
+    }
+
+    // =========================================================================
+    // Streaming Page Loading API
+    // =========================================================================
+
+    /// Begin streaming HTML into the engine's document.
+    /// CSS init (parse_cb + done_cb) is installed before the chunk parse begins,
+    /// so <style> tags are handled automatically by the lexbor style module.
+    /// Call processStreamChunk() for each chunk, then endStream() at EOF.
+    pub fn beginStream(self: *ScriptEngine, options: LoadPageOptions) !void {
+        self.rc.base_dir = options.base_dir;
+        self.rc.sanitize_enabled = false;
+        try z.initDocumentCSS(self.dom.doc, true);
+        if (lxb_html_document_parse_chunk_begin(self.dom.doc) != 0) return error.StreamBeginFailed;
+        // Scripting enabled: <noscript> content is hidden from DOM.
+        // chunk_begin has created the parser; set flag before first chunk.
+        z.documentSetScripting(self.dom.doc, true);
+        self.streaming_active = true;
+    }
+
+    /// Feed a chunk of HTML into the streaming parser.
+    /// parse_cb fires for any </style> tag encountered in the chunk.
+    pub fn processStreamChunk(self: *ScriptEngine, chunk: []const u8) !void {
+        if (!self.streaming_active) return error.StreamNotActive;
+        const null_term = try self.allocator.dupeZ(u8, chunk);
+        defer self.allocator.free(null_term);
+        if (lxb_html_document_parse_chunk(self.dom.doc, null_term, chunk.len) != 0)
+            return error.StreamChunkFailed;
+    }
+
+    /// Finalize the stream. done_cb fires here (applies all <style> sheets).
+    /// Then loads inline styles, external <link> sheets, and runs scripts.
+    pub fn endStream(self: *ScriptEngine, options: LoadPageOptions) !void {
+        if (!self.streaming_active) return error.StreamNotActive;
+        if (lxb_html_document_parse_chunk_end(self.dom.doc) != 0) return error.StreamEndFailed;
+        // done_cb has fired: all <style> sheets collected and applied to elements.
+        self.streaming_active = false;
+        // Inline style="" attributes missed by _wo_events during chunk parse:
+        try z.loadInlineStyles(self.allocator, self.dom.doc);
+        if (options.load_stylesheets) try self.loadExternalStylesheets(options.base_dir);
+        if (options.execute_scripts) try self.executeScripts(self.allocator, options.base_dir);
+        if (options.run_loop) try self.run();
     }
 
     /// Load external stylesheets with sanitization.
@@ -1032,7 +1027,7 @@ pub const ScriptEngine = struct {
                     }
 
                     metas[i].filename = fetch_url;
-                    z.print("[Engine] Fetching remote script: {s}\n", .{fetch_url});
+                    if (builtin.mode == .Debug) z.print("[Engine] Fetching remote script: {s}\n", .{fetch_url});
 
                     // Submit to curl_multi for parallel fetch
                     if (cm) |c| {
@@ -1080,11 +1075,11 @@ pub const ScriptEngine = struct {
         // Wait for all parallel fetches to complete
         if (cm) |c| {
             if (remote_count > 0) {
-                std.debug.print("[Engine] Waiting for {d} parallel script fetches...\n", .{remote_count});
+                if (builtin.mode == .Debug) std.debug.print("[Engine] Waiting for {d} parallel script fetches...\n", .{remote_count});
                 while (buffers.pending_count > 0) {
                     _ = c.poll(100) catch break;
                 }
-                std.debug.print("[Engine] All remote scripts fetched\n", .{});
+                if (builtin.mode == .Debug) std.debug.print("[Engine] All remote scripts fetched\n", .{});
             }
         }
 
@@ -1133,9 +1128,9 @@ pub const ScriptEngine = struct {
                 }
             }
             self.ctx.freeValue(doc_obj);
-            std.debug.print("[Engine] Script {d}/{d} done\n", .{ i + 1, scripts.len });
+            if (builtin.mode == .Debug) std.debug.print("[Engine] Script {d}/{d} done\n", .{ i + 1, scripts.len });
         }
-        std.debug.print("[Engine] All {d} scripts executed\n", .{scripts.len});
+        if (builtin.mode == .Debug) std.debug.print("[Engine] All {d} scripts executed\n", .{scripts.len});
 
         const val = try self.ctx.eval("__dispatchLoadEvent()", "<lifecycle>", .{});
         defer self.ctx.freeValue(val);

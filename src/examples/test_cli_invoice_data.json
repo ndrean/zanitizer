@@ -8,7 +8,7 @@
   "customerName": "Linus Torvalds",
   "customerAddress": "1 Open Source Way, Portland OR",
   "customerEmail": "torvalds@linux-foundation.org",
-  "taxRate": 19.6,
+  "taxRate": 0.196,
   "items": [
     { "description": "Headless Layout Engine", "qty": 1, "price": 500.0 },
     { "description": "CLI Architecture", "qty": 1, "price": 250.0 }

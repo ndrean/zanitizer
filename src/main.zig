@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("root.zig");
+const curl = z.curl;
 const zqjs = z.wrapper;
 const event_loop_mod = @import("event_loop.zig");
 const EventLoop = event_loop_mod.EventLoop;
@@ -83,6 +84,7 @@ pub fn main() !void {
         return;
     };
 
+    // --- verb "render", "run"
     if (std.mem.eql(u8, verb, "render") or std.mem.eql(u8, verb, "run")) {
         var maybe_path: ?[:0]const u8 = null;
         var inline_code: ?[]const u8 = null;
@@ -148,12 +150,14 @@ pub fn main() !void {
         var engine = try z.ScriptEngine.init(gpa, sandbox_root);
         defer engine.deinit();
 
-        if (is_debug) engine.printMemoryUsage();
+        // if (is_debug) engine.printMemoryUsage();
 
         try runCliRequest(engine, script_content, script_filename, format, output_path, load_html_path, cli_args.items, pretty);
-    } else if (std.mem.eql(u8, verb, "convert") or std.mem.eql(u8, verb, "sanitize")) {
+    }
+    // --- verb "convert", "sanitize"
+    else if (std.mem.eql(u8, verb, "convert") or std.mem.eql(u8, verb, "sanitize")) {
         var maybe_path: ?[:0]const u8 = null;
-        var maybe_url: ?[]const u8 = null; // --url overrides base URL for stdin input
+        var maybe_url: ?[]const u8 = null; // --base overrides base URL for stdin input
         var output_path: ?[]const u8 = null;
         var width: u32 = 800; // viewport width in pixels (595=A4@72dpi, 2480=A4@300dpi)
         var load_css: bool = true;
@@ -170,7 +174,7 @@ pub fn main() !void {
                     // A4 = 210mm wide = 8.2677 inches → round(8.2677 * dpi)
                     width = @intFromFloat(@round(8.2677 * @as(f32, @floatFromInt(dpi))));
                 }
-            } else if (std.mem.eql(u8, arg, "--url") or std.mem.eql(u8, arg, "-u")) {
+            } else if (std.mem.eql(u8, arg, "--base") or std.mem.eql(u8, arg, "-u")) {
                 maybe_url = args.next();
             } else if (std.mem.eql(u8, arg, "--no-css")) {
                 load_css = false;
@@ -185,7 +189,7 @@ pub fn main() !void {
         defer gpa.free(html_content);
 
         // Determine base URL/dir for resolving relative asset hrefs.
-        // Priority: --url flag > URL path input > file path dirname > "." (local stdin)
+        // Priority: --base flag > URL path input > file path dirname > "." (local stdin)
         const base_dir: []const u8 =
             if (maybe_url) |u| u else if (maybe_path) |p| blk: {
                 if (std.mem.startsWith(u8, p, "http://") or std.mem.startsWith(u8, p, "https://"))
@@ -199,12 +203,211 @@ pub fn main() !void {
         if (std.mem.eql(u8, verb, "convert")) {
             try runConvert(engine, html_content, base_dir, output_path, width, load_css, load_scripts);
         } else {
-            try runSanitize(engine, html_content, base_dir, output_path, load_css, load_scripts);
+            try runSanitize(engine, html_content, base_dir, load_css, load_scripts);
+        }
+    }
+    // --- verb "stream"
+    else if (std.mem.eql(u8, verb, "stream")) {
+        var maybe_url: ?[]const u8 = null;
+        var output_path: ?[]const u8 = null;
+        var width: u32 = 800;
+        var load_css: bool = true;
+        var load_scripts: bool = true;
+
+        while (args.next()) |arg| {
+            if (std.mem.eql(u8, arg, "-o")) {
+                output_path = args.next();
+            } else if (std.mem.eql(u8, arg, "-w") or std.mem.eql(u8, arg, "--width")) {
+                if (args.next()) |val| width = std.fmt.parseInt(u32, val, 10) catch 800;
+            } else if (std.mem.eql(u8, arg, "--dpi")) {
+                if (args.next()) |val| {
+                    const dpi = std.fmt.parseInt(u32, val, 10) catch 72;
+                    width = @intFromFloat(@round(8.2677 * @as(f32, @floatFromInt(dpi))));
+                }
+            } else if (std.mem.eql(u8, arg, "--base") or std.mem.eql(u8, arg, "-u")) {
+                maybe_url = args.next();
+            } else if (std.mem.eql(u8, arg, "--no-css")) {
+                load_css = false;
+            } else if (std.mem.eql(u8, arg, "--no-scripts")) {
+                load_scripts = false;
+            }
+        }
+
+        const base_dir: []const u8 = if (maybe_url) |u| u else ".";
+
+        var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+        defer engine.deinit();
+
+        const opts: z.LoadPageOptions = .{
+            .base_dir = base_dir,
+            .load_stylesheets = load_css,
+            .execute_scripts = load_scripts,
+        };
+        try engine.beginStream(opts);
+
+        // Read stdin chunks until EOF (Elixir Port.close sends EOF)
+        var buf: [65536]u8 = undefined;
+        while (true) {
+            const n = try std.fs.File.stdin().read(&buf);
+            if (n == 0) break;
+            try engine.processStreamChunk(buf[0..n]);
+        }
+
+        try engine.endStream(opts);
+
+        // Consistent with sanitize: HTML to stdout by default, image only when -o *.png/*.pdf
+        try writeHtmlOrImage(gpa, engine, output_path, width, "<stream>");
+    } else if (std.mem.eql(u8, verb, "scrape")) {
+        var maybe_url: ?[]const u8 = null;
+        var output_path: ?[]const u8 = null;
+        var inline_code: ?[]const u8 = null;
+        var maybe_script: ?[]const u8 = null;
+        var no_scripts: bool = false;
+        var no_css: bool = false;
+        var pretty: bool = false;
+
+        while (args.next()) |arg| {
+            if (std.mem.eql(u8, arg, "-o")) {
+                output_path = args.next();
+            } else if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--eval")) {
+                inline_code = args.next();
+            } else if (std.mem.eql(u8, arg, "--no-scripts")) {
+                no_scripts = true;
+            } else if (std.mem.eql(u8, arg, "--no-css")) {
+                no_css = true;
+            } else if (std.mem.eql(u8, arg, "--pretty") or std.mem.eql(u8, arg, "-p")) {
+                pretty = true;
+            } else if (maybe_url == null and
+                (std.mem.startsWith(u8, arg, "http://") or std.mem.startsWith(u8, arg, "https://")))
+            {
+                maybe_url = arg;
+            } else if (maybe_script == null and !std.mem.startsWith(u8, arg, "-")) {
+                maybe_script = arg;
+            }
+        }
+
+        const url = maybe_url orelse {
+            z.print("❌ scrape requires a URL (http:// or https://)\n", .{});
+            z.print("   Usage: zxp scrape <url> [-e <js>] [-o <file>]\n", .{});
+            return;
+        };
+
+        const html_content = try fetchScrapeUrl(gpa, url);
+        defer gpa.free(html_content);
+
+        var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+        defer engine.deinit();
+
+        // set a custom simple mobile profile
+        const mobile_profile = @embedFile("browser_profile.js");
+        try engine.loadPage(html_content, .{
+            .base_dir = url,
+            .pre_script = mobile_profile,
+            .execute_scripts = !no_scripts,
+            .load_stylesheets = !no_css,
+            .run_loop = true,
+        });
+
+        // Determine what to extract
+        const has_extraction = inline_code != null or maybe_script != null;
+        const output: []const u8 = if (has_extraction) blk: {
+            // NOTE: script_src holds file content that must outlive evalAsyncAndStringify.
+            // Do NOT use defer inside the inner block — it would free before eval runs.
+            var script_src: ?[]const u8 = null;
+            defer if (script_src) |s| gpa.free(s);
+            const expr: []const u8 = if (inline_code) |c| c else expr: {
+                const s = try std.fs.cwd().readFileAlloc(gpa, maybe_script.?, 10 * 1024 * 1024);
+                script_src = s;
+                break :expr s;
+            };
+            const json_str = try engine.evalAsyncAndStringify(engine.allocator, expr, "<scrape>");
+            if (pretty) {
+                const p = try prettyJson(engine.allocator, json_str);
+                engine.allocator.free(json_str);
+                break :blk p;
+            }
+            break :blk json_str;
+        } else blk: {
+            // Default: rendered outerHTML after JS execution
+            break :blk try engine.evalAsyncAs(engine.allocator, []const u8, "document.documentElement.outerHTML", "<scrape>");
+        };
+        defer engine.allocator.free(output);
+
+        if (output_path) |p| {
+            try std.fs.cwd().writeFile(.{ .sub_path = p, .data = output });
+            z.print("✅ Saved to {s}\n", .{p});
+        } else {
+            const stdout = std.fs.File.stdout();
+            try stdout.writeAll(output);
+            try stdout.writeAll("\n");
         }
     } else {
         z.print("❌ Unknown command: {s}\n", .{verb});
         printUsage();
     }
+}
+
+const MOBILE_UA =
+    "Mozilla/5.0 (Linux; Android 12; Pixel 5) " ++
+    "AppleWebKit/537.36 (KHTML, like Gecko) " ++
+    "Chrome/120.0.0.0 Mobile Safari/537.36";
+
+/// Fetch a URL with mobile browser headers for scraping.
+/// Uses libcurl (same TLS stack as the rest of the codebase) rather than
+/// std.http.Client which crashes on some HTTPS hosts.
+fn fetchScrapeUrl(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    const ca_bundle = curl.allocCABundle(aa) catch |err| {
+        z.print("❌ Failed to load CA bundle: {}\n", .{err});
+        return error.FetchFailed;
+    };
+    defer ca_bundle.deinit();
+
+    var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch |err| {
+        z.print("❌ Failed to init curl: {}\n", .{err});
+        return error.FetchFailed;
+    };
+    defer easy.deinit();
+
+    const url_z = try aa.dupeZ(u8, url);
+    easy.setUrl(url_z) catch |err| {
+        z.print("❌ Failed to set URL: {}\n", .{err});
+        return error.FetchFailed;
+    };
+    z.hardenEasy(easy);
+
+    // Mobile browser headers
+    var headers = curl.Easy.Headers{};
+    defer headers.deinit();
+    headers.add("User-Agent: " ++ MOBILE_UA) catch return error.FetchFailed;
+    headers.add("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8") catch return error.FetchFailed;
+    headers.add("Accept-Language: en-US,en;q=0.9") catch return error.FetchFailed;
+    headers.add("Upgrade-Insecure-Requests: 1") catch return error.FetchFailed;
+    headers.add("Sec-Fetch-Site: none") catch return error.FetchFailed;
+    headers.add("Sec-Fetch-Mode: navigate") catch return error.FetchFailed;
+    headers.add("Sec-Fetch-User: ?1") catch return error.FetchFailed;
+    headers.add("Sec-Fetch-Dest: document") catch return error.FetchFailed;
+    easy.setHeaders(headers) catch return error.FetchFailed;
+
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    errdefer writer.deinit();
+
+    easy.setWriter(&writer.writer) catch return error.FetchFailed;
+
+    const ret = easy.perform() catch |err| {
+        z.print("❌ Failed to fetch '{s}': {}\n", .{ url, err });
+        return error.FetchFailed;
+    };
+
+    if (ret.status_code < 200 or ret.status_code >= 300) {
+        z.print("❌ HTTP {} fetching '{s}'\n", .{ ret.status_code, url });
+        return error.FetchFailed;
+    }
+
+    return writer.toOwnedSlice() catch error.FetchFailed;
 }
 
 fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[]const u8) ![]u8 {
@@ -246,16 +449,13 @@ fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[]const u8) ![]u8 {
     return std.fs.cwd().readFileAlloc(allocator, path, 10 * 1024 * 1024);
 }
 
-fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8, width: u32, load_css: bool, load_scripts: bool) !void {
-    try engine.loadPage(html, .{ .base_dir = base_dir, .load_stylesheets = load_css, .execute_scripts = load_scripts });
-
+/// Build the JS render script for the given width and output path (PNG or PDF).
+/// Caller must free the returned slice.
+fn buildRenderScript(allocator: std.mem.Allocator, out_path: ?[]const u8, width: u32) ![]const u8 {
     const is_pdf = if (out_path) |p| std.mem.endsWith(u8, p, ".pdf") else false;
-
-    // Build script with the requested width.
-    // For PDF: render at requested width, read PNG height from header, scale to 595pt.
-    // PNG IHDR: bytes 16-19 = width, 20-23 = height (big-endian u32).
-    const script = if (is_pdf)
-        try std.fmt.allocPrint(engine.allocator,
+    if (is_pdf) {
+        // Render at requested width, read PNG height from IHDR (bytes 20-23), scale to 595pt A4.
+        return std.fmt.allocPrint(allocator,
             \\const _imgBuf = zxp.paintDOM(document.body, {d});
             \\const _view = new DataView(_imgBuf);
             \\const _pxH = _view.getUint32(20, false);
@@ -264,13 +464,43 @@ fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out
             \\_pdf.addPage();
             \\_pdf.drawImageFromBuffer(_imgBuf, 0, 0, 595, _pdfH);
             \\_pdf.toArrayBuffer()
-        , .{ width, width })
+        , .{ width, width });
+    }
+    return std.fmt.allocPrint(allocator, "zxp.paintDOM(document.body, {d})", .{width});
+}
+
+/// Write output: HTML to stdout/file by default; render PNG/PDF when -o *.png/*.pdf.
+fn writeHtmlOrImage(allocator: std.mem.Allocator, engine: *ScriptEngine, out_path: ?[]const u8, width: u32, tag: [:0]const u8) !void {
+    const render_image = if (out_path) |p|
+        std.mem.endsWith(u8, p, ".png") or std.mem.endsWith(u8, p, ".pdf")
     else
-        try std.fmt.allocPrint(
-            engine.allocator,
-            "zxp.paintDOM(document.body, {d})",
-            .{width},
-        );
+        false;
+
+    if (render_image) {
+        const script = try buildRenderScript(allocator, out_path, width);
+        defer allocator.free(script);
+        const buffer = try engine.evalAsyncAs(allocator, []const u8, script, tag);
+        defer allocator.free(buffer);
+        try std.fs.cwd().writeFile(.{ .sub_path = out_path.?, .data = buffer });
+        z.print("✅ Saved {d} bytes to {s}\n", .{ buffer.len, out_path.? });
+    } else {
+        const html_out = try engine.evalAsyncAs(allocator, []const u8, "document.documentElement.outerHTML", tag);
+        defer allocator.free(html_out);
+        if (out_path) |p| {
+            try std.fs.cwd().writeFile(.{ .sub_path = p, .data = html_out });
+            z.print("✅ Saved {d} bytes to {s}\n", .{ html_out.len, p });
+        } else {
+            const stdout = std.fs.File.stdout();
+            try stdout.writeAll(html_out);
+            try stdout.writeAll("\n");
+        }
+    }
+}
+
+fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8, width: u32, load_css: bool, load_scripts: bool) !void {
+    try engine.loadPage(html, .{ .base_dir = base_dir, .load_stylesheets = load_css, .execute_scripts = load_scripts });
+
+    const script = try buildRenderScript(engine.allocator, out_path, width);
     defer engine.allocator.free(script);
 
     const buffer = try engine.evalAsyncAs(engine.allocator, []const u8, script, "<convert>");
@@ -284,33 +514,46 @@ fn runConvert(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out
     }
 }
 
-fn runSanitize(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, out_path: ?[]const u8, load_css: bool, load_scripts: bool) !void {
+fn runSanitize(engine: *ScriptEngine, html: []const u8, base_dir: []const u8, load_css: bool, load_scripts: bool) !void {
     try engine.loadPage(html, .{ .sanitize = true, .base_dir = base_dir, .load_stylesheets = load_css, .execute_scripts = load_scripts });
     const clean_html = try engine.evalAsyncAs(engine.allocator, []const u8, "document.documentElement.outerHTML", "<sanitize>");
     defer engine.allocator.free(clean_html);
-    if (out_path) |p| {
-        try std.fs.cwd().writeFile(.{ .sub_path = p, .data = clean_html });
-        z.print("✅ Saved sanitized HTML to {s}\n", .{p});
-    } else {
-        const stdout = std.fs.File.stdout();
-        try stdout.writeAll(clean_html);
-        try stdout.writeAll("\n");
-    }
+    try std.fs.File.stdout().writeAll(clean_html);
+    try std.fs.File.stdout().writeAll("\n");
 }
 
 fn runCliRequest(engine: *ScriptEngine, script: []const u8, filename: [:0]const u8, format: TargetFormat, out_path: ?[]const u8, load_html_path: ?[]const u8, cli_args: []const []const u8, pretty: bool) !void {
-    // Inject zxp.args for all modes — scripts can read flags regardless of output format.
+    // Inject zxp.args (positional) and zxp.flags (--key [value] named) for all modes.
     {
         const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
         defer scope.deinit();
         const zxp_obj = engine.ctx.getPropertyStr(scope.global, "zxp");
         defer engine.ctx.freeValue(zxp_obj);
         const js_args = engine.ctx.newArray();
-        for (cli_args, 0..) |arg, i| {
-            const js_str = engine.ctx.newString(arg);
-            _ = try engine.ctx.setPropertyUint32(js_args, @intCast(i), js_str);
+        const js_flags = engine.ctx.newObject();
+        var positional_idx: u32 = 0;
+        var i: usize = 0;
+        while (i < cli_args.len) {
+            const arg = cli_args[i];
+            if (std.mem.startsWith(u8, arg, "--") and arg.len > 2) {
+                const key = arg[2..];
+                const has_value = (i + 1 < cli_args.len) and !std.mem.startsWith(u8, cli_args[i + 1], "-");
+                const js_val = if (has_value) blk: {
+                    i += 1;
+                    break :blk engine.ctx.newString(cli_args[i]);
+                } else zqjs.TRUE;
+                const key_z = try engine.allocator.dupeZ(u8, key);
+                defer engine.allocator.free(key_z);
+                _ = try engine.ctx.setPropertyStr(js_flags, key_z, js_val);
+            } else {
+                const js_str = engine.ctx.newString(arg);
+                _ = try engine.ctx.setPropertyUint32(js_args, positional_idx, js_str);
+                positional_idx += 1;
+            }
+            i += 1;
         }
         _ = try engine.ctx.setPropertyStr(zxp_obj, "args", js_args);
+        _ = try engine.ctx.setPropertyStr(zxp_obj, "flags", js_flags);
     }
 
     switch (format) {
@@ -381,13 +624,15 @@ fn determineFormat(verb: []const u8, out_path: ?[]const u8, format_override: ?[]
         if (std.mem.eql(u8, f, "png")) return .binary_png;
     }
 
-    if (std.mem.eql(u8, verb, "render")) {
-        if (out_path) |p| {
-            if (std.mem.endsWith(u8, p, ".pdf")) return .binary_pdf;
-            if (std.mem.endsWith(u8, p, ".jpg") or std.mem.endsWith(u8, p, ".jpeg")) return .binary_jpeg;
-        }
-        return .binary_png;
+    // Detect binary output format from the output file extension (works for both run and render)
+    if (out_path) |p| {
+        if (std.mem.endsWith(u8, p, ".pdf")) return .binary_pdf;
+        if (std.mem.endsWith(u8, p, ".jpg") or std.mem.endsWith(u8, p, ".jpeg")) return .binary_jpeg;
+        if (std.mem.endsWith(u8, p, ".png")) return .binary_png;
     }
+
+    // render defaults to PNG output even without -o
+    if (std.mem.eql(u8, verb, "render")) return .binary_png;
 
     return .json_data;
 }
@@ -400,7 +645,9 @@ fn printUsage() void {
         \\  run      [script]    Execute script, return data (JSON/text)
         \\  render   [script]    Execute script, return image (PNG)
         \\  convert  <file>      HTML → PNG  (no script needed)
-        \\  sanitize <file>      HTML → clean HTML
+        \\  sanitize <file>      HTML → sanitized HTML on stdout
+        \\  stream               Stdin HTML chunks → HTML (or PNG/PDF with -o file.png)
+        \\  scrape   <url>       Fetch URL as mobile browser, run page JS, extract data
         \\
         \\Script source for run/render (pick one):
         \\  <file>               Path to a .js file
@@ -420,7 +667,7 @@ fn printUsage() void {
         \\                         150 → 1240 px (good quality)
         \\                         300 → 2480 px (print quality)
         \\  -w, --width <px>     Viewport width in pixels (default: 800)
-        \\  -u, --url <url>      Base URL for resolving relative assets
+        \\  -u, --base <url>      Base URL for resolving relative assets
         \\                         (required when piping HTML from stdin)
         \\  --no-css             Skip loading external stylesheets
         \\  --no-scripts         Skip executing <script> tags
@@ -434,10 +681,25 @@ fn printUsage() void {
         \\  zxp render template.js -H base.html -o poster.png
         \\  zxp convert page.html -o screenshot.png
         \\  zxp convert https://example.com --width 595 -o screenshot.png
-        \\  curl https://example.com | zxp convert - --url https://example.com > screenshot.png
-        \\  zxp sanitize dirty.html -o clean.html
+        \\  curl https://example.com | zxp convert - --base https://example.com > screenshot.png
+        \\  zxp sanitize dirty.html > clean.html
         \\  zxp sanitize https://amazon.com --no-css > amz.html
-        \\  curl https://ziggit.dev | zxp sanitize - --url https://ziggit.dev > clean.html
+        \\  curl https://ziggit.dev | zxp sanitize - --base https://ziggit.dev > clean.html
+        \\  zxp sanitize dirty.html | zxp convert - -o cleaned.png
+        \\
+        \\Options (scrape):
+        \\  -o <file>            Output file (default: stdout)
+        \\  -e, --eval <js>      Extraction expression → JSON output
+        \\  <script.js>          Extraction script → JSON output
+        \\  --no-scripts         Skip page scripts (static HTML + CSS only)
+        \\  --no-css             Skip stylesheets
+        \\  -p, --pretty         Pretty-print JSON
+        \\
+        \\  Without -e or script: outputs rendered outerHTML (after page JS runs).
+        \\
+        \\  zxp scrape https://news.ycombinator.com -e "Array.from(document.querySelectorAll('.titleline a')).map(a=>([a.textContent,a.href]))" --pretty
+        \\  zxp scrape https://example.com -o page.html
+        \\  zxp scrape https://example.com extract.js -o data.json
         \\
     , .{});
 }

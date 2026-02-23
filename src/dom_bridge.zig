@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const w = @import("wrapper.zig");
@@ -1289,6 +1290,7 @@ fn js_appendChild_manual(
     const child_type = z.nodeType(child);
 
     // DEBUG: trace ALL appendChild calls
+
     {
         const parent_tag = if (z.nodeToElement(parent)) |pe| z.tagName_zc(pe) else "#node";
         const child_tag = switch (child_type) {
@@ -1298,7 +1300,9 @@ fn js_appendChild_manual(
             .document_fragment => "#fragment",
             else => "#other",
         };
-        z.print("[Zig appendChild] {s} into {s}\n", .{ child_tag, parent_tag });
+        if (builtin.mode == .Debug) {
+            std.debug.print("[Zig appendChild] {s} into {s}\n", .{ child_tag, parent_tag });
+        }
     }
 
     if (child_type == .document_fragment) {

@@ -524,6 +524,7 @@ pub const isMathMLAttributeSafe = specs.isMathMLAttributeSafe;
 pub const initDocumentCSS = styles.initDocumentCSS;
 pub const destroyDocumentCSS = styles.destroyDocumentCSS;
 pub const destroyDocumentStylesheets = styles.destroyDocumentStylesheets;
+pub const documentSetScripting = styles.documentSetScripting;
 pub const createStylesheet = styles.createStylesheet;
 pub const destroyStylesheet = styles.destroyStylesheet;
 pub const parseStylesheet = styles.parseStylesheet;

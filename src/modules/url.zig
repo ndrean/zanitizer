@@ -282,8 +282,11 @@ pub const URLParser = struct {
         return URLParser{ .parser = parser };
     }
 
-    /// Destroy the parser and free resources
+    /// Destroy the parser and free resources.
+    /// lxb_url_parser_destroy() does NOT free the mraw pool; call
+    /// lxb_url_parser_memory_destroy() first (per lexbor url.h docs).
     pub fn destroy(self: *URLParser) void {
+        lxb_url_parser_memory_destroy(self.parser);
         _ = lxb_url_parser_destroy(self.parser, true);
     }
 

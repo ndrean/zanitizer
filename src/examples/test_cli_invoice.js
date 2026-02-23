@@ -1,5 +1,8 @@
 // src/examples/generate_invoice.js
 
+const template =
+  zxp.args[1] || "file://src/examples/test_cli_invoice_template.svg";
+
 // 1. Get the JSON data path from the CLI arguments (fallback to a default if testing)
 async function generateInvoice() {
   const dataPath = zxp.args[0];
@@ -14,9 +17,7 @@ async function generateInvoice() {
     `[JS] Generating invoice ${data.invoiceNumber} for ${data.company}...`,
   );
 
-  const templateRes = await fetch(
-    "file://src/examples/test_cli_invoice_template.svg",
-  );
+  const templateRes = await fetch(template);
   const svgText = await templateRes.text();
 
   const logoRes = await fetch(data.logoUrl);
@@ -39,90 +40,90 @@ async function generateInvoice() {
   pdf.restoreGraphicsState();
 
   // --- 3. Header text (white on dark background) ---
-  pdf.fillStyle = "#ffffff";
-  pdf.setFont("Roboto", 28);
-  pdf.fillText("INVOICE", 140, 65);
+  // pdf.fillStyle = "#ffffff";
+  // pdf.setFont("Roboto", 28);
+  // pdf.fillText("INVOICE", 140, 65);
 
-  pdf.setFont("Roboto", 11);
-  pdf.fillText(data.company, 140, 85);
-  pdf.fillText(data.companyEmail, 140, 100);
+  // pdf.setFont("Roboto", 11);
+  // pdf.fillText(data.company, 140, 85);
+  // pdf.fillText(data.companyEmail, 140, 100);
 
-  // --- 4. Invoice details (right-aligned box) ---
-  pdf.fillStyle = "#1e293b";
-  pdf.setFont("Roboto", 10);
-  pdf.fillText("Invoice #:", 365, 180);
-  pdf.fillText("Date:", 365, 196);
-  pdf.fillText("Due Date:", 365, 212);
+  // // --- 4. Invoice details (right-aligned box) ---
+  // pdf.fillStyle = "#1e293b";
+  // pdf.setFont("Roboto", 10);
+  // pdf.fillText("Invoice #:", 365, 180);
+  // pdf.fillText("Date:", 365, 196);
+  // pdf.fillText("Due Date:", 365, 212);
 
-  pdf.fillStyle = "#475569";
-  pdf.fillText(data.invoiceNumber, 440, 180);
-  pdf.fillText(data.date, 440, 196);
-  pdf.fillText(data.dueDate, 440, 212);
+  // pdf.fillStyle = "#475569";
+  // pdf.fillText(data.invoiceNumber, 440, 180);
+  // pdf.fillText(data.date, 440, 196);
+  // pdf.fillText(data.dueDate, 440, 212);
 
-  // --- 5. Bill To ---
-  pdf.fillStyle = "#64748b";
-  pdf.setFont("Roboto", 10);
-  pdf.fillText("BILL TO", 50, 180);
+  // // --- 5. Bill To ---
+  // pdf.fillStyle = "#64748b";
+  // pdf.setFont("Roboto", 10);
+  // pdf.fillText("BILL TO", 50, 180);
 
-  pdf.fillStyle = "#1e293b";
-  pdf.setFont("Roboto", 12);
-  pdf.fillText(data.customerName, 50, 200);
+  // pdf.fillStyle = "#1e293b";
+  // pdf.setFont("Roboto", 12);
+  // pdf.fillText(data.customerName, 50, 200);
 
-  pdf.fillStyle = "#475569";
-  pdf.setFont("Roboto", 10);
-  pdf.fillText(data.customerAddress, 50, 218);
-  pdf.fillText(data.customerEmail, 50, 234);
+  // pdf.fillStyle = "#475569";
+  // pdf.setFont("Roboto", 10);
+  // pdf.fillText(data.customerAddress, 50, 218);
+  // pdf.fillText(data.customerEmail, 50, 234);
 
-  // --- 6. Items table ---
-  // Table header
-  pdf.fillStyle = "#64748b";
-  pdf.setFont("Roboto", 10);
-  pdf.fillText("Description", 55, 363);
-  pdf.fillText("Qty", 360, 363);
-  pdf.fillText("Price", 410, 363);
-  pdf.fillText("Total", 490, 363);
+  // // --- 6. Items table ---
+  // // Table header
+  // pdf.fillStyle = "#64748b";
+  // pdf.setFont("Roboto", 10);
+  // pdf.fillText("Description", 55, 363);
+  // pdf.fillText("Qty", 360, 363);
+  // pdf.fillText("Price", 410, 363);
+  // pdf.fillText("Total", 490, 363);
 
-  // Table rows
-  pdf.fillStyle = "#1e293b";
-  pdf.setFont("Roboto", 10);
-  let rowY = 398;
-  let subtotal = 0;
+  // // Table rows
+  // pdf.fillStyle = "#1e293b";
+  // pdf.setFont("Roboto", 10);
+  // let rowY = 398;
+  // let subtotal = 0;
 
-  for (const item of data.items) {
-    const lineTotal = item.qty * item.price;
-    subtotal += lineTotal;
+  // for (const item of data.items) {
+  //   const lineTotal = item.qty * item.price;
+  //   subtotal += lineTotal;
 
-    pdf.fillText(item.description, 55, rowY);
-    pdf.fillText(String(item.qty), 368, rowY);
-    pdf.fillText(`$${item.price.toFixed(2)}`, 410, rowY);
-    pdf.fillText(`$${lineTotal.toFixed(2)}`, 490, rowY);
-    rowY += 36;
-  }
+  //   pdf.fillText(item.description, 55, rowY);
+  //   pdf.fillText(String(item.qty), 368, rowY);
+  //   pdf.fillText(`$${item.price.toFixed(2)}`, 410, rowY);
+  //   pdf.fillText(`$${lineTotal.toFixed(2)}`, 490, rowY);
+  //   rowY += 36;
+  // }
 
-  // --- 7. Totals ---
-  const tax = subtotal * data.taxRate;
-  const total = subtotal + tax;
+  // // --- 7. Totals ---
+  // const tax = subtotal * data.taxRate;
+  // const total = subtotal + tax;
 
-  pdf.fillStyle = "#475569";
-  pdf.setFont("Roboto", 10);
-  pdf.fillText("Subtotal:", 365, 540);
-  pdf.fillText(`Tax (${(data.taxRate * 100).toFixed(0)}%):`, 365, 558);
+  // pdf.fillStyle = "#475569";
+  // pdf.setFont("Roboto", 10);
+  // pdf.fillText("Subtotal:", 365, 540);
+  // pdf.fillText(`Tax (${(data.taxRate * 100).toFixed(0)}%):`, 365, 558);
 
-  pdf.fillText(`$${subtotal.toFixed(2)}`, 480, 540);
-  pdf.fillText(`$${tax.toFixed(2)}`, 480, 558);
+  // pdf.fillText(`$${subtotal.toFixed(2)}`, 480, 540);
+  // pdf.fillText(`$${tax.toFixed(2)}`, 480, 558);
 
-  pdf.fillStyle = "#1e293b";
-  pdf.setFont("Roboto", 14);
-  pdf.fillText("Total:", 365, 582);
-  pdf.fillText(`$${total.toFixed(2)}`, 472, 582);
+  // pdf.fillStyle = "#1e293b";
+  // pdf.setFont("Roboto", 14);
+  // pdf.fillText("Total:", 365, 582);
+  // pdf.fillText(`$${total.toFixed(2)}`, 472, 582);
 
-  // --- 8. Footer ---
-  pdf.fillStyle = "#94a3b8";
-  pdf.setFont("Roboto", 9);
-  const footerText = `Thank you for your business! — Generated by Zexplorer`;
-  const footerM = pdf.measureText(footerText);
-  const footerX = (595 - footerM.width) / 2;
-  pdf.fillText(footerText, footerX, 820);
+  // // --- 8. Footer ---
+  // pdf.fillStyle = "#94a3b8";
+  // pdf.setFont("Roboto", 9);
+  // const footerText = `Thank you for your business! — Generated by Zexplorer`;
+  // const footerM = pdf.measureText(footerText);
+  // const footerX = (595 - footerM.width) / 2;
+  // pdf.fillText(footerText, footerX, 820);
 
   console.log(`Invoice generated: ${data.invoiceNumber}`);
   return pdf.toArrayBuffer();

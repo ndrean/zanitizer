@@ -627,17 +627,22 @@ fn js_pdf_toArrayBuffer(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, _: c_in
         return qjs.JS_ThrowInternalError(ctx.ptr, "Failed to save PDF to memory stream");
     }
 
-    // 2. Find out exactly how big the compiled PDF is
+    // 2. Rewind the stream to the beginning before reading.
+    //    HPDF_SaveToStream leaves the stream position at the END; without this
+    //    HPDF_ReadFromStream reads 0 bytes and produces an empty (invalid) PDF.
+    _ = hpdf.HPDF_ResetStream(self.doc);
+
+    // 3. Find out exactly how big the compiled PDF is
     var size = hpdf.HPDF_GetStreamSize(self.doc);
     if (size == 0) return zqjs.UNDEFINED;
 
-    // 3. Allocate a temporary Zig buffer to hold the bytes
+    // 4. Allocate a temporary Zig buffer to hold the bytes
     const buf = self.allocator.alloc(u8, size) catch {
         return qjs.JS_ThrowOutOfMemory(ctx.ptr);
     };
     defer self.allocator.free(buf);
 
-    // 4. Read the bytes out of LibHaru
+    // 5. Read the bytes out of LibHaru
     _ = hpdf.HPDF_ReadFromStream(self.doc, buf.ptr, &size);
 
     // 5. Hand the bytes to QuickJS as an ArrayBuffer (QuickJS makes its own copy)

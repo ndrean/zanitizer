@@ -11,6 +11,8 @@
 #include <lexbor/css/declaration.h>
 #include <lexbor/css/selectors/selectors.h>
 #include <lexbor/style/dom/interfaces/document.h>
+#include <lexbor/html/interfaces/document.h>
+#include <lexbor/html/parser.h>
 
 // ============================================================================
 // Stylesheet Access
@@ -163,4 +165,32 @@ void zexp_destroy_document_stylesheets(lxb_dom_document_t *document)
         (void) lxb_css_stylesheet_destroy(sst, true);
     }
     stylesheets->length = 0;
+}
+
+// ============================================================================
+// Scripting flag
+// ============================================================================
+
+// Enable/disable the scripting flag for the document's current parse.
+// Must be called AFTER lxb_html_document_parse_chunk_begin() (which lazily
+// creates the parser via lxb_html_document_parser_prepare), and BEFORE any
+// lxb_html_document_parse_chunk() calls.
+//
+// Two flags must be set:
+//   dom_document.scripting — checked by insertion mode handlers (e.g. noscript)
+//   parser->tree->scripting — used by the tokenizer for raw-text element state
+//
+// When scripting=true, the parser treats <noscript> content as raw text
+// (hidden from DOM), matching real browser behaviour for script-enabled pages.
+void zexp_document_set_scripting(lxb_html_document_t *doc, bool scripting)
+{
+    if (doc == NULL) return;
+    lxb_dom_document_t *d = lxb_dom_interface_document(doc);
+    // Checked by in_body_noscript insertion mode handler:
+    d->scripting = scripting;
+    // Checked by tokenizer (lxb_html_tokenizer_set_state_by_tag, etc.):
+    lxb_html_parser_t *parser = (lxb_html_parser_t *)d->parser;
+    if (parser != NULL) {
+        lxb_html_parser_scripting_set_noi(parser, scripting);
+    }
 }

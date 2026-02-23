@@ -2,9 +2,9 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-`zexplorer` is designed for document content pipelines that you control, not a general-purpose application runtime nor for rendering arbitrary public websites: a mini Swiss Army knife that runs fast, delivers, and dies.
+`zexplorer` is a stateless, composable and embeddable engine designed for document content pipelines, not a general-purpose application runtime nor for rendering arbitrary public websites: a mini Swiss Army knife that runs fast, delivers, and dies.
 
-It is a native DOM + JS runtime with some layour rendering capabilities (**Flexbox** layout rendering and raster compositing).
+It is a native DOM + JS runtime with some layout rendering capabilities (**Flexbox** layout rendering and raster compositing).
 
 Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and get back structured data or a layout as PNG, JPEG, WEBP, SVG, or PDF, without a browser.
 
@@ -20,45 +20,15 @@ Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and g
 > - Features JavaScript ES2020
 > - SVG, PNG, JPEG, WEBP, PDF support
 > - JSX support via "tagged templates" with `htm` embedded
-> - Rendering of simple **flex** or table layouts only. `grid-1d` is emulated ❗️ not arbitrary public websites using grid-2d, modals, position:fixed...
+> - A "good enough" snapshot rendering engine. Based on `Flexbox` with `grid-1d` is emulated ❗️ Not arbitrary bot protected public websites using grid-2d, modals, position:fixed, CSS functions...
 
 `zexplorer` can be used as a **Zig library** to add native functionalities or with the **CLI**.
-
-## The CLI Runner
-
-`zexplorer` operates as a generic CLI runner (`zxp`). The output format is entirely dictated by the command you use and what your JavaScript returns.
-
-```sh
-# Scrape a React site
-zxp scrape https://demo.vercel.store --selector "a[href^='/product/']" -f json
-
-# Render a D3 chart to PNG — copy-paste from the D3 docs, get a PNG
-zxp render chart.html -o chart.png
-
-# Generate OG images from a Figma SVG template + data
-zxp render og-template.html --data posts.json --out "og-{slug}.png"
-
-# Sanitize untrusted HTML
-curl https://sketchy.site | zxp sanitize - -o cleaned.html
-
-# Clean a local HTML file with its CSS
-zxp sanitize dirty.html --css style.css -o clean.html
-
-# Render a simple website with screen quality (default)
-curl https://example.com | zxp convert - -o example.png
-# Render with PDF quality (A4, 72 DPI <-> 595)
-curl https://example.com | ./zig-out/bin/zxp convert - --width 595 -o example.pdf
-# Print quality (A4 at 300 DPI <-> 2480)
-zxp convert page.html -w 2480 -o page.pdf
-
-```
-
----
 
 ## What can it do?
 
 - **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
-- **Render** — take any HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
+- **Stream**  - receive HTML chunks and rebuild a real DOM.
+- **Render** — `Flexbox` based and no CSS functions.  HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
 - **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
 - **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
 - **Run JS** — execute ES2020 scripts against a real DOM with fetch, timers, workers, and an event loop.
@@ -69,18 +39,18 @@ zxp convert page.html -w 2480 -o page.pdf
 
 A native Zig engine that wires together purpose-built C/C++ libraries — no runtime dependencies:
 
-| Layer                    | Library                                                                                         | Role                                |
-| ------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------- |
-| DOM & CSS                | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors  |
-| JavaScript               | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT) |
-| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode       |
-| Raster rendering         | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization              |
-| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation                      |
-| Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)   |
-| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
-| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                  |
+| Layer                    | Library                                                                                         | Role                                   |
+| ------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
+| DOM & CSS                | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors     |
+| JavaScript               | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT)    |
+| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode          |
+| Raster rendering         | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization & thorvg-canvas |
+| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation & text layer            |
+| Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)      |
+| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi                 |
+| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                     |
 
-Comparable to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 10MB footprint, 2ms cold start.
+Can be compared to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 10MB footprint, 2ms cold start.
 
 ## Tested against js-framework-benchmark
 
@@ -91,21 +61,21 @@ The engine runs real framework code from [js-framework-benchmark](https://github
 | Startup time      | 2ms                       | ~30ms           | ~500ms          |
 | DOM sanitization  | Built-in, DOM & CSS-aware | Needs DOMPurify | Browser context |
 | Memory footprint  | 10MB                      | ~50MB           | ~200MB          |
-| Web API coverage  | ~40% (essential)          | ~90%            | 100%            |
+| Web API coverage  | (essential)               | ~90%            | 100%            |
 | JavaScript engine | QuickJS (bytecode)        | Node.js V8      | Chrome V8       |
 
 ## What it is not
 
 - Not a `Node.js` or `Bun` alternative — no persistent event I/O
 - Not a headless browser — no layout engine, no visual rendering
-- Not a full Web API implementation — ~40% coverage, focused on what frameworks actually need
+- Not a full Web API implementation — "essential" coverage, focused on what frameworks actually need
 - Not a multi-tenant platform — assumes process-level isolation (microVM/container)
 
 ## Security
 
 If you use your own trusted code, you can skip sanitization entirely. For untrusted content:
 
-> [!NOTE]
+> [!WARNING]
 > All layers are _best-effort_ — see [SECURITY.md](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md) for full details.
 >
 > - **Content sanitization** — DOM+CSS-aware: stylesheets, inline styles, iframes, SVG/MathML, DOM clobbering, URI schemas, XSS/mXSS. Tested against [H5SC](https://github.com/cure53/H5SC), [OWASP](https://cheatsheetseries.owasp.org/cheatsheets/DOM_based_XSS_Prevention_Cheat_Sheet.html), [PortSwigger](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet), and [DOMPurify](https://github.com/cure53/DOMPurify).
@@ -131,7 +101,7 @@ Raw HTML / SVG / CSS
         │    • strip unsafe attributes           │    merge sanitized
         │    • inline style → CSS sanitizer      │    CSS back into DOM
         │                                        │
-        └─── CSS AST (stylesheets + style="") ──┘
+        └─── CSS AST (stylesheets + style="")  ──┘
              • remove dangerous at-rules
              • strip unsafe properties
              • validate URIs structurally
@@ -168,42 +138,51 @@ Raw HTML / SVG / CSS
 
 ---
 
-## Showcase
+## CLI Showcase
 
-### Scrape a Vercel site in under 1s
+### HTML rendering examples
 
-Scrape <https://demo.vercel.store> — 12 HTTP requests, 42 scripts hydrated, structured data extracted:
+**First example**: Take this HTML:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo-vercel-store.png" alt="vercel" width="600" height="400"> 
+<details><summary>First CSS rendering example</summary>
 
-You prepare a JavaScript to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API:
-```js
-await zexplorer.goto("https://demo.vercel.store");
-await zexplorer.waitForSelector("a[href^='/product/']");
-
-const links = document.querySelectorAll("a[href^='/product/']");
-const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
-const items = unique.map(href => {
-  const el = document.querySelector(`a[href='${href}']`);
-  return el.textContent.trim();
-});
-console.log(items);
-return items;
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <style>
+      h1 {
+        color:blue;
+        font-size:40px;
+      }
+      body {
+        background:#fff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>CSS Test</h1>
+    <p style="color:red">inline style test</p>
+  </body>
+</html>
 ```
 
-The result is logged in the terminal:
+</details>
 
-```txt
-0.17s user 0.14s system 37% cpu 0.835 total
+You can compose:
 
-["Acme Circles T-Shirt$20.00USD", "Acme Drawstring Bag$12.00USD", ...]
+```sh
+echo '<!DOCTYPE html><html><head><style>h1{color:blue;font-size:40px}body{background:#fff;}</style></head><body><h1>CSS Test</h1><p style="color:red">inline style test</p></body></html>' | \
+./zig-out/bin/zxp convert - -o first_css_rendering.png
 ```
 
-See the [full Vercel example](#scrape-a-vercel-site) below.
+This gives you:
 
-### Render HTML as an image
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/first_css_rendering.png" alt="first_css_rendering" width="300" height="200">
 
-The engine lets you render some CSS properties.
+<br>
+
+**Grid-1D layout example**: The engine lets you render some CSS properties.
 
 <details><summary>Example with grid-1d layout</summary>
 
@@ -344,20 +323,126 @@ To obtain an image (JPEG here) that represents this HTML file, you can use the C
 
 ```sh
 zxp convert src/examples/test_grid_1d.html -w 595 -o test_grid_1d.jpeg
-
-# or in PDF if you prefer
-
-zxp convert src/examples/test_grid_1d.html -dpi 72 -o test_grid_1d.pdf
 ```
 
-If you use the library, you can run the Zig file:
+or in PDF if you prefer (with size A4, dpi 72<-> 595)
 
 ```sh
-zig build example -Dname=teset_grid_1d
+zxp convert src/examples/test_grid_1d.html -dpi 72 -o test_grid_1d.pdf
 ```
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.jpeg" alt="grid example" width="500" height="400">
 
+<br>
+
+If you use the library, you can run the Zig file:
+
+```sh
+zig build example -Dname=test_grid_1d
+```
+
+### Scrape a Vercel site in 1s
+
+Scrape <https://demo.vercel.store> and get structured data extracted:
+
+You prepare a JavaScript to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `zxp.goto` and `zxp.waitForSelector`.
+
+```js
+//  src/examples/vercel-demo/inline-select.js 
+await zxp.goto("https://demo.vercel.store");
+await zxp.waitForSelector("a[href^='/product/']");
+
+const links = document.querySelectorAll("a[href^='/product/']");
+const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
+const items = unique.map(href => {
+  const el = document.querySelector(`a[href='${href}']`);
+  return el.textContent.trim();
+});
+return items;
+```
+
+You run:
+
+```sh
+zxp run src/examples/vercel-demo/inline-select.js --pretty
+```
+
+The result is logged in the terminal:
+
+```txt
+0.26s user 0.04s system 26% cpu 1.108 total
+
+[
+  "Acme Circles T-Shirt$20.00USD",
+  "Acme Drawstring Bag$12.00USD",
+  "Acme Cup$15.00USD",
+  ...
+]
+```
+
+### Render the Vercel side
+
+If you want to visualize the website, you can do:
+
+```sh
+zxp scrape https://demo.vercel.store src/examples/inline-images.js -o vercel.html
+```
+
+We run a JavaScript snippet (_src/examples/inline-images.js_) since we need to transform the served images into base64 data URIs as they  will not render if you just use a Liveserver in VSCode. Moreover, Next.js uses `srcset` to serve multiple formats, and we transform it into a `src ="data:image/webp;base64, ..."`.
+
+We use two custom native methods `fetchAll` and `arrayBufferToBase64DataUri`.
+
+<details><summary>inline-image.js helper</summary>
+
+```js
+// Resolves Next.js srcset URLs; removes srcset after inlining.
+async function fetchImages() {
+  const base = "https://demo.vercel.store";
+  const imgs = Array.from(document.querySelectorAll("img"));
+
+  // Collect one URL per image (first srcset entry preferred over src).
+  const urls = imgs.map((img) => {
+    const srcset = img.getAttribute("srcset");
+    if (srcset) {
+      const first = srcset.split(",")[0].trim().split(/\s+/)[0];
+      if (first) return first.startsWith("http") ? first : base + first;
+    }
+    const src = img.getAttribute("src");
+    if (src && !src.startsWith("data:")) {
+      return src.startsWith("http") ? src : base + src;
+    }
+    return null;
+  });
+
+  // Fetch all in parallel via libcurl multi.
+  const results = fetchAll(
+    urls.filter((u) => u !== null),
+    {
+      Accept: "image/png,image/jpeg,image/webp,*/*;q=0.5",
+      Referer: base + "/",
+    }
+  );
+
+  // Map results back to images (skip nulls).
+  let ri = 0;
+  for (let i = 0; i < imgs.length; i++) {
+    if (urls[i] === null) continue;
+    const r = results[ri++];
+    if (!r || !r.ok) continue;
+    imgs[i].setAttribute("src", arrayBufferToBase64DataUri(r.data, r.type));
+    imgs[i].removeAttribute("srcset");
+  }
+
+  return document.documentElement.outerHTML;
+}
+fetchImages();
+```
+
+</details>
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo.vercel.store.png" alt="vercel demo" width="600" height="400">
+
+<br>
 
 ### Generate a Leaflet map PDF report
 
@@ -369,12 +454,9 @@ See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-
 
 ---
 
-## Quick start
+## Library quick start
 
-How to use `zexplorer` ?
 
-- as a Zig library to run JS code
-- via the CLI: WIP
 
 ### Hello world
 
@@ -654,12 +736,6 @@ The output is as expected:
 ### Scrape a Vercel site
 
 We scrape <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scripts in order to hydrate the first SSR rendered page.
-
-<details><summary>Preview demo.vercel.store</summary>
-
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/demo-vercel-store.png" alt="vercel" width="600" height="400">
-
-</details>
 
 You can scrap the Vercel website with this JavaScript snippet that mimics `Puppeteer`'s API.
 

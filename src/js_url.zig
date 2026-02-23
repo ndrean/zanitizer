@@ -33,20 +33,31 @@ fn js_URL_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
 
     // Create URL object
     const url_obj = rc.allocator.create(URLObject) catch return ctx.throwOutOfMemory();
-    errdefer rc.allocator.destroy(url_obj);
 
     url_obj.parent_allocator = rc.allocator;
     url_obj.parser = rc.allocator.create(z.URLParser) catch {
         rc.allocator.destroy(url_obj);
         return ctx.throwOutOfMemory();
     };
-    errdefer rc.allocator.destroy(url_obj.parser);
 
     url_obj.parser.* = z.URLParser.create() catch {
         rc.allocator.destroy(url_obj.parser);
         rc.allocator.destroy(url_obj);
         return ctx.throwTypeError("Failed to create URL parser");
     };
+
+    // Convenience: fully tears down url_obj (with initialized parser) and its temp allocations.
+    // Used in error paths below. Note: errdefer is dead code for callconv(.c) functions that
+    // return a non-error type, so we must clean up explicitly before every early return.
+    const cleanupUrlObj = struct {
+        fn f(alloc: std.mem.Allocator, obj: *URLObject, tp: ?*z.URLParser, tu: ?*z.URL) void {
+            if (tu) |v| { v.destroy(); alloc.destroy(v); }
+            if (tp) |v| { v.destroy(); alloc.destroy(v); }
+            obj.parser.destroy();
+            alloc.destroy(obj.parser);
+            alloc.destroy(obj);
+        }
+    }.f;
 
     // Parse URL (with optional base)
     if (argc >= 2 and !ctx.isUndefined(argv[1])) {
@@ -60,33 +71,47 @@ fn js_URL_constructor(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
             base_url = base_url_obj.url;
         } else if (ctx.isString(argv[1])) {
             // Path B: It's a string. We must parse it temporarily!
-            const base_str = ctx.toZString(argv[1]) catch return ctx.throwOutOfMemory();
+            const base_str = ctx.toZString(argv[1]) catch {
+                cleanupUrlObj(rc.allocator, url_obj, null, null);
+                return ctx.throwOutOfMemory();
+            };
             defer ctx.freeZString(base_str);
 
-            temp_parser = rc.allocator.create(z.URLParser) catch return ctx.throwOutOfMemory();
-            temp_parser.?.* = z.URLParser.create() catch return ctx.throwTypeError("Failed to create temp parser");
+            temp_parser = rc.allocator.create(z.URLParser) catch {
+                cleanupUrlObj(rc.allocator, url_obj, null, null);
+                return ctx.throwOutOfMemory();
+            };
+            temp_parser.?.* = z.URLParser.create() catch {
+                rc.allocator.destroy(temp_parser.?);
+                cleanupUrlObj(rc.allocator, url_obj, null, null);
+                return ctx.throwTypeError("Failed to create temp parser");
+            };
 
-            temp_url = rc.allocator.create(z.URL) catch return ctx.throwOutOfMemory();
-            temp_url.?.* = temp_parser.?.parse(base_str) catch return ctx.throwTypeError("Invalid base URL string");
+            temp_url = rc.allocator.create(z.URL) catch {
+                cleanupUrlObj(rc.allocator, url_obj, temp_parser, null);
+                return ctx.throwOutOfMemory();
+            };
+            temp_url.?.* = temp_parser.?.parse(base_str) catch {
+                rc.allocator.destroy(temp_url.?);
+                cleanupUrlObj(rc.allocator, url_obj, temp_parser, null);
+                return ctx.throwTypeError("Invalid base URL string");
+            };
 
             base_url = temp_url;
         } else {
+            cleanupUrlObj(rc.allocator, url_obj, null, null);
             return ctx.throwTypeError("Second argument must be a URL object or a valid URL string");
         }
 
-        url_obj.url = rc.allocator.create(z.URL) catch return ctx.throwOutOfMemory();
+        url_obj.url = rc.allocator.create(z.URL) catch {
+            cleanupUrlObj(rc.allocator, url_obj, temp_parser, temp_url);
+            return ctx.throwOutOfMemory();
+        };
 
         // Perform the relative parsing
         url_obj.url.* = url_obj.parser.parseRelative(url_str, base_url.?) catch {
-            // Cleanup temp allocations on failure
-            if (temp_url) |tu| {
-                tu.destroy();
-                rc.allocator.destroy(tu);
-            }
-            if (temp_parser) |tp| {
-                tp.destroy();
-                rc.allocator.destroy(tp);
-            }
+            rc.allocator.destroy(url_obj.url);
+            cleanupUrlObj(rc.allocator, url_obj, temp_parser, temp_url);
             return ctx.throwTypeError("Invalid URL");
         };
 

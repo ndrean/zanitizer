@@ -16,9 +16,9 @@ const lxb_serialize_cb_f = *const fn (
     ctx: ?*anyopaque,
 ) callconv(.c) c_int;
 
-// Document CSS Init/Destroy
-extern "c" fn lxb_dom_document_css_init(document: *z.DomDocument, init_events: bool) c_int;
-extern "c" fn lxb_dom_document_css_destroy(document: *z.DomDocument) void;
+// Document CSS Init/Destroy (HTML-level: installs parse_cb + done_cb in addition to DOM engine)
+extern "c" fn lxb_html_document_css_init_noi(document: *z.HTMLDocument, init_events: bool) c_int;
+extern "c" fn lxb_html_document_css_destroy_noi(document: *z.HTMLDocument) void;
 
 // Element Style Attachment (The "Magic" Function that runs the cascade)
 extern "c" fn lxb_dom_document_element_styles_attach(element: *z.HTMLElement) c_int;
@@ -63,17 +63,18 @@ extern "c" fn lxb_css_stylesheet_parse(sst: *z.CssStyleSheet, parser: *z.CssStyl
 extern "c" fn lxb_css_stylesheet_destroy(sst: *z.CssStyleSheet, self_destroy: bool) void;
 extern "c" fn lxb_dom_document_stylesheet_attach(document: *z.DomDocument, sst: *z.CssStyleSheet) c_int;
 extern "c" fn zexp_destroy_document_stylesheets(document: *z.DomDocument) void;
+extern "c" fn zexp_document_set_scripting(doc: *z.HTMLDocument, scripting: bool) void;
 
 // ============================================================================
 // IMPLEMENTATION
 // ============================================================================
 
 pub fn initDocumentCSS(doc: *z.HTMLDocument, init_events: bool) !void {
-    if (lxb_dom_document_css_init(doc.asDom(), init_events) != z._OK) return error.CSSInitFailed;
+    if (lxb_html_document_css_init_noi(doc, init_events) != z._OK) return error.CSSInitFailed;
 }
 
 pub fn destroyDocumentCSS(doc: *z.HTMLDocument) void {
-    lxb_dom_document_css_destroy(doc.asDom());
+    lxb_html_document_css_destroy_noi(doc);
 }
 
 /// Destroy all stylesheets attached to the document CSS state.
@@ -82,6 +83,15 @@ pub fn destroyDocumentCSS(doc: *z.HTMLDocument) void {
 /// Call this BEFORE destroyDocumentCSS.
 pub fn destroyDocumentStylesheets(doc: *z.HTMLDocument) void {
     zexp_destroy_document_stylesheets(doc.asDom());
+}
+
+/// Enable the HTML parser's scripting flag on the document's internal parser.
+/// Must be called AFTER lxb_html_document_parse_chunk_begin() (which lazily
+/// creates the parser) and BEFORE any chunk is fed.
+/// When enabled, <noscript> content is treated as raw text (hidden from DOM),
+/// matching real browser behaviour for pages that execute scripts.
+pub fn documentSetScripting(doc: *z.HTMLDocument, scripting: bool) void {
+    zexp_document_set_scripting(doc, scripting);
 }
 
 pub fn createCssStyleParser() !*z.CssStyleParser {

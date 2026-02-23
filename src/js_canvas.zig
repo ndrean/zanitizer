@@ -2326,10 +2326,7 @@ pub fn install(ctx: zqjs.Context) !void {
 /// Checks magic bytes, IHDR-first ordering, required chunks, and segment bounds.
 pub fn verifyPngStructure(bytes: []const u8) !void {
     const magic = "\x89PNG\r\n\x1a\n";
-    if (bytes.len < 8 or !std.mem.startsWith(u8, bytes, magic)) {
-        std.debug.print("❌ Invalid PNG Header\n", .{});
-        return error.InvalidPng;
-    }
+    if (bytes.len < 8 or !std.mem.startsWith(u8, bytes, magic)) return error.InvalidPng;
 
     // Chunk structure: Length (4) | Type (4) | Data (Len) | CRC (4)
     var has_ihdr = false;
@@ -2344,10 +2341,7 @@ pub fn verifyPngStructure(bytes: []const u8) !void {
 
         // IHDR must be the first chunk
         if (is_first_chunk) {
-            if (!std.mem.eql(u8, type_code, "IHDR")) {
-                std.debug.print("❌ Invalid PNG: First chunk is not IHDR\n", .{});
-                return error.InvalidPng;
-            }
+            if (!std.mem.eql(u8, type_code, "IHDR")) return error.InvalidPng;
             is_first_chunk = false;
         }
 
@@ -2357,18 +2351,12 @@ pub fn verifyPngStructure(bytes: []const u8) !void {
 
         // Bounds check: 4(len) + 4(type) + data + 4(crc)
         const chunk_total = @as(u64, len) + 12;
-        if (pos + chunk_total > bytes.len) {
-            std.debug.print("❌ Invalid PNG: Chunk length exceeds file size at pos {d}\n", .{pos});
-            return error.InvalidPng;
-        }
+        if (pos + chunk_total > bytes.len) return error.InvalidPng;
 
         pos += @intCast(chunk_total);
     }
 
-    if (has_ihdr and has_idat and has_iend) {
-        std.debug.print("🟢 Valid PNG: IHDR, IDAT, IEND found.\n", .{});
-    } else {
-        std.debug.print("❌ Corrupt PNG: Missing chunks (IHDR:{}, IDAT:{}, IEND:{})\n", .{ has_ihdr, has_idat, has_iend });
+    if (!has_ihdr or !has_idat or !has_iend) {
         return error.InvalidPng;
     }
 }
@@ -2378,23 +2366,17 @@ pub fn verifyPngStructure(bytes: []const u8) !void {
 pub fn verifyJpegStructure(bytes: []const u8) !void {
     // JPEG must start with SOI (Start of Image) marker: FF D8
     if (bytes.len < 2 or bytes[0] != 0xFF or bytes[1] != 0xD8) {
-        std.debug.print("❌ Invalid JPEG Header (missing SOI marker)\n", .{});
         return error.InvalidJpeg;
     }
 
     var pos: usize = 2; // skip SOI
     var has_sof = false;
     var has_sos = false;
-    var has_dqt = false;
-    var has_dht = false;
     var has_eoi = false;
 
     while (pos + 1 < bytes.len) {
         // Every marker starts with 0xFF
-        if (bytes[pos] != 0xFF) {
-            std.debug.print("❌ Invalid JPEG: Expected 0xFF at position {d}\n", .{pos});
-            return error.InvalidJpeg;
-        }
+        if (bytes[pos] != 0xFF) return error.InvalidJpeg;
 
         // Skip fill bytes (consecutive 0xFF padding)
         while (pos + 1 < bytes.len and bytes[pos + 1] == 0xFF) {
@@ -2418,23 +2400,16 @@ pub fn verifyJpegStructure(bytes: []const u8) !void {
         if (marker >= 0xD0 and marker <= 0xD7) continue;
 
         // All remaining markers have a 2-byte length field
-        if (pos + 2 > bytes.len) {
-            std.debug.print("❌ Invalid JPEG: Truncated marker at position {d}\n", .{pos});
-            return error.InvalidJpeg;
-        }
+        if (pos + 2 > bytes.len) return error.InvalidJpeg;
 
         // Length is big-endian and includes the 2 length bytes themselves
         const segment_len = std.mem.readInt(u16, bytes[pos..][0..2], .big);
-        if (segment_len < 2 or pos + segment_len > bytes.len) {
-            std.debug.print("❌ Invalid JPEG: Segment length {d} invalid at pos {d}\n", .{ segment_len, pos });
-            return error.InvalidJpeg;
-        }
+        if (segment_len < 2 or pos + segment_len > bytes.len) return error.InvalidJpeg;
 
         switch (marker) {
             // SOF markers (Start of Frame)
             0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF => {
                 has_sof = true;
-                if (marker == 0xC0) std.debug.print("Found Baseline DCT (SOF0)\n", .{});
             },
             0xDA => { // SOS (Start of Scan)
                 has_sos = true;
@@ -2447,28 +2422,11 @@ pub fn verifyJpegStructure(bytes: []const u8) !void {
                 }
                 continue; // pos is already at the next marker's 0xFF
             },
-            0xDB => has_dqt = true, // DQT (Quantization Table)
-            0xC4 => has_dht = true, // DHT (Huffman Table)
-            0xE0 => { // APP0 — check for JFIF
-                if (segment_len >= 7 and std.mem.eql(u8, bytes[pos + 2 ..][0..5], "JFIF\x00")) {
-                    std.debug.print("Found JFIF marker\n", .{});
-                }
-            },
-            else => {}, // APPn, COM, DRI, etc. — skip
+            else => {}, // APPn, COM, DRI, DQT, DHT, etc. — skip
         }
 
         pos += segment_len;
     }
 
-    if (has_sof and has_sos and has_eoi) {
-        std.debug.print("🟢 Valid JPEG structure\n", .{});
-    } else {
-        if (!has_sof) std.debug.print("❌ Invalid JPEG: Missing SOF marker\n", .{});
-        if (!has_sos) std.debug.print("❌ Invalid JPEG: Missing SOS marker\n", .{});
-        if (!has_eoi) std.debug.print("❌ Invalid JPEG: Missing EOI marker\n", .{});
-        return error.InvalidJpeg;
-    }
-
-    if (!has_dqt) std.debug.print("⚠️  Warning: No quantization tables (DQT) found\n", .{});
-    if (!has_dht) std.debug.print("⚠️  Warning: No Huffman tables (DHT) found\n", .{});
+    if (!has_sof or !has_sos or !has_eoi) return error.InvalidJpeg;
 }

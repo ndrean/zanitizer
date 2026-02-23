@@ -493,50 +493,60 @@ pub const CssSanitizer = struct {
         while (current) |rule| {
             const rule_type = zexp_css_rule_get_type(rule);
             if (rule_type == LXB_CSS_RULE_DECLARATION) {
-                // Get property name using C shim
-                const prop_name = self.getDeclarationPropertyName(rule);
-                if (prop_name.len == 0) {
+                const type_id = zexp_css_declaration_get_type_id(rule);
+
+                // Serialize first — needed for value checking, property name
+                // extraction, and distinguishing real CSS custom properties
+                // (type_id==1, name starts with '--') from Lexbor-custom shorthands
+                // like `background`, `border-radius`, `box-shadow`, `gap` which also
+                // get type_id==1 because they're not in Lexbor's cascade table.
+                var decl_buf: std.ArrayListUnmanaged(u8) = .empty;
+                defer decl_buf.deinit(self.allocator);
+                var decl_ctx = SerializeContext{ .list = &decl_buf, .allocator = self.allocator };
+
+                if (lxb_css_rule_declaration_serialize(rule, serializeCallback, &decl_ctx) != lxb_status_ok) {
                     current = zexp_css_rule_get_next(rule);
                     continue;
                 }
 
-                // Check if property is allowed
-                if (!self.isPropertyAllowed(prop_name)) {
-                    current = zexp_css_rule_get_next(rule);
-                    continue;
-                }
-
-                // Serialize the declaration to check value safety
-                var value_buf: std.ArrayListUnmanaged(u8) = .empty;
-                defer value_buf.deinit(self.allocator);
-                var serialize_ctx = SerializeContext{ .list = &value_buf, .allocator = self.allocator };
-
-                if (lxb_css_rule_declaration_serialize(rule, serializeCallback, &serialize_ctx) != lxb_status_ok) {
-                    current = zexp_css_rule_get_next(rule);
-                    continue;
-                }
-
-                // Extract value part after colon
-                const serialized = value_buf.items;
+                const serialized = decl_buf.items;
                 const colon_idx = std.mem.indexOfScalar(u8, serialized, ':') orelse {
                     current = zexp_css_rule_get_next(rule);
                     continue;
                 };
-                const value_part = std.mem.trim(u8, serialized[colon_idx + 1 ..], &std.ascii.whitespace);
 
-                // Check if value is safe
+                // Get the property name: prefer the ID lookup for known properties
+                // (returns a stable slice into Lexbor's table); for type_id<=1
+                // fall back to extracting from the serialized "prop: value" string.
+                const prop_name: []const u8 = blk: {
+                    if (type_id > 1) {
+                        if (lxb_css_property_by_id(type_id)) |entry| {
+                            if (entry.name) |name| break :blk name[0..entry.length];
+                        }
+                    }
+                    break :blk std.mem.trim(u8, serialized[0..colon_idx], &std.ascii.whitespace);
+                };
+
+                // Block real CSS custom properties (--variable: value) — data-exfil risk
+                if (std.mem.startsWith(u8, prop_name, "--")) {
+                    current = zexp_css_rule_get_next(rule);
+                    continue;
+                }
+
+                if (prop_name.len == 0 or !self.isPropertyAllowed(prop_name)) {
+                    current = zexp_css_rule_get_next(rule);
+                    continue;
+                }
+
+                // Check value safety
+                const value_part = std.mem.trim(u8, serialized[colon_idx + 1 ..], &std.ascii.whitespace);
                 if (!self.isValueSafe(value_part)) {
                     current = zexp_css_rule_get_next(rule);
                     continue;
                 }
 
-                // Add separator if not first
-                if (!first) {
-                    try result.appendSlice(self.allocator, "; ");
-                }
+                if (!first) try result.appendSlice(self.allocator, "; ");
                 first = false;
-
-                // Append the serialized declaration
                 try result.appendSlice(self.allocator, serialized);
             }
 
@@ -1031,20 +1041,14 @@ pub const CssSanitizer = struct {
         while (current) |rule| {
             const rule_type = zexp_css_rule_get_type(rule);
             if (rule_type == LXB_CSS_RULE_DECLARATION) {
-                // Get property name using C shim
-                const prop_name = self.getDeclarationPropertyName(rule);
-                if (prop_name.len == 0) {
-                    current = zexp_css_rule_get_next(rule);
-                    continue;
-                }
+                const type_id = zexp_css_declaration_get_type_id(rule);
 
-                // Check if property is allowed
-                if (!self.isPropertyAllowed(prop_name)) {
-                    current = zexp_css_rule_get_next(rule);
-                    continue;
-                }
-
-                // Serialize the full declaration to check value
+                // Serialize first — needed for value checking, property name
+                // extraction (type_id==0: Lexbor-unknown properties), and
+                // distinguishing real CSS custom properties (type_id==1, name starts
+                // with '--') from Lexbor-custom shorthands like `background`,
+                // `border-radius`, `box-shadow` which ALSO get type_id==1 because
+                // they're not in Lexbor's cascade property table.
                 var decl_buf: std.ArrayListUnmanaged(u8) = .empty;
                 defer decl_buf.deinit(self.allocator);
                 var decl_ctx = SerializeContext{ .list = &decl_buf, .allocator = self.allocator };
@@ -1054,23 +1058,39 @@ pub const CssSanitizer = struct {
                     continue;
                 }
 
-                // Extract value part and validate
                 const serialized = decl_buf.items;
                 const colon_idx = std.mem.indexOfScalar(u8, serialized, ':') orelse {
                     current = zexp_css_rule_get_next(rule);
                     continue;
                 };
-                const value_part = std.mem.trim(u8, serialized[colon_idx + 1 ..], &std.ascii.whitespace);
 
+                const prop_name: []const u8 = blk: {
+                    if (type_id > 1) {
+                        if (lxb_css_property_by_id(type_id)) |entry| {
+                            if (entry.name) |name| break :blk name[0..entry.length];
+                        }
+                    }
+                    break :blk std.mem.trim(u8, serialized[0..colon_idx], &std.ascii.whitespace);
+                };
+
+                // Block real CSS custom properties (--variable: value) — data-exfil risk
+                if (std.mem.startsWith(u8, prop_name, "--")) {
+                    current = zexp_css_rule_get_next(rule);
+                    continue;
+                }
+
+                if (prop_name.len == 0 or !self.isPropertyAllowed(prop_name)) {
+                    current = zexp_css_rule_get_next(rule);
+                    continue;
+                }
+
+                const value_part = std.mem.trim(u8, serialized[colon_idx + 1 ..], &std.ascii.whitespace);
                 if (!self.isValueSafe(value_part)) {
                     current = zexp_css_rule_get_next(rule);
                     continue;
                 }
 
-                // This declaration is safe - add it
-                if (!first) {
-                    try result.appendSlice(self.allocator, "; ");
-                }
+                if (!first) try result.appendSlice(self.allocator, "; ");
                 first = false;
                 try result.appendSlice(self.allocator, serialized);
             }
