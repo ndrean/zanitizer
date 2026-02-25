@@ -191,22 +191,32 @@ globalThis.zxp = {
   args: [],
   flags: {},
   fs: {
-    // readFileSync: (path) => __native_readFileSync(path), TODO
+    readFileSync: (path) => __native_readFileSync(path),
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
   },
 
-  async goto(url, options = { sanitize: false }) {
+  async goto(url, options = {}) {
     applyLocationPolyfill(url);
-    // JS handles the network (easy to add headers, cookies, etc.)
-    const res = await fetch(url);
+    // JS handles the network — send mobile browser headers matching the scrape CLI path
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Linux; Android 12; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Upgrade-Insecure-Requests": "1",
+      },
+    });
     const html = await res.text();
 
     // Zig handles the Browser Pipeline (Parse, CSS, Scripts, Sanitize)
     __native_loadPage(html, {
       base_dir: url,
-      sanitize: options.sanitize,
+      sanitize: options.sanitize ?? false,
       execute_scripts: true,
       load_stylesheets: true,
+      browser_profile: options.browser_profile ?? true,
     });
     if (
       globalThis.customElements &&
@@ -251,19 +261,62 @@ globalThis.zxp = {
     );
   },
 
-  paintDOM(node, outputPath) {
-    return __paintDOM(node, outputPath);
+  /*
+  paintDOM(node, opts?) → { data: ArrayBuffer (raw RGBA), width, height }
+  opts: { width: 800 } | { dpi: 150 } | number (legacy width)
+  */
+  paintDOM(node, opts) {
+    let w = 800;
+    if (opts !== undefined && opts !== null) {
+      if (typeof opts === "number") w = opts;
+      else if (opts.width) w = opts.width;
+      else if (opts.dpi) w = Math.round(8.2677 * opts.dpi);
+    }
+    return __paintDOM(node, w);
+  },
+
+  // save(img, path) — encode RGBA + write to disk; extension decides format
+  // Supported: .png  .jpg/.jpeg  .webp  .pdf
+  save(img, path) {
+    __native_save(img.data, img.width, img.height, path);
+  },
+
+  /*
+  Takes [url], [request_eaders: "Accept": "image/webp", "Authorization": "Bearer xyz" ]
+  Returns array: [
+  {ok: bool, // status 200–299
+  status: number,    // HTTP status code 
+  data: ArrayBuffer, // raw response body
+  type: string,      // Content-Type from response headers
+  }]
+  */
+  fetchAll(url_array, request_headers_array) {
+    return __native_fetchAll(url_array, request_headers_array);
+  },
+  arrayBufferToBase64DataUri(buffer, type) {
+    return __native_arrayBufferToBase64DataUri(buffer, type);
+  },
+
+  // encode(img, format) → ArrayBuffer — for server response or writeFileSync
+  // format: "png" | "jpg" | "webp" | "pdf"  (default: "png")
+  encode(img, format) {
+    return __native_encode(img.data, img.width, img.height, format ?? "png");
+  },
+
+  loadHTML(html) {
+    return __loadHTML(html);
   },
 
   pdf: {
-    async generate(svgString, outputPath) {
+    // SVG string → PDF ArrayBuffer (optionally saves to disk if outputPath given)
+    async generateFromSvg(svgString, outputPath) {
       const blob = new Blob([svgString], { type: "image/svg+xml" });
       const bitmap = await createImageBitmap(blob);
 
       const doc = new PDFDocument();
       doc.addPage();
       doc.drawImage(bitmap, 0, 0, bitmap.width, bitmap.height);
-      doc.save(outputPath);
+      if (outputPath) doc.save(outputPath);
       return doc.toArrayBuffer();
     },
   },
@@ -394,12 +447,3 @@ document.createElement = function (tagName) {
   }
   return el;
 };
-
-async function testSSE() {
-  for (let i = 0; i < 10; i++) {
-    zxp.write("chunk " + i);
-    return await new Promise((r) => setTimeout(r, 100));
-  }
-}
-
-testSSE();

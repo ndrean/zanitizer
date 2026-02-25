@@ -35,7 +35,7 @@ fn run_test(allocator: std.mem.Allocator, sbx: []const u8) !void {
     // 2. Paint initial state
     const paint_script =
         \\ const body = document.querySelector("body");
-        \\ zxp.paintDOM(body, "zxp.png")
+        \\ zxp.save(zxp.paintDOM(body), "zxp.png")
     ;
     const render_val1 = try engine.eval(paint_script, "<render-test1>", .global);
     engine.ctx.freeValue(render_val1);
@@ -61,7 +61,7 @@ fn run_test(allocator: std.mem.Allocator, sbx: []const u8) !void {
     // 5. Paint updated state
     const paint_script2 =
         \\ const body2 = document.querySelector("body");
-        \\ zxp.paintDOM(body2, "zxp_after.png")
+        \\ zxp.save(zxp.paintDOM(body2), "zxp_after.png")
     ;
     const render_val3 = try engine.eval(paint_script2, "<render-test2>", .global);
     engine.ctx.freeValue(render_val3);

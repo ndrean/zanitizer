@@ -31,7 +31,7 @@ pub fn main() !void {
     // Paint
     const script =
         \\ const body = document.querySelector("body");
-        \\ zxp.paintDOM(body, "layout_test.png")
+        \\ zxp.save(zxp.paintDOM(body), "layout_test.png")
     ;
     const val = try engine.eval(script, "<layout-test>", .global);
     engine.ctx.freeValue(val);

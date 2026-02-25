@@ -80,11 +80,85 @@ const stbi = @cImport({
 const stbi_write = @cImport({
     @cInclude("stb_image_write.h");
 });
+const hpdf = @cImport({
+    @cInclude("hpdf.h");
+});
+
+// JPEG-to-buffer callback (stb has no jpeg_to_mem, only jpeg_to_func)
+const JpegWriteContext = struct {
+    data: *std.ArrayListUnmanaged(u8),
+    allocator: std.mem.Allocator,
+};
+extern fn stbi_write_jpg_to_func(
+    func: *const fn (?*anyopaque, ?*anyopaque, c_int) callconv(.c) void,
+    context: ?*anyopaque,
+    x: c_int, y: c_int, comp: c_int, data: ?*const anyopaque, quality: c_int,
+) c_int;
+fn stbiJpegWriteCallback(context: ?*anyopaque, data: ?*anyopaque, size: c_int) callconv(.c) void {
+    const jctx: *JpegWriteContext = @ptrCast(@alignCast(context));
+    if (data) |d| {
+        const slice: []const u8 = @as([*]const u8, @ptrCast(d))[0..@intCast(size)];
+        jctx.data.appendSlice(jctx.allocator, slice) catch {};
+    }
+}
+
+fn localPdfErrorHandler(_: hpdf.HPDF_STATUS, _: hpdf.HPDF_STATUS, _: ?*anyopaque) callconv(.c) void {}
+
+fn saveRgbaAsPdf(allocator: std.mem.Allocator, rgba: []const u8, width: u32, height: u32, path: []const u8) !void {
+    const doc = hpdf.HPDF_New(&localPdfErrorHandler, null) orelse return error.PdfInitFailed;
+    defer hpdf.HPDF_Free(doc);
+    _ = hpdf.HPDF_UseUTFEncodings(doc);
+    const page = hpdf.HPDF_AddPage(doc);
+    const pdf_w: f32 = 595.0;
+    const pdf_h: f32 = @as(f32, @floatFromInt(height)) * (pdf_w / @as(f32, @floatFromInt(width)));
+    _ = hpdf.HPDF_Page_SetWidth(page, pdf_w);
+    _ = hpdf.HPDF_Page_SetHeight(page, pdf_h);
+    const pixel_count = @as(usize, width) * height;
+    const rgb = try allocator.alloc(u8, pixel_count * 3);
+    defer allocator.free(rgb);
+    for (0..pixel_count) |i| {
+        rgb[i * 3 + 0] = rgba[i * 4 + 0];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+    const hpdf_img = hpdf.HPDF_LoadRawImageFromMem(doc, rgb.ptr, @intCast(width), @intCast(height), hpdf.HPDF_CS_DEVICE_RGB, 8);
+    _ = hpdf.HPDF_Page_DrawImage(page, hpdf_img, 0, 0, pdf_w, pdf_h);
+    _ = hpdf.HPDF_SaveToFile(doc, path.ptr);
+}
+
+fn encodeRgbaAsPdf(allocator: std.mem.Allocator, rgba: []const u8, width: u32, height: u32) ![]u8 {
+    const doc = hpdf.HPDF_New(&localPdfErrorHandler, null) orelse return error.PdfInitFailed;
+    defer hpdf.HPDF_Free(doc);
+    _ = hpdf.HPDF_UseUTFEncodings(doc);
+    const page = hpdf.HPDF_AddPage(doc);
+    const pdf_w: f32 = 595.0;
+    const pdf_h: f32 = @as(f32, @floatFromInt(height)) * (pdf_w / @as(f32, @floatFromInt(width)));
+    _ = hpdf.HPDF_Page_SetWidth(page, pdf_w);
+    _ = hpdf.HPDF_Page_SetHeight(page, pdf_h);
+    const pixel_count = @as(usize, width) * height;
+    const rgb = try allocator.alloc(u8, pixel_count * 3);
+    defer allocator.free(rgb);
+    for (0..pixel_count) |i| {
+        rgb[i * 3 + 0] = rgba[i * 4 + 0];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
+    const hpdf_img = hpdf.HPDF_LoadRawImageFromMem(doc, rgb.ptr, @intCast(width), @intCast(height), hpdf.HPDF_CS_DEVICE_RGB, 8);
+    _ = hpdf.HPDF_Page_DrawImage(page, hpdf_img, 0, 0, pdf_w, pdf_h);
+    if (hpdf.HPDF_SaveToStream(doc) != hpdf.HPDF_OK) return error.PdfSaveFailed;
+    _ = hpdf.HPDF_ResetStream(doc);
+    var size = hpdf.HPDF_GetStreamSize(doc);
+    if (size == 0) return error.EmptyPdf;
+    const buf = try allocator.alloc(u8, size);
+    _ = hpdf.HPDF_ReadFromStream(doc, buf.ptr, &size);
+    return buf[0..size];
+}
 
 const yoga = z.yoga;
 const thorvg = z.thorvg;
 const Tvg_Canvas = thorvg.Tvg_Canvas;
 const Tvg_Paint = thorvg.Tvg_Paint;
+const css_color = z.css_color;
 
 // =============================================================================
 // Thorvg C-API
@@ -126,6 +200,9 @@ extern fn stbi_write_png_to_mem(
     n: c_int,
     out_len: *c_int,
 ) ?[*]u8;
+
+extern fn WebPEncodeRGBA(rgba: [*]const u8, width: c_int, height: c_int, stride: c_int, quality_factor: f32, output: *[*]u8) usize;
+extern fn WebPFree(ptr: ?[*]u8) void;
 
 fn stbiw_free(ptr: ?*anyopaque) void {
     if (ptr) |p| std.c.free(p);
@@ -373,6 +450,16 @@ fn buildYogaTree(
     var has_explicit_flex = false;
     if (z.nodeToElement(dom_node)) |el| {
         const tag = z.tagName_zc(el);
+
+        // Non-visual head elements — skip entirely (never paint their text content)
+        const non_visual = [_][]const u8{ "HEAD", "STYLE", "SCRIPT", "LINK", "META", "TITLE", "NOSCRIPT", "TEMPLATE", "BASE" };
+        for (non_visual) |skip| {
+            if (std.mem.eql(u8, tag, skip)) {
+                yoga.nodeFree(yg);
+                allocator.destroy(info);
+                return null;
+            }
+        }
 
         // Use serializeElementStyles to get the full CSS cascade (not just inline style="")
         const style_str = z.serializeElementStyles(allocator, el) catch null;
@@ -968,33 +1055,12 @@ fn collapseWhitespace(allocator: std.mem.Allocator, raw: []const u8) ?[]const u8
 /// Parse CSS color values: named keywords, #hex, rgb(), rgba().
 /// Covers all formats that Lexbor's serializer may emit.
 fn parseCSSColor(val: []const u8) ?[4]u8 {
-    // CSS named colors (W3C basic + extended set most likely to appear)
-    const Named = struct { name: []const u8, rgba: [4]u8 };
-    const named_colors = [_]Named{
-        .{ .name = "black",   .rgba = .{ 0,   0,   0,   255 } },
-        .{ .name = "white",   .rgba = .{ 255, 255, 255, 255 } },
-        .{ .name = "red",     .rgba = .{ 255, 0,   0,   255 } },
-        .{ .name = "green",   .rgba = .{ 0,   128, 0,   255 } },
-        .{ .name = "blue",    .rgba = .{ 0,   0,   255, 255 } },
-        .{ .name = "yellow",  .rgba = .{ 255, 255, 0,   255 } },
-        .{ .name = "orange",  .rgba = .{ 255, 165, 0,   255 } },
-        .{ .name = "purple",  .rgba = .{ 128, 0,   128, 255 } },
-        .{ .name = "pink",    .rgba = .{ 255, 192, 203, 255 } },
-        .{ .name = "cyan",    .rgba = .{ 0,   255, 255, 255 } },
-        .{ .name = "magenta", .rgba = .{ 255, 0,   255, 255 } },
-        .{ .name = "gray",    .rgba = .{ 128, 128, 128, 255 } },
-        .{ .name = "grey",    .rgba = .{ 128, 128, 128, 255 } },
-        .{ .name = "silver",  .rgba = .{ 192, 192, 192, 255 } },
-        .{ .name = "brown",   .rgba = .{ 165, 42,  42,  255 } },
-        .{ .name = "navy",    .rgba = .{ 0,   0,   128, 255 } },
-        .{ .name = "teal",    .rgba = .{ 0,   128, 128, 255 } },
-        .{ .name = "lime",    .rgba = .{ 0,   255, 0,   255 } },
-        .{ .name = "maroon",  .rgba = .{ 128, 0,   0,   255 } },
-        .{ .name = "olive",   .rgba = .{ 128, 128, 0,   255 } },
-        .{ .name = "transparent", .rgba = .{ 0, 0, 0, 0 } },
-    };
-    for (named_colors) |nc| {
-        if (std.mem.eql(u8, val, nc.name)) return nc.rgba;
+    // Named colors — O(1) lookup via the full 148-entry StaticStringMap in css_color.zig.
+    // Lowercase into a stack buffer first (CSS color names are case-insensitive).
+    if (val.len <= 32) {
+        var buf: [32]u8 = undefined;
+        const lc = std.ascii.lowerString(buf[0..val.len], val);
+        if (css_color.NamedColors.get(lc)) |c| return .{ c.r, c.g, c.b, c.a };
     }
 
     // #RGB, #RRGGBB, #RRGGBBAA
@@ -1021,9 +1087,9 @@ fn parseCSSColor(val: []const u8) ?[4]u8 {
 
     // rgb(r, g, b) and rgba(r, g, b, a) — Lexbor may emit this format
     const is_rgba = std.mem.startsWith(u8, val, "rgba(");
-    const is_rgb  = std.mem.startsWith(u8, val, "rgb(");
+    const is_rgb = std.mem.startsWith(u8, val, "rgb(");
     if (is_rgb or is_rgba) {
-        const paren_open  = std.mem.indexOfScalar(u8, val, '(') orelse return null;
+        const paren_open = std.mem.indexOfScalar(u8, val, '(') orelse return null;
         const paren_close = std.mem.lastIndexOfScalar(u8, val, ')') orelse return null;
         if (paren_close <= paren_open) return null;
         const inner = val[paren_open + 1 .. paren_close];
@@ -1232,25 +1298,16 @@ pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv
     }
     const root_node: *z.DomNode = @ptrCast(@alignCast(ptr));
 
-    // 2. Optional width (Arg 1: number, default 800px)
-    //    Examples: zxp.paintDOM(el, 595)   // A4 at 72 DPI
-    //              zxp.paintDOM(el, 2480)  // A4 at 300 DPI (print)
+    // 2. Width (Arg 1: number or undefined, default 800px)
+    //    JS resolves {dpi} → number before calling __paintDOM.
     const page_width: u32 = blk: {
-        if (argc >= 2 and !ctx.isString(argv[1])) {
+        if (argc >= 2 and !ctx.isUndefined(argv[1]) and !ctx.isNull(argv[1])) {
             var w_f64: f64 = 800;
             if (qjs.JS_ToFloat64(ctx.ptr, &w_f64, argv[1]) == 0 and w_f64 > 0)
                 break :blk @as(u32, @intFromFloat(w_f64));
         }
         break :blk 800;
     };
-
-    // Optional filename (Arg 1: string legacy, or Arg 2: string)
-    var filename: ?[]const u8 = null;
-    if (argc >= 2 and ctx.isString(argv[1])) {
-        filename = ctx.toZString(argv[1]) catch null;
-    } else if (argc >= 3 and ctx.isString(argv[2])) {
-        filename = ctx.toZString(argv[2]) catch null;
-    }
 
     // 3. Initialize ThorVG early (needed for text measurement during tree build)
     _ = tvg_engine_init(0);
@@ -1295,13 +1352,14 @@ pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv
     _ = tvg_canvas_draw(canvas, false);
     _ = tvg_canvas_sync(canvas);
 
+    // Return raw RGBA as { data: ArrayBuffer, width, height }
     const master_u8: [*]const u8 = @ptrCast(master_buffer.ptr);
-    if (filename) |fname| {
-        defer ctx.freeZString(fname);
-        return saveToDisk(fname, master_u8, page_width, page_height);
-    } else {
-        return encodeToArrayBuffer(ctx, master_u8, page_width, page_height);
-    }
+    const pixel_bytes = master_u8[0..@as(usize, page_width) * page_height * 4];
+    const result = ctx.newObject();
+    ctx.setPropertyStr(result, "data", ctx.newArrayBufferCopy(pixel_bytes)) catch return w.UNDEFINED;
+    ctx.setPropertyStr(result, "width", ctx.newFloat64(@floatFromInt(page_width))) catch return w.UNDEFINED;
+    ctx.setPropertyStr(result, "height", ctx.newFloat64(@floatFromInt(page_height))) catch return w.UNDEFINED;
+    return result;
 }
 
 pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -1388,10 +1446,18 @@ pub fn js_generateRoutePng(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_i
 
     const master_u8: [*]const u8 = @ptrCast(master_buffer.ptr);
     if (filename) |fname| {
-        std.debug.print("[Compositor] Saving final image to {s}...\n", .{fname});
-        return saveToDisk(fname, master_u8, page_width, page_height);
+        std.debug.print("[Compositor] Saving route PNG to {s}...\n", .{fname});
+        const r = stbi_write.stbi_write_png(fname.ptr, @intCast(page_width), @intCast(page_height), 4, master_u8, @intCast(page_width * 4));
+        if (r == 0) std.debug.print("[Compositor] ⚠️ Failed to write PNG\n", .{});
+        return w.UNDEFINED;
     } else {
-        return encodeToArrayBuffer(ctx, master_u8, page_width, page_height);
+        var out_len: c_int = 0;
+        const png_ptr = stbi_write_png_to_mem(master_u8, 0, @intCast(page_width), @intCast(page_height), 4, &out_len);
+        if (png_ptr) |p| {
+            defer stbiw_free(p);
+            return ctx.newArrayBufferCopy(p[0..@intCast(out_len)]);
+        }
+        return w.UNDEFINED;
     }
 }
 
@@ -1446,44 +1512,101 @@ fn alphaComposite(master: []u32, overlay: [*]const u32, count: usize) void {
     }
 }
 
-fn encodeToArrayBuffer(ctx: w.Context, master_u8: [*]const u8, width: u32, height: u32) w.Value {
-    var out_len: c_int = 0;
+// =============================================================================
+// __native_save(dataAB, width, height, path) — encode RGBA + write to disk
+// =============================================================================
 
-    const png_c_ptr = stbi_write_png_to_mem(
-        master_u8,
-        0,
-        @intCast(width),
-        @intCast(height),
-        4,
-        &out_len,
-    );
+pub fn js_native_save(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 4) return w.UNDEFINED;
 
-    if (png_c_ptr) |png_ptr| {
-        defer stbiw_free(png_ptr);
-        return ctx.newArrayBufferCopy(png_ptr[0..@intCast(out_len)]);
-    } else {
-        std.debug.print("[Compositor] ⚠️ Failed to encode PNG to memory\n", .{});
-        return w.UNDEFINED;
-    }
+    const rgba = ctx.getArrayBuffer(argv[0]) catch return w.UNDEFINED;
+    var width: u32 = 0;
+    var height: u32 = 0;
+    _ = qjs.JS_ToUint32(ctx.ptr, &width, argv[1]);
+    _ = qjs.JS_ToUint32(ctx.ptr, &height, argv[2]);
+    if (width == 0 or height == 0) return w.UNDEFINED;
+
+    const path = ctx.toZString(argv[3]) catch return w.UNDEFINED;
+    defer ctx.freeZString(path);
+
+    const lower = std.ascii.allocLowerString(std.heap.c_allocator, path) catch path;
+    defer if (lower.ptr != path.ptr) std.heap.c_allocator.free(lower);
+
+    std.debug.print("[Compositor] Saving to {s}...\n", .{path});
+
+    const ok: bool = blk: {
+        if (std.mem.endsWith(u8, lower, ".jpg") or std.mem.endsWith(u8, lower, ".jpeg")) {
+            const r = stbi_write.stbi_write_jpg(path.ptr, @intCast(width), @intCast(height), 4, rgba.ptr, 90);
+            break :blk r != 0;
+        } else if (std.mem.endsWith(u8, lower, ".webp")) {
+            var out_ptr: [*]u8 = undefined;
+            const out_len = WebPEncodeRGBA(rgba.ptr, @intCast(width), @intCast(height), @intCast(width * 4), 90.0, &out_ptr);
+            if (out_len == 0) break :blk false;
+            defer WebPFree(out_ptr);
+            std.fs.cwd().writeFile(.{ .sub_path = path, .data = out_ptr[0..out_len] }) catch break :blk false;
+            break :blk true;
+        } else if (std.mem.endsWith(u8, lower, ".pdf")) {
+            saveRgbaAsPdf(rc.allocator, rgba, width, height, path) catch break :blk false;
+            break :blk true;
+        } else {
+            // default: PNG
+            const r = stbi_write.stbi_write_png(path.ptr, @intCast(width), @intCast(height), 4, rgba.ptr, @intCast(width * 4));
+            break :blk r != 0;
+        }
+    };
+
+    if (!ok) std.debug.print("[Compositor] ⚠️ Failed to save image\n", .{});
+    return w.UNDEFINED;
 }
 
-fn saveToDisk(fname: []const u8, master_u8: [*]const u8, width: u32, height: u32) w.Value {
-    std.debug.print("[Compositor] Saving final image to {s}...\n", .{fname});
+// =============================================================================
+// __native_encode(dataAB, width, height, format) → ArrayBuffer
+// =============================================================================
 
-    const result = stbi_write.stbi_write_png(
-        fname.ptr,
-        @intCast(width),
-        @intCast(height),
-        4,
-        master_u8,
-        @intCast(width * 4),
-    );
+pub fn js_native_encode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 4) return w.UNDEFINED;
 
-    if (result == 0) {
-        std.debug.print("[Compositor] ⚠️ Failed to write PNG to disk\n", .{});
+    const rgba = ctx.getArrayBuffer(argv[0]) catch return w.UNDEFINED;
+    var width: u32 = 0;
+    var height: u32 = 0;
+    _ = qjs.JS_ToUint32(ctx.ptr, &width, argv[1]);
+    _ = qjs.JS_ToUint32(ctx.ptr, &height, argv[2]);
+    if (width == 0 or height == 0) return w.UNDEFINED;
+
+    const fmt = ctx.toZString(argv[3]) catch return w.UNDEFINED;
+    defer ctx.freeZString(fmt);
+
+    const lower = std.ascii.allocLowerString(std.heap.c_allocator, fmt) catch fmt;
+    defer if (lower.ptr != fmt.ptr) std.heap.c_allocator.free(lower);
+
+    if (std.mem.eql(u8, lower, "jpg") or std.mem.eql(u8, lower, "jpeg")) {
+        var list = std.ArrayListUnmanaged(u8){};
+        defer list.deinit(rc.allocator);
+        var jctx = JpegWriteContext{ .data = &list, .allocator = rc.allocator };
+        _ = stbi_write_jpg_to_func(stbiJpegWriteCallback, &jctx, @intCast(width), @intCast(height), 4, rgba.ptr, 90);
+        return ctx.newArrayBufferCopy(list.items);
+    } else if (std.mem.eql(u8, lower, "webp")) {
+        var out_ptr: [*]u8 = undefined;
+        const out_len = WebPEncodeRGBA(rgba.ptr, @intCast(width), @intCast(height), @intCast(width * 4), 90.0, &out_ptr);
+        if (out_len == 0) return w.UNDEFINED;
+        defer WebPFree(out_ptr);
+        return ctx.newArrayBufferCopy(out_ptr[0..out_len]);
+    } else if (std.mem.eql(u8, lower, "pdf")) {
+        const pdf_bytes = encodeRgbaAsPdf(rc.allocator, rgba, width, height) catch return w.UNDEFINED;
+        defer rc.allocator.free(pdf_bytes);
+        return ctx.newArrayBufferCopy(pdf_bytes);
     } else {
-        std.debug.print("[Compositor] Saved to disk.\n", .{});
+        // default: PNG
+        var out_len: c_int = 0;
+        const png_ptr = stbi_write_png_to_mem(rgba.ptr, 0, @intCast(width), @intCast(height), 4, &out_len);
+        if (png_ptr) |p| {
+            defer stbiw_free(p);
+            return ctx.newArrayBufferCopy(p[0..@intCast(out_len)]);
+        }
+        return w.UNDEFINED;
     }
-
-    return w.UNDEFINED;
 }

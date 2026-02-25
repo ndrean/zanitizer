@@ -1,49 +1,68 @@
 const std = @import("std");
-const z = @import("zexplorer");
+const z = @import("root.zig");
 const qjs = z.qjs;
 const zqjs = z.wrapper;
+const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 
-pub fn js_writeFileSync(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+/// __native_readFileSync(path: string) → ArrayBuffer
+/// Reads a file synchronously and returns its bytes as an ArrayBuffer.
+pub fn js_readFileSync(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context.from(ctx_ptr);
+    if (argc < 1) return ctx.throwTypeError("readFileSync requires a path");
 
-    if (argc < 2) return ctx.throwTypeError("writeFile requires path and ArrayBuffer");
+    const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
+    defer ctx.freeCString(path_c);
+    const path = std.mem.span(path_c);
 
-    // 1. Get the file path
-    const path = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
-    defer ctx.freeZString(path);
-
-    // 2. Extract the raw bytes from the ArrayBuffer
-    var size: usize = 0;
-    const buf_ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &size, argv[1]);
-    if (buf_ptr == null) {
-        return ctx.throwTypeError("Second argument must be an ArrayBuffer");
-    }
-
-    const data = buf_ptr[0..size];
-
-    // 3. Write securely to the current directory (or your sandbox!)
-    // Note: You should ideally route this through your js_security.Sandbox!
-    std.fs.cwd().writeFile(.{ .sub_path = path, .data = data }) catch |err| {
-        std.debug.print("Write error: {any}\n", .{err});
-        return ctx.throwInternalError("Failed to write file");
+    const rc = RuntimeContext.get(ctx);
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        return ctx.throwInternalError(@errorName(err));
     };
+    defer file.close();
 
-    return zqjs.UNDEFINED;
+    const content = file.readToEndAlloc(rc.allocator, 500 * 1024 * 1024) catch |err| {
+        return ctx.throwInternalError(@errorName(err));
+    };
+    defer rc.allocator.free(content);
+
+    return ctx.newArrayBufferCopy(content);
 }
 
-pub fn install(ctx: zqjs.Context) !void {
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
+/// __native_writeFileSync(path: string, data: string | ArrayBuffer | TypedArray) → undefined
+/// Writes data to a file synchronously, overwriting any existing content.
+pub fn js_writeFileSync(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
+    if (argc < 2) return ctx.throwTypeError("writeFileSync requires path and data");
 
-    // Create the zxp.fs namespace
-    const zexplorer_obj = ctx.getPropertyStr(global, "zxp");
-    defer ctx.freeValue(zexplorer_obj);
+    const path_c = ctx.toCString(argv[0]) catch return zqjs.EXCEPTION;
+    defer ctx.freeCString(path_c);
+    const path = std.mem.span(path_c);
 
-    const fs_obj = ctx.newObject();
-    defer ctx.freeValue(fs_obj);
+    const file = std.fs.cwd().createFile(path, .{}) catch |err| {
+        return ctx.throwInternalError(@errorName(err));
+    };
+    defer file.close();
 
-    const write_fn = ctx.newCFunction(js_writeFileSync, "writeFileSync", 2);
-    try ctx.setPropertyStr(fs_obj, "writeFileSync", write_fn);
+    if (ctx.isString(argv[1])) {
+        const data_c = ctx.toCString(argv[1]) catch return zqjs.EXCEPTION;
+        defer ctx.freeCString(data_c);
+        file.writeAll(std.mem.span(data_c)) catch |err| {
+            return ctx.throwInternalError(@errorName(err));
+        };
+    } else if (ctx.isArrayBuffer(argv[1])) {
+        const data = ctx.getArrayBuffer(argv[1]) catch return ctx.throwTypeError("Invalid ArrayBuffer");
+        file.writeAll(data) catch |err| {
+            return ctx.throwInternalError(@errorName(err));
+        };
+    } else {
+        // TypedArray (Uint8Array, etc.) — get its backing ArrayBuffer
+        const ab = ctx.getTypedArrayBuffer(argv[1]) catch return ctx.throwTypeError("writeFileSync: data must be string, ArrayBuffer, or TypedArray");
+        defer ctx.freeValue(ab.buffer);
+        const data = ctx.getArrayBuffer(ab.buffer) catch return ctx.throwTypeError("Invalid TypedArray buffer");
+        file.writeAll(data[ab.byte_offset .. ab.byte_offset + ab.byte_length]) catch |err| {
+            return ctx.throwInternalError(@errorName(err));
+        };
+    }
 
-    try ctx.setPropertyStr(zexplorer_obj, "fs", fs_obj);
+    return zqjs.UNDEFINED;
 }

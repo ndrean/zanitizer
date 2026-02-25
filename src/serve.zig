@@ -106,6 +106,19 @@ pub fn healthHandler(_: *AppContext, _: *httpz.Request, res: *httpz.Response) !v
     res.status = 200;
 }
 
+/// Detect MIME type from the first few magic bytes of a binary buffer.
+fn sniffMime(bytes: []const u8) []const u8 {
+    if (bytes.len >= 4) {
+        if (std.mem.startsWith(u8, bytes, "\x89PNG")) return "image/png";
+        if (std.mem.startsWith(u8, bytes, "\xFF\xD8")) return "image/jpeg";
+        if (std.mem.startsWith(u8, bytes, "%PDF")) return "application/pdf";
+        if (std.mem.startsWith(u8, bytes, "GIF8")) return "image/gif";
+        if (std.mem.startsWith(u8, bytes, "RIFF") and bytes.len >= 12 and
+            std.mem.eql(u8, bytes[8..12], "WEBP")) return "image/webp";
+    }
+    return "application/octet-stream";
+}
+
 // Bridges zxp.write(str) → res.chunk(str) for streaming output.
 // Called from the thread-local set in runHandler.
 fn chunkWriter(ptr: *anyopaque, data: []const u8) void {
@@ -136,10 +149,6 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
     var engine = try z.ScriptEngine.init(alloc, zxp_rt);
     defer engine.deinit();
 
-    // Route zxp.write() calls → res.chunk() for this request's thread.
-    // z.js_console.setChunkWriter(chunkWriter, res);
-    // defer z.js_console.clearChunkWriter();
-
     // Set up zxp.write + zxp.flags + zxp.args, mirroring runCliRequest in main.zig.
     {
         const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
@@ -153,18 +162,47 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
         _ = try engine.ctx.setPropertyStr(zxp_obj, "flags", engine.ctx.newObject());
     }
 
-    // Run the script. zxp.write() calls stream chunks back immediately via res.chunk().
-    // Any return value is sent as a final chunk.
-    const result = try engine.evalAsyncAndStringify(alloc, body, "<serve>");
-    defer alloc.free(result);
+    // Evaluate — keep the raw JS value so we can inspect its type.
+    const val = try engine.evalAsync(body, "<serve>");
+    defer engine.ctx.freeValue(val);
 
-    if (result.len > 0) {
+    // ── Binary (ArrayBuffer) ─────────────────────────────────────────────────
+    // Script returned raw bytes (e.g. PNG from zxp.paintDOM).
+    // Sniff the MIME type from magic bytes and send as a binary body.
+    // Bytes are copied into the response arena so they survive engine.deinit().
+    if (engine.ctx.isArrayBuffer(val)) {
+        const bytes = try engine.ctx.getArrayBuffer(val);
+        res.header("Content-Type", sniffMime(bytes));
+        res.body = try res.arena.dupe(u8, bytes);
+        return;
+    }
+
+    // ── Empty (undefined / null) ─────────────────────────────────────────────
+    // Script used zxp.write() for streaming output — nothing left to send.
+    if (engine.ctx.isUndefined(val) or engine.ctx.isNull(val)) return;
+
+    // ── String ───────────────────────────────────────────────────────────────
+    if (engine.ctx.isString(val)) {
+        const z_str = try engine.ctx.toZString(val);
+        defer engine.ctx.freeZString(z_str);
         if (tl_is_sse) {
-            const sse_result = try std.fmt.allocPrint(alloc, "data: {s}\n\n", .{result});
-            defer alloc.free(sse_result);
-            try res.chunk(sse_result);
+            try res.chunk(try std.fmt.allocPrint(res.arena, "data: {s}\n\n", .{z_str}));
         } else {
-            try res.chunk(result);
+            res.header("Content-Type", "text/plain; charset=utf-8");
+            res.body = try res.arena.dupe(u8, z_str);
         }
+        return;
+    }
+
+    // ── Object / array → JSON ────────────────────────────────────────────────
+    const json_val = engine.ctx.jsonStringifySimple(val) catch return;
+    defer engine.ctx.freeValue(json_val);
+    const json_str = try engine.ctx.toZString(json_val);
+    defer engine.ctx.freeZString(json_str);
+    if (tl_is_sse) {
+        try res.chunk(try std.fmt.allocPrint(res.arena, "data: {s}\n\n", .{json_str}));
+    } else {
+        res.header("Content-Type", "application/json");
+        res.body = try res.arena.dupe(u8, json_str);
     }
 }

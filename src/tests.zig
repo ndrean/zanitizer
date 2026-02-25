@@ -452,14 +452,16 @@ fn printUsage() void {
 // // try demoSuspiciousAttributes(allocator);
 
 fn vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
+    var zxp_rt = try z.ZxpRuntime.init(allocator, sbx);
+    defer zxp_rt.deinit();
+
+    var engine = try ScriptEngine.init(allocator, zxp_rt);
     defer engine.deinit();
 
     const script =
         \\async function testVercel() {
         \\  try {
         \\      await zxp.goto("https://demo.vercel.store");
-        // \\      __flush();
         \\      await zxp.waitForSelector("a[href^='/product/']");
         \\      const links = document.querySelectorAll("a[href^='/product/']");
         \\      const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
@@ -552,7 +554,7 @@ fn generate_pdf(_: std.mem.Allocator, _: []const u8) !void {
         \\const finalSvg = template.replace("{{total}}", "$4560.00");
 
         // Generates a crisp PDF in ~40ms using native LibHaru
-        \\await zxp.pdf.generate(finalSvg, "./output_invoice.pdf");
+        \\await zxp.pdf.generateFromSvg(finalSvg, "./output_invoice.pdf");
         \\console.log("Invoice generated!");
     ;
     _ = js;

@@ -14,9 +14,7 @@ function paint() {
   </div>
 `;
 
-  // Call compositor, omitting the filename
-  // This triggers your `encodeToArrayBuffer` branch in Zig.
-  return zxp.paintDOM(document.body);
+  return zxp.encode(zxp.paintDOM(document.body), "png");
 }
 
 paint();

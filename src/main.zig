@@ -484,19 +484,13 @@ fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[]const u8) ![]u8 {
 fn buildRenderScript(allocator: std.mem.Allocator, out_path: ?[]const u8, width: u32) ![]const u8 {
     const is_pdf = if (out_path) |p| std.mem.endsWith(u8, p, ".pdf") else false;
     if (is_pdf) {
-        // Render at requested width, read PNG height from IHDR (bytes 20-23), scale to 595pt A4.
         return std.fmt.allocPrint(allocator,
-            \\const _imgBuf = zxp.paintDOM(document.body, {d});
-            \\const _view = new DataView(_imgBuf);
-            \\const _pxH = _view.getUint32(20, false);
-            \\const _pdfH = Math.round(_pxH * (595 / {d}));
-            \\const _pdf = new PDFDocument();
-            \\_pdf.addPage();
-            \\_pdf.drawImageFromBuffer(_imgBuf, 0, 0, 595, _pdfH);
-            \\_pdf.toArrayBuffer()
-        , .{ width, width });
+            "zxp.encode(zxp.paintDOM(document.body, {d}), \"pdf\")",
+            .{width});
     }
-    return std.fmt.allocPrint(allocator, "zxp.paintDOM(document.body, {d})", .{width});
+    return std.fmt.allocPrint(allocator,
+        "zxp.encode(zxp.paintDOM(document.body, {d}), \"png\")",
+        .{width});
 }
 
 /// Write output: HTML to stdout/file by default; render PNG/PDF when -o *.png/*.pdf.

@@ -17,6 +17,8 @@ const FetchBridge = @import("js_fetch.zig").FetchBridge;
 const AsyncBridge = @import("async_bridge.zig");
 const FormDataBridge = @import("js_formData.zig").FormDataBridge;
 const FSBridge = @import("js_fs.zig").FSBridge;
+const js_file_sync = @import("js_file_writeFileSync.zig");
+const js_compositor = @import("js_compositor.zig");
 const js_console = @import("js_console.zig");
 const js_marshall = @import("js_marshall.zig");
 const CurlMulti = @import("curl_multi.zig").CurlMulti;
@@ -154,6 +156,11 @@ pub const ScriptEngine = struct {
 
         _ = try self.ctx.setPropertyStr(global, "__native_flush", self.ctx.newCFunction(js_flush, "flush", 0));
         _ = try self.ctx.setPropertyStr(global, "__native_loadPage", self.ctx.newCFunction(js_native_loadPage, "loadPage", 2));
+        _ = try self.ctx.setPropertyStr(global, "__loadHTML", self.ctx.newCFunction(js_loadHTML, "__loadHTML", 1));
+        _ = try self.ctx.setPropertyStr(global, "__native_readFileSync", self.ctx.newCFunction(js_file_sync.js_readFileSync, "__native_readFileSync", 1));
+        _ = try self.ctx.setPropertyStr(global, "__native_writeFileSync", self.ctx.newCFunction(js_file_sync.js_writeFileSync, "__native_writeFileSync", 2));
+        _ = try self.ctx.setPropertyStr(global, "__native_save", self.ctx.newCFunction(js_compositor.js_native_save, "__native_save", 4));
+        _ = try self.ctx.setPropertyStr(global, "__native_encode", self.ctx.newCFunction(js_compositor.js_native_encode, "__native_encode", 4));
 
         // --- bytecode cache: compile once, execute from bytecode every init ---
         {
@@ -1357,6 +1364,21 @@ fn parseFetchArgs(loop: *EventLoop, ctx: zqjs.Context, args: []const zqjs.Value)
     };
 }
 
+/// JS binding: `__loadHTML(htmlString)` → `zxp.loadHTML(html)`
+/// Parses a full HTML document string into the current document (trusted path).
+/// CSS init + style tags + inline styles are handled exactly like the CLI `loadHTML` path.
+fn js_loadHTML(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
+    if (argc < 1) return qjs.JS_ThrowTypeError(ctx.ptr, "loadHTML requires an HTML string");
+    const rc = RuntimeContext.get(ctx);
+    const engine_ptr = rc.engine_ptr orelse return qjs.JS_ThrowInternalError(ctx.ptr, "Fatal: ScriptEngine pointer lost");
+    const engine: *ScriptEngine = @ptrCast(@alignCast(engine_ptr));
+    const html = ctx.toZString(argv[0]) catch return zqjs.EXCEPTION;
+    defer ctx.freeZString(html);
+    engine.loadHTML(html) catch {};
+    return zqjs.UNDEFINED;
+}
+
 fn js_native_loadPage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = zqjs.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
@@ -1415,6 +1437,13 @@ fn js_native_loadPage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
         defer ctx.freeValue(css_val);
         if (!ctx.isUndefined(css_val)) {
             options.load_stylesheets = qjs.JS_ToBool(ctx.ptr, css_val) != 0;
+        }
+
+        // browser_profile: bool
+        const bp_val = ctx.getPropertyStr(argv[1], "browser_profile");
+        defer ctx.freeValue(bp_val);
+        if (!ctx.isUndefined(bp_val)) {
+            options.browser_profile = qjs.JS_ToBool(ctx.ptr, bp_val) != 0;
         }
     }
 

@@ -2,11 +2,13 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-`zexplorer` is a stateless, composable and embeddable engine designed for document content pipelines, not a general-purpose application runtime nor for rendering arbitrary public websites: a mini Swiss Army knife that runs fast, delivers, and dies.
+`zexplorer` is a stateless, composable and embeddable engine designed for HTML based document content pipelines: a mini Swiss Army knife that runs fast, delivers, and dies.
 
 It is a native DOM + JS runtime with some layout rendering capabilities (**Flexbox** layout rendering and raster compositing).
 
-Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and get back structured data or a layout as PNG, JPEG, WEBP, SVG, or PDF, without a browser.
+It is not a general-purpose application runtime nor for rendering arbitrary public websites.
+
+Feed the dev-server with a JavaScript snippet, or pass your HTML documents to the CLI, and get back structured data or a layout as PNG, JPEG, WEBP, or PDF, without a browser.
 
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
@@ -14,28 +16,45 @@ Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and g
 
 ---
 
-You can use it as:
+You can use it :
 
- 1) a library if you need to add native functionalities and are ready to use Zig,
- 2) via the CLI for composing steps,
- 3) as a service: you design a JavaScript snippet of your pipeline and POST it to the engine "/run" endpoint (default port 9984).
+ 1) as a library if you need to add native functionalities and are ready to use Zig,
+ 2) via the CLI for composing/piping as a one-shot multi-steps process,
+ 3) as a service: you pass a JavaScript snippet that and POST it to the running dev-server.
 
 ---
 
-**TL;DR**
+**TL;DR**:
 
 > - Cold start: 2ms
 > - Memory: 10MB
 > - Zero dependencies. Single binary.
 > - Features JavaScript ES2020
-> - SVG, PNG, JPEG, WEBP, PDF support
+> - can be used as a composable/embeddable tool (think `ffmepg`) or as a dev server serving requests over HTTP.
 > - supports HTML chunks streams (SSE)
-> - JSX support via "tagged templates" with `htm` embedded
-> - A "good enough" snapshot rendering engine. Based on `Flexbox` with `grid-1d` is emulated ❗️ Not arbitrary bot protected public websites using grid-2d, modals, position:fixed, CSS functions...
+> - suppports HTML or SVG with PNG, JPEG or WEBP input support, and output data with PNG, JPEG, WEBP and PDF support.
+> - No TypeScript nor JSX. It supports "tagged templates" with the embedded `htm` library.
+> - A "good enough" snapshot rendering engine. Based on `Flexbox` with `grid-1d` emulated.
 
-`zexplorer` can be used as a **Zig library** to add native functionalities or with the **CLI** or as a **service** over HTTP.
+**Limitations**:
+
+It is not
+
+- a `Node.js` or `Bun` alternative
+- a headless browser — no layout engine, no visual rendering
+- a full Web API implementation — however, it has "essential" coverage, focused on what frameworks actually need
+- a multi-tenant platform — it assumes process-level isolation (microVM/container)
+
+It cannot:
+
+- scrape arbitrary bot protected public websites,
+- paint complex CSS using grid-2d, position:fixed, CSS functions...
 
 ## What can it do?
+
+Think of it as a lightweight `JSDOM`+`DOMPurify`+`node-canvas`+`Satori` engine used with its built-in HTTP server or its composable CLI.
+
+It can:
 
 - **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
 - **Stream**  - receive HTML chunks and rebuild a real DOM.
@@ -44,7 +63,7 @@ You can use it as:
 - **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
 - **Run JS** — execute ES2020 scripts against a real DOM with fetch, timers, workers, and an event loop.
 
-> ❗️No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
+❗️No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
 
 ## How is it built?
 
@@ -75,13 +94,6 @@ The engine runs real framework code from [js-framework-benchmark](https://github
 | Memory footprint  | 10MB                      | ~50MB           | ~200MB          |
 | Web API coverage  | (essential)               | ~90%            | 100%            |
 | JavaScript engine | QuickJS (bytecode)        | Node.js V8      | Chrome V8       |
-
-## What it is not
-
-- Not a `Node.js` or `Bun` alternative — no persistent event I/O
-- Not a headless browser — no layout engine, no visual rendering
-- Not a full Web API implementation — "essential" coverage, focused on what frameworks actually need
-- Not a multi-tenant platform — assumes process-level isolation (microVM/container)
 
 ## Security
 
@@ -150,259 +162,152 @@ Raw HTML / SVG / CSS
 
 ---
 
-## CLI Showcase
+## Usage examples
 
-### HTML rendering examples
+### Render an HTML file
 
-**First example**: Take this HTML:
+We want to render this HTML:
 
-<details><summary>First CSS rendering example</summary>
+<https://github.com/ndrean/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.html>
 
-```html
-<!DOCTYPE html>
-<html>
-  <head>
-    <style>
-      h1 {
-        color:blue;
-        font-size:40px;
-      }
-      body {
-        background:#fff;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>CSS Test</h1>
-    <p style="color:red">inline style test</p>
-  </body>
-</html>
+- Using the **dev-server**: the pipeline is described in a JavaScript snippet where we read the HTML file using `fetch(url, headers)`, load the HTML with `zxp.loadHTML()` and paint the DOM using `zxp.paintDOM(node)` and get an ImageData. Then we can either print it in the terminal as a PNG using ``kitty` and use `zxp.encode(imageData, mimeType)`, or save the image locally, with `zxp.save(path, imageData)`.
+  
+In the example below, we encode in WEBP and will pipe the output to render an image in the terminal using `kitty`.
+
+```js
+const file = "file://src/examples/render_grid_1d/grid_1d.html";
+
+async function render() {
+  const file_data = await fetch(file);
+  const html = await file_data.text();
+  zxp.loadHTML(html);
+  const img = zxp.paintDOM(document.body);
+  return zxp.encode(img, "webp");
+}
+
+render();
 ```
 
-</details>
-
-You can compose:
+We start the dev-server with:
 
 ```sh
-echo '<!DOCTYPE html><html><head><style>h1{color:blue;font-size:40px}body{background:#fff;}</style></head><body><h1>CSS Test</h1><p style="color:red">inline style test</p></body></html>' | \
-./zig-out/bin/zxp convert - -o first_css_rendering.png
+./zig-out/bin/zxp server
 ```
 
-This gives you:
+and send an HTTP request with the content of the JavaScript snippet and pipe to display an image in the terminal:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/first_css_rendering.png" alt="first_css_rendering" width="300" height="200">
+```sh
+curl -s -X POST http://localhost:9984/run  \
+--data-binary @src/examples/render_grid_1d/grid_1d.js \
+| kitty +kitten icat
+```
+
+and get in your terminal the image:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.webp" alt="grid_1d.png" width="300" height="200">
 
 <br>
 
-**Grid-1D layout example**: The engine lets you render some CSS properties.
+If you want to save the image to a say JPEG, you can instead use `zxp.save()` and the file extension will use the proper encoding (amonst PNG, WEBP, JPEG and PDF).
 
-<details><summary>Example with grid-1d layout</summary>
-
-```html
-<html>
-  <head>
-    <style>
-      body {
-        background: #1e1e2e;
-        padding: 24px;
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-        width: 760px;
-      }
-
-      h3 {
-        color: #cba6f7;
-        font-size: 13px;
-      }
-
-      /* Test 1: 3 equal columns, wraps to 2 rows */
-      .grid-3col {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-      }
-      .grid-3col .cell {
-        background: #313244;
-        border: 1px solid #585b70;
-        border-radius: 6px;
-        padding: 16px;
-        color: #a6e3a1;
-        font-size: 14px;
-      }
-
-      /* Test 2: 4 equal columns with gap */
-      .grid-4col {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 8px;
-      }
-      .grid-4col .cell {
-        background: #45475a;
-        border: 1px solid #6c7086;
-        border-radius: 4px;
-        padding: 12px;
-        color: #89dceb;
-        font-size: 13px;
-      }
-
-      /* Test 3: grid-auto-flow: column — items flow horizontally */
-      .grid-autoflow {
-        display: grid;
-        grid-auto-flow: column;
-        gap: 10px;
-      }
-      .grid-autoflow .badge {
-        background: #f38ba8;
-        border-radius: 4px;
-        padding: 8px 14px;
-        color: #1e1e2e;
-        font-size: 13px;
-      }
-
-      /* Test 4: place-items: center — single centred item */
-      .grid-center {
-        display: grid;
-        place-items: center;
-        background: #181825;
-        border: 1px solid #cba6f7;
-        border-radius: 8px;
-        height: 100px;
-      }
-      .grid-center .label {
-        background: #cba6f7;
-        border-radius: 4px;
-        padding: 10px 24px;
-        color: #1e1e2e;
-        font-size: 14px;
-      }
-    </style>
-  </head>
-  <body>
-    <!-- Test 1: 3-column equal-fr, 6 items → 2 rows -->
-    <div>
-      <h3>repeat(3, 1fr) — 6 items, wraps to 2 rows</h3>
-      <div class="grid-3col">
-        <div class="cell">Column A</div>
-        <div class="cell">Column B</div>
-        <div class="cell">Column C</div>
-        <div class="cell">Row 2 — A</div>
-        <div class="cell">Row 2 — B</div>
-        <div class="cell">Row 2 — C</div>
-      </div>
-    </div>
-
-    <!-- Test 2: 4-column grid with gap, 8 items → 2 rows -->
-    <div>
-      <h3>repeat(4, 1fr) + gap: 8px — 8 items</h3>
-      <div class="grid-4col">
-        <div class="cell">Jan</div>
-        <div class="cell">Feb</div>
-        <div class="cell">Mar</div>
-        <div class="cell">Apr</div>
-        <div class="cell">May</div>
-        <div class="cell">Jun</div>
-        <div class="cell">Jul</div>
-        <div class="cell">Aug</div>
-      </div>
-    </div>
-
-    <!-- Test 3: grid-auto-flow: column → horizontal flex row -->
-    <div>
-      <h3>grid-auto-flow: column — horizontal strip</h3>
-      <div class="grid-autoflow">
-        <div class="badge">Alpha</div>
-        <div class="badge">Beta</div>
-        <div class="badge">Gamma</div>
-        <div class="badge">Delta</div>
-      </div>
-    </div>
-
-    <!-- Test 4: place-items: center → centered item in box -->
-    <div>
-      <h3>place-items: center</h3>
-      <div class="grid-center">
-        <div class="label" style="color: yellow">Centered content</div>
-      </div>
-    </div>
-  </body>
-</html>
+```js
+zxp.save(img, "src/examples/render_grid_1d/serve_grid_1d.webp");
 ```
 
-</details>
-
-To obtain an image (JPEG here) that represents this HTML file, you can use the CLI:
+- using the CLI: we use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
 
 ```sh
-zxp convert src/examples/test_grid_1d.html -w 595 -o test_grid_1d.jpeg
+./zig-out/bin/zxp convert src/examples/render_grid_1d/grid_1d.html -dpi 72 -o src/examples/render_grid_1d/grid_1d.pdf
 ```
 
-or in PDF if you prefer (with size A4, dpi 72<-> 595)
+- using the library:
+
+The code is: <https://github.com/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.zig>
+
+You run it with:
 
 ```sh
-zxp convert src/examples/test_grid_1d.html -dpi 72 -o test_grid_1d.pdf
+zig build example -Dname=render_grid_1d/grid_1d
 ```
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/test_grid_1d.jpeg" alt="grid example" width="500" height="400">
+---
 
-<br>
-
-If you use the library, you can run the Zig file:
-
-```sh
-zig build example -Dname=test_grid_1d
-```
-
-### Scrape a Vercel site in 1s
+### Scrape a Vercel site in less than 1s
 
 Scrape <https://demo.vercel.store> and get structured data extracted:
 
-You prepare a JavaScript to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `zxp.goto` and `zxp.waitForSelector`.
+- using the dev-server: you prepare a JavaScript snippet to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `await zxp.goto()` ot fetch, execute all the received JS chunks and CSS files and parse and sync the DOM and CSS to be able to `await zxp.waitForSelector()` which extracts the data using _querySelector_ against the DOM.
 
 ```js
 //  src/examples/vercel-demo/inline-select.js 
-await zxp.goto("https://demo.vercel.store");
-await zxp.waitForSelector("a[href^='/product/']");
+async function select() {
+  await zxp.goto("https://demo.vercel.store");
+  await zxp.waitForSelector("a[href^='/product/']");
 
-const links = document.querySelectorAll("a[href^='/product/']");
-const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
-const items = unique.map(href => {
-  const el = document.querySelector(`a[href='${href}']`);
-  return el.textContent.trim();
-});
-return items;
+  const links = document.querySelectorAll("a[href^='/product/']");
+  const unique = [
+    ...new Set(Array.from(links).map((el) => el.getAttribute("href"))),
+  ];
+  const items = unique.map((href) => {
+    const el = document.querySelector(`a[href='${href}']`);
+    return el.textContent.trim();
+  });
+  return items;
+}
+
+select();
 ```
 
-You run:
+Your server is still running:
+
+```sh
+./zig-out/bin/zxp server
+```
+
+You send a POST request:
+
+```sh
+curl -s -X POST http://localhost:9984/run  \
+--data-binary @src/examples/vercel-demo/inline-select.js
+```
+
+You receive in your terminal:
+
+```txt
+["Acme Circles T-Shirt$20.00USD", "Acme Drawstring Bag$12.00USD", "Acme Cup$15.00USD",...]
+```
+
+- using the CLI: you rus the verb `run`
 
 ```sh
 zxp run src/examples/vercel-demo/inline-select.js --pretty
 ```
 
-The result is logged in the terminal:
+- using the library:
 
-```txt
-0.26s user 0.04s system 26% cpu 1.108 total
+Source: <https://github.com/zexplorer/blob/main/src/examples/vercel-demo/inline-select.zig>
 
-[
-  "Acme Circles T-Shirt$20.00USD",
-  "Acme Drawstring Bag$12.00USD",
-  "Acme Cup$15.00USD",
-  ...
-]
+```sh
+zig build example -Dname=vercel-demo/vercel
 ```
+
+---
 
 ### Render the Vercel side
 
 If you want to visualize the website, you can do:
 
+- using the CLI: we use the verb `scrape` and run an additional snippet:
+
+<https://github.com/ndrean/zexplorer/blob/main/src/examples/vercel-demo/inline-images.js>
+
+The reason is that Next.js uses `srcset` to serve multiple formats, and we transform it into a `src ="data:image/webp;base64, ..."` to render using the Liveserver in VSCode.
+
+We use two custom native methods `zxp.fetchAll([urls], [headers])` and `zxp.arrayBufferToBase64DataUri(buffer, type)`.
+
 ```sh
-zxp scrape https://demo.vercel.store src/examples/inline-images.js -o vercel.html
+zxp scrape https://demo.vercel.store src/examples/inline-images.js -o src/examples/vercel-demo/vercel.html
 ```
-
-We run a JavaScript snippet (_src/examples/inline-images.js_) since we need to transform the served images into base64 data URIs as they  will not render if you just use a Liveserver in VSCode. Moreover, Next.js uses `srcset` to serve multiple formats, and we transform it into a `src ="data:image/webp;base64, ..."`.
-
-We use two custom native methods `fetchAll` and `arrayBufferToBase64DataUri`.
 
 <details><summary>inline-image.js helper</summary>
 
@@ -456,6 +361,25 @@ fetchImages();
 
 <br>
 
+When using the server, we then use this function along with `zxp.goto()`:
+
+```js
+async function scrape() {
+  url = "https://demo.vercel.store";
+  await zxp.goto(url);
+  return await fetchImages(url); // <-- returns the serailized DOM
+  // return zxp.fs.WriteFileSync("src/examples/demo-vercel/vercel.html) <- save disk
+}
+scrape();
+
+```
+
+You can serve this HTML via the LiveServer to have a snapshot of the Vercel demo website.
+
+<https://github.com/ndrean/zexplorer/blob/main/demo-vercel/vercel.html>
+
+---
+
 ### Generate a Leaflet map PDF report
 
 Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map with an SVG template, and output a multi-layered PDF — all in one shot:
@@ -466,9 +390,8 @@ See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-
 
 ---
 
+
 ## Library quick start
-
-
 
 ### Hello world
 
@@ -1164,8 +1087,11 @@ pub fn main() !void {
 }
 
 fn run_test(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
+    var zxp_rt = z.ZxpRuntime.init(allocator, sbx);
+    defer zxp_rt.deinit();
+    var engine = try z.ScriptEngine.init(allocator, zxp_rt);
     defer engine.deinit();
+
     const script = @embedFile("test_og_generator.js");
 
     const val = try engine.eval(script, "<script>", .global);

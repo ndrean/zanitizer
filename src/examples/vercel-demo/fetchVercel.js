@@ -1,7 +1,5 @@
-// Inline external images as base64 data URIs using native parallel fetchAll().
-// Resolves Next.js srcset URLs; removes srcset after inlining.
-async function fetchImages() {
-  const base = "https://demo.vercel.store";
+async function fetchImages(url) {
+  const base = url;
   const imgs = Array.from(document.querySelectorAll("img"));
 
   // Collect one URL per image (first srcset entry preferred over src).
@@ -26,7 +24,6 @@ async function fetchImages() {
       Referer: base + "/",
     },
   );
-  console.log(results);
 
   // Map results back to images (skip nulls).
   let ri = 0;
@@ -40,4 +37,13 @@ async function fetchImages() {
 
   return document.documentElement.outerHTML;
 }
-fetchImages();
+
+async function scrape() {
+  url = "https://demo.vercel.store";
+  await zxp.goto(url);
+  const html = await fetchImages(url);
+  return html;
+  // return zxp.fs.writeFileSync("src/examples/vercel-demo/vv.html", html);
+}
+
+scrape();

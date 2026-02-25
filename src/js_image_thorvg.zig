@@ -470,8 +470,62 @@ pub fn js_createImageBitmap(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_in
         return promise;
     }
 
+    // ImageData path: { data: ArrayBuffer, width, height } from zxp.paintDOM
+    const data_val = ctx.getPropertyStr(args[0], "data");
+    defer ctx.freeValue(data_val);
+    if (ctx.isArrayBuffer(data_val)) {
+        const width_val = ctx.getPropertyStr(args[0], "width");
+        defer ctx.freeValue(width_val);
+        const height_val = ctx.getPropertyStr(args[0], "height");
+        defer ctx.freeValue(height_val);
+        var img_w: u32 = 0;
+        var img_h: u32 = 0;
+        _ = qjs.JS_ToUint32(ctx.ptr, &img_w, width_val);
+        _ = qjs.JS_ToUint32(ctx.ptr, &img_h, height_val);
+        if (img_w > 0 and img_h > 0) {
+            const rgba = ctx.getArrayBuffer(data_val) catch {
+                const err = makeTypeError(ctx, "Failed to read ImageData buffer");
+                _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
+                ctx.freeValue(err);
+                return promise;
+            };
+            const img_ptr = rc.allocator.create(Image) catch {
+                const err = makeTypeError(ctx, "Out of memory");
+                _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
+                ctx.freeValue(err);
+                return promise;
+            };
+            const pixels = rc.allocator.alloc(u8, rgba.len) catch {
+                rc.allocator.destroy(img_ptr);
+                const err = makeTypeError(ctx, "Out of memory");
+                _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
+                ctx.freeValue(err);
+                return promise;
+            };
+            @memcpy(pixels, rgba);
+            img_ptr.* = .{
+                .width = @intCast(img_w),
+                .height = @intCast(img_h),
+                .channels = 4,
+                .pixels = pixels.ptr,
+                .allocator = rc.allocator,
+                .pixel_owner = .zig,
+            };
+            const obj = qjs.JS_NewObjectClass(ctx.ptr, rc.classes.image);
+            if (qjs.JS_IsException(obj)) {
+                img_ptr.deinit();
+                _ = ctx.call(reject, zqjs.UNDEFINED, &.{obj});
+                return promise;
+            }
+            _ = qjs.JS_SetOpaque(obj, img_ptr);
+            _ = ctx.call(resolve, zqjs.UNDEFINED, &.{obj});
+            ctx.freeValue(obj);
+            return promise;
+        }
+    }
+
     const blob_obj = ctx.getOpaqueAs(js_blob.BlobObject, args[0], rc.classes.blob) orelse {
-        const err = makeTypeError(ctx, "Argument 1 must be a Blob");
+        const err = makeTypeError(ctx, "Argument 1 must be a Blob or ImageData");
         _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
         ctx.freeValue(err);
         return promise;

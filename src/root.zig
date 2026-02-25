@@ -52,6 +52,7 @@ pub const AsyncBridge = @import("async_bridge.zig");
 pub const FormDataBridge = @import("js_formData.zig").FormDataBridge;
 pub const FSBridge = @import("js_fs.zig").FSBridge;
 pub const sanitizer_mod = @import("modules/sanitizer.zig");
+pub const css_color = @import("css_color.zig");
 
 pub const Mailbox = @import("mailbox.zig").Mailbox;
 pub const bindings = @import("bindings_generated.zig");

@@ -309,7 +309,7 @@ fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
 
     const c_flags = &.{ "-std=c99", "-DLEXBOR_STATIC" };
     lib.addCSourceFile(.{ .file = b.path("src/minimal.c"), .flags = c_flags });
-    lib.addCSourceFile(.{ .file = b.path("src/c/stb_image.c"), .flags = &.{ "-g", "-fno-sanitize=undefined" } });
+    lib.addCSourceFile(.{ .file = b.path("src/c/stb_image.c"), .flags = &.{ "-g", "-fno-sanitize=undefined", "-fwrapv" } });
     // Legacy: nanosvg replaced by ThorVG for SVG rasterization
     // lib.addCSourceFile(.{ .file = b.path("src/c/nanosvg.c"), .flags = &.{ "-std=c99", "-fno-sanitize=undefined" } });
     lib.addCSourceFile(.{ .file = b.path("src/css_shim.c"), .flags = c_flags });
@@ -408,7 +408,7 @@ fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
             },
         }),
     });
-    exe.addCSourceFiles(.{ .files = &.{"src/c/stb_image.c"}, .flags = &.{"-g"} });
+    exe.addCSourceFiles(.{ .files = &.{"src/c/stb_image.c"}, .flags = &.{ "-g", "-fno-sanitize=undefined", "-fwrapv" } });
     // Legacy: nanosvg replaced by ThorVG
     // exe.addCSourceFiles(.{ .files = &.{"src/c/nanosvg.c"}, .flags = &.{"-std=c99"} });
     linkAllLibs(exe, paths, libs);
@@ -501,12 +501,19 @@ fn buildTests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bui
 
 fn buildExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module, zexplorer_module: *std.Build.Module) void {
     const example_name = b.option([]const u8, "name", "Example name (without .zig extension)");
-    if (example_name) |name| {
+    if (example_name) |ex_name| {
+        const name: []const u8 = blk: {
+            var it = std.mem.splitAny(u8, ex_name, "/");
+            var last: []const u8 = ex_name;
+            while (it.next()) |n| last = n;
+            break :blk last;
+        };
+
         const example_step = b.step("example", "Run an example from src/examples/");
         const example_exe = b.addExecutable(.{
             .name = b.fmt("example-{s}", .{name}),
             .root_module = b.createModule(.{
-                .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{name})),
+                .root_source_file = b.path(b.fmt("src/examples/{s}.zig", .{ex_name})),
                 .target = target,
                 .optimize = optimize,
                 .imports = &.{

@@ -220,12 +220,15 @@ pub fn install(ctx: w.Context) !void {
     _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "__flush", flush);
 
     // arrayBufferToBase64DataUri: native base64 data URI encoding
-    const ab_to_b64 = ctx.newCFunction(js_arrayBufferToBase64DataUri, "arrayBufferToBase64DataUri", 2);
-    _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "arrayBufferToBase64DataUri", ab_to_b64);
+    // const ab_to_b64 = ctx.newCFunction(js_arrayBufferToBase64DataUri, "arrayBufferToBase64DataUri", 2);
+    // _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "__arrayBufferToBase64DataUri", ab_to_b64);
+    try ctx.setPropertyStr(global, "__native_arrayBufferToBase64DataUri", ctx.newCFunction(js_arrayBufferToBase64DataUri, "arrayBufferToBase64DataUri", 2));
 
-    // fetchAll: parallel HTTP fetcher using curl_multi
-    const fetch_all_fn = ctx.newCFunction(js_fetch_all.js_fetchAll, "fetchAll", 2);
-    _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "fetchAll", fetch_all_fn);
+    // fetchAll: parallel HTTP fetcher using curl_multi. Takes 2 arrays, [url],[req_headers] and returns [{ok, status, data, type}]
+    try ctx.setPropertyStr(global, "__native_fetchAll", ctx.newCFunction(js_fetch_all.js_fetchAll, "fetchAll", 2));
+    // const fetch_all_fn = ctx.newCFunction(js_fetch_all.js_fetchAll, "fetchAll", 2);
+    // _ = qjs.JS_SetPropertyStr(ctx.ptr, global, "fetchAll", fetch_all_fn);
+
     // All JS polyfills (env, rAF, MessageChannel, etc.) now live in polyfills.js
     // and are loaded as bytecode by ScriptEngine after zexplorer.js.
 }
