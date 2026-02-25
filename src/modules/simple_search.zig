@@ -90,6 +90,34 @@ pub fn getElementsByClassName(allocator: std.mem.Allocator, doc: *z.HTMLDocument
     return walker.genSearchElements(ClassContext, z.elementToNode(root), &ctx);
 }
 
+/// Find elements by class name starting from a given DOM node (like element.getElementsByClassName)
+/// Returns owned slice - caller must free with allocator.free(result)
+pub fn getElementsByClassNameFromNode(allocator: std.mem.Allocator, root_node: *z.DomNode, class_name: []const u8) ![]const *z.HTMLElement {
+    const ClassContext = struct {
+        allocator: std.mem.Allocator,
+        results: std.ArrayList(*z.HTMLElement),
+        matcher: *const fn (*z.DomNode, ctx: *@This()) callconv(.c) c_int,
+        target_class: []const u8,
+
+        fn findClass(node: *z.DomNode, ctx: *@This()) callconv(.c) c_int {
+            const element = z.nodeToElement(node) orelse return z._CONTINUE;
+            if (z.hasClass(element, ctx.target_class)) {
+                ctx.results.append(ctx.allocator, element) catch return z._STOP;
+            }
+            return z._CONTINUE;
+        }
+    };
+
+    var ctx = ClassContext{
+        .allocator = allocator,
+        .results = .empty,
+        .matcher = ClassContext.findClass,
+        .target_class = class_name,
+    };
+
+    return walker.genSearchElements(ClassContext, root_node, &ctx);
+}
+
 /// Find elements by tag name (like document.getElementsByTagName)
 /// Returns owned slice - caller must free with allocator.free(result)
 pub fn getElementsByTagName(allocator: std.mem.Allocator, doc: *z.HTMLDocument, tag_name: []const u8) ![]const *z.HTMLElement {

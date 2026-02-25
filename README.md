@@ -308,11 +308,14 @@ We want to render this HTML:
 
 We will use the three methods: use the dev-server and send a POST HTTP request whose payload is JavaScript code, use the CLI with the verb `convert`, and run `Zig` code.
 
-- **dev-server**: the pipeline is described in a JavaScript snippet where we:
-  - read the HTML file using `fetch(url, headers)`,
-  - load (parse, load JS chunks, load and sync CSS) the full HTML with `zxp.loadHTML(html, {sanitize: ?})`
-  - paint the DOM using `zxp.paintDOM(node)` and get an ImageData.
-  - Then we can either print it in the terminal as a PNG using `kitty` and use `zxp.encode(imageData, mimeType)`, or save the image locally, with `zxp.save(path, imageData)`.
+#### Dev-server
+
+The pipeline is described in a JavaScript snippet where we:
+
+- read the HTML file using `fetch(url, headers)`,
+- load (parse, load JS chunks, load and sync CSS) the full HTML with `zxp.loadHTML(html, {sanitize: ?})`
+- paint the DOM using `zxp.paintDOM(node)` and get an ImageData.
+- Then we can either print it in the terminal as a PNG using `kitty` and use `zxp.encode(imageData, mimeType)`, or save the image locally, with `zxp.save(path, imageData)`.
   
 In the example below, we encode in WEBP and will pipe the output to render an image in the terminal using `kitty`.
 
@@ -356,13 +359,15 @@ If you want to save the image to a say JPEG, you can instead use `zxp.save()` an
 zxp.save(img, "src/examples/render_grid_1d/serve_grid_1d.webp");
 ```
 
-- **CLI**: we use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
+#### CLI
+
+We use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
 
 ```sh
 ./zig-out/bin/zxp convert src/examples/render_grid_1d/grid_1d.html -dpi 72 -o src/examples/render_grid_1d/grid_1d.pdf
 ```
 
-- **using the library**:
+#### The library
 
 <details><summary>Zig code using the library</summary>
 
@@ -425,7 +430,9 @@ zig build example -Dname=render_grid_1d/grid_1d
 
 Scrape <https://demo.vercel.store> and get structured data extracted:
 
-- using the dev-server: you prepare a JavaScript snippet to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `await zxp.goto()` ot fetch, execute all the received JS chunks and CSS files and parse and sync the DOM and CSS to be able to `await zxp.waitForSelector()` which extracts the data using _querySelector_ against the DOM.
+#### Dev-server
+  
+You prepare a JavaScript snippet to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `await zxp.goto()` ot fetch, execute all the received JS chunks and CSS files and parse and sync the DOM and CSS to be able to `await zxp.waitForSelector()` which extracts the data using _querySelector_ against the DOM.
 
 ```js
 //  src/examples/vercel-demo/inline-select.js 
@@ -466,13 +473,15 @@ You receive in your terminal:
 ["Acme Circles T-Shirt$20.00USD", "Acme Drawstring Bag$12.00USD", "Acme Cup$15.00USD",...]
 ```
 
-- using the CLI: you rus the verb `run`
+#### CLI
+
+You use the verb `run`
 
 ```sh
 zxp run src/examples/vercel-demo/inline-select.js --pretty
 ```
 
-- using the library:
+#### The library
 
 Source: <https://github.com/zexplorer/blob/main/src/examples/vercel-demo/inline-select.zig>
 
@@ -568,6 +577,8 @@ You can serve this HTML via the LiveServer to have a snapshot of the Vercel demo
 <https://github.com/ndrean/zexplorer/blob/main/demo-vercel/vercel.html>
 
 ---
+
+### Stream html chunks
 
 ### Generate a Leaflet map PDF report
 

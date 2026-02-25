@@ -651,6 +651,7 @@ pub const getElementByDataAttribute = search.getElementByDataAttribute;
 // Multiple Element Search Functions (Walker-based, returns slices)
 
 pub const getElementsByClassName = search.getElementsByClassName;
+pub const getElementsByClassNameFromNode = search.getElementsByClassNameFromNode;
 pub const getElementsByTagName = search.getElementsByTagName;
 pub const getElementsById = search.getElementsById;
 pub const getElementsByAttribute = search.getElementsByAttribute;

@@ -147,6 +147,7 @@ pub const DOMBridge = struct {
             js_utils.defineMethod(ctx, node_proto, "appendChild", js_appendChild_manual, 1);
             js_utils.defineMethod(ctx, node_proto, "querySelector", js_querySelector, 1);
             js_utils.defineMethod(ctx, node_proto, "querySelectorAll", js_querySelectorAll, 1);
+            js_utils.defineMethod(ctx, node_proto, "getElementsByClassName", js_getElementsByClassName, 1);
             js_utils.defineMethod(ctx, node_proto, "append", js_append, -1);
             js_utils.defineMethod(ctx, node_proto, "prepend", js_prepend, -1);
             js_utils.defineMethod(ctx, node_proto, "before", js_before, -1);
@@ -171,6 +172,7 @@ pub const DOMBridge = struct {
             js_utils.defineMethod(ctx, el_proto, "setAttribute", js_setAttribute_sanitized, 2);
             js_utils.defineMethod(ctx, el_proto, "querySelector", js_querySelector, 1);
             js_utils.defineMethod(ctx, el_proto, "querySelectorAll", js_querySelectorAll, 1);
+            js_utils.defineMethod(ctx, el_proto, "getElementsByClassName", js_getElementsByClassName, 1);
             js_utils.defineMethod(ctx, el_proto, "matches", js_matches, 1);
             js_utils.defineMethod(ctx, el_proto, "closest", js_closest, 1);
             js_utils.defineMethod(ctx, el_proto, "insertAdjacentHTML", js_insertAdjacentHTML, 2);
@@ -452,6 +454,9 @@ pub const DOMBridge = struct {
 
         const gtn_fn = ctx.newCFunction(js_getElementsByTagName, "getElementsByTagName", 1);
         try ctx.setPropertyStr(doc_obj, "getElementsByTagName", gtn_fn);
+
+        const gcn_fn = ctx.newCFunction(js_getElementsByClassName, "getElementsByClassName", 1);
+        try ctx.setPropertyStr(doc_obj, "getElementsByClassName", gcn_fn);
 
         const ctn_fn = ctx.newCFunction(js_createTextNode, "createTextNode", 1);
         try ctx.setPropertyStr(doc_obj, "createTextNode", ctn_fn);
@@ -1148,6 +1153,50 @@ fn js_getElementsByTagName(
     defer bridge.allocator.free(elements);
 
     // Convert to JS Array
+    const array = ctx.newArray();
+    for (elements, 0..) |el, i| {
+        const val = DOMBridge.wrapElement(ctx, el) catch continue;
+        _ = ctx.setPropertyUint32(array, @intCast(i), val) catch {};
+    }
+
+    return array;
+}
+
+fn js_getElementsByClassName(
+    ctx_ptr: ?*z.qjs.JSContext,
+    this_val: zqjs.Value,
+    argc: c_int,
+    argv: [*c]z.qjs.JSValue,
+) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    if (argc < 1) return ctx.throwTypeError("getElementsByClassName requires 1 argument");
+
+    // Unwrap 'this' (Polymorphic: Element, Document, Fragment, or generic Node)
+    var root_node: ?*z.DomNode = null;
+
+    if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
+        root_node = z.elementToNode(@ptrCast(ptr));
+    } else if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| {
+        const doc: *z.HTMLDocument = @ptrCast(ptr);
+        root_node = z.documentRoot(doc);
+    } else if (ctx.getOpaque(this_val, rc.classes.document_fragment)) |ptr| {
+        root_node = z.fragmentToNode(@ptrCast(ptr));
+    } else if (ctx.getOpaque(this_val, rc.classes.dom_node)) |ptr| {
+        root_node = @ptrCast(@alignCast(ptr));
+    } else {
+        return ctx.throwTypeError("getElementsByClassName called on invalid object");
+    }
+
+    if (root_node == null) return ctx.newArray();
+
+    const class_name = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(class_name);
+
+    const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+    const elements = z.getElementsByClassNameFromNode(bridge.allocator, root_node.?, class_name) catch return w.EXCEPTION;
+    defer bridge.allocator.free(elements);
+
     const array = ctx.newArray();
     for (elements, 0..) |el, i| {
         const val = DOMBridge.wrapElement(ctx, el) catch continue;
