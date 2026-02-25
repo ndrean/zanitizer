@@ -699,14 +699,16 @@ pub fn registerWorkerClass(ctx: zqjs.Context) !void {
     const rt = ctx.getRuntime();
     const loop = EventLoop.getFromContext(ctx) orelse return error.NoEventLoop;
 
-    loop.worker_class_id = rt.newClassID();
-    worker_class_id = loop.worker_class_id;
-
-    try rt.newClass(loop.worker_class_id, .{
-        .class_name = "Worker",
-        .finalizer = workerFinalizer,
-        .gc_mark = workerGCMark,
-    });
+    // Register the Worker class on the runtime once per thread (threadlocal guard).
+    if (worker_class_id == 0) {
+        worker_class_id = rt.newClassID();
+        try rt.newClass(worker_class_id, .{
+            .class_name = "Worker",
+            .finalizer = workerFinalizer,
+            .gc_mark = workerGCMark,
+        });
+    }
+    loop.worker_class_id = worker_class_id;
 
     const proto = ctx.newObject();
     // defer ctx.freeValue(proto); // <--- the BUG!!!!!

@@ -619,12 +619,11 @@ pub fn install(ctx: zqjs.Context) !void {
     if (rc.classes.readable_stream == 0) {
         rc.classes.readable_stream = rt.newClassID();
         g_stream_class_id = rc.classes.readable_stream;
+        try rt.newClass(rc.classes.readable_stream, .{
+            .class_name = "ReadableStream",
+            .finalizer = js_ReadableStream_finalizer,
+        });
     }
-
-    try rt.newClass(rc.classes.readable_stream, .{
-        .class_name = "ReadableStream",
-        .finalizer = js_ReadableStream_finalizer,
-    });
 
     const stream_proto = ctx.newObject();
     _ = qjs.JS_SetPropertyStr(ctx.ptr, stream_proto, "getReader", qjs.JS_NewCFunction(ctx.ptr, js_ReadableStream_getReader, "getReader", 0));
@@ -644,12 +643,11 @@ pub fn install(ctx: zqjs.Context) !void {
     if (rc.classes.readable_stream_reader == 0) {
         rc.classes.readable_stream_reader = rt.newClassID();
         g_reader_class_id = rc.classes.readable_stream_reader;
+        try rt.newClass(rc.classes.readable_stream_reader, .{
+            .class_name = "ReadableStreamDefaultReader",
+            .finalizer = js_Reader_finalizer,
+        });
     }
-
-    try rt.newClass(rc.classes.readable_stream_reader, .{
-        .class_name = "ReadableStreamDefaultReader",
-        .finalizer = js_Reader_finalizer,
-    });
 
     const reader_proto = ctx.newObject();
     _ = qjs.JS_SetPropertyStr(ctx.ptr, reader_proto, "read", qjs.JS_NewCFunction(ctx.ptr, js_Reader_read, "read", 0));

@@ -707,7 +707,9 @@ test "module loader: import traversal escape blocked" {
     const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
     defer alloc.free(cwd);
 
-    var engine = try ScriptEngine.init(alloc, cwd);
+    var zxp_rt = try @import("zxp_runtime.zig").ZxpRuntime.init(alloc, cwd);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(alloc, zxp_rt);
     defer engine.deinit();
 
     // Try to import a module that escapes the sandbox via ../
@@ -726,7 +728,9 @@ test "module loader: nonexistent local module fails gracefully" {
     const cwd = try std.fs.cwd().realpathAlloc(alloc, ".");
     defer alloc.free(cwd);
 
-    var engine = try ScriptEngine.init(alloc, cwd);
+    var zxp_rt = try @import("zxp_runtime.zig").ZxpRuntime.init(alloc, cwd);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(alloc, zxp_rt);
     defer engine.deinit();
 
     const script =

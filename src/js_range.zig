@@ -155,15 +155,17 @@ pub const RangeBridge = struct {
         const rt_ptr = qjs.JS_GetRuntime(ctx.ptr);
         const rc = RuntimeContext.get(ctx);
 
-        var class_id: z.qjs.JSClassID = 0;
-        _ = z.qjs.JS_NewClassID(rt_ptr, &class_id); // Generate new unique ID
-        rc.classes.range = class_id;
+        if (rc.classes.range == 0) {
+            var class_id: z.qjs.JSClassID = 0;
+            _ = z.qjs.JS_NewClassID(rt_ptr, &class_id);
+            rc.classes.range = class_id;
 
-        const class_def = qjs.JSClassDef{
-            .class_name = "Range",
-            .finalizer = range_finalizer,
-        };
-        _ = qjs.JS_NewClass(rt_ptr, class_id, &class_def);
+            const class_def = qjs.JSClassDef{
+                .class_name = "Range",
+                .finalizer = range_finalizer,
+            };
+            _ = qjs.JS_NewClass(rt_ptr, class_id, &class_def);
+        }
 
         // Prototype
         const proto = ctx.newObject();

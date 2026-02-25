@@ -8,6 +8,10 @@
             .url = "https://github.com/jiacai2050/zig-curl/archive/refs/tags/v0.3.2.tar.gz",
             .hash = "curl-0.3.2-P4tT4SXPAACuV6f5eyh4jG_1SspjWwMm_vRJfoKrQep5",
         },
+        .httpz = .{
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#ddaf1989f9c5fe1b139fa846ad273efd4368083a",
+            .hash = "httpz-0.0.0-PNVzrN40BwD3lGAE8l_pShvVIGSlWglmFOsdhJnMVcXR",
+        },
     },
     .paths = .{
         "build.zig",

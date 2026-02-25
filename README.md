@@ -12,6 +12,16 @@ Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and g
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
 </p>
 
+---
+
+You can use it as:
+
+ 1) a library if you need to add native functionalities and are ready to use Zig,
+ 2) via the CLI for composing steps,
+ 3) as a service: you design a JavaScript snippet of your pipeline and POST it to the engine "/run" endpoint (default port 9984).
+
+---
+
 **TL;DR**
 
 > - Cold start: 2ms
@@ -19,10 +29,11 @@ Feed it with your HTML or SVG documents, or JavaScript against a real DOM, and g
 > - Zero dependencies. Single binary.
 > - Features JavaScript ES2020
 > - SVG, PNG, JPEG, WEBP, PDF support
+> - supports HTML chunks streams (SSE)
 > - JSX support via "tagged templates" with `htm` embedded
 > - A "good enough" snapshot rendering engine. Based on `Flexbox` with `grid-1d` is emulated ❗️ Not arbitrary bot protected public websites using grid-2d, modals, position:fixed, CSS functions...
 
-`zexplorer` can be used as a **Zig library** to add native functionalities or with the **CLI**.
+`zexplorer` can be used as a **Zig library** to add native functionalities or with the **CLI** or as a **service** over HTTP.
 
 ## What can it do?
 
@@ -48,6 +59,7 @@ A native Zig engine that wires together purpose-built C/C++ libraries — no run
 | PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation & text layer            |
 | Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)      |
 | Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi                 |
+| WebServer                | [httpz-zig](https://github.com/karlseguin/http.zig)                                             | Serve over HTTP                        |
 | Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                     |
 
 Can be compared to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 10MB footprint, 2ms cold start.

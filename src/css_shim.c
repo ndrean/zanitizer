@@ -11,7 +11,9 @@
 #include <lexbor/css/declaration.h>
 #include <lexbor/css/selectors/selectors.h>
 #include <lexbor/style/dom/interfaces/document.h>
+#include <lexbor/style/html/interfaces/document.h>
 #include <lexbor/html/interfaces/document.h>
+#include <lexbor/html/interfaces/element.h>
 #include <lexbor/html/parser.h>
 
 // ============================================================================
@@ -137,34 +139,32 @@ void zexp_css_at_rule_get_prelude_offsets(lxb_css_rule_t *rule,
 // Document stylesheet cleanup
 // ============================================================================
 
-// Destroy all stylesheets attached to the document's CSS state.
-// lexbor_array_destroy() only frees the array pointer, not the individual
-// stylesheet objects. Each stylesheet has its own memory pool that must be
-// freed via lxb_css_stylesheet_destroy(sst, true).
-// Call this BEFORE lxb_dom_document_css_destroy() to avoid leaks.
-void zexp_destroy_document_stylesheets(lxb_dom_document_t *document)
+// Null-safe wrapper around lxb_html_document_stylesheet_destroy_all().
+// The lexbor function uses lexbor_array_pop() and correctly skips stylesheets
+// that share the CSS engine memory pool (css->memory != sst->memory), avoiding
+// the double-free that a naive always-destroy loop would cause.
+// Call this BEFORE lxb_html_document_css_destroy() to avoid leaks.
+void zexp_destroy_document_stylesheets(lxb_html_document_t *document)
 {
-    if (document == NULL || document->css == NULL) return;
+    if (document == NULL) return;
+    lxb_dom_document_t *dom = lxb_dom_interface_document(document);
+    if (dom == NULL || dom->css == NULL) return;
+    lxb_html_document_stylesheet_destroy_all(document, true);
+}
 
-    lexbor_array_t *stylesheets = document->css->stylesheets;
-    if (stylesheets == NULL) return;
+// ============================================================================
+// Null-safe element style attachment
+// ============================================================================
 
-    for (size_t i = 0; i < stylesheets->length; i++) {
-        lxb_css_stylesheet_t *sst = (lxb_css_stylesheet_t *)stylesheets->list[i];
-        if (sst == NULL) continue;
-
-        // Null out ALL occurrences of this pointer first to prevent double-free.
-        // The same stylesheet can appear multiple times if attached repeatedly
-        // (e.g. via repeated loadCSS calls).
-        for (size_t j = i; j < stylesheets->length; j++) {
-            if (stylesheets->list[j] == sst) {
-                stylesheets->list[j] = NULL;
-            }
-        }
-
-        (void) lxb_css_stylesheet_destroy(sst, true);
-    }
-    stylesheets->length = 0;
+// lxb_dom_document_element_styles_attach() segfaults (at offset 0x28) when
+// doc->css is NULL.  This safe variant skips the call gracefully, so scripts
+// that manipulate the DOM without first calling initDocumentCSS() don't crash.
+lxb_status_t zexp_element_styles_attach_safe(lxb_html_element_t *element)
+{
+    if (element == NULL) return LXB_STATUS_OK;
+    lxb_dom_document_t *doc = lxb_dom_interface_node(element)->owner_document;
+    if (doc == NULL || doc->css == NULL) return LXB_STATUS_OK;
+    return lxb_dom_document_element_styles_attach(lxb_dom_interface_element(element));
 }
 
 // ============================================================================

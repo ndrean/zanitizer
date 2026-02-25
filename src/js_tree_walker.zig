@@ -334,15 +334,18 @@ pub const TreeWalkerBridge = struct {
         const rt_ptr = qjs.JS_GetRuntime(ctx.ptr);
         const rc = RuntimeContext.get(ctx);
 
-        var class_id: qjs.JSClassID = 0;
-        _ = qjs.JS_NewClassID(rt_ptr, &class_id);
-        rc.classes.tree_walker = class_id;
+        if (rc.classes.tree_walker == 0) {
+            var class_id: qjs.JSClassID = 0;
+            _ = qjs.JS_NewClassID(rt_ptr, &class_id);
+            rc.classes.tree_walker = class_id;
 
-        const class_def = qjs.JSClassDef{
-            .class_name = "TreeWalker",
-            .finalizer = tree_walker_finalizer,
-        };
-        _ = qjs.JS_NewClass(rt_ptr, class_id, &class_def);
+            const class_def = qjs.JSClassDef{
+                .class_name = "TreeWalker",
+                .finalizer = tree_walker_finalizer,
+            };
+            _ = qjs.JS_NewClass(rt_ptr, class_id, &class_def);
+        }
+        const class_id = rc.classes.tree_walker;
 
         // Prototype with methods
         const proto = ctx.newObject();

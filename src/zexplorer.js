@@ -1,27 +1,11 @@
-// --- zexplorer.js (Embedded in Zig, runs on boot) ---
+// --- zexplorer.js ---
+// Core ZXP engine API — embedded in Zig, runs on every ScriptEngine init.
+// Compat shims and environment polyfills live in polyfills.js (loaded after).
 
-if (typeof window === "undefined") {
-  globalThis.window = globalThis;
-}
-if (typeof self === "undefined") {
-  globalThis.self = globalThis;
-}
+// ── Location Polyfill ──────────────────────────────────────────────────────
+// Called from zxp.goto() to set window.location before user scripts run.
 
-// navigator is set in Zig (js_polyfills.install) with a full Chrome-like userAgent
-window.devicePixelRatio = window.devicePixelRatio || 1;
-
-// ShadowRoot stub — HTMX checks `instanceof ShadowRoot` during DOM processing.
-// No real shadow DOM support, just prevent ReferenceError.
-if (typeof globalThis.ShadowRoot === "undefined") {
-  globalThis.ShadowRoot = class ShadowRoot {};
-}
-
-// Document readyState — starts as "loading", frameworks check this to decide
-// whether to init immediately or wait for DOMContentLoaded.
-// The script engine fires DOMContentLoaded after all scripts execute.
-if (typeof document !== "undefined" && !document.readyState) {
-  document.readyState = "loading";
-}
+console.log("[zxp] Booting standard library...");
 
 function applyLocationPolyfill(urlStr) {
   try {
@@ -59,242 +43,9 @@ function applyLocationPolyfill(urlStr) {
   }
 }
 
-// Namespace-aware attribute stubs: lexbor doesn't track XML namespaces,
-// so we ignore the namespace URI and delegate to the plain attribute API.
-// Needed by D3, Snap.svg, and any library that builds SVG via the DOM.
-if (!globalThis.Element.prototype.setAttributeNS) {
-  globalThis.Element.prototype.setAttributeNS = function (ns, name, value) {
-    this.setAttribute(name, value);
-  };
-}
-if (!globalThis.Element.prototype.getAttributeNS) {
-  globalThis.Element.prototype.getAttributeNS = function (ns, name) {
-    return this.getAttribute(name);
-  };
-}
-if (!globalThis.Element.prototype.removeAttributeNS) {
-  globalThis.Element.prototype.removeAttributeNS = function (ns, name) {
-    this.removeAttribute(name);
-  };
-}
+// ── htm: JSX-like tagged templates for real DOM (no VDOM) ─────────────────
+// htm parser (https://github.com/developit/htm)
 
-globalThis.SVGRect = function () {
-  this.x = 0;
-  this.y = 0;
-  this.width = 0;
-  this.height = 0;
-};
-
-// Attach it to all Elements (safest headless fallback)
-if (!globalThis.Element.prototype.createSVGRect) {
-  globalThis.Element.prototype.createSVGRect = function () {
-    return new SVGRect();
-  };
-}
-
-globalThis.SVGRect = function () {
-  this.x = 0;
-  this.y = 0;
-  this.width = 0;
-  this.height = 0;
-};
-globalThis.SVGMatrix = function () {
-  this.a = 1;
-  this.b = 0;
-  this.c = 0;
-  this.d = 1;
-  this.e = 0;
-  this.f = 0;
-};
-
-if (!globalThis.Element.prototype.createSVGRect) {
-  globalThis.Element.prototype.createSVGRect = function () {
-    return new SVGRect();
-  };
-}
-
-globalThis.Range.prototype.createContextualFragment = function (htmlString) {
-  const template = document.createElement("template");
-  template.innerHTML = htmlString;
-  return template.content; // Returns a DocumentFragment
-};
-
-if (!globalThis.Element.prototype.createSVGMatrix) {
-  globalThis.Element.prototype.createSVGMatrix = function () {
-    return new SVGMatrix();
-  };
-}
-
-// Leaflet sometimes asks paths for their bounding box.
-// We return a fake empty rect to prevent crashes.
-if (!globalThis.Element.prototype.getBBox) {
-  globalThis.Element.prototype.getBBox = function () {
-    return new SVGRect();
-  };
-}
-
-// XPathEvaluator — HTMX 2.x uses XPath to find elements with hx-on:* attributes.
-// We implement a minimal evaluator that handles starts-with(name(), "prefix") patterns
-// by walking the DOM tree and checking attribute names. This covers HTMX's single query.
-globalThis.XPathEvaluator =
-  globalThis.XPathEvaluator ||
-  (() => {
-    function parseAttrPrefixes(expr) {
-      const prefixes = [];
-      const re = /starts-with\s*\(\s*name\s*\(\s*\)\s*,\s*"([^"]+)"\s*\)/g;
-      let m;
-      while ((m = re.exec(expr)) !== null) prefixes.push(m[1]);
-      return prefixes;
-    }
-
-    function walkElements(root, prefixes) {
-      const results = [];
-      const all = root.querySelectorAll("*");
-      for (let j = 0; j < all.length; j++) {
-        const node = all[j];
-        if (!node.attributes) continue;
-        for (let i = 0; i < node.attributes.length; i++) {
-          const attrName = node.attributes[i].name;
-          for (const pfx of prefixes) {
-            if (attrName.startsWith(pfx)) {
-              results.push(node);
-              i = node.attributes.length;
-              break;
-            }
-          }
-        }
-      }
-      return results;
-    }
-
-    function makeResult(nodes) {
-      let idx = 0;
-      return {
-        snapshotLength: nodes.length,
-        snapshotItem: (i) => nodes[i] || null,
-        iterateNext: () => (idx < nodes.length ? nodes[idx++] : null),
-      };
-    }
-
-    class XPathEvaluator {
-      createExpression(expr) {
-        const prefixes = parseAttrPrefixes(expr);
-        return {
-          evaluate: (contextNode) =>
-            makeResult(
-              prefixes.length ? walkElements(contextNode, prefixes) : [],
-            ),
-        };
-      }
-      evaluate(expr, contextNode) {
-        const prefixes = parseAttrPrefixes(expr);
-        return makeResult(
-          prefixes.length ? walkElements(contextNode, prefixes) : [],
-        );
-      }
-    }
-    return XPathEvaluator;
-  })();
-if (!document.evaluate) {
-  const evaluator = new XPathEvaluator();
-  document.evaluate = function (expr, contextNode) {
-    return evaluator.evaluate(expr, contextNode);
-  };
-}
-
-window.matchMedia =
-  window.matchMedia ||
-  function (query) {
-    return {
-      matches: false, // Defaulting to desktop/false is usually safest
-      media: query,
-      onchange: null,
-      addListener: function () {}, // Legacy, but React still calls it
-      removeListener: function () {},
-      addEventListener: function () {},
-      removeEventListener: function () {},
-      dispatchEvent: function () {
-        return false;
-      },
-    };
-  };
-
-class ResizeObserver {
-  constructor(callback) {
-    this.callback = callback;
-  }
-  observe(target) {}
-  unobserve(target) {}
-  disconnect() {}
-}
-window.ResizeObserver = window.ResizeObserver || ResizeObserver;
-
-// we tell the framework that everything is visible to hydrate and get
-// acces to all elements.
-class IntersectionObserver {
-  constructor(callback, options) {
-    this.callback = callback;
-  }
-  observe(target) {
-    // Fire the callback in the next microtask, pretending it just scrolled into view
-    Promise.resolve().then(() => {
-      this.callback([
-        {
-          isIntersecting: true,
-          target: target,
-          intersectionRatio: 1.0,
-        },
-      ]);
-    });
-  }
-  unobserve(target) {}
-  disconnect() {}
-}
-window.IntersectionObserver =
-  window.IntersectionObserver || IntersectionObserver;
-
-window.scrollTo = window.scrollTo || function () {};
-window.scrollBy = window.scrollBy || function () {};
-
-// // --- DocumentFragment Unpacker Polyfill ---
-// // C-based DOM engines often drop parent pointers for Comment/Text nodes
-// // when appending DocumentFragments. This unpacks them in pure JS to guarantee
-// // the C-bridge correctly links every single Lit marker node!
-// (function () {
-//   const proto = globalThis.Node
-//     ? globalThis.Node.prototype
-//     : globalThis.Element.prototype;
-
-//   const origAppend = proto.appendChild;
-//   if (origAppend) {
-//     proto.appendChild = function (child) {
-//       if (child && child.nodeType === 11) {
-//         // 11 = DocumentFragment
-//         while (child.firstChild) {
-//           origAppend.call(this, child.firstChild);
-//         }
-//         return child;
-//       }
-//       return origAppend.call(this, child);
-//     };
-//   }
-
-//   const origInsert = proto.insertBefore;
-//   if (origInsert) {
-//     proto.insertBefore = function (child, ref) {
-//       if (child && child.nodeType === 11) {
-//         while (child.firstChild) {
-//           origInsert.call(this, child.firstChild, ref);
-//         }
-//         return child;
-//       }
-//       return origInsert.call(this, child, ref);
-//     };
-//   }
-// })();
-
-// --- htm: JSX-like tagged templates for real DOM (no VDOM) ---
-// htm parser (https://github.com/developit/htm, ~500 bytes)
 var __htm_build = function (a, o, l, n) {
     var i;
     o[0] = 0;
@@ -318,6 +69,7 @@ var __htm_build = function (a, o, l, n) {
     return n;
   },
   __htm_cache = new Map();
+
 function __htm_tag(a) {
   var o = __htm_cache.get(this);
   return (
@@ -403,7 +155,7 @@ function __htm_tag(a) {
 }
 
 // h() creates real Lexbor DOM elements
-function __zexplorer_h(tag, props, ...children) {
+function __zxp_h(tag, props, ...children) {
   const el = document.createElement(tag);
   if (props) {
     for (const [k, v] of Object.entries(props)) {
@@ -431,14 +183,18 @@ function __zexplorer_h(tag, props, ...children) {
   return el;
 }
 
+// ── zxp API ───────────────────────────────────────────────────────────────
+
 globalThis.zxp = {
-  h: __zexplorer_h,
-  html: __htm_tag.bind(__zexplorer_h),
+  h: __zxp_h,
+  html: __htm_tag.bind(__zxp_h),
   args: [],
   flags: {},
   fs: {
+    // readFileSync: (path) => __native_readFileSync(path), TODO
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
   },
+
   async goto(url, options = { sanitize: false }) {
     applyLocationPolyfill(url);
     // JS handles the network (easy to add headers, cookies, etc.)
@@ -448,7 +204,6 @@ globalThis.zxp = {
     // Zig handles the Browser Pipeline (Parse, CSS, Scripts, Sanitize)
     __native_loadPage(html, {
       base_dir: url,
-      // base_dir: new URL(".", url).href, // Web compliant URL API
       sanitize: options.sanitize,
       execute_scripts: true,
       load_stylesheets: true,
@@ -502,7 +257,6 @@ globalThis.zxp = {
 
   pdf: {
     async generate(svgString, outputPath) {
-      // Wraps LibHaru/ThorVG logic
       const blob = new Blob([svgString], { type: "image/svg+xml" });
       const bitmap = await createImageBitmap(blob);
 
@@ -515,33 +269,15 @@ globalThis.zxp = {
   },
 };
 
-// WebComponents
-// if (
-//   !Object.getOwnPropertyDescriptor(globalThis.Node.prototype, "isConnected")
-// ) {
-//   Object.defineProperty(globalThis.Node.prototype, "isConnected", {
-//     get() {
-//       return true;
-//     },
-//   });
-// }
+// ── Web Components Infrastructure ──────────────────────────────────────────
 
-// 1. ShadowRoot stub — Fallback for attachShadow
-if (!globalThis.Element.prototype.attachShadow) {
-  globalThis.Element.prototype.attachShadow = function (options) {
-    this.shadowRoot = this;
-    return this;
-  };
-}
-
-// 2. The Headless HTMLElement Base with Constructor Hijacking
+// The Headless HTMLElement Base with Constructor Hijacking.
+// When a custom element is upgraded, the constructor returns the native
+// C-backed Lexbor node directly instead of creating a ghost JS object.
 let upgradingElement = null;
 
 class HeadlessHTMLElement {
   constructor() {
-    // If we are currently upgrading an element, hijack the constructor!
-    // The 'new' keyword will abort creating a ghost JS object and instead
-    // return the native C-backed Lexbor node directly to LitElement.
     if (upgradingElement) {
       const el = upgradingElement;
       upgradingElement = null;
@@ -557,7 +293,7 @@ if (globalThis.Element) {
 }
 globalThis.HTMLElement = HeadlessHTMLElement;
 
-// 2. The Custom Elements Registry
+// 2. The Custom Elements Registry.
 globalThis.customElements = {
   _registry: new Map(),
 
@@ -587,15 +323,13 @@ globalThis.customElements = {
       const el = elements[i];
       if (el.__isUpgraded) continue;
 
-      // Step 1: Morph the prototype
       Object.setPrototypeOf(el, constructorClass.prototype);
 
-      // Step 2: The Constructor Hijack!
-      // This forces LitElement to initialize all its internal reactive Symbols
-      // and microtasks directly onto the native C-backed Lexbor node!
+      // Constructor Hijack
+      // Forces LitElement to initialize its reactive Symbols directly onto
+      // the native C-backed Lexbor node.
       upgradingElement = el;
       try {
-        // This invokes HeadlessHTMLElement, which returns 'el'!
         const instance = new constructorClass();
         if (instance !== el) {
           // Fallback in case super() wasn't called properly
@@ -609,7 +343,7 @@ globalThis.customElements = {
 
       el.__isUpgraded = true;
 
-      // Step 3: Feed HTML attributes into Lit
+      // Feed HTML attributes into Lit
       if (
         constructorClass.observedAttributes &&
         typeof el.attributeChangedCallback === "function"
@@ -621,7 +355,7 @@ globalThis.customElements = {
         });
       }
 
-      // Step 4: Fire the Web Component lifecycle
+      // Fire the Web Component lifecycle
       if (typeof el.connectedCallback === "function") {
         el.connectedCallback();
       }
@@ -629,48 +363,25 @@ globalThis.customElements = {
   },
 };
 
-globalThis.CSSStyleSheet =
-  globalThis.CSSStyleSheet ||
-  class CSSStyleSheet {
-    replaceSync() {}
-    replace() {
-      return Promise.resolve(this);
-    }
-  };
-
-// Ensure Document exists so prototype access doesn't crash
-if (!globalThis.Document) globalThis.Document = class Document {};
-
-// Stub adoptedStyleSheets to safely bypass the modern CSS engine
-if (!globalThis.Document.prototype.adoptedStyleSheets) {
-  Object.defineProperty(globalThis.Document.prototype, "adoptedStyleSheets", {
-    get: () => [],
-    set: () => {},
-  });
-  Object.defineProperty(globalThis.Element.prototype, "adoptedStyleSheets", {
-    get: () => [],
-    set: () => {},
-  });
-}
-
+// 3. Dispatch DOMContentLoaded + load — called from Zig after scripts execute.
 globalThis.__dispatchLoadEvent = function () {
-  // 1. Tell JS the document is fully parsed
+  // Tell JS the document is fully parsed
   Object.defineProperty(Object.getPrototypeOf(document), "readyState", {
     get: () => "complete",
     configurable: true,
   });
 
-  // 2. Upgrade all custom elements that were parsed
+  // Upgrade all custom elements that were parsed
   if (globalThis.customElements) {
     customElements.upgradeAll();
   }
 
-  // 3. Fire standard browser events for libraries like HTMX
+  // Fire standard browser events (HTMX, React, etc. listen here)
   document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
   window.dispatchEvent(new Event("load"));
 };
 
-// Hook 1: Override createElement
+// Hook createElement to auto-upgrade custom elements at creation time.
 const originalCreateElement = document.createElement.bind(document);
 
 document.createElement = function (tagName) {
@@ -680,88 +391,15 @@ document.createElement = function (tagName) {
   if (CustomClass) {
     Object.setPrototypeOf(el, CustomClass.prototype);
     el.__isUpgraded = true;
-    // Note: connectedCallback usually fires when appended to the document,
-    // so you might hook into `appendChild` to fire it perfectly,
-    // but doing it here works for most headless scripts.
   }
   return el;
 };
 
-// importNode is now a native binding in dom_bridge.zig
-// Uses lexbor's lxb_dom_document_import_node for proper ownerDocument adoption
-
-// node.append()
-if (!globalThis.Element.prototype.append) {
-  const appendFn = function (...nodes) {
-    for (const node of nodes) {
-      this.appendChild(
-        typeof node === "string" ? document.createTextNode(node) : node,
-      );
-    }
-  };
-  globalThis.Element.prototype.append = appendFn;
-  globalThis.DocumentFragment.prototype.append = appendFn;
+async function testSSE() {
+  for (let i = 0; i < 10; i++) {
+    zxp.write("chunk " + i);
+    return await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
-// Missing ES22 methods
-// 1. Array/String .at() (Extremely common cause of "not a function" in modern Lit)
-if (!Array.prototype.at) {
-  const atFn = function (n) {
-    n = Math.trunc(n) || 0;
-    if (n < 0) n += this.length;
-    if (n < 0 || n >= this.length) return undefined;
-    return this[n];
-  };
-  Object.defineProperty(Array.prototype, "at", {
-    value: atFn,
-    writable: true,
-    configurable: true,
-  });
-  Object.defineProperty(String.prototype, "at", {
-    value: atFn,
-    writable: true,
-    configurable: true,
-  });
-}
-
-// 2. String.prototype.replaceAll
-if (!String.prototype.replaceAll) {
-  String.prototype.replaceAll = function (str, newStr) {
-    if (
-      Object.prototype.toString.call(str).toLowerCase() === "[object regexp]"
-    ) {
-      return this.replace(str, newStr);
-    }
-    return this.replace(
-      new RegExp(str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"),
-      newStr,
-    );
-  };
-}
-
-// 3. String.prototype.matchAll (Used heavily by template parsers)
-if (!String.prototype.matchAll) {
-  String.prototype.matchAll = function* (regex) {
-    const globalRegex = new RegExp(
-      regex,
-      regex.flags.includes("g") ? regex.flags : regex.flags + "g",
-    );
-    let match;
-    while ((match = globalRegex.exec(this)) !== null) {
-      yield match;
-    }
-  };
-}
-
-// 4. Object.hasOwn (Replaces hasOwnProperty in ES2022)
-if (!Object.hasOwn) {
-  Object.defineProperty(Object, "hasOwn", {
-    value: function (obj, prop) {
-      if (obj == null)
-        throw new TypeError("Cannot convert undefined or null to object");
-      return Object.prototype.hasOwnProperty.call(Object(obj), prop);
-    },
-    configurable: true,
-    writable: true,
-  });
-}
+testSSE();

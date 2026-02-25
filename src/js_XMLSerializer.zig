@@ -65,27 +65,27 @@ pub const XMLSerializerBridge = struct {
         const rc = RuntimeContext.get(ctx);
         const rt_ptr = qjs.JS_GetRuntime(ctx.ptr);
 
-        // Register class ID
-        var class_id: qjs.JSClassID = 0;
-        _ = qjs.JS_NewClassID(rt_ptr, &class_id);
-        rc.classes.xml_serializer = class_id;
+        // Register class on the runtime once; ID persists in rc.classes.
+        if (rc.classes.xml_serializer == 0) {
+            var class_id: qjs.JSClassID = 0;
+            _ = qjs.JS_NewClassID(rt_ptr, &class_id);
+            rc.classes.xml_serializer = class_id;
 
-        // Define class with finalizer
-        const class_def = qjs.JSClassDef{
-            .class_name = "XMLSerializer",
-            .finalizer = finalizer,
-        };
-        _ = qjs.JS_NewClass(rt_ptr, class_id, &class_def);
+            const class_def = qjs.JSClassDef{
+                .class_name = "XMLSerializer",
+                .finalizer = finalizer,
+            };
+            _ = qjs.JS_NewClass(rt_ptr, class_id, &class_def);
+        }
 
-        // Create prototype with serializeToString method
+        // Per-context: prototype + constructor + global (always)
         const proto = ctx.newObject();
         defer ctx.freeValue(proto);
         try ctx.setPropertyStr(proto, "serializeToString", ctx.newCFunction(serializeToString, "serializeToString", 1));
 
-        // Create constructor and wire up
         const ctor = ctx.newCFunction2(constructor, "XMLSerializer", 0, qjs.JS_CFUNC_constructor, 0);
         try ctx.setPropertyStr(ctor, "prototype", ctx.dupValue(proto));
-        qjs.JS_SetClassProto(ctx.ptr, class_id, ctx.dupValue(proto));
+        qjs.JS_SetClassProto(ctx.ptr, rc.classes.xml_serializer, ctx.dupValue(proto));
 
         // Expose globally
         const global = ctx.getGlobalObject();

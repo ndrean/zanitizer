@@ -257,6 +257,32 @@ fn isInlineElement(tag: []const u8) bool {
     return false;
 }
 
+/// Returns true when there is at least one non-inline-element child AND every such
+/// child has CSS `display: inline-block` or `display: inline-flex`.
+/// Used to detect inline formatting contexts, e.g. a row of pill badges inside a div.
+fn allBlockChildrenHaveInlineDisplay(node: *z.DomNode, allocator: std.mem.Allocator) bool {
+    var found_any = false;
+    var child = z.firstChild(node);
+    while (child) |c_node| : (child = z.nextSibling(c_node)) {
+        if (z.nodeType(c_node) != .element) continue;
+        if (z.nodeToElement(c_node)) |el| {
+            const tag = z.tagName_zc(el);
+            if (isInlineElement(tag)) continue; // known inline — skip
+            // Non-inline element child: must declare display:inline-block/inline-flex
+            const style_str = z.serializeElementStyles(allocator, el) catch return false;
+            defer allocator.free(style_str);
+            const is_inline_block =
+                std.mem.indexOf(u8, style_str, "display: inline-block") != null or
+                std.mem.indexOf(u8, style_str, "display:inline-block") != null or
+                std.mem.indexOf(u8, style_str, "display: inline-flex") != null or
+                std.mem.indexOf(u8, style_str, "display:inline-flex") != null;
+            if (!is_inline_block) return false;
+            found_any = true;
+        }
+    }
+    return found_any;
+}
+
 fn isRemoteUrl(url: []const u8) bool {
     return std.mem.startsWith(u8, url, "https://") or
         std.mem.startsWith(u8, url, "http://") or
@@ -344,6 +370,7 @@ fn buildYogaTree(
     };
 
     // Parse computed style (cascade: <link>, <style>, inline) and apply tag defaults
+    var has_explicit_flex = false;
     if (z.nodeToElement(dom_node)) |el| {
         const tag = z.tagName_zc(el);
 
@@ -353,6 +380,13 @@ fn buildYogaTree(
         if (style_str) |s| {
             if (s.len > 0) {
                 applyInlineStyle(yg, info, s);
+                // Track whether an explicit flex/grid context was declared in CSS.
+                // We use this below to avoid overriding intentional column flex containers.
+                has_explicit_flex =
+                    std.mem.indexOf(u8, s, "display: flex") != null or
+                    std.mem.indexOf(u8, s, "display:flex") != null or
+                    std.mem.indexOf(u8, s, "display: grid") != null or
+                    std.mem.indexOf(u8, s, "display:grid") != null;
             }
         }
 
@@ -456,6 +490,15 @@ fn buildYogaTree(
 
     // Inline SVG and <img> with loaded data are leaf nodes — don't recurse into DOM children
     if (info.img_is_svg and info.img_data != null) return yg;
+
+    // Inline formatting context: when a plain block container has only inline-block children
+    // (e.g. a div full of badge/pill elements), switch to row+wrap so they flow horizontally.
+    // Skip when CSS already set an explicit flex/grid context on this element.
+    if (!has_explicit_flex and allBlockChildrenHaveInlineDisplay(dom_node, allocator)) {
+        yoga.setFlexDirection(yg, yoga.FLEX_DIRECTION_ROW);
+        yoga.setFlexWrap(yg, yoga.WRAP_WRAP);
+        yoga.setAlignItems(yg, yoga.ALIGN_FLEX_START);
+    }
 
     if (hasBlockChildren(dom_node)) {
         // Has element children → recurse into them

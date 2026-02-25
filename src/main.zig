@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("root.zig");
+const ZxpRuntime = @import("zxp_runtime.zig").ZxpRuntime;
+const zxp_runtime = @import("zxp_runtime.zig");
 const curl = z.curl;
 const zqjs = z.wrapper;
 const event_loop_mod = @import("event_loop.zig");
@@ -20,32 +22,37 @@ const JSWorker = @import("js_worker.zig");
 const Reflect = @import("reflection.zig");
 const Mocks = @import("dom_mocks.zig");
 const Native = @import("js_native_bridge.zig");
+const Server = @import("serve.zig").Server;
+const Handler = @import("serve.zig").Handler;
+
+const httpz = @import("httpz");
 
 const native_os = builtin.os.tag;
-pub var app_should_quit = std.atomic.Value(bool).init(false);
 
-// toggle the flag
-fn handleSigInt(_: c_int) callconv(.c) void {
-    app_should_quit.store(true, .seq_cst);
-}
+var server_instance: ?*httpz.Server(*Handler) = null;
+// var server_instance: ?*httpz.Server(Handler) = null;
+
 // Setup function to call at start of main()
 pub fn setupSignalHandler() void {
     if (builtin.os.tag == .windows) {
-        // Windows needs a different approach (SetConsoleCtrlHandler),
-        // but for now we focus on POSIX (Linux/macOS) as requested.
         return;
     }
 
     const act = std.posix.Sigaction{
-        .handler = .{ .handler = handleSigInt },
+        .handler = .{ .handler = shutdown },
         .mask = std.posix.sigemptyset(),
         .flags = 0,
     };
 
-    // Catch Ctrl+C (SIGINT)
     std.posix.sigaction(std.posix.SIG.INT, &act, null);
-    // Optional: Catch Termination request (SIGTERM)
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+}
+
+fn shutdown(_: c_int) callconv(.c) void {
+    if (server_instance) |svr| {
+        server_instance = null;
+        svr.stop();
+    }
 }
 
 pub const TargetFormat = enum {
@@ -66,7 +73,8 @@ pub fn main() !void {
     };
 
     defer if (is_debug) {
-        _ = .ok == debug_gpa.deinit();
+        // _ = .ok == debug_gpa.deinit();
+        std.debug.print("{}\n", .{debug_gpa.deinit()});
     };
 
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
@@ -83,6 +91,20 @@ pub fn main() !void {
         printUsage();
         return;
     };
+
+    if (std.mem.eql(u8, verb, "serve")) {
+        var app_server = try Server.init(gpa, sandbox_root);
+        defer {
+            // Order matters:
+            //  1. server.deinit() joins the thread pool — all workers finish.
+            //  2. destroyAll() frees thread-local ZxpRuntimes — safe now.
+            // Both must run before debug_gpa.deinit() (the outer defer).
+            app_server.deinit();
+            zxp_runtime.destroyAll(gpa);
+        }
+        server_instance = &app_server.server; // set BEFORE listen so shutdown() can reach it
+        try app_server.listen(); // blocks until stop() is called
+    }
 
     // --- verb "render", "run"
     if (std.mem.eql(u8, verb, "render") or std.mem.eql(u8, verb, "run")) {
@@ -147,7 +169,9 @@ pub fn main() !void {
 
         const format = determineFormat(verb, output_path, format_override);
 
-        var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+        var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+        defer zxp_rt.deinit();
+        var engine = try z.ScriptEngine.init(gpa, zxp_rt);
         defer engine.deinit();
 
         // if (is_debug) engine.printMemoryUsage();
@@ -197,7 +221,9 @@ pub fn main() !void {
                 break :blk std.fs.path.dirname(p) orelse "."; // local file
             } else ".";
 
-        var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+        var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+        defer zxp_rt.deinit();
+        var engine = try z.ScriptEngine.init(gpa, zxp_rt);
         defer engine.deinit();
 
         if (std.mem.eql(u8, verb, "convert")) {
@@ -235,7 +261,9 @@ pub fn main() !void {
 
         const base_dir: []const u8 = if (maybe_url) |u| u else ".";
 
-        var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+        var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+        defer zxp_rt.deinit();
+        var engine = try z.ScriptEngine.init(gpa, zxp_rt);
         defer engine.deinit();
 
         const opts: z.LoadPageOptions = .{
@@ -295,14 +323,14 @@ pub fn main() !void {
         const html_content = try fetchScrapeUrl(gpa, url);
         defer gpa.free(html_content);
 
-        var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+        var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+        defer zxp_rt.deinit();
+        var engine = try z.ScriptEngine.init(gpa, zxp_rt);
         defer engine.deinit();
 
-        // set a custom simple mobile profile
-        const mobile_profile = @embedFile("browser_profile.js");
         try engine.loadPage(html_content, .{
             .base_dir = url,
-            .pre_script = mobile_profile,
+            .browser_profile = true,
             .execute_scripts = !no_scripts,
             .load_stylesheets = !no_css,
             .run_loop = true,
@@ -345,6 +373,8 @@ pub fn main() !void {
         z.print("❌ Unknown command: {s}\n", .{verb});
         printUsage();
     }
+
+    // try server.listen();
 }
 
 const MOBILE_UA =
@@ -554,6 +584,10 @@ fn runCliRequest(engine: *ScriptEngine, script: []const u8, filename: [:0]const 
         }
         _ = try engine.ctx.setPropertyStr(zxp_obj, "args", js_args);
         _ = try engine.ctx.setPropertyStr(zxp_obj, "flags", js_flags);
+
+        // zxp.write(str) — stdout without trailing newline (safe for piping raw HTML/binary)
+        const write_fn = engine.ctx.newCFunction(z.js_console.js_stdout_write, "write", 1);
+        _ = try engine.ctx.setPropertyStr(zxp_obj, "write", write_fn);
     }
 
     switch (format) {
@@ -586,7 +620,7 @@ fn runCliRequest(engine: *ScriptEngine, script: []const u8, filename: [:0]const 
             if (out_path) |p| {
                 try std.fs.cwd().writeFile(.{ .sub_path = p, .data = output });
                 z.print("✅ Saved JSON to {s}\n", .{p});
-            } else {
+            } else if (output.len > 0) {
                 const stdout = std.fs.File.stdout();
                 try stdout.writeAll(output);
                 try stdout.writeAll("\n");

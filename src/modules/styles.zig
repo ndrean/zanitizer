@@ -20,8 +20,8 @@ const lxb_serialize_cb_f = *const fn (
 extern "c" fn lxb_html_document_css_init_noi(document: *z.HTMLDocument, init_events: bool) c_int;
 extern "c" fn lxb_html_document_css_destroy_noi(document: *z.HTMLDocument) void;
 
-// Element Style Attachment (The "Magic" Function that runs the cascade)
-extern "c" fn lxb_dom_document_element_styles_attach(element: *z.HTMLElement) c_int;
+// Null-safe element style attachment — no-op when doc->css is not initialized.
+extern "c" fn zexp_element_styles_attach_safe(element: *z.HTMLElement) c_int;
 
 extern "c" fn lexbor_css_parser_memory_wrapper(parser: *z.CssStyleParser) ?*z.CssMemory;
 
@@ -62,7 +62,7 @@ extern "c" fn lxb_css_stylesheet_create(memory: ?*z.CssMemory) ?*z.CssStyleSheet
 extern "c" fn lxb_css_stylesheet_parse(sst: *z.CssStyleSheet, parser: *z.CssStyleParser, data: [*]const u8, length: usize) c_int;
 extern "c" fn lxb_css_stylesheet_destroy(sst: *z.CssStyleSheet, self_destroy: bool) void;
 extern "c" fn lxb_dom_document_stylesheet_attach(document: *z.DomDocument, sst: *z.CssStyleSheet) c_int;
-extern "c" fn zexp_destroy_document_stylesheets(document: *z.DomDocument) void;
+extern "c" fn zexp_destroy_document_stylesheets(document: *z.HTMLDocument) void;
 extern "c" fn zexp_document_set_scripting(doc: *z.HTMLDocument, scripting: bool) void;
 
 // ============================================================================
@@ -82,7 +82,7 @@ pub fn destroyDocumentCSS(doc: *z.HTMLDocument) void {
 /// not the individual stylesheet objects (each has its own memory pool).
 /// Call this BEFORE destroyDocumentCSS.
 pub fn destroyDocumentStylesheets(doc: *z.HTMLDocument) void {
-    zexp_destroy_document_stylesheets(doc.asDom());
+    zexp_destroy_document_stylesheets(doc);
 }
 
 /// Enable the HTML parser's scripting flag on the document's internal parser.
@@ -130,7 +130,7 @@ pub fn attachStylesheet(doc: *z.HTMLDocument, sst: *z.CssStyleSheet) !void {
 pub fn attachElementStyles(element: *z.HTMLElement) !void {
     // Lexbor's native function. It iterates the document's stylesheets
     // and applies matching rules to this element's internal style list.
-    if (lxb_dom_document_element_styles_attach(element) != z._OK) {
+    if (zexp_element_styles_attach_safe(element) != z._OK) {
         return error.StyleAttachFailed;
     }
 }

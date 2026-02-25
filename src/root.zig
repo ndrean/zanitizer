@@ -45,6 +45,7 @@ pub const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
 pub const EventLoop = @import("event_loop.zig").EventLoop;
 pub const ScriptEngine = @import("script_engine.zig").ScriptEngine;
 pub const LoadPageOptions = @import("script_engine.zig").LoadPageOptions;
+pub const ZxpRuntime = @import("zxp_runtime.zig").ZxpRuntime;
 pub const JSWorker = @import("js_worker.zig");
 pub const FetchBridge = @import("js_fetch.zig").FetchBridge;
 pub const AsyncBridge = @import("async_bridge.zig");

@@ -5,6 +5,8 @@ const zqjs = z.wrapper;
 const qjs = z.qjs;
 const js_security = z.js_security;
 const sanitizer_mod = @import("modules/sanitizer.zig");
+const zxp_runtime = @import("zxp_runtime.zig");
+const ZxpRuntime = zxp_runtime.ZxpRuntime;
 
 const EventLoop = @import("event_loop.zig").EventLoop;
 const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
@@ -22,6 +24,25 @@ const ScriptBuffers = @import("curl_multi.zig").ScriptBuffers;
 
 const Sanitizer = sanitizer_mod.Sanitizer;
 const SanitizeOptions = sanitizer_mod.SanitizeOptions;
+
+// ---------------------------------------------------------------------------
+// Bytecode caches for zexplorer.js and polyfills.js
+// Compiled once per process on first ScriptEngine.init, reused every time.
+// QuickJS bytecode is portable across runtimes: atoms are stored by name.
+// Execution order per init: zexplorer.js → polyfills.js
+// ---------------------------------------------------------------------------
+var g_boot_mutex: std.Thread.Mutex = .{};
+/// Non-empty once the first context has compiled zexplorer.js.
+/// Allocated via std.heap.c_allocator so it lives for the process lifetime.
+var g_boot_bytecode: []const u8 = &.{};
+
+var g_polyfills_mutex: std.Thread.Mutex = .{};
+/// Non-empty once the first context has compiled polyfills.js.
+var g_polyfills_bytecode: []const u8 = &.{};
+
+var g_profile_mutex: std.Thread.Mutex = .{};
+/// Non-empty once browser_profile.js has been compiled.
+var g_profile_bytecode: []const u8 = &.{};
 
 // Chunk-based HTML parsing API (used by streaming mode)
 extern "c" fn lxb_html_document_parse_chunk_begin(doc: *z.HTMLDocument) c_uint;
@@ -58,77 +79,45 @@ pub const LoadPageOptions = struct {
     /// Run event loop after loading (process timers, promises, etc.).
     run_loop: bool = false,
 
+    /// Inject the built-in mobile browser profile (Pixel 5 / Chrome 120) before
+    /// page scripts run. Uses a bytecode cache — zero parse cost after the first use.
+    browser_profile: bool = false,
+
     /// JS source injected into the global scope AFTER CSS but BEFORE page <script> tags.
-    /// Used by scrape mode to install the mobile browser profile before the page runs.
+    /// For truly custom pre-scripts; prefer `browser_profile` for the built-in profile.
     pre_script: ?[]const u8 = null,
 };
 
 /// avoid infinte loops like `white (true) {}` by setting a deadline
-export fn js_interrupt_handler(_: ?*qjs.JSRuntime, opaque_ptr: ?*anyopaque) callconv(.c) c_int {
-    // Cast the opaque pointer back to the ScriptEngine
-    if (opaque_ptr) |ptr| {
-        const engine: *ScriptEngine = @ptrCast(@alignCast(ptr));
-
-        // Check if a deadline is set
-        if (engine.interrupt_deadline > 0) {
-            // and if we have exceeded the deadline
-            if (std.time.milliTimestamp() > engine.interrupt_deadline) {
-                // TIMEOUT!
-                return 1;
-            }
-        }
-    }
-    return 0; // Continue
-}
 
 pub const ScriptEngine = struct {
     allocator: std.mem.Allocator,
-    rt: *zqjs.Runtime,
+    zxp_rt: *ZxpRuntime, // borrowed — NOT owned; do not free in deinit
     ctx: zqjs.Context,
     loop: *EventLoop,
     rc: *RuntimeContext,
     dom: DOMBridge, // VALUE!! to own the DOMBridge struct so DOMBridge deinit its content and ScriptEngine
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
-    sandbox: js_security.Sandbox,
     streaming_active: bool = false,
 
     // TODO: need to read the import_map as external
-    const import_map_json = @embedFile("examples/cdn_import_map.json");
-
-    /// Initialize JS Environment on the heap
-    pub fn init(allocator: std.mem.Allocator, sandbox_root: []const u8) !*ScriptEngine {
+    /// Initialize JS Environment on the heap.
+    /// `zxp_rt` is a borrowed reference — ScriptEngine does NOT own the runtime or sandbox.
+    pub fn init(allocator: std.mem.Allocator, zxp_rt: *ZxpRuntime) !*ScriptEngine {
         const self = try allocator.create(ScriptEngine);
         self.allocator = allocator;
         errdefer allocator.destroy(self);
 
-        self.sandbox = try js_security.Sandbox.initWithImportMap(allocator, sandbox_root, import_map_json);
-        errdefer self.sandbox.deinit();
+        // Borrow the thread-local runtime — we do NOT own rt or sandbox.
+        self.zxp_rt = zxp_rt;
 
-        // Runtime & Context
-        self.rt = try zqjs.Runtime.init(allocator);
-        errdefer self.rt.deinit();
-        self.rt.setMemoryLimit(256 * 1024 * 1024); // 256 MB
-        self.rt.setGCThreshold(32 * 1024 * 1024); // 32MB before GC (avoid mid-render collection)
-        self.rt.setMaxStackSize(16 * 1024 * 1024); // 16 MB stack (Preact's recursive diffing needs more than 4MB at 1k+ rows)
-
-        self.rt.setInterruptHandler(js_interrupt_handler, @ptrCast(self));
-        self.rt.setCanBlock(false);
-
-        // Security firewall
-        // self.rt.enableModuleLoader();
-        self.rt.setModuleLoader(
-            js_security.js_secure_module_normalize,
-            js_security.js_secure_module_loader,
-            &self.sandbox,
-        );
-
-        self.ctx = zqjs.Context.init(self.rt);
-
+        // Fresh JSContext on the shared runtime
+        self.ctx = zqjs.Context.init(zxp_rt.rt);
         self.ctx.setAllocator(&self.allocator);
         errdefer self.ctx.deinit();
 
-        // Event Loop
-        self.loop = try EventLoop.create(allocator, self.rt);
+        // Event Loop (uses the same runtime)
+        self.loop = try EventLoop.create(allocator, zxp_rt.rt);
         errdefer self.loop.destroy();
 
         // Runtime Context: allocates, zeroes classes, sets the opaque pointer
@@ -136,8 +125,8 @@ pub const ScriptEngine = struct {
             allocator,
             self.ctx,
             self.loop,
-            &self.sandbox,
-            sandbox_root,
+            &zxp_rt.sandbox,
+            zxp_rt.sandbox_root,
         );
         errdefer self.rc.destroy();
 
@@ -166,16 +155,60 @@ pub const ScriptEngine = struct {
         _ = try self.ctx.setPropertyStr(global, "__native_flush", self.ctx.newCFunction(js_flush, "flush", 0));
         _ = try self.ctx.setPropertyStr(global, "__native_loadPage", self.ctx.newCFunction(js_native_loadPage, "loadPage", 2));
 
-        const stdlib_code = @embedFile("zexplorer.js");
-        const eval_res = try self.ctx.eval(stdlib_code, "zexplorer.js", zqjs.Context.EvalFlags{
-            .type = .global,
-        });
-        // const eval_res = qjs.JS_Eval(self.ctx.ptr, stdlib_code.ptr, stdlib_code.len, "zexplorer.js", qjs.JS_EVAL_TYPE_GLOBAL);
-        if (self.ctx.isException(eval_res)) {
-            // if (qjs.JS_IsException(eval_res)) {
-            std.debug.print("CRITICAL: Failed to load zexplorer.js standard library!\n", .{});
+        // --- bytecode cache: compile once, execute from bytecode every init ---
+        {
+            g_boot_mutex.lock();
+            defer g_boot_mutex.unlock();
+            if (g_boot_bytecode.len == 0) {
+                const stdlib_code = @embedFile("zexplorer.js");
+                const fn_val = try self.ctx.eval(stdlib_code, "zexplorer.js", zqjs.Context.EvalFlags{
+                    .type = .global,
+                    .compile_only = true,
+                });
+
+                if (self.ctx.isException(fn_val)) {
+                    const trace = self.ctx.getException();
+                    defer self.ctx.freeValue(trace);
+                    std.debug.print("{any}\n", .{trace}); // do better!!
+                    self.ctx.freeValue(trace);
+                    return error.FailedJSLoading;
+                }
+                defer self.ctx.freeValue(fn_val);
+                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
+                g_boot_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
+                self.ctx.free(@ptrCast(qjs_buf.ptr));
+            }
         }
-        defer self.ctx.freeValue(eval_res);
+        const boot_fn = self.ctx.readObject(g_boot_bytecode, .{ .bytecode = true });
+        const boot_res = self.ctx.evalFunction(boot_fn);
+        defer self.ctx.freeValue(boot_res);
+        if (self.ctx.isException(boot_res)) {
+            std.debug.print("CRITICAL: Failed to execute zexplorer.js bytecode!\n", .{});
+        }
+
+        // polyfills.js — browser compat shims, loaded after zexplorer.js so
+        // that HTMLElement = HeadlessHTMLElement when the event-handler polyfill runs.
+        {
+            g_polyfills_mutex.lock();
+            defer g_polyfills_mutex.unlock();
+            if (g_polyfills_bytecode.len == 0) {
+                const polyfills_code = @embedFile("polyfills.js");
+                const fn_val = try self.ctx.eval(polyfills_code, "polyfills.js", zqjs.Context.EvalFlags{
+                    .type = .global,
+                    .compile_only = true,
+                });
+                defer self.ctx.freeValue(fn_val);
+                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
+                g_polyfills_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
+                self.ctx.free(@ptrCast(qjs_buf.ptr));
+            }
+        }
+        const polyfills_fn = self.ctx.readObject(g_polyfills_bytecode, .{ .bytecode = true });
+        const polyfills_res = self.ctx.evalFunction(polyfills_fn);
+        defer self.ctx.freeValue(polyfills_res);
+        if (self.ctx.isException(polyfills_res)) {
+            std.debug.print("CRITICAL: Failed to execute polyfills.js bytecode!\n", .{});
+        }
 
         // TODO Other async bindings (sandboxed readFile, etc.)
         // const readFile_fn = self.ctx.newCFunction(async_bindings.js_readFile, "readFile", 1);
@@ -214,25 +247,20 @@ pub const ScriptEngine = struct {
 
     pub fn deinit(self: *ScriptEngine) void {
         self.rc.cleanUp(self.ctx);
-        self.sandbox.deinit();
         self.dom.deinit();
         if (self.rc.last_result) |val| {
             self.ctx.freeValue(val);
             self.rc.last_result = null;
         }
-        // bridges first (release JS references)
-        // release internal slots
         self.rc.destroy();
-        // Loop (stops threads, frees tasks)
         self.loop.destroy();
-        // GC before context deinit to collect cycles (e.g. img.onload → closure → img)
-        self.rt.runGC();
-        // Context
+        // GC before context deinit to collect cycles (e.g. img.onload → closure → img).
+        // Uses the shared runtime — does NOT destroy it (ZxpRuntime owns that).
+        self.zxp_rt.rt.runGC();
+        // Clear any stale interrupt deadline so the next request on this thread
+        // doesn't get false-triggered by a deadline left over from this request.
+        zxp_runtime.tl_deadline = 0;
         self.ctx.deinit();
-        std.Thread.sleep(10 * std.time.ns_per_ms);
-        // Runtime (final GC and destroy)
-        self.rt.runGC();
-        self.rt.deinit();
         self.allocator.destroy(self);
     }
 
@@ -241,7 +269,11 @@ pub const ScriptEngine = struct {
         // Set interrupt deadline so the interrupt handler can kill runaway JS
         // during event loop execution (not just during eval)
         self.interrupt_deadline = std.time.milliTimestamp() + RUN_TIMEOUT_MS;
-        defer self.interrupt_deadline = 0;
+        zxp_runtime.tl_deadline = self.interrupt_deadline;
+        defer {
+            self.interrupt_deadline = 0;
+            zxp_runtime.tl_deadline = 0;
+        }
 
         // NOTE: No pre-drain here — the event loop's step 2 drains microtasks
         // with a safety limit. A pre-drain without limits caused hangs when
@@ -258,6 +290,7 @@ pub const ScriptEngine = struct {
         // the outer deadline set by run().
         const prev_deadline = self.interrupt_deadline;
         self.interrupt_deadline = std.time.milliTimestamp() + TIMEOUT_MS;
+        zxp_runtime.tl_deadline = self.interrupt_deadline;
 
         const c_code = try self.allocator.dupeZ(u8, code);
         defer self.allocator.free(c_code);
@@ -274,10 +307,12 @@ pub const ScriptEngine = struct {
             // The exception is still in the context, print it before returning
             _ = self.ctx.checkAndPrintException();
             self.interrupt_deadline = prev_deadline; // restore outer deadline
+            zxp_runtime.tl_deadline = prev_deadline;
             return error.JSException;
         };
 
         self.interrupt_deadline = prev_deadline; // restore outer deadline
+        zxp_runtime.tl_deadline = prev_deadline;
 
         // Check for JS-level exceptions (syntax errors, throw new Error(), etc.)
         if (self.ctx.isException(val)) {
@@ -531,6 +566,12 @@ pub const ScriptEngine = struct {
         const val = try self.evalAsync(script, filename);
         defer self.ctx.freeValue(val);
 
+        // Scripts that use console.log for output (e.g. streaming pipelines) return
+        // undefined — emit nothing rather than the string "undefined".
+        if (self.ctx.isUndefined(val) or self.ctx.isNull(val)) {
+            return allocator.dupe(u8, "");
+        }
+
         // Raw string result (e.g. outerHTML) — return without JSON wrapping.
         if (self.ctx.isString(val)) {
             const z_str = try self.ctx.toZString(val);
@@ -705,7 +746,25 @@ pub const ScriptEngine = struct {
             }
         }
 
-        // Inject pre_script (e.g. mobile browser profile) before page scripts see the globals
+        // Inject browser profile (bytecode-cached) or a custom pre_script before page scripts.
+        if (options.browser_profile) {
+            g_profile_mutex.lock();
+            defer g_profile_mutex.unlock();
+            if (g_profile_bytecode.len == 0) {
+                const src = @embedFile("browser_profile.js");
+                const fn_val = try self.ctx.eval(src, "browser_profile.js", zqjs.Context.EvalFlags{
+                    .type = .global,
+                    .compile_only = true,
+                });
+                defer self.ctx.freeValue(fn_val);
+                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
+                g_profile_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
+                self.ctx.free(@ptrCast(qjs_buf.ptr));
+            }
+            const profile_fn = self.ctx.readObject(g_profile_bytecode, .{ .bytecode = true });
+            const profile_res = self.ctx.evalFunction(profile_fn);
+            self.ctx.freeValue(profile_res);
+        }
         if (options.pre_script) |src| {
             const r = try self.eval(src, "<pre-script>", .global);
             self.ctx.freeValue(r);
@@ -827,7 +886,7 @@ pub const ScriptEngine = struct {
                 };
                 path_owned = rel_path;
 
-                const css_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                const css_content = self.zxp_rt.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
                     z.print("Failed to load CSS '{s}': {any}\n", .{ rel_path, err });
                     continue;
                 };
@@ -937,7 +996,7 @@ pub const ScriptEngine = struct {
 
     pub fn processJobs(self: *ScriptEngine) void {
         const js_polyfills = @import("js_polyfills.zig");
-        js_polyfills.drainMicrotasksGCSafe(self.rt.ptr, self.ctx.ptr);
+        js_polyfills.drainMicrotasksGCSafe(self.zxp_rt.rt.ptr, self.ctx.ptr);
     }
 
     /// [host] Process all <script> tags in the document (Inline and Remote)
@@ -1053,7 +1112,7 @@ pub const ScriptEngine = struct {
                     metas[i].filename_owned = rel_path;
                     metas[i].filename = rel_path;
 
-                    const file_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                    const file_content = self.zxp_rt.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
                         z.print("Failed to load script '{s}' from sandbox: {any}\n", .{ rel_path, err });
                         continue;
                     };
@@ -1220,7 +1279,7 @@ pub const ScriptEngine = struct {
                 };
                 path_owned = rel_path;
 
-                const css_content = self.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
+                const css_content = self.zxp_rt.sandbox.dir.readFileAlloc(self.allocator, rel_path, 5 * 1024 * 1024) catch |err| {
                     z.print("Failed to load CSS '{s}': {any}\n", .{ rel_path, err });
                     continue;
                 };
@@ -1263,7 +1322,7 @@ pub const ScriptEngine = struct {
 
     pub fn printMemoryUsage(self: *ScriptEngine) void {
         var stats: z.qjs.JSMemoryUsage = undefined;
-        z.qjs.JS_ComputeMemoryUsage(self.rt.ptr, &stats);
+        z.qjs.JS_ComputeMemoryUsage(self.zxp_rt.rt.ptr, &stats);
 
         std.debug.print("\n--- QuickJS Memory Stats ---\n", .{});
         std.debug.print("Malloc count: {d}\n", .{stats.malloc_count});

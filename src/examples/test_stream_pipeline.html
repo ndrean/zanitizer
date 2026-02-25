@@ -21,15 +21,11 @@
         padding: 14px;
         margin: 10px 0;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
-      }
-      status-badge {
-        display: inline-block;
-        margin: 4px;
-      }
-      .svg-section {
         display: flex;
+        flex-direction: row;
         align-items: center;
-        gap: 12px;
+        flex-wrap: wrap;
+        gap: 8px;
       }
     </style>
     <script>
@@ -61,10 +57,39 @@
 
     <!-- inline style -->
     <div class="card">
-      <p style="color: #7c3aed; font-weight: bold">
-        Inline style: purple bold text (parsed via loadInlineStyles).
-      </p>
-      <p style="color: #0891b2">Inline style: cyan text.</p>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <p style="color: #7c3aed; font-weight: bold">
+          Inline style: purple bold text (parsed via loadInlineStyles).
+        </p>
+        <p style="color: #0891b2">Inline style: cyan text.</p>
+      </div>
+    </div>
+
+    <!-- CSS threat: background-image used as a tracking pixel / data-exfiltration vector -->
+    <div class="card">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <p style="color: #16a34a; background-image: url(https://tracker.evil.com/pixel.gif)">
+          background-image URL stripped — text color survives.
+        </p>
+        <p style="color: #6b7280; font-size: 13px">
+          Threat: <code>background-image: url(tracker)</code> silently loads an external
+          resource, leaking the visitor's IP to an attacker's server.
+        </p>
+      </div>
+    </div>
+
+    <!-- CSS threat: -webkit-filter / behavior injection -->
+    <div class="card">
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <p style="color: #2563eb; behavior: url(exploit.htc); filter: url(https://evil.com/xss.svg#xss)">
+          behavior + filter stripped — text color survives.
+        </p>
+        <p style="color: #6b7280; font-size: 13px">
+          Threats: <code>behavior:</code> runs an IE HTC script;
+          <code>filter: url(…)</code> can load and execute an SVG with
+          embedded script.
+        </p>
+      </div>
     </div>
 
     <!-- SVG with "bad" event-handler attributes that the sanitizer should strip -->
@@ -78,7 +103,7 @@
       >
         <circle cx="45" cy="45" r="35" fill="#f97316" />
         <text
-          x="45"
+          x="30"
           y="50"
           text-anchor="middle"
           fill="white"

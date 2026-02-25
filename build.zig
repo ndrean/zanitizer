@@ -326,6 +326,7 @@ fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
 
     lib.linkLibC();
     lib.linkLibCpp();
+
     return lib;
 }
 
@@ -390,6 +391,11 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
 }
 
 fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, zexplorer_module: *std.Build.Module, curl_module: *std.Build.Module) void {
+    const httpz = b.dependency("httpz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "zxp",
         .root_module = b.createModule(.{
@@ -406,7 +412,7 @@ fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
     // Legacy: nanosvg replaced by ThorVG
     // exe.addCSourceFiles(.{ .files = &.{"src/c/nanosvg.c"}, .flags = &.{"-std=c99"} });
     linkAllLibs(exe, paths, libs);
-
+    exe.root_module.addImport("httpz", httpz.module("httpz"));
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

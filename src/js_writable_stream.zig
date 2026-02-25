@@ -728,12 +728,11 @@ pub fn install(ctx: zqjs.Context) !void {
     if (rc.classes.writable_stream == 0) {
         rc.classes.writable_stream = rt.newClassID();
         g_stream_class_id = rc.classes.writable_stream;
+        try rt.newClass(rc.classes.writable_stream, .{
+            .class_name = "WritableStream",
+            .finalizer = js_WritableStream_finalizer,
+        });
     }
-
-    try rt.newClass(rc.classes.writable_stream, .{
-        .class_name = "WritableStream",
-        .finalizer = js_WritableStream_finalizer,
-    });
 
     const stream_proto = ctx.newObject();
     _ = qjs.JS_SetPropertyStr(ctx.ptr, stream_proto, "getWriter", qjs.JS_NewCFunction(ctx.ptr, js_WritableStream_getWriter, "getWriter", 0));
@@ -754,12 +753,11 @@ pub fn install(ctx: zqjs.Context) !void {
     if (rc.classes.writable_stream_writer == 0) {
         rc.classes.writable_stream_writer = rt.newClassID();
         g_writer_class_id = rc.classes.writable_stream_writer;
+        try rt.newClass(rc.classes.writable_stream_writer, .{
+            .class_name = "WritableStreamDefaultWriter",
+            .finalizer = js_Writer_finalizer,
+        });
     }
-
-    try rt.newClass(rc.classes.writable_stream_writer, .{
-        .class_name = "WritableStreamDefaultWriter",
-        .finalizer = js_Writer_finalizer,
-    });
 
     const writer_proto = ctx.newObject();
     _ = qjs.JS_SetPropertyStr(ctx.ptr, writer_proto, "write", qjs.JS_NewCFunction(ctx.ptr, js_Writer_write, "write", 1));
