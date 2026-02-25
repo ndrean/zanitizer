@@ -20,7 +20,7 @@ You can use it :
 
  1) as a library if you need to add native functionalities and are ready to use Zig,
  2) via the CLI for composing/piping as a one-shot multi-steps process,
- 3) as a service: you pass a JavaScript snippet that and POST it to the running dev-server.
+ 3) as a service: you pass a JavaScript snippet and POST it to the dev-server.
 
 ---
 
@@ -168,9 +168,151 @@ Raw HTML / SVG / CSS
 
 We want to render this HTML:
 
+<details><summary>HTML with CSS grid-1D and Flexbox</summary>
+
 <https://github.com/ndrean/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.html>
 
-- Using the **dev-server**: the pipeline is described in a JavaScript snippet where we read the HTML file using `fetch(url, headers)`, load the HTML with `zxp.loadHTML()` and paint the DOM using `zxp.paintDOM(node)` and get an ImageData. Then we can either print it in the terminal as a PNG using ``kitty` and use `zxp.encode(imageData, mimeType)`, or save the image locally, with `zxp.save(path, imageData)`.
+```html
+<html>
+  <head>
+    <style>
+      body {
+        background: #1e1e2e;
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        width: 760px;
+      }
+
+      h3 {
+        color: #cba6f7;
+        font-size: 13px;
+      }
+
+      /* Test 1: 3 equal columns, wraps to 2 rows */
+      .grid-3col {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .grid-3col .cell {
+        background: #313244;
+        border: 1px solid #585b70;
+        border-radius: 6px;
+        padding: 16px;
+        color: #a6e3a1;
+        font-size: 14px;
+      }
+
+      /* Test 2: 4 equal columns with gap */
+      .grid-4col {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+      }
+      .grid-4col .cell {
+        background: #45475a;
+        border: 1px solid #6c7086;
+        border-radius: 4px;
+        padding: 12px;
+        color: #89dceb;
+        font-size: 13px;
+      }
+
+      /* Test 3: grid-auto-flow: column — items flow horizontally */
+      .grid-autoflow {
+        display: grid;
+        grid-auto-flow: column;
+        gap: 10px;
+      }
+      .grid-autoflow .badge {
+        background: #f38ba8;
+        border-radius: 4px;
+        padding: 8px 14px;
+        color: #1e1e2e;
+        font-size: 13px;
+      }
+
+      /* Test 4: place-items: center — single centred item */
+      .grid-center {
+        display: grid;
+        place-items: center;
+        background: #181825;
+        border: 1px solid #cba6f7;
+        border-radius: 8px;
+        height: 100px;
+      }
+      .grid-center .label {
+        background: fuchsia;
+        border-radius: 4px;
+        padding: 10px 24px;
+        color: #1e1e2e;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Test 1: 3-column equal-fr, 6 items → 2 rows -->
+    <div>
+      <h3>repeat(3, 1fr) — 6 items, wraps to 2 rows</h3>
+      <div class="grid-3col">
+        <div class="cell">Column A</div>
+        <div class="cell">Column B</div>
+        <div class="cell">Column C</div>
+        <div class="cell">Row 2 — A</div>
+        <div class="cell">Row 2 — B</div>
+        <div class="cell">Row 2 — C</div>
+      </div>
+    </div>
+
+    <!-- Test 2: 4-column grid with gap, 8 items → 2 rows -->
+    <div>
+      <h3>repeat(4, 1fr) + gap: 8px — 8 items</h3>
+      <div class="grid-4col">
+        <div class="cell">Jan</div>
+        <div class="cell">Feb</div>
+        <div class="cell">Mar</div>
+        <div class="cell">Apr</div>
+        <div class="cell">May</div>
+        <div class="cell">Jun</div>
+        <div class="cell">Jul</div>
+        <div class="cell">Aug</div>
+      </div>
+    </div>
+
+    <!-- Test 3: grid-auto-flow: column → horizontal flex row -->
+    <div>
+      <h3>grid-auto-flow: column — horizontal strip</h3>
+      <div class="grid-autoflow">
+        <div class="badge">Alpha</div>
+        <div class="badge">Beta</div>
+        <div class="badge">Gamma</div>
+        <div class="badge">Delta</div>
+      </div>
+    </div>
+
+    <!-- Test 4: place-items: center → centered item in box -->
+    <div>
+      <h3>place-items: center</h3>
+      <div class="grid-center">
+        <div class="label" style="color: yellow">Centered content</div>
+      </div>
+    </div>
+  </body>
+</html>
+
+```
+
+</details>
+
+We will use the three methods: use the dev-server and send a POST HTTP request whose payload is JavaScript code, use the CLI with the verb `convert`, and run `Zig` code.
+
+- **dev-server**: the pipeline is described in a JavaScript snippet where we:
+  - read the HTML file using `fetch(url, headers)`,
+  - load (parse, load JS chunks, load and sync CSS) the full HTML with `zxp.loadHTML(html, {sanitize: ?})`
+  - paint the DOM using `zxp.paintDOM(node)` and get an ImageData.
+  - Then we can either print it in the terminal as a PNG using `kitty` and use `zxp.encode(imageData, mimeType)`, or save the image locally, with `zxp.save(path, imageData)`.
   
 In the example below, we encode in WEBP and will pipe the output to render an image in the terminal using `kitty`.
 
@@ -214,15 +356,62 @@ If you want to save the image to a say JPEG, you can instead use `zxp.save()` an
 zxp.save(img, "src/examples/render_grid_1d/serve_grid_1d.webp");
 ```
 
-- using the CLI: we use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
+- **CLI**: we use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
 
 ```sh
 ./zig-out/bin/zxp convert src/examples/render_grid_1d/grid_1d.html -dpi 72 -o src/examples/render_grid_1d/grid_1d.pdf
 ```
 
-- using the library:
+- **using the library**:
 
-The code is: <https://github.com/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.zig>
+<details><summary>Zig code using the library</summary>
+
+Source: <https://github.com/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.zig>
+
+```zig
+const std = @import("std");
+const builtin = @import("builtin");
+const z = @import("zexplorer");
+const ZxpRuntime = z.ZxpRuntime;
+const ScriptEngine = z.ScriptEngine;
+
+pub fn main() !void {
+    var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+    const gpa, const is_debug = gpa: {
+        break :gpa switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
+        };
+    };
+    defer if (is_debug) {
+        _ = .ok == debug_allocator.deinit();
+    };
+
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var zxp_rt = try z.ZxpRuntime.init(gpa, sandbox_root);
+    defer zxp_rt.deinit();
+
+    var engine = try ScriptEngine.init(gpa, zxp_rt);
+    defer engine.deinit();
+
+    const html = @embedFile("grid_1d.html"); // relative to source file
+    try engine.loadPage(html, .{});
+
+    try z.prettyPrint(gpa, z.bodyNode(engine.dom.doc).?);
+
+    // Paint
+    const script =
+        \\ const body = document.querySelector("body");
+        \\ zxp.save(zxp.paintDOM(body), "src/examples/render_grid_1d/grid_1d.jpeg")
+    ;
+    const val = try engine.eval(script, "<grid-paint>", .global);
+    engine.ctx.freeValue(val);
+}
+```
+
+</details>
 
 You run it with:
 
