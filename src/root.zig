@@ -709,22 +709,28 @@ test {
 }
 
 pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
-    var allocating = std.Io.Writer.Allocating.init(allocator);
-    defer allocating.deinit();
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const aa = arena.allocator();
 
-    var client: std.http.Client = .{
-        .allocator = allocator,
-    };
-    defer client.deinit();
+    const ca_bundle = try curl.allocCABundle(aa);
+    defer ca_bundle.deinit();
 
-    const response = try client.fetch(.{
-        .method = .GET,
-        .location = .{ .url = url },
-        .response_writer = &allocating.writer,
-    });
+    var easy = try curl.Easy.init(.{ .ca_bundle = ca_bundle });
+    defer easy.deinit();
 
-    std.debug.assert(response.status == .ok);
-    return allocating.toOwnedSlice();
+    const url_z = try aa.dupeZ(u8, url);
+    try easy.setUrl(url_z);
+    curl_multi.hardenEasy(easy);
+
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    errdefer writer.deinit();
+    try easy.setWriter(&writer.writer);
+
+    const ret = try easy.perform();
+    if (ret.status_code < 200 or ret.status_code >= 300) return error.HttpError;
+
+    return writer.toOwnedSlice();
 }
 
 /// Write directly to stdout (unbuffered). Use for program output

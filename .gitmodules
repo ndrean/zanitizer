@@ -4,9 +4,6 @@
 [submodule "vendor/thorvg"]
 	path = vendor/thorvg
 	url = https://github.com/thorvg/thorvg
-[submodule "vendor/lexbor_src_master"]
-	path = vendor/lexbor_src_master
-	url = https://github.com/lexbor/lexbor
 [submodule "vendor/libwebp"]
 	path = vendor/libwebp
 	url = https://github.com/webmproject/libwebp
@@ -17,3 +14,6 @@
 [submodule "vendor/yoga"]
 	path = vendor/yoga
 	url = https://github.com/facebook/yoga
+[submodule "vendor/lexbor_src_master"]
+	path = vendor/lexbor_src_master
+	url = https://github.com/lexbor/lexbor

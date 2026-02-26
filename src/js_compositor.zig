@@ -70,6 +70,7 @@
 //!   * stb_image can decode WebP but libwebp is used directly for better fidelity / alpha support
 
 const std = @import("std");
+const builtin = @import("builtin");
 const z = @import("root.zig");
 const RuntimeContext = z.RuntimeContext;
 const qjs = z.qjs;
@@ -315,6 +316,8 @@ fn hasBlockChildren(node: *z.DomNode) bool {
                         return true;
                     }
                 }
+                // Inline element wrapping block-level content (e.g. <a><img></a>)
+                if (hasBlockChildren(c_node)) return true;
             }
         }
     }
@@ -383,8 +386,13 @@ fn resolveUrl(allocator: std.mem.Allocator, base: []const u8, src: []const u8) !
             const host_end = std.mem.indexOfScalarPos(u8, base, after_scheme, '/') orelse base.len;
             return std.fmt.allocPrint(allocator, "{s}{s}", .{ base[0..host_end], src });
         }
-        // Relative path: resolve against base directory (strip trailing filename if any)
-        const dir_end = std.mem.lastIndexOfScalar(u8, base, '/') orelse base.len;
+        // Relative path: resolve against base directory (strip trailing filename if any).
+        // Skip past "://" so we don't mistake the scheme slashes for a path separator.
+        const after_scheme = (std.mem.indexOf(u8, base, "://") orelse return error.BadBase) + 3;
+        const dir_end = if (std.mem.lastIndexOfScalar(u8, base[after_scheme..], '/')) |d|
+            after_scheme + d
+        else
+            base.len; // bare hostname, no path — use the full base
         return std.fmt.allocPrint(allocator, "{s}/{s}", .{ base[0..dir_end], src });
     }
 
@@ -397,32 +405,60 @@ fn resolveUrl(allocator: std.mem.Allocator, base: []const u8, src: []const u8) !
 /// same-site image proxies (like Next.js /_next/image) accept the request.
 /// Accept is restricted to formats our decoders support — avoids AVIF from Vary:Accept servers.
 fn fetchImageBytes(allocator: std.mem.Allocator, url: []const u8, referer: ?[]const u8) ?[]const u8 {
-    var client: std.http.Client = .{ .allocator = allocator };
-    defer client.deinit();
-    var buf = std.Io.Writer.Allocating.init(allocator);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const aa = arena.allocator();
 
-    var headers_buf: [2]std.http.Header = .{
-        .{ .name = "Accept", .value = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml,*/*;q=0.5" },
-        .{ .name = "Referer", .value = referer orelse "" },
-    };
-    const headers: []const std.http.Header = if (referer != null) headers_buf[0..2] else headers_buf[0..1];
-
-    const resp = client.fetch(.{
-        .method = .GET,
-        .location = .{ .url = url },
-        .response_writer = &buf.writer,
-        .extra_headers = headers,
-    }) catch |err| {
-        buf.deinit();
-        std.debug.print("[Compositor] ⚠️ Failed to fetch image {s}: {}\n", .{ url, err });
+    const ca_bundle = z.curl.allocCABundle(aa) catch {
+        std.debug.print("[Compositor] fetchImageBytes: allocCABundle failed\n", .{});
         return null;
     };
-    if (resp.status != .ok) {
-        buf.deinit();
-        std.debug.print("[Compositor] HTTP {} for image: {s}\n", .{ @intFromEnum(resp.status), url });
+    defer ca_bundle.deinit();
+
+    var easy = z.curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch {
+        std.debug.print("[Compositor] fetchImageBytes: Easy.init failed\n", .{});
+        return null;
+    };
+    defer easy.deinit();
+
+    const url_z = aa.dupeZ(u8, url) catch return null;
+    easy.setUrl(url_z) catch {
+        std.debug.print("[Compositor] fetchImageBytes: setUrl failed\n", .{});
+        return null;
+    };
+    z.hardenEasy(easy);
+
+    var headers = z.curl.Easy.Headers{};
+    defer headers.deinit();
+    headers.add("Accept: image/png,image/jpeg,image/webp,image/gif,image/svg+xml,*/*;q=0.5") catch return null;
+    if (referer) |ref| {
+        var ref_buf: [2048]u8 = undefined;
+        const ref_hdr = std.fmt.bufPrintZ(&ref_buf, "Referer: {s}", .{ref}) catch return null;
+        headers.add(ref_hdr) catch return null;
+    }
+    easy.setHeaders(headers) catch {
+        std.debug.print("[Compositor] fetchImageBytes: setHeaders failed\n", .{});
+        return null;
+    };
+
+    var writer = std.Io.Writer.Allocating.init(allocator);
+    easy.setWriter(&writer.writer) catch {
+        std.debug.print("[Compositor] fetchImageBytes: setWriter failed\n", .{});
+        writer.deinit();
+        return null;
+    };
+
+    const ret = easy.perform() catch {
+        writer.deinit();
+        std.debug.print("[Compositor] ⚠️ Failed to fetch image {s}\n", .{url});
+        return null;
+    };
+    if (ret.status_code < 200 or ret.status_code >= 300) {
+        writer.deinit();
+        std.debug.print("[Compositor] HTTP {} for image: {s}\n", .{ ret.status_code, url });
         return null;
     }
-    return buf.toOwnedSlice() catch null;
+    return writer.toOwnedSlice() catch null;
 }
 
 /// Build a Yoga tree from the DOM. Only element nodes become Yoga nodes.
@@ -1237,6 +1273,7 @@ fn paintYogaTree(
                 _ = tvg_canvas_add(canvas, pic);
             } else {
                 // Unsupported format (webp, avif, etc.) or corrupt data — free and skip
+                if (builtin.mode == .Debug) std.debug.print("[Compositor] ⚠️ tvg_picture_load_data failed (code={}, svg={}, len={})\n", .{ load_ok, info.img_is_svg, img_data.len });
                 _ = tvg_paint_unref(pic, true);
             }
         }

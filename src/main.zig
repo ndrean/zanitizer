@@ -384,7 +384,7 @@ const MOBILE_UA =
 
 /// Fetch a URL with mobile browser headers for scraping.
 /// Uses libcurl (same TLS stack as the rest of the codebase) rather than
-/// std.http.Client which crashes on some HTTPS hosts.
+/// Uses libcurl with mobile browser headers for better server compatibility.
 fn fetchScrapeUrl(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -457,46 +457,36 @@ fn readHtmlInput(allocator: std.mem.Allocator, maybe_path: ?[]const u8) ![]u8 {
         return list.toOwnedSlice(allocator);
     }
     if (std.mem.startsWith(u8, path, "http://") or std.mem.startsWith(u8, path, "https://")) {
-        var client: std.http.Client = .{ .allocator = allocator };
-        defer client.deinit();
-        var buf = std.Io.Writer.Allocating.init(allocator);
-        const resp = client.fetch(.{
-            .method = .GET,
-            .location = .{ .url = path },
-            .response_writer = &buf.writer,
-        }) catch |err| {
-            buf.deinit();
+        return z.get(allocator, path) catch |err| {
             z.print("❌ Failed to fetch URL '{s}': {}\n", .{ path, err });
             return error.FetchFailed;
         };
-        if (resp.status != .ok) {
-            buf.deinit();
-            z.print("❌ HTTP {} fetching '{s}'\n", .{ @intFromEnum(resp.status), path });
-            return error.FetchFailed;
-        }
-        return buf.toOwnedSlice();
     }
     return std.fs.cwd().readFileAlloc(allocator, path, 10 * 1024 * 1024);
 }
 
-/// Build the JS render script for the given width and output path (PNG or PDF).
+/// Build the JS render script for the given width and output path.
 /// Caller must free the returned slice.
 fn buildRenderScript(allocator: std.mem.Allocator, out_path: ?[]const u8, width: u32) ![]const u8 {
-    const is_pdf = if (out_path) |p| std.mem.endsWith(u8, p, ".pdf") else false;
-    if (is_pdf) {
-        return std.fmt.allocPrint(allocator,
-            "zxp.encode(zxp.paintDOM(document.body, {d}), \"pdf\")",
-            .{width});
-    }
+    const fmt: []const u8 = if (out_path) |p| blk: {
+        if (std.ascii.endsWithIgnoreCase(p, ".pdf")) break :blk "pdf";
+        if (std.ascii.endsWithIgnoreCase(p, ".jpg") or std.ascii.endsWithIgnoreCase(p, ".jpeg")) break :blk "jpeg";
+        if (std.ascii.endsWithIgnoreCase(p, ".webp")) break :blk "webp";
+        break :blk "png";
+    } else "png";
     return std.fmt.allocPrint(allocator,
-        "zxp.encode(zxp.paintDOM(document.body, {d}), \"png\")",
-        .{width});
+        "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")",
+        .{ width, fmt });
 }
 
 /// Write output: HTML to stdout/file by default; render PNG/PDF when -o *.png/*.pdf.
 fn writeHtmlOrImage(allocator: std.mem.Allocator, engine: *ScriptEngine, out_path: ?[]const u8, width: u32, tag: [:0]const u8) !void {
     const render_image = if (out_path) |p|
-        std.mem.endsWith(u8, p, ".png") or std.mem.endsWith(u8, p, ".pdf")
+        std.ascii.endsWithIgnoreCase(p, ".png") or
+        std.ascii.endsWithIgnoreCase(p, ".pdf") or
+        std.ascii.endsWithIgnoreCase(p, ".jpg") or
+        std.ascii.endsWithIgnoreCase(p, ".jpeg") or
+        std.ascii.endsWithIgnoreCase(p, ".webp")
     else
         false;
 

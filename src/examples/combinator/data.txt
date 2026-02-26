@@ -1,0 +1,58 @@
+Show HN: Neo – Turn any web app into an API by capturing browser traffic	https://github.com/4ier/neo
+github.com/4ier	from?site=github.com/4ier
+Show HN: Grubl – AI and structured recipe generation	https://grubl.app
+grubl.app	from?site=grubl.app
+Show HN: Better Hub – A better GitHub experience	https://www.better-hub.com/
+better-hub.com	from?site=better-hub.com
+Norwegian state newspaper investigate AI psychosis	https://www.nrk.no/direkte/xl/ki-psykose_-vi-undersokte-hvordan-chatbotter-svarer-1.17770908
+nrk.no	from?site=nrk.no
+Little about software engineering has changed over past last three months	https://twitter.com/Grady_Booch/status/2026736492488568955
+twitter.com/grady_booch	from?site=twitter.com/grady_booch
+Axelera: Cutting-edge hardware and software platform for accelerating inference	https://axelera.ai
+axelera.ai	from?site=axelera.ai
+WTF Happened in 2025?	https://wtfhappened2025.com/
+wtfhappened2025.com	from?site=wtfhappened2025.com
+OpenClaw broadcasts its screen while I'm at the gym [video]	https://www.instagram.com/reel/DVN2zfSEXJj/
+instagram.com	from?site=instagram.com
+Asura: Looped Language Models done better	https://neel04.github.io/my-website/projects/asura/
+neel04.github.io	from?site=neel04.github.io
+Facebook is now the EU law maker	https://thegoodlobby.eu/watchdogs-call-to-drop-ex-meta-lobbyist-as-digital-omnibus-rapporteur/
+thegoodlobby.eu	from?site=thegoodlobby.eu
+Show HN: A Confidence Calibration Game	https://www.calibrategame.com/
+calibrategame.com	from?site=calibrategame.com
+Memory Price Trends	https://fr.pcpartpicker.com/trends/price/memory/
+pcpartpicker.com	from?site=pcpartpicker.com
+Sometimes Your Device Is Alive but Is Dead	https://dunkels.com/adam/sometimes-your-device-is-alive-but-is-actually-dead/
+dunkels.com	from?site=dunkels.com
+Why This Ransomware Attack Failed	https://kb-it.net/why_this_ransomware_attack_failed/
+kb-it.net	from?site=kb-it.net
+Technical Excellence Is Not Enough	https://raccoon.land/posts/technical-excellence-is-not-enough/
+raccoon.land	from?site=raccoon.land
+Heinzel – AI-Powered Linux Server Administration with Claude Code	https://github.com/wintermeyer/heinzel
+github.com/wintermeyer	from?site=github.com/wintermeyer
+Reducing the size of Go binaries by up to 77%	https://www.datadoghq.com/blog/engineering/agent-go-binaries/
+datadoghq.com	from?site=datadoghq.com
+What a negative AI economic scenario could look like	https://deadneurons.substack.com/p/what-a-negative-ai-economic-scenario
+deadneurons.substack.com	from?site=deadneurons.substack.com
+How Russia is intercepting communications from European satellites	https://theconversation.com/how-russia-is-intercepting-communications-from-european-satellites-276094
+theconversation.com	from?site=theconversation.com
+Pdfpc: A presenter console with multi-monitor support for PDF files	https://pdfpc.github.io/
+pdfpc.github.io	from?site=pdfpc.github.io
+Show HN: Who's Winning the AI Race?	https://whoswinningtheairace.com/
+whoswinningtheairace.com	from?site=whoswinningtheairace.com
+8B tokens a day forced AT&T to rethink AI orchestration and cut costs by 90%	https://venturebeat.com/orchestration/8-billion-tokens-a-day-forced-at-and-t-to-rethink-ai-orchestration-and-cut
+venturebeat.com	from?site=venturebeat.com
+Show HN: Codex builds a working NES Emulator in one hour	https://github.com/kaonashi-tyc/codex-nes-emulator
+github.com/kaonashi-tyc	from?site=github.com/kaonashi-tyc
+Show HN: PsiGuard – real-time hallucination monitoring for LLM apps	item?id=47163893
+Tech Monitor – Real-Time AI and Tech Industry Dashboard	https://tech.worldmonitor.app/
+worldmonitor.app	from?site=worldmonitor.app
+Tell HN: YC companies scrape GitHub activity, send spam emails to users	item?id=47163885
+Thoughts on Coding Agents	https://dennybritz.com/posts/coding-agents/
+dennybritz.com	from?site=dennybritz.com
+SEO, AEO, and AI Visibility: The three metrics that define your Website's future	https://repuai.live/en/blog/seo-aeo-ai-visibility-metrics-website-analysis
+repuai.live	from?site=repuai.live
+I built a turn tracking app and I don't know if it's useful?	https://www.turnsies.app/signin?returnUrl=%2F
+turnsies.app	from?site=turnsies.app
+Copland (Operating System)	https://en.wikipedia.org/wiki/Copland_(operating_system)
+wikipedia.org	from?site=wikipedia.org

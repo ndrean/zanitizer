@@ -1103,7 +1103,7 @@ pub const ScriptEngine = struct {
                         };
                         remote_count += 1;
                     } else {
-                        // Fallback: synchronous fetch via std.http
+                        // Fallback: synchronous fetch via curl
                         const remote_code = self.get(fetch_url) catch |err| {
                             z.print("Failed to fetch script '{s}': {}\n", .{ fetch_url, err });
                             continue;
@@ -1300,24 +1300,9 @@ pub const ScriptEngine = struct {
         }
     }
 
-    /// Synchronous HTTP GET (still used for CSS loading)
+    /// Synchronous HTTP GET (used for CSS loading and sync script fallback).
     pub fn get(self: *ScriptEngine, url: []const u8) ![]u8 {
-        var allocating = std.Io.Writer.Allocating.init(self.allocator);
-        defer allocating.deinit();
-
-        var client: std.http.Client = .{
-            .allocator = self.allocator,
-        };
-        defer client.deinit();
-
-        const response = try client.fetch(.{
-            .method = .GET,
-            .location = .{ .url = url },
-            .response_writer = &allocating.writer,
-        });
-
-        std.debug.assert(response.status == .ok);
-        return allocating.toOwnedSlice();
+        return z.get(self.allocator, url);
     }
 
     // Helper to check for remote URLs
