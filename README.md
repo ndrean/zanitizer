@@ -164,6 +164,7 @@ Raw HTML / SVG / CSS
 
 ## Usage examples
 
+
 ### Render an HTML file
 
 We want to render this HTML:
@@ -739,6 +740,68 @@ You can serve this HTML via the LiveServer to have a snapshot of the Vercel demo
 ---
 
 ### Stream html chunks
+
+## Showcase
+
+### Generative template
+
+The HTML file becomes a generative template — declarative, stateless, reproducible. Just swap the prompt.
+
+```js
+async function run() {
+  const html = await zxp.llmHTML({
+    model: "llama3.1",
+    prompt: "3 metric cards in a row using flexbox: Revenue $12k, Users 340, Uptime 99.9%. White background, colored cards.",
+  });
+ 
+  document.body.innerHTML = html;
+  const img = zxp.paintDOM(document.body, 800);
+  return zxp.encode(img, "png");
+}
+run();
+```
+
+```sh
+./zig-out/bin/zxp run src/examples/generative/test_llm.js
+```
+
+which outputs:
+
+```html
+<div style="display:flex;flex-direction:row;justify-content:space-around;align-items:center;gap:20px;padding:10px;margin:20px;background:#fff;">
+  <div style="width:150px;height:100px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:10px;margin:0;border-radius:10px;background:#FFC107;color:#333;font-size:14px;font-weight:bold;">Revenue $12k</div>
+  <div style="width:150px;height:100px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:10px;margin:0;border-radius:10px;background:#8BC34A;color:#fff;font-size:14px;font-weight:bold;">Users 340</div>
+  <div style="width:150px;height:100px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:10px;margin:0;border-radius:10px;background:#2196F3;color:#fff;font-size:14px;font-weight:bold;">Uptime 99.9%</div>
+</div>
+```
+
+or visually
+
+<img src="" alt="llm generated" width="300">
+
+SSE format:
+
+
+|Provider	|Content path	|End signal|
+|--|--|--|
+|OpenAI	|.choices[0].delta.content	|data: [DONE]|
+|Anthropic	|.delta.text (on content_block_delta events)	|event: message_stop|
+|Gemini	|.candidates[0].content.parts[0].text	|.finishReason == "STOP"|
+|Ollama	|.message.content	|no SSE — raw NDJSON|
+
+```txt
+if openai || groq || mistral || together || ollama_v1 → .choices[0].delta.content
+if anthropic                                           → .delta.text
+if gemini                                             → .candidates[0].content.parts[0].text
+```
+
+```txt
+You are a UI generator. Output ONLY raw HTML.
+Use ONLY: display:flex, flex-direction, justify-content, align-items,
+gap, padding, margin, color, background, font-size, border-radius.
+No external fonts. No animations. No @media. No CSS variables.
+Inline styles only OR a single <style> block.
+```
 
 ### Generate a Leaflet map PDF report
 

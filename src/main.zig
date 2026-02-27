@@ -59,6 +59,7 @@ pub const TargetFormat = enum {
     binary_png,
     binary_jpeg,
     binary_pdf,
+    binary_webp,
     json_data,
     raw_text,
 };
@@ -474,19 +475,17 @@ fn buildRenderScript(allocator: std.mem.Allocator, out_path: ?[]const u8, width:
         if (std.ascii.endsWithIgnoreCase(p, ".webp")) break :blk "webp";
         break :blk "png";
     } else "png";
-    return std.fmt.allocPrint(allocator,
-        "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")",
-        .{ width, fmt });
+    return std.fmt.allocPrint(allocator, "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")", .{ width, fmt });
 }
 
 /// Write output: HTML to stdout/file by default; render PNG/PDF when -o *.png/*.pdf.
 fn writeHtmlOrImage(allocator: std.mem.Allocator, engine: *ScriptEngine, out_path: ?[]const u8, width: u32, tag: [:0]const u8) !void {
     const render_image = if (out_path) |p|
         std.ascii.endsWithIgnoreCase(p, ".png") or
-        std.ascii.endsWithIgnoreCase(p, ".pdf") or
-        std.ascii.endsWithIgnoreCase(p, ".jpg") or
-        std.ascii.endsWithIgnoreCase(p, ".jpeg") or
-        std.ascii.endsWithIgnoreCase(p, ".webp")
+            std.ascii.endsWithIgnoreCase(p, ".pdf") or
+            std.ascii.endsWithIgnoreCase(p, ".jpg") or
+            std.ascii.endsWithIgnoreCase(p, ".jpeg") or
+            std.ascii.endsWithIgnoreCase(p, ".webp")
     else
         false;
 
@@ -575,7 +574,7 @@ fn runCliRequest(engine: *ScriptEngine, script: []const u8, filename: [:0]const 
     }
 
     switch (format) {
-        .binary_png, .binary_jpeg, .binary_pdf => {
+        .binary_png, .binary_jpeg, .binary_pdf, .binary_webp => {
             if (load_html_path) |html_path| {
                 const html = try readHtmlInput(engine.allocator, html_path);
                 defer engine.allocator.free(html);
@@ -640,6 +639,9 @@ fn determineFormat(verb: []const u8, out_path: ?[]const u8, format_override: ?[]
         if (std.mem.eql(u8, f, "text")) return .raw_text;
         if (std.mem.eql(u8, f, "json")) return .json_data;
         if (std.mem.eql(u8, f, "png")) return .binary_png;
+        if (std.mem.eql(u8, f, "webp")) return .binary_webp;
+        if (std.mem.eql(u8, f, "jpeg") or std.mem.eql(u8, f, "jpg")) return .binary_jpeg;
+        if (std.mem.eql(u8, f, "pdf")) return .binary_pdf;
     }
 
     // Detect binary output format from the output file extension (works for both run and render)
@@ -647,6 +649,7 @@ fn determineFormat(verb: []const u8, out_path: ?[]const u8, format_override: ?[]
         if (std.mem.endsWith(u8, p, ".pdf")) return .binary_pdf;
         if (std.mem.endsWith(u8, p, ".jpg") or std.mem.endsWith(u8, p, ".jpeg")) return .binary_jpeg;
         if (std.mem.endsWith(u8, p, ".png")) return .binary_png;
+        if (std.mem.endsWith(u8, p, ".webp")) return .binary_webp;
     }
 
     // render defaults to PNG output even without -o
@@ -675,7 +678,7 @@ fn printUsage() void {
         \\Options (run/render):
         \\  -o <file>            Output file path (default: stdout)
         \\  -p, --pretty         Pretty-print JSON output
-        \\  -f, --format <fmt>   Output format: json (default), text
+        \\  -f, --format <fmt>   Output format: json (default), text, png, webp, jpeg, pdf
         \\  -H, --load-html <f>  Seed render with a real HTML file
         \\
         \\Options (convert/sanitize):

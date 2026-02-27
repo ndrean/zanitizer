@@ -229,6 +229,15 @@ globalThis.zxp = {
     if (typeof __native_flush === "function") __native_flush();
   },
 
+  // llmHTML(config) — call an LLM, stream HTML tokens, return the full HTML string.
+  // config: { model, prompt, provider?, system?, base_url? }
+  // provider defaults to "ollama" (http://localhost:11434)
+  async llmHTML(config) {
+    const raw = __native_llmHTML(config);
+    // Strip markdown code fences that some models add despite instructions
+    return raw.replace(/^```[\w]*\n?/, "").replace(/\n?```\s*$/, "").trim();
+  },
+
   // streamFrom(url) — like goto(), but feeds the response directly into the
   // lexbor streaming parser instead of buffering the whole response first.
   // Use when the source is slow (LLM token stream, large SSR payload).
