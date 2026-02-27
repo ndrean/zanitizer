@@ -14,6 +14,7 @@ const Paths = struct {
     miniz_src: std.Build.LazyPath,
     libharu_include: std.Build.LazyPath,
     fake_zlib: std.Build.LazyPath,
+    md4c_src: std.Build.LazyPath,
 };
 
 /// All C libraries needed by the project
@@ -24,6 +25,7 @@ const Libraries = struct {
     yoga: *std.Build.Step.Compile,
     miniz: *std.Build.Step.Compile,
     haru: *std.Build.Step.Compile,
+    md4c: *std.Build.Step.Compile,
     zexplorer: *std.Build.Step.Compile,
 };
 
@@ -44,6 +46,7 @@ pub fn build(b: *std.Build) void {
         .miniz_src = b.path("vendor/miniz"),
         .libharu_include = b.path("vendor/libharu/include"),
         .fake_zlib = b.path("vendor/fake_zlib"),
+        .md4c_src = b.path("vendor/md4c/src"),
     };
 
     // Build all C libraries
@@ -54,6 +57,7 @@ pub fn build(b: *std.Build) void {
         .yoga = buildYoga(b, target, optimize, paths),
         .miniz = buildMiniz(b, target, optimize, paths),
         .haru = buildLibHaru(b, target, optimize, paths),
+        .md4c = buildMd4c(b, target, optimize, paths),
         .zexplorer = buildZexplorerLib(b, target, optimize, paths),
     };
 
@@ -64,6 +68,7 @@ pub fn build(b: *std.Build) void {
     libs.zexplorer.linkLibrary(libs.yoga);
     libs.zexplorer.linkLibrary(libs.miniz);
     libs.zexplorer.linkLibrary(libs.haru);
+    libs.zexplorer.linkLibrary(libs.md4c);
 
     // Curl dependency
     const dep_curl = b.dependency(
@@ -300,6 +305,22 @@ fn buildThorVG(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.bu
     return lib;
 }
 
+fn buildMd4c(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .name = "md4c",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    lib.addCSourceFiles(.{
+        .root = paths.md4c_src,
+        .files = &.{ "md4c.c", "md4c-html.c", "entity.c" },
+        .flags = &.{"-O2"},
+    });
+    lib.addIncludePath(paths.md4c_src);
+    lib.linkLibC();
+    return lib;
+}
+
 fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths) *std.Build.Step.Compile {
     const lib = b.addLibrary(.{
         .name = "zexplorer",
@@ -323,6 +344,7 @@ fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
     lib.addIncludePath(paths.libharu_include);
     lib.addIncludePath(paths.fake_zlib);
     lib.addIncludePath(b.path("vendor/libharu/include"));
+    lib.addIncludePath(paths.md4c_src);
 
     lib.linkLibC();
     lib.linkLibCpp();
@@ -349,6 +371,7 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     mod.linkLibrary(libs.yoga);
     mod.linkLibrary(libs.miniz);
     mod.linkLibrary(libs.haru);
+    mod.linkLibrary(libs.md4c);
     mod.addIncludePath(paths.quickjs_src);
     mod.addIncludePath(paths.lexbor_src);
     mod.addIncludePath(paths.stb_image_src);
@@ -360,6 +383,7 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     mod.addIncludePath(paths.libharu_include);
     mod.addIncludePath(paths.fake_zlib);
     mod.addIncludePath(b.path("vendor/libharu/include"));
+    mod.addIncludePath(paths.md4c_src);
     mod.addIncludePath(b.path("vendor/yoga/yoga"));
     mod.link_libc = true;
     mod.link_libcpp = true;
@@ -388,6 +412,8 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
     artifact.linkLibrary(libs.yoga);
     artifact.linkLibrary(libs.miniz);
     artifact.linkLibrary(libs.haru);
+    artifact.linkLibrary(libs.md4c);
+    artifact.addIncludePath(paths.md4c_src);
 }
 
 fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, zexplorer_module: *std.Build.Module, curl_module: *std.Build.Module) void {

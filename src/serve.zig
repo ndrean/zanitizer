@@ -3,6 +3,7 @@ const z = @import("root.zig");
 const httpz = @import("httpz");
 const zxp_runtime = @import("zxp_runtime.zig");
 const js_streamfrom = @import("js_streamfrom.zig");
+const js_llm = @import("js_llm.zig");
 
 const WriterContext = struct {
     res: *httpz.Response,
@@ -89,6 +90,7 @@ pub const Server = struct {
         router.post("/run", runHandler, .{});
         router.post("/stream", streamHandler, .{});
         router.post("/render", renderProxyHandler, .{});
+        router.get("/render_llm", renderLlmHandler, .{});
 
         return Server{ .allocator = allocator, .app_ctx = app_ctx, .server = server };
     }
@@ -306,6 +308,51 @@ pub fn renderProxyHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz
     if (!engine.ctx.isArrayBuffer(val)) {
         res.status = 500;
         res.body = "render failed: paintDOM did not return an ArrayBuffer";
+        return;
+    }
+
+    const bytes = try engine.ctx.getArrayBuffer(val);
+    res.header("Content-Type", sniffMime(bytes));
+    res.body = try res.arena.dupe(u8, bytes);
+}
+
+/// GET /render_llm?prompt=<text>[&model=llama3.2][&system=<text>][&width=800][&format=png][&base_url=http://localhost:11434]
+///
+/// Streams an LLM prompt directly into the headless DOM via Ollama, paints
+/// the result, and returns the encoded image.  Designed to be used as an
+/// <img> src so the browser can embed generative UI without a JS pipeline:
+///
+///   <img src="http://localhost:9984/render_llm?prompt=3+metric+cards&format=webp">
+pub fn renderLlmHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
+    const qs = try req.query();
+
+    const prompt = qs.get("prompt") orelse "A simple table";
+    const model = qs.get("model") orelse "llama3.2";
+    const system = qs.get("system") orelse js_llm.default_system;
+    const base_url = qs.get("base_url") orelse "http://localhost:11434";
+    const width: u32 = if (qs.get("width")) |w| std.fmt.parseInt(u32, w, 10) catch 800 else 800;
+    const format: []const u8 = qs.get("format") orelse "png";
+
+    const alloc = app_ctx.allocator;
+    const zxp_rt = try zxp_runtime.getOrCreate(alloc, app_ctx.sandbox_root);
+    var engine = try z.ScriptEngine.init(alloc, zxp_rt);
+    defer engine.deinit();
+
+    // Stream Ollama tokens directly into the headless DOM — no HTML buffer.
+    try js_llm.streamLLMtoDOM(engine, base_url, model, system, prompt);
+
+    // Paint and encode the fully-processed DOM.
+    const js = try std.fmt.allocPrint(alloc,
+        "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")",
+        .{ width, format });
+    defer alloc.free(js);
+
+    const val = try engine.evalAsync(js, "<render_llm>");
+    defer engine.ctx.freeValue(val);
+
+    if (!engine.ctx.isArrayBuffer(val)) {
+        res.status = 500;
+        res.body = "render_llm failed: paintDOM did not return an ArrayBuffer";
         return;
     }
 

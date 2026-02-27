@@ -238,6 +238,21 @@ globalThis.zxp = {
     return raw.replace(/^```[\w]*\n?/, "").replace(/\n?```\s*$/, "").trim();
   },
 
+  // llmStream(config) — call an LLM and feed each HTML token directly into the
+  // lexbor streaming parser. The document is fully populated when this returns.
+  // No HTML string accumulation; single parse pass; lower latency than llmHTML.
+  // config: { model, prompt, provider?, system?, base_url? }
+  llmStream(config) {
+    __native_llmStream(config);
+    if (
+      globalThis.customElements &&
+      typeof customElements.upgradeAll === "function"
+    ) {
+      customElements.upgradeAll();
+    }
+    if (typeof __native_flush === "function") __native_flush();
+  },
+
   // streamFrom(url) — like goto(), but feeds the response directly into the
   // lexbor streaming parser instead of buffering the whole response first.
   // Use when the source is slow (LLM token stream, large SSR payload).

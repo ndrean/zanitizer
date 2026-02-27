@@ -162,8 +162,7 @@ Raw HTML / SVG / CSS
 
 ---
 
-## Usage examples
-
+## First examples
 
 ### Render an HTML file
 
@@ -745,6 +744,8 @@ You can serve this HTML via the LiveServer to have a snapshot of the Vercel demo
 
 ### Generative template
 
+You want to use a LLM to generate some HTML with CSS for you. The LLM uses SSE. The engine handles _text/event-stream_  and 
+
 The HTML file becomes a generative template — declarative, stateless, reproducible. Just swap the prompt.
 
 ```js
@@ -756,28 +757,18 @@ async function run() {
  
   document.body.innerHTML = html;
   const img = zxp.paintDOM(document.body, 800);
-  return zxp.encode(img, "png");
+  return zxp.encode(img, "webp");
 }
 run();
 ```
 
 ```sh
-./zig-out/bin/zxp run src/examples/generative/test_llm.js
+./zig-out/bin/zxp run src/examples/generative/test_llm.js -o src/examples/generative/test_llm.webp
 ```
 
-which outputs:
+The result is an LLM generated image. We rendered an image for demonstration but you can use it directly in a rendered HTML.
 
-```html
-<div style="display:flex;flex-direction:row;justify-content:space-around;align-items:center;gap:20px;padding:10px;margin:20px;background:#fff;">
-  <div style="width:150px;height:100px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:10px;margin:0;border-radius:10px;background:#FFC107;color:#333;font-size:14px;font-weight:bold;">Revenue $12k</div>
-  <div style="width:150px;height:100px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:10px;margin:0;border-radius:10px;background:#8BC34A;color:#fff;font-size:14px;font-weight:bold;">Users 340</div>
-  <div style="width:150px;height:100px;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:10px;margin:0;border-radius:10px;background:#2196F3;color:#fff;font-size:14px;font-weight:bold;">Uptime 99.9%</div>
-</div>
-```
-
-or visually
-
-<img src="" alt="llm generated" width="300">
+<img src="http://localhost:9984/render" alt="llm generated" width="300">
 
 SSE format:
 
@@ -3945,38 +3936,40 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 - `zig-quickjs` [License MIT](https://github.com/nDimensional/zig-quickjs/blob/main/LICENSE)
 - `zig-curl` [License MIT](https://github.com/jiacai2050/zig-curl/blob/main/LICENSE)
 - `htm`[htm](https://github.com/developit/htm/blob/master/LICENSE)
+- `turndown.js` [License MIT](https://github.com/mixmark-io/turndown/blob/master/LICENSE)
+- `md4c` [License MIT](https://github.com/mity/md4c/blob/master/LICENSE.md)
 
 ---
 
 ## COCOMO analysis
 
-<https://github.com/boyter/scc>
+Curious? Check <https://github.com/boyter/scc>
 
 ```txt
 ───────────────────────────────────────────────────────────────────────────────
 Language            Files       Lines    Blanks  Comments       Code Complexity
 ───────────────────────────────────────────────────────────────────────────────
-Zig                   179      81,092     7,497     7,766     65,829     10,895
-JavaScript             69       7,082       545       326      6,211      1,023
-HTML                   51       8,292       973       154      7,165          0
-SVG                     9         302        36        22        244          0
-Markdown                8       4,740     1,187         0      3,553          0
-JSON                    6       1,160         3         0      1,157          0
+Zig                   190      85,131     7,977     8,311     68,843     11,998
+JavaScript             87       8,074       703       520      6,851      1,158
+HTML                   55       7,825       814       165      6,846          0
+SVG                    11         335        43        30        262          0
+Markdown                8       5,490     1,354         0      4,136          0
+JSON                    7       1,176         3         0      1,173          0
+CSS                     3          41         3         1         37          0
 JSX                     3         336        41         3        292          7
-Plain Text              3         346        57         0        289          0
-C                       2         341        55        72        214         61
-CSS                     2          24         2         0         22          0
+Plain Text              3         397        57         0        340          0
+C                       2         406        61       102        243         77
+Shell                   2         143        25        28         90          7
 License                 1          21         4         0         17          0
-Shell                   1         106        19        14         73          7
 Svelte                  1         181         6         0        175          3
 TypeScript              1           1         0         0          1          0
 ───────────────────────────────────────────────────────────────────────────────
-Total                 336     104,024    10,425     8,357     85,242     11,996
+Total                 374     109,557    11,091     9,160     89,306     13,250
 ───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $2,875,952
-Estimated Schedule Effort (organic) 20.55 months
-Estimated People Required (organic) 12.44
+Estimated Cost to Develop (organic) $3,020,090
+Estimated Schedule Effort (organic) 20.93 months
+Estimated People Required (organic) 12.82
 ───────────────────────────────────────────────────────────────────────────────
-Processed 5152069 bytes, 5.152 megabytes (SI)
+Processed 5719486 bytes, 5.719 megabytes (SI)
 ───────────────────────────────────────────────────────────────────────────────
 ```
