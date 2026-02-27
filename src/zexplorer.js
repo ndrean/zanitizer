@@ -229,6 +229,22 @@ globalThis.zxp = {
     if (typeof __native_flush === "function") __native_flush();
   },
 
+  // streamFrom(url) — like goto(), but feeds the response directly into the
+  // lexbor streaming parser instead of buffering the whole response first.
+  // Use when the source is slow (LLM token stream, large SSR payload).
+  // After this returns, `document` is fully populated (CSS + scripts applied).
+  streamFrom(url, _options = {}) {
+    applyLocationPolyfill(url);
+    __native_streamFrom(url);
+    if (
+      globalThis.customElements &&
+      typeof customElements.upgradeAll === "function"
+    ) {
+      customElements.upgradeAll();
+    }
+    if (typeof __native_flush === "function") __native_flush();
+  },
+
   async waitForSelector(selector, timeoutMs = 5000) {
     const start = Date.now();
     return new Promise((resolve, reject) => {
@@ -272,7 +288,7 @@ globalThis.zxp = {
       else if (opts.width) w = opts.width;
       else if (opts.dpi) w = Math.round(8.2677 * opts.dpi);
     }
-    return __paintDOM(node, w);
+    return __native_paintDOM(node, w);
   },
 
   // save(img, path) — encode RGBA + write to disk; extension decides format

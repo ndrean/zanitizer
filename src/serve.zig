@@ -2,6 +2,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const httpz = @import("httpz");
 const zxp_runtime = @import("zxp_runtime.zig");
+const js_streamfrom = @import("js_streamfrom.zig");
 
 const WriterContext = struct {
     res: *httpz.Response,
@@ -86,6 +87,8 @@ pub const Server = struct {
         var router = try server.router(.{});
         router.get("/health", healthHandler, .{});
         router.post("/run", runHandler, .{});
+        router.post("/stream", streamHandler, .{});
+        router.post("/render", renderProxyHandler, .{});
 
         return Server{ .allocator = allocator, .app_ctx = app_ctx, .server = server };
     }
@@ -122,13 +125,11 @@ fn sniffMime(bytes: []const u8) []const u8 {
 // Bridges zxp.write(str) → res.chunk(str) for streaming output.
 // Called from the thread-local set in runHandler.
 fn chunkWriter(ptr: *anyopaque, data: []const u8) void {
-    // const res: *httpz.Response = @ptrCast(@alignCast(ptr));
-    // res.chunk(data) catch {};
     const ctx: *WriterContext = @ptrCast(@alignCast(ptr));
     if (ctx.is_sse) {
-        // Arena is freed by httpz at end of request — no need to free individually.
-        const sse_data = std.fmt.allocPrint(ctx.res.arena, "data: {s}\n\n", .{data}) catch return;
-        ctx.res.chunk(sse_data) catch {};
+        ctx.res.chunk("data: ") catch {};
+        ctx.res.chunk(data) catch {};
+        ctx.res.chunk("\n\n") catch {};
     } else {
         ctx.res.chunk(data) catch {};
     }
@@ -186,7 +187,9 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
         const z_str = try engine.ctx.toZString(val);
         defer engine.ctx.freeZString(z_str);
         if (tl_is_sse) {
-            try res.chunk(try std.fmt.allocPrint(res.arena, "data: {s}\n\n", .{z_str}));
+            try res.chunk("data: ");
+            try res.chunk(z_str);
+            try res.chunk("\n\n");
         } else {
             res.header("Content-Type", "text/plain; charset=utf-8");
             res.body = try res.arena.dupe(u8, z_str);
@@ -200,9 +203,113 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
     const json_str = try engine.ctx.toZString(json_val);
     defer engine.ctx.freeZString(json_str);
     if (tl_is_sse) {
-        try res.chunk(try std.fmt.allocPrint(res.arena, "data: {s}\n\n", .{json_str}));
+        try res.chunk("data: ");
+        try res.chunk(json_str);
+        try res.chunk("\n\n");
     } else {
         res.header("Content-Type", "application/json");
         res.body = try res.arena.dupe(u8, json_str);
     }
+}
+
+/// POST /stream?base=<url>
+/// Body: raw HTML  →  Response: processed HTML (text/html)
+///
+/// Mirrors the CLI `zxp stream` verb: feeds the request body through
+/// ScriptEngine.beginStream / processStreamChunk / endStream (lexbor CSS
+/// module, external stylesheets, inline scripts), then returns the
+/// serialized document.
+///
+/// Pass `Accept: text/event-stream` to receive zxp.write() output as SSE.
+pub fn streamHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
+    const html = req.body() orelse {
+        res.status = 400;
+        res.body = "missing body: expected HTML";
+        return;
+    };
+
+    const alloc = app_ctx.allocator;
+
+    // Optional ?base=URL query param — sets rc.base_dir for asset resolution.
+    const qs = try req.query();
+    const base_dir: []const u8 = qs.get("base") orelse ".";
+
+    const zxp_rt = try zxp_runtime.getOrCreate(alloc, app_ctx.sandbox_root);
+    var engine = try z.ScriptEngine.init(alloc, zxp_rt);
+    defer engine.deinit();
+
+    // Hook zxp.write() → SSE/chunked output (same as runHandler).
+    var writer_ctx = WriterContext{ .res = res, .is_sse = tl_is_sse };
+    z.js_console.setChunkWriter(chunkWriter, &writer_ctx);
+    defer z.js_console.clearChunkWriter();
+
+    const opts: z.LoadPageOptions = .{
+        .base_dir = base_dir,
+        .load_stylesheets = true,
+        .execute_scripts = true,
+    };
+
+    try engine.beginStream(opts);
+    try engine.processStreamChunk(html);
+    try engine.endStream(opts);
+
+    // Serialize the processed document and return it.
+    const out = try engine.evalAsyncAs(alloc, []const u8, "document.documentElement.outerHTML", "<stream>");
+    defer alloc.free(out);
+
+    res.header("Content-Type", "text/html; charset=utf-8");
+    res.body = try res.arena.dupe(u8, out);
+}
+
+/// POST /render?url=<url>[&width=800][&format=webp]
+///
+/// Fetches the target URL via curl streaming (curl write callback →
+/// processStreamChunk → lexbor), applies CSS + scripts, paints the DOM,
+/// and returns the encoded image as a binary response.
+///
+/// Query params:
+///   url    — required, the page to fetch and render
+///   width  — optional pixel width (default 800)
+///   format — optional: png | jpg | webp | pdf (default png, detected from Accept)
+///
+/// Example:
+///   curl "http://localhost:9984/render?url=https://example.com&format=webp" -o page.webp
+pub fn renderProxyHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
+    const qs = try req.query();
+
+    const url = qs.get("url") orelse {
+        res.status = 400;
+        res.body = "missing ?url= query parameter";
+        return;
+    };
+
+    const width: u32 = if (qs.get("width")) |w| std.fmt.parseInt(u32, w, 10) catch 800 else 800;
+    const format: []const u8 = qs.get("format") orelse "png";
+
+    const alloc = app_ctx.allocator;
+    const zxp_rt = try zxp_runtime.getOrCreate(alloc, app_ctx.sandbox_root);
+    var engine = try z.ScriptEngine.init(alloc, zxp_rt);
+    defer engine.deinit();
+
+    // Fetch the URL and stream it into the engine's lexbor document.
+    try js_streamfrom.streamFromUrl(engine, url);
+
+    // Paint and encode the fully-processed DOM.
+    const js = try std.fmt.allocPrint(alloc,
+        "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")",
+        .{ width, format });
+    defer alloc.free(js);
+
+    const val = try engine.evalAsync(js, "<render>");
+    defer engine.ctx.freeValue(val);
+
+    if (!engine.ctx.isArrayBuffer(val)) {
+        res.status = 500;
+        res.body = "render failed: paintDOM did not return an ArrayBuffer";
+        return;
+    }
+
+    const bytes = try engine.ctx.getArrayBuffer(val);
+    res.header("Content-Type", sniffMime(bytes));
+    res.body = try res.arena.dupe(u8, bytes);
 }

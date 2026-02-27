@@ -91,7 +91,6 @@ pub const LoadPageOptions = struct {
 };
 
 /// avoid infinte loops like `white (true) {}` by setting a deadline
-
 pub const ScriptEngine = struct {
     allocator: std.mem.Allocator,
     zxp_rt: *ZxpRuntime, // borrowed — NOT owned; do not free in deinit
@@ -720,8 +719,8 @@ pub const ScriptEngine = struct {
     pub fn loadPage(self: *ScriptEngine, html: []const u8, options: LoadPageOptions) !void {
         const bridge = self.dom;
 
-        // Store settings in RuntimeContext
-        self.rc.base_dir = options.base_dir;
+        // Store settings in RuntimeContext (setBaseDir owns a copy so callers don't need to keep options.base_dir alive)
+        self.rc.setBaseDir(options.base_dir);
         self.rc.sanitize_enabled = options.sanitize;
         self.rc.sanitize_options = options.sanitizer_options;
 
@@ -797,7 +796,7 @@ pub const ScriptEngine = struct {
     /// so <style> tags are handled automatically by the lexbor style module.
     /// Call processStreamChunk() for each chunk, then endStream() at EOF.
     pub fn beginStream(self: *ScriptEngine, options: LoadPageOptions) !void {
-        self.rc.base_dir = options.base_dir;
+        self.rc.setBaseDir(options.base_dir);
         self.rc.sanitize_enabled = false;
         try z.initDocumentCSS(self.dom.doc, true);
         if (lxb_html_document_parse_chunk_begin(self.dom.doc) != 0) return error.StreamBeginFailed;
@@ -1380,9 +1379,6 @@ fn js_native_loadPage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
     defer ctx.freeZString(html);
 
     // Extract options from argv[1] if provided
-    var base_dir_owned: ?[]u8 = null;
-    defer if (base_dir_owned) |b| engine.allocator.free(b);
-
     var options = LoadPageOptions{
         .sanitize = false,
         .execute_scripts = true,
@@ -1391,15 +1387,13 @@ fn js_native_loadPage(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, arg
 
     if (argc >= 2 and ctx.isObject(argv[1])) {
         // base_dir: string — critical for resolving relative script src against remote URLs
+        // loadPage → setBaseDir dupes the string, so we just borrow it here.
         const base_dir_val = ctx.getPropertyStr(argv[1], "base_dir");
         defer ctx.freeValue(base_dir_val);
         if (!ctx.isUndefined(base_dir_val)) {
             if (ctx.toZString(base_dir_val)) |str| {
                 defer ctx.freeZString(str);
-                base_dir_owned = engine.allocator.dupe(u8, str) catch null;
-                if (base_dir_owned) |owned| {
-                    options.base_dir = owned;
-                }
+                options.base_dir = str;
             } else |_| {}
         }
 

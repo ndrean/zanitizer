@@ -364,7 +364,7 @@ zxp.save(img, "src/examples/render_grid_1d/serve_grid_1d.webp");
 We use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
 
 ```sh
-./zig-out/bin/zxp convert src/examples/render_grid_1d/grid_1d.html -dpi 72 -o src/examples/render_grid_1d/grid_1d.pdf
+./zig-out/bin/zxp convert src/examples/render_grid_1d/grid_1d.html -dpi 72 -o src/examples/render_grid_1d/grid_1d.webp
 ```
 
 #### The library
@@ -423,6 +423,166 @@ You run it with:
 ```sh
 zig build example -Dname=render_grid_1d/grid_1d
 ```
+
+---
+
+### Scrape Hacker news
+
+Let's fetch the newest posts from the "hacker news" website.
+
+#### Dev-server
+
+We start the dev-server with:
+
+```sh
+./zig-out/bin/zxp serve
+```
+
+<details><summary>We run this JavaScript snippet:</summary>
+
+<https://github.com/ndrean/zexplorer/blob/main/src/examples/combinator/hacker.js>
+
+```js
+async function scrape() {
+  url = "https://news.ycombinator.com/newest";
+  await zxp.goto(url);
+  return Array.from(document.querySelectorAll(".titleline a")).map((a) => [
+    a.textContent,
+    a.href,
+  ]);
+}
+
+scrape();
+```
+
+</details>
+
+We send a POST request where the payload is the JavaScript code:
+
+```sh
+curl -s -X POST http://localhost:9984/run  --data-binary @src/examples/combinator/hacker.js
+```
+
+We get back:
+
+```txt
+[
+  ["Show HN: One-line x402 pay-per-request protection for ElysiaJS APIs","https://github.com/codingstark-dev/x402-elysia"],
+  ["github.com/codingstark-dev","from?site=github.com/codingstark-dev"],
+  ...
+]
+```
+
+#### CLI
+
+We use the verb `scrape` and pass a JavaScript snippet to be executed, using the `-e` flag:
+
+```sh
+./zig-out/bin/zxp scrape https://news.ycombinator.com -e "Array.from(document.querySelectorAll('.titleline a')).map(a=>([a.textContent,a.href]))" --pretty
+```
+
+
+#### Library
+
+<details><summary>The source code:</summary>
+
+<https://github.com/zexplorer/blob/main/src/examples/combinator/hacker.zig>
+
+```zig
+const std = @import("std");
+const builtin = @import("builtin");
+const z = @import("zexplorer");
+const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
+
+var debug_gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+pub fn main() !void {
+    const gpa, const is_debug = gpa: {
+        break :gpa switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ debug_gpa.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
+        };
+    };
+
+    defer if (is_debug) {
+        _ = .ok == debug_gpa.deinit();
+    };
+
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(gpa, zxp_rt);
+    defer engine.deinit();
+
+    const script =
+        \\async function scrape() {
+        \\    url = "https://news.ycombinator.com/newest";
+        \\    await zxp.goto(url);
+        \\    return Array.from(document.querySelectorAll(".titleline a")).map((a) => [a.textContent, a.href]);
+        \\}
+    ;
+
+    const val = try engine.eval(script, "<hacker>", .global);
+    defer engine.ctx.freeValue(val);
+
+    const items = try engine.evalAsyncAs(gpa, []const []const []const u8, "scrape()", "<scrape>");
+    defer {
+        for (items) |pair| {
+            for (pair) |s| gpa.free(s);
+            gpa.free(pair);
+        }
+        gpa.free(items);
+    }
+
+    // Join with newlines for file output
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    for (items) |pair| {
+        for (pair, 0..) |s, i| {
+            try buf.appendSlice(gpa, s);
+            if (i < pair.len - 1) try buf.append(gpa, '\t');
+        }
+        try buf.append(gpa, '\n');
+    }
+
+    try std.fs.cwd().writeFile(
+        .{
+            .sub_path = "src/examples/combinator/data.txt",
+            .data = buf.items,
+        },
+    );
+}
+
+```
+
+</details>
+
+We run:
+
+```sh
+zig build example -Dname=combinator/hacker
+```
+
+---
+
+We can take a snapshot of the website. The rendering is very dependant upon the CSS and we currently support only Flexbox based CSS with no grid-2d nor media-querries no CSS functions and variables.
+
+Using the CLI, you can pipe the verb `scrape` with the verb `convert`. Note that you must supply the `--base` entry as the prefix of the static assets that will be fetched. You also use the flag `-o` to direct into which format you want to save the snapshot (PNG, WEBP, JPEG, PDF).
+
+```sh
+./zig-out/bin/zxp scrape https://news.ycombinator.com | ./zig-out/bin/zxp convert - --base https://news.ycombinator.com  -o src/examples/combinator/hacker.webp
+```
+
+Using th dev-server (the server is still running `./zig-out/bin/zxp serve`):
+
+
+
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/combinator/hacker.webp" alt="hacer news" width="400" height="300">
+
+<br>
 
 ---
 

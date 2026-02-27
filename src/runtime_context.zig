@@ -24,8 +24,10 @@ pub const RuntimeContext = struct {
     blob_registry: std.StringHashMap(z.qjs.JSValue), // "blob:uuid" (owned string) -> Blob Object (JSValue)
     global_font: ?*Font = null,
 
-    // Base directory for resolving relative asset paths (set by loadPage)
+    // Base directory for resolving relative asset paths (set by loadPage).
+    // Always read via rc.base_dir. Owned copy lives in base_dir_heap (freed by setBaseDir/destroy).
     base_dir: []const u8 = ".",
+    base_dir_heap: ?[]u8 = null,
 
     // Sanitization settings (set by loadPage when sanitize=true)
     // When enabled, innerHTML/outerHTML will sanitize content before insertion
@@ -125,6 +127,13 @@ pub const RuntimeContext = struct {
         self.blob_registry.clearAndFree();
     }
 
+    /// Set base_dir, taking an owned copy. Frees the previous owned copy if any.
+    pub fn setBaseDir(self: *RuntimeContext, dir: []const u8) void {
+        if (self.base_dir_heap) |old| self.allocator.free(old);
+        self.base_dir_heap = self.allocator.dupe(u8, dir) catch null;
+        self.base_dir = self.base_dir_heap orelse ".";
+    }
+
     /// Cleanup function
     pub fn destroy(self: *RuntimeContext) void {
         var it = self.blob_registry.iterator();
@@ -134,6 +143,7 @@ pub const RuntimeContext = struct {
             // Note: We don't JS_FreeValue the values here because
             // the Runtime is usually destroyed before the RuntimeContext.
         }
+        if (self.base_dir_heap) |b| self.allocator.free(b);
         if (self.global_font) |f| {
             f.deinit();
         }

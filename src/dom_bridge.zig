@@ -27,6 +27,7 @@ const js_writable_stream = @import("js_writable_stream.zig");
 const js_range = @import("js_range.zig");
 const js_tree_walker = @import("js_tree_walker.zig");
 const js_XMLSerializer = @import("js_XMLSerializer.zig");
+const js_streamfrom = @import("js_streamfrom.zig");
 const js_canvas = @import("js_canvas.zig");
 const js_image = z.js_image;
 const js_pdf = z.js_pdf;
@@ -411,7 +412,8 @@ pub const DOMBridge = struct {
         // Compositor: generateRoutePng(mapData, svgString, filename)
         try ctx.setPropertyStr(global, "__native_generateRoutePng", ctx.newCFunction(js_compositor.js_generateRoutePng, "generateRoutePng", 5));
 
-        try ctx.setPropertyStr(global, "__paintDOM", ctx.newCFunction(js_compositor.js_paintDOM, "paintDOM", 5));
+        try ctx.setPropertyStr(global, "__native_paintDOM", ctx.newCFunction(js_compositor.js_paintDOM, "paintDOM", 5));
+        try ctx.setPropertyStr(global, "__native_streamFrom", ctx.newCFunction(js_streamfrom.js_native_streamFrom, "streamFrom", 1));
 
         // HTMLElement constructor is now exposed in init() before polyfills
 

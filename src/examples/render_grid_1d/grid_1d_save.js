@@ -5,7 +5,7 @@ async function render() {
   const html = await file_data.text();
   zxp.loadHTML(html);
   const img = zxp.paintDOM(document.body);
-  zxp.save(img, "src/examples/render_grid_1d/grid_1d.pdf");
+  zxp.save(img, "src/examples/render_grid_1d/grid_1d.webp");
 }
 
 render();
