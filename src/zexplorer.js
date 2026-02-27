@@ -195,6 +195,13 @@ globalThis.zxp = {
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
   },
 
+  csv: {
+    // parse(csvString) → Array of Objects (headers from first row)
+    parse: (csv) => __native_parseCSV(csv),
+    // stringify(arrayOfObjects) → CSV string
+    stringify: (rows) => __native_stringifyCSV(rows),
+  },
+
   async goto(url, options = {}) {
     applyLocationPolyfill(url);
     // JS handles the network — send mobile browser headers matching the scrape CLI path
@@ -251,6 +258,50 @@ globalThis.zxp = {
       customElements.upgradeAll();
     }
     if (typeof __native_flush === "function") __native_flush();
+  },
+
+  // toMarkdown(element, options?) — convert a DOM element to Markdown (GFM).
+  // Pass a DOM element directly (avoids re-parsing HTML; walks the live lexbor DOM).
+  // options: TurndownService constructor options (headingStyle, bulletListMarker, etc.)
+  // Requires TurndownService + turndownPluginGfm (loaded at boot).
+  // GFM plugin adds: tables (pipe syntax), strikethrough, task lists, highlighted code blocks.
+  toMarkdown(input, options) {
+    const td = new TurndownService(Object.assign({ headingStyle: "atx" }, options));
+    td.use(turndownPluginGfm.gfm);
+    // Patch: the GFM 'table' filter uses HTMLTableElement.rows which lexbor doesn't implement.
+    // Override it using querySelector("tr") which lexbor does support.
+    td.addRule("table", {
+      filter(node) {
+        if (node.nodeName !== "TABLE") return false;
+        const firstRow = node.querySelector("tr");
+        if (!firstRow) return false;
+        const p = firstRow.parentNode;
+        // Header row = inside <thead>, OR first row with all <th> children
+        return (p && p.nodeName === "THEAD") ||
+          Array.prototype.every.call(firstRow.childNodes, function(c) { return c.nodeName === "TH"; });
+      },
+      replacement(content) {
+        return "\n\n" + content.replace("\n\n", "\n") + "\n\n";
+      }
+    });
+    // Patch: taskListItems filter uses input.type (IDL property) — lexbor only has getAttribute.
+    td.addRule("taskListItems", {
+      filter(node) {
+        return node.nodeName === "INPUT" &&
+          (node.getAttribute("type") || "").toLowerCase() === "checkbox" &&
+          node.parentNode && node.parentNode.nodeName === "LI";
+      },
+      replacement(_content, node) {
+        return (node.hasAttribute("checked") ? "[x]" : "[ ]") + " ";
+      }
+    });
+    return td.turndown(input);
+  },
+
+  // markdownToHTML(md) — convert a Markdown string to HTML using md4c (native).
+  // Supports GFM: tables, strikethrough, task lists, raw HTML passthrough.
+  markdownToHTML(md) {
+    return __native_markdownToHTML(md);
   },
 
   // streamFrom(url) — like goto(), but feeds the response directly into the

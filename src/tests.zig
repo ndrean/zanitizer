@@ -508,46 +508,6 @@ fn vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
     );
 }
 
-fn preview_vercel(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
-    defer engine.deinit();
-
-    // /s/LCkidJ7x0
-    const script =
-        \\async function testVercel() {
-        \\  try {
-        \\      await zxp.goto("https://next-preview.vercel.app");
-        // \\      console.log(document.body.innerHTML);
-        \\      return document.body.innerHTML;
-        \\
-        // \\      await zxp.waitForSelector("[data-slate-string]", 5000);
-        // \\      const results = document.querySelectorAll("[data-slate-string]");
-        // \\      const result =  [...results].map((node) => node.textContent).filter((txt) => txt.includes("x-vercel-id"));
-        // \\      console.log(result);
-        // \\      return result;
-        \\  } catch (err) {
-        \\      console.error(err);
-        \\  }
-        \\}
-    ;
-    const val = try engine.eval(script, "test_vercel.js", .global);
-    defer engine.ctx.freeValue(val);
-
-    const lines = try engine.evalAsyncAs(
-        allocator,
-        []const u8,
-        "testVercel()",
-        "<vercel>",
-    );
-    defer allocator.free(lines);
-    // defer {
-    //     for (lines) |line| allocator.free(line);
-    //     allocator.free(lines);
-    // }
-    // for (lines) |line|
-    std.debug.print("{s}\n", .{lines});
-}
-
 fn generate_pdf(_: std.mem.Allocator, _: []const u8) !void {
     const js =
         \\const template = `<svg>... your visual figma design with {{total}} ...</svg>`;
@@ -2863,7 +2823,7 @@ fn async_CSV_JSON_Parser(allocator: std.mem.Allocator, sbx: []const u8) !void {
 
     try engine.registerFunction("parseProducts", js_fn, 1);
 
-    try engine.disableUnsafeFeatures();
+    // try engine.disableUnsafeFeatures();
 
     // 3. JS Code
     const script =

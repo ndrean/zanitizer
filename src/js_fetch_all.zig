@@ -116,7 +116,7 @@ pub fn js_fetchAll(
     defer _ = c.curl_multi_cleanup(multi.multi);
 
     // ── Spin up one easy handle per URL ───────────────────────────────────────
-    var entries: std.ArrayListUnmanaged(Entry) = .empty;
+    var entries: std.ArrayList(Entry) = .empty;
     // Cleanup: remove from multi first, then free each entry.
     // (shared_headers.deinit runs after entries via LIFO defer order.)
     defer {
@@ -133,9 +133,16 @@ pub fn js_fetchAll(
 
         var easy = curl.Easy.init(.{ .ca_bundle = ca_bundle }) catch continue;
 
-        const url_z = allocator.dupeZ(u8, url_s) catch { easy.deinit(); continue; };
+        const url_z = allocator.dupeZ(u8, url_s) catch {
+            easy.deinit();
+            continue;
+        };
 
-        easy.setUrl(url_z) catch { easy.deinit(); allocator.free(url_z); continue; };
+        easy.setUrl(url_z) catch {
+            easy.deinit();
+            allocator.free(url_z);
+            continue;
+        };
         z.hardenEasy(easy);
 
         // Apply shared headers (curl stores the pointer; slist stays alive until

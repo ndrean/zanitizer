@@ -42,6 +42,14 @@ var g_polyfills_mutex: std.Thread.Mutex = .{};
 /// Non-empty once the first context has compiled polyfills.js.
 var g_polyfills_bytecode: []const u8 = &.{};
 
+var g_turndown_mutex: std.Thread.Mutex = .{};
+/// Non-empty once the first context has compiled turndown.js.
+var g_turndown_bytecode: []const u8 = &.{};
+
+var g_turndown_gfm_mutex: std.Thread.Mutex = .{};
+/// Non-empty once the first context has compiled turndown-plugin-gfm.js.
+var g_turndown_gfm_bytecode: []const u8 = &.{};
+
 var g_profile_mutex: std.Thread.Mutex = .{};
 /// Non-empty once browser_profile.js has been compiled.
 var g_profile_bytecode: []const u8 = &.{};
@@ -214,6 +222,52 @@ pub const ScriptEngine = struct {
         defer self.ctx.freeValue(polyfills_res);
         if (self.ctx.isException(polyfills_res)) {
             std.debug.print("CRITICAL: Failed to execute polyfills.js bytecode!\n", .{});
+        }
+
+        // turndown.js — HTML → Markdown JS library (TurndownService global)
+        {
+            g_turndown_mutex.lock();
+            defer g_turndown_mutex.unlock();
+            if (g_turndown_bytecode.len == 0) {
+                const turndown_code = @embedFile("vendor/turndown722.js");
+                const fn_val = try self.ctx.eval(turndown_code, "turndown.js", zqjs.Context.EvalFlags{
+                    .type = .global,
+                    .compile_only = true,
+                });
+                defer self.ctx.freeValue(fn_val);
+                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
+                g_turndown_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
+                self.ctx.free(@ptrCast(qjs_buf.ptr));
+            }
+        }
+        const turndown_fn = self.ctx.readObject(g_turndown_bytecode, .{ .bytecode = true });
+        const turndown_res = self.ctx.evalFunction(turndown_fn);
+        defer self.ctx.freeValue(turndown_res);
+        if (self.ctx.isException(turndown_res)) {
+            std.debug.print("CRITICAL: Failed to execute turndown.js bytecode!\n", .{});
+        }
+
+        // turndown-plugin-gfm — tables, strikethrough, taskLists for turndown
+        {
+            g_turndown_gfm_mutex.lock();
+            defer g_turndown_gfm_mutex.unlock();
+            if (g_turndown_gfm_bytecode.len == 0) {
+                const gfm_code = @embedFile("vendor/turndown-plugin-gfm.js");
+                const fn_val = try self.ctx.eval(gfm_code, "turndown-plugin-gfm.js", zqjs.Context.EvalFlags{
+                    .type = .global,
+                    .compile_only = true,
+                });
+                defer self.ctx.freeValue(fn_val);
+                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
+                g_turndown_gfm_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
+                self.ctx.free(@ptrCast(qjs_buf.ptr));
+            }
+        }
+        const gfm_fn = self.ctx.readObject(g_turndown_gfm_bytecode, .{ .bytecode = true });
+        const gfm_res = self.ctx.evalFunction(gfm_fn);
+        defer self.ctx.freeValue(gfm_res);
+        if (self.ctx.isException(gfm_res)) {
+            std.debug.print("CRITICAL: Failed to execute turndown-plugin-gfm.js bytecode!\n", .{});
         }
 
         // TODO Other async bindings (sandboxed readFile, etc.)

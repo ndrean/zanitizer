@@ -29,6 +29,8 @@ const js_tree_walker = @import("js_tree_walker.zig");
 const js_XMLSerializer = @import("js_XMLSerializer.zig");
 const js_streamfrom = @import("js_streamfrom.zig");
 const js_llm = @import("js_llm.zig");
+const js_markdown = @import("js_markdown.zig");
+const js_csv = @import("js_csv.zig");
 const js_canvas = @import("js_canvas.zig");
 const js_image = z.js_image;
 const js_pdf = z.js_pdf;
@@ -417,6 +419,9 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "__native_streamFrom", ctx.newCFunction(js_streamfrom.js_native_streamFrom, "streamFrom", 1));
         try ctx.setPropertyStr(global, "__native_llmHTML", ctx.newCFunction(js_llm.js_native_llmHTML, "llmHTML", 1));
         try ctx.setPropertyStr(global, "__native_llmStream", ctx.newCFunction(js_llm.js_native_llmStream, "llmStream", 1));
+        try ctx.setPropertyStr(global, "__native_markdownToHTML", ctx.newCFunction(js_markdown.js_native_markdownToHTML, "markdownToHTML", 1));
+        try ctx.setPropertyStr(global, "__native_parseCSV", ctx.newCFunction(js_csv.js_native_parseCSV, "parseCSV", 1));
+        try ctx.setPropertyStr(global, "__native_stringifyCSV", ctx.newCFunction(js_csv.js_native_stringifyCSV, "stringifyCSV", 1));
 
         // HTMLElement constructor is now exposed in init() before polyfills
 

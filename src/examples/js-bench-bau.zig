@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("zexplorer");
 const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -22,29 +23,24 @@ pub fn main() !void {
 }
 
 fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
-
+    var start = std.time.nanoTimestamp();
+    var zxp_rt = try ZxpRuntime.init(allocator, sbx);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(allocator, zxp_rt);
     defer engine.deinit();
+    var end = std.time.nanoTimestamp();
+    var ms = @divFloor(end - start, 1_000);
+    std.debug.print("\n⚡️ Zig Engine Boot Time: {d}ns\n\n", .{ms});
 
     z.print("\n=== JS-framework-Bau -----------------------------\n\n", .{});
-
-    const start = std.time.nanoTimestamp();
-
+    start = std.time.nanoTimestamp();
     const html = @embedFile("js-bench-bau.html");
 
     try engine.loadHTML(html);
-
-    // const js = @embedFile("js-bench-bau.js");
-
     try engine.executeScripts(allocator, ".");
-
     try engine.run();
 
-    // const app = z.getElementById(engine.dom.doc, "app");
-
-    // try z.prettyPrint(allocator, z.elementToNode(app.?));
-
-    const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000);
-    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n\n", .{ms});
+    end = std.time.nanoTimestamp();
+    ms = @divFloor(end - start, 1_000);
+    std.debug.print("\n⚡️ Zig Engine Execution Time: {d}ns\n\n", .{ms});
 }

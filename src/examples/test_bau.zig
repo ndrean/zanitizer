@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const z = @import("zexplorer");
 const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -21,8 +22,10 @@ pub fn main() !void {
     try runBau(gpa, sandbox_root);
 }
 
-fn runBau(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
-    var engine = try ScriptEngine.init(gpa, sandbox_root);
+fn runBau(gpa: std.mem.Allocator, sbx: []const u8) !void {
+    var zxp_rt = try ZxpRuntime.init(gpa, sbx);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(gpa, zxp_rt);
     defer engine.deinit();
     const html = @embedFile("test_bau.html");
     try engine.loadHTML(html);
