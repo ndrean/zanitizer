@@ -33,7 +33,7 @@ You can use it :
 
 ## What can it do?
 
-Think of it as a lightweight `JSDOM`+`DOMPurify`+`node-canvas`+`Satori` engine used with its built-in HTTP server or its composable CLI.
+Think of `ffmpeg` for documents: an engine including lightweight versions of [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) with its built-in HTTP server or its composable CLI.
 
 It can:
 
@@ -75,20 +75,6 @@ A native Zig engine that wires together purpose-built C/C++ libraries — no run
 | Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi                 |
 | WebServer                | [httpz-zig](https://github.com/karlseguin/http.zig)                                             | Serve over HTTP                        |
 | Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                     |
-
-Can be compared to [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) — but native speed, 10MB footprint, 2ms cold start.
-
-## Tested against js-framework-benchmark
-
-The engine runs real framework code from [js-framework-benchmark](https://github.com/krausest/js-framework-benchmark): React 19, Preact, SolidJS, Vue 3, Svelte 5, Lit-html.
-
-| Feature           | zexplorer                 | JSDOM           | Puppeteer       |
-| ----------------- | ------------------------- | --------------- | --------------- |
-| Startup time      | 2ms                       | ~30ms           | ~500ms          |
-| DOM sanitization  | Built-in, DOM & CSS-aware | Needs DOMPurify | Browser context |
-| Memory footprint  | 10MB                      | ~50MB           | ~200MB          |
-| Web API coverage  | (essential)               | ~90%            | 100%            |
-| JavaScript engine | QuickJS (bytecode)        | Node.js V8      | Chrome V8       |
 
 ## Security
 
@@ -2452,7 +2438,15 @@ zig build example -Dname=test_vue --release=fast
 
 ### Running framework code
 
-To ensure the Web primitives are correctly implemented in `zexplorer`, we tested various frameworks and used the [js-vanilla-bench-framework tests](https://github.com/krausest/js-framework-benchmark).
+To ensure the Web primitives are correctly implemented in `zexplorer`, we tested various frameworks and used the [js-vanilla-bench-framework tests](https://github.com/krausest/js-framework-benchmark): React 19, Preact, SolidJS, Vue 3, Svelte 5, Lit-html, HTMX, Bau.
+
+| Feature           | zexplorer                 | JSDOM           | Puppeteer       |
+| ----------------- | ------------------------- | --------------- | --------------- |
+| Startup time      | 2ms                       | ~30ms           | ~500ms          |
+| DOM sanitization  | Built-in, DOM & CSS-aware | Needs DOMPurify | Browser context |
+| Memory footprint  | 10MB                      | ~50MB           | ~200MB          |
+| Web API coverage  | (essential)               | ~90%            | 100%            |
+| JavaScript engine | QuickJS (bytecode)        | Node.js V8      | Chrome V8       |
 
 Source:
 
