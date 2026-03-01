@@ -4,55 +4,36 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const js_security = z.js_security;
-const sanitizer_mod = @import("modules/sanitizer.zig");
+const sanitizer_mod = z.sanitizer_mod;
 const zxp_runtime = @import("zxp_runtime.zig");
 const ZxpRuntime = zxp_runtime.ZxpRuntime;
 
-const EventLoop = @import("event_loop.zig").EventLoop;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
-const async_bindings = @import("async_bindings_generated.zig");
-const JSWorker = @import("js_worker.zig");
-const FetchBridge = @import("js_fetch.zig").FetchBridge;
-const AsyncBridge = @import("async_bridge.zig");
-const FormDataBridge = @import("js_formData.zig").FormDataBridge;
-const FSBridge = @import("js_fs.zig").FSBridge;
-const js_file_sync = @import("js_file_writeFileSync.zig");
-const js_compositor = @import("js_compositor.zig");
-const js_console = @import("js_console.zig");
-const js_marshall = @import("js_marshall.zig");
+const EventLoop = z.EventLoop;
+const RuntimeContext = z.RuntimeContext;
+const DOMBridge = z.DOMBridge;
+// const async_bindings = @import("async_bindings_generated.zig");
+const JSWorker = z.js_worker;
+const FetchBridge = z.FetchBridge;
+const ImportScriptBridge = z.js_import_script.ImportScriptBridge;
+const FormDataBridge = z.js_formData.FormDataBridge;
+const FSBridge = z.js_fs.FSBridge;
+const js_file_sync = z.js_file_writeFileSync;
+const js_compositor = z.js_compositor;
+const js_console = z.js_console;
+const js_marshall = z.js_marshall;
+
+// const AsyncBridge = @import("async_bridge.zig");
+
 const CurlMulti = @import("curl_multi.zig").CurlMulti;
 const ScriptBuffers = @import("curl_multi.zig").ScriptBuffers;
 
 const Sanitizer = sanitizer_mod.Sanitizer;
 const SanitizeOptions = sanitizer_mod.SanitizeOptions;
 
-// ---------------------------------------------------------------------------
-// Bytecode caches for zexplorer.js and polyfills.js
-// Compiled once per process on first ScriptEngine.init, reused every time.
-// QuickJS bytecode is portable across runtimes: atoms are stored by name.
-// Execution order per init: zexplorer.js → polyfills.js
-// ---------------------------------------------------------------------------
-var g_boot_mutex: std.Thread.Mutex = .{};
-/// Non-empty once the first context has compiled zexplorer.js.
-/// Allocated via std.heap.c_allocator so it lives for the process lifetime.
-var g_boot_bytecode: []const u8 = &.{};
-
-var g_polyfills_mutex: std.Thread.Mutex = .{};
-/// Non-empty once the first context has compiled polyfills.js.
-var g_polyfills_bytecode: []const u8 = &.{};
-
-var g_turndown_mutex: std.Thread.Mutex = .{};
-/// Non-empty once the first context has compiled turndown.js.
-var g_turndown_bytecode: []const u8 = &.{};
-
-var g_turndown_gfm_mutex: std.Thread.Mutex = .{};
-/// Non-empty once the first context has compiled turndown-plugin-gfm.js.
-var g_turndown_gfm_bytecode: []const u8 = &.{};
-
-var g_profile_mutex: std.Thread.Mutex = .{};
-/// Non-empty once browser_profile.js has been compiled.
-var g_profile_bytecode: []const u8 = &.{};
+// Boot JS files are precompiled to QuickJS bytecode at `zig build` time
+// (tools/gen_bytecode.zig → anonymous imports via build.zig).
+// @import("xxx_bc").data is a []const u8 baked into the binary — no
+// runtime parse/compile cost, no globals, no mutexes.
 
 // Chunk-based HTML parsing API (used by streaming mode)
 extern "c" fn lxb_html_document_parse_chunk_begin(doc: *z.HTMLDocument) c_uint;
@@ -169,101 +150,33 @@ pub const ScriptEngine = struct {
         _ = try self.ctx.setPropertyStr(global, "__native_save", self.ctx.newCFunction(js_compositor.js_native_save, "__native_save", 4));
         _ = try self.ctx.setPropertyStr(global, "__native_encode", self.ctx.newCFunction(js_compositor.js_native_encode, "__native_encode", 4));
 
-        // --- bytecode cache: compile once, execute from bytecode every init ---
-        {
-            g_boot_mutex.lock();
-            defer g_boot_mutex.unlock();
-            if (g_boot_bytecode.len == 0) {
-                const stdlib_code = @embedFile("zexplorer.js");
-                const fn_val = try self.ctx.eval(stdlib_code, "zexplorer.js", zqjs.Context.EvalFlags{
-                    .type = .global,
-                    .compile_only = true,
-                });
-
-                if (self.ctx.isException(fn_val)) {
-                    const trace = self.ctx.getException();
-                    defer self.ctx.freeValue(trace);
-                    std.debug.print("{any}\n", .{trace}); // do better!!
-                    self.ctx.freeValue(trace);
-                    return error.FailedJSLoading;
-                }
-                defer self.ctx.freeValue(fn_val);
-                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
-                g_boot_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
-                self.ctx.free(@ptrCast(qjs_buf.ptr));
-            }
-        }
-        const boot_fn = self.ctx.readObject(g_boot_bytecode, .{ .bytecode = true });
+        // zexplorer.js — core zxp API (precompiled at build time)
+        const boot_fn = self.ctx.readObject(@import("zexplorer_bc").data, .{ .bytecode = true });
         const boot_res = self.ctx.evalFunction(boot_fn);
         defer self.ctx.freeValue(boot_res);
-        if (self.ctx.isException(boot_res)) {
-            std.debug.print("CRITICAL: Failed to execute zexplorer.js bytecode!\n", .{});
-        }
+        if (self.ctx.isException(boot_res)) return error.FailedJSLoading;
 
-        // polyfills.js — browser compat shims, loaded after zexplorer.js so
-        // that HTMLElement = HeadlessHTMLElement when the event-handler polyfill runs.
-        {
-            g_polyfills_mutex.lock();
-            defer g_polyfills_mutex.unlock();
-            if (g_polyfills_bytecode.len == 0) {
-                const polyfills_code = @embedFile("polyfills.js");
-                const fn_val = try self.ctx.eval(polyfills_code, "polyfills.js", zqjs.Context.EvalFlags{
-                    .type = .global,
-                    .compile_only = true,
-                });
-                defer self.ctx.freeValue(fn_val);
-                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
-                g_polyfills_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
-                self.ctx.free(@ptrCast(qjs_buf.ptr));
-            }
-        }
-        const polyfills_fn = self.ctx.readObject(g_polyfills_bytecode, .{ .bytecode = true });
+        // importScript — zxp.importScript(url) must be installed after zexplorer.js defines zxp
+        try ImportScriptBridge.install(self.ctx);
+
+        // polyfills.js — browser compat shims (must run after zexplorer.js)
+        const polyfills_fn = self.ctx.readObject(@import("polyfills_bc").data, .{ .bytecode = true });
         const polyfills_res = self.ctx.evalFunction(polyfills_fn);
         defer self.ctx.freeValue(polyfills_res);
         if (self.ctx.isException(polyfills_res)) {
             std.debug.print("CRITICAL: Failed to execute polyfills.js bytecode!\n", .{});
         }
 
-        // turndown.js — HTML → Markdown JS library (TurndownService global)
-        {
-            g_turndown_mutex.lock();
-            defer g_turndown_mutex.unlock();
-            if (g_turndown_bytecode.len == 0) {
-                const turndown_code = @embedFile("vendor/turndown722.js");
-                const fn_val = try self.ctx.eval(turndown_code, "turndown.js", zqjs.Context.EvalFlags{
-                    .type = .global,
-                    .compile_only = true,
-                });
-                defer self.ctx.freeValue(fn_val);
-                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
-                g_turndown_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
-                self.ctx.free(@ptrCast(qjs_buf.ptr));
-            }
-        }
-        const turndown_fn = self.ctx.readObject(g_turndown_bytecode, .{ .bytecode = true });
+        // turndown.js — HTML → Markdown library (TurndownService global)
+        const turndown_fn = self.ctx.readObject(@import("turndown_bc").data, .{ .bytecode = true });
         const turndown_res = self.ctx.evalFunction(turndown_fn);
         defer self.ctx.freeValue(turndown_res);
         if (self.ctx.isException(turndown_res)) {
             std.debug.print("CRITICAL: Failed to execute turndown.js bytecode!\n", .{});
         }
 
-        // turndown-plugin-gfm — tables, strikethrough, taskLists for turndown
-        {
-            g_turndown_gfm_mutex.lock();
-            defer g_turndown_gfm_mutex.unlock();
-            if (g_turndown_gfm_bytecode.len == 0) {
-                const gfm_code = @embedFile("vendor/turndown-plugin-gfm.js");
-                const fn_val = try self.ctx.eval(gfm_code, "turndown-plugin-gfm.js", zqjs.Context.EvalFlags{
-                    .type = .global,
-                    .compile_only = true,
-                });
-                defer self.ctx.freeValue(fn_val);
-                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
-                g_turndown_gfm_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
-                self.ctx.free(@ptrCast(qjs_buf.ptr));
-            }
-        }
-        const gfm_fn = self.ctx.readObject(g_turndown_gfm_bytecode, .{ .bytecode = true });
+        // turndown-plugin-gfm — tables, strikethrough, taskLists
+        const gfm_fn = self.ctx.readObject(@import("turndown_gfm_bc").data, .{ .bytecode = true });
         const gfm_res = self.ctx.evalFunction(gfm_fn);
         defer self.ctx.freeValue(gfm_res);
         if (self.ctx.isException(gfm_res)) {
@@ -806,22 +719,9 @@ pub const ScriptEngine = struct {
             }
         }
 
-        // Inject browser profile (bytecode-cached) or a custom pre_script before page scripts.
+        // Inject browser profile (precompiled at build time) before page scripts.
         if (options.browser_profile) {
-            g_profile_mutex.lock();
-            defer g_profile_mutex.unlock();
-            if (g_profile_bytecode.len == 0) {
-                const src = @embedFile("browser_profile.js");
-                const fn_val = try self.ctx.eval(src, "browser_profile.js", zqjs.Context.EvalFlags{
-                    .type = .global,
-                    .compile_only = true,
-                });
-                defer self.ctx.freeValue(fn_val);
-                const qjs_buf = try self.ctx.writeObject(fn_val, .{ .bytecode = true, .strip_source = true });
-                g_profile_bytecode = try std.heap.c_allocator.dupe(u8, qjs_buf);
-                self.ctx.free(@ptrCast(qjs_buf.ptr));
-            }
-            const profile_fn = self.ctx.readObject(g_profile_bytecode, .{ .bytecode = true });
+            const profile_fn = self.ctx.readObject(@import("browser_profile_bc").data, .{ .bytecode = true });
             const profile_res = self.ctx.evalFunction(profile_fn);
             self.ctx.freeValue(profile_res);
         }

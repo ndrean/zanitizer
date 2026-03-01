@@ -1,18 +1,11 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Solid-keyed</title>
-    <link href="/css/currentStyle.css" rel="stylesheet" />
-  </head>
+<html>
   <body>
-    <div id="main"></div>
-
-    <!--<script type="module" src="js-bench-solid.js"></script>-->
-
-    <script src="src/examples/vendor/bench-solid.js"></script>
-
+    <div id="app"></div>
     <script type="module">
+      // SVGElement/Element polyfills are now in js_polyfills.zig
+      // (import hoisting runs the module before inline polyfills execute)
+      import "src/examples/frameworks/vue/js-bench-vue.js";
       __flush();
 
       function click(selector) {
@@ -27,12 +20,11 @@
       function measure(name, fn) {
         const start = performance.now();
         fn();
-
         const end = performance.now();
         console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
       }
 
-      console.log("\n=== SolidJS Benchmark\n");
+      console.log("\n=== Vue3 Benchmark ===\n");
 
       // Warmup
       click("#run");

@@ -1,20 +1,27 @@
-# zexplorer
+# zexplorer (`zxp`)
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 `zexplorer` is a stateless, composable and embeddable engine designed for HTML based document content pipelines: a mini Swiss Army knife that runs fast, delivers, and dies.
 
-It is a native DOM + JS runtime with some layout rendering capabilities (**Flexbox** layout rendering and raster compositing).
-
-It is not a general-purpose application runtime nor for rendering arbitrary public websites.
-
-Feed the dev-server with a JavaScript snippet, or pass your HTML documents to the CLI, and get back structured data or a layout as PNG, JPEG, WEBP, or PDF, without a browser.
+It is a native DOM + JS runtime with some layout rendering capabilities (**Flexbox** layout rendering and raster compositing). 
+Feed the dev-server with a JavaScript snippet, or pass your HTML documents to the CLI, and get back structured data or a layout as PNG, JPEG, WEBP, or PDF, without booting a massive browser.
 
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
 </p>
 
----
+<br>
+
+**TL;DR**:
+
+- Cold start: ~3ms
+- Memory: ~10MB
+- Zero dependencies. Single statically-compiled binary.
+- Powered by: QuickJS (ES2020), Lexbor (HTML5/DOM), Yoga (Flexbox), and ThorVG (Vector/Raster Graphics).
+- Pipelines: Native support for parsing Markdown, CSV, and SVG.
+- Outputs: Return raw data (JSON, strings, binary arrays) or render to PNG, JPEG, WEBP, and PDF.
+- Use Cases: Composable CLI tool (think `ffmpeg` for the web) or a high-concurrency HTTP rendering service.
 
 You can use it :
 
@@ -24,19 +31,22 @@ You can use it :
 
 ---
 
-**TL;DR**:
+## What can it do?
 
-> - Cold start: 2ms
-> - Memory: 10MB
-> - Zero dependencies. Single binary.
-> - Features JavaScript ES2020
-> - can be used as a composable/embeddable tool (think `ffmepg`) or as a dev server serving requests over HTTP.
-> - supports HTML chunks streams (SSE)
-> - suppports HTML or SVG with PNG, JPEG or WEBP input support, and output data with PNG, JPEG, WEBP and PDF support.
-> - No TypeScript nor JSX. It supports "tagged templates" with the embedded `htm` library.
-> - A "good enough" snapshot rendering engine. Based on `Flexbox` with `grid-1d` emulated.
+Think of it as a lightweight `JSDOM`+`DOMPurify`+`node-canvas`+`Satori` engine used with its built-in HTTP server or its composable CLI.
+
+It can:
+
+- **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
+- **Stream**  - communicate with an LLM via SSE. It can receive HTML chunks and rebuild a real DOM.
+- **Render** — `Flexbox` based and no CSS functions.  HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
+- **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
+- **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
+- **Run JS** — execute ES2020 scripts against a real DOM with fetch, timers, workers, and an event loop.
 
 **Limitations**:
+
+❗️No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
 
 It is not
 
@@ -49,21 +59,6 @@ It cannot:
 
 - scrape arbitrary bot protected public websites,
 - paint complex CSS using grid-2d, position:fixed, CSS functions...
-
-## What can it do?
-
-Think of it as a lightweight `JSDOM`+`DOMPurify`+`node-canvas`+`Satori` engine used with its built-in HTTP server or its composable CLI.
-
-It can:
-
-- **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
-- **Stream**  - receive HTML chunks and rebuild a real DOM.
-- **Render** — `Flexbox` based and no CSS functions.  HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
-- **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
-- **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
-- **Run JS** — execute ES2020 scripts against a real DOM with fetch, timers, workers, and an event loop.
-
-❗️No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
 
 ## How is it built?
 
@@ -107,64 +102,114 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 > - **Network hardening** — timeouts, redirect/size limits, SSRF pre-flight filtering, HTTPS-only remote imports.
 > - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines.
 
-### Sanitization model
+## The Showcase
 
-The sanitizer operates on the **live Lexbor DOM and CSS AST** — there is no serialize/re-parse step, so there is no parse-differential surface for mXSS. HTML character references are decoded by Lexbor at parse time, before the sanitizer sees any attribute value.
+1) Generative template
+2) OG images
+3) Leaflet
+4) CSV to D3
 
-The pipeline:
-
-```txt
-Raw HTML / SVG / CSS
-        │
-        ▼
-  Lexbor parse ── entities decoded, DOM + CSSOM built
-        │
-        ├─── DOM node tree ──────────────────────┐
-        │    walk every node                     │
-        │    • remove dangerous elements         │
-        │    • strip unsafe attributes           │    merge sanitized
-        │    • inline style → CSS sanitizer      │    CSS back into DOM
-        │                                        │
-        └─── CSS AST (stylesheets + style="")  ──┘
-             • remove dangerous at-rules
-             • strip unsafe properties
-             • validate URIs structurally
-
-        ▼
-  Sanitized DOM — safe for rendering or serialization
-```
-
-**Policy decisions and known trade-offs:**
-
-| Threat                                                                                         | Policy                                                                                                                     | Rationale                                                                                                                                          | Gap / known trade-off                                                                                                                                 |
-| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<script>` tags                                                                                | Removed by default; configurable via `remove_scripts: bool`                                                                | Scripts execute in the QuickJS sandbox during `loadPage` — the sandbox is the boundary                                                             | When allowed, no CSP is generated; caller is responsible                                                                                              |
-| `on*` event handlers                                                                           | Always removed                                                                                                             | No legitimate use in sanitized output                                                                                                              | —                                                                                                                                                     |
-| `href="javascript:"`, `vbscript:`, `file:`                                                     | Blocked on all URL attributes (`href`, `src`, `action`, `poster`, `data`, …)                                               | These protocols execute code or access local files                                                                                                 | —                                                                                                                                                     |
-| `data:` URIs — non-image                                                                       | Blocked entirely                                                                                                           | `data:text/html`, `data:text/javascript` are direct XSS vectors                                                                                    | —                                                                                                                                                     |
-| `data:image/svg+xml`                                                                           | Blocked                                                                                                                    | SVG images can contain `<script>` and event handlers                                                                                               | —                                                                                                                                                     |
-| `data:image/*` — other                                                                         | Allowed only with `;base64` encoding **and** matching magic bytes                                                          | Non-base64 binary images are never legitimate; magic byte check (PNG/JPEG/WebP/GIF header) blocks mislabeled or polyglot payloads                  | `image/avif`, `image/bmp`, etc. have no magic checker — pass through on MIME type alone                                                               |
-| External image `src` (`https://…`)                                                             | Allowed                                                                                                                    | External images are legitimate content; blocking would break most pages                                                                            | Tracking pixels are a known consequence — this is a content policy decision, not a sanitizer decision                                                 |
-| `srcset` attribute                                                                             | Allowed without URL validation                                                                                             | `srcset` contains multiple space-separated URLs; browsers do not execute JavaScript from `srcset`                                                  | Known gap: a `javascript:` URL in `srcset` would pass through (browsers ignore it, but the string survives)                                           |
-| `//evil.com` protocol-relative                                                                 | Allowed                                                                                                                    | Protocol-relative URLs are legitimate for same-protocol assets                                                                                     | In HTTP contexts, loads HTTP even on an HTTPS page; caller should enforce CSP                                                                         |
-| `<style>` blocks                                                                               | CSS AST sanitized — dangerous at-rules (`@import`, `@namespace`) removed, unsafe properties stripped                       | Tokenized AST parsing: obfuscated `expression()` and `url(javascript:)` are structurally detected, not regex-matched                               | —                                                                                                                                                     |
-| External stylesheets (`<link>`)                                                                | Fetched, sanitized, inlined as `<style>` in the output                                                                     | The serialized output is self-contained; re-fetching the original URL would bypass sanitization                                                    | Only enforced in sanitize mode; SSRF limits apply to the fetch                                                                                        |
-| Inline `style=""`                                                                              | CSS sanitizer applied per-attribute                                                                                        | `background-image: url(evil.com)` is an exfiltration vector — stripped                                                                             | —                                                                                                                                                     |
-| JS DOM mutation (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `createElement+setAttribute`) | Sanitized post-mutation via the same CSS sanitizer pipeline                                                                | Mutations happen in the QuickJS sandbox; results are sanitized before the DOM is considered stable                                                 | —                                                                                                                                                     |
-| SVG `<foreignObject>`, `<feImage>`, `<animate>`, `<animateMotion>`, `<set>`, `<switch>`        | Blocked                                                                                                                    | `foreignObject` re-enters HTML parsing context (primary mXSS entry point); `feImage` loads external resources; animate* can trigger event handlers | —                                                                                                                                                     |
-| SVG `href` / `xlink:href`                                                                      | Fragment-only (`#id`) for most elements; `<image>` and `<a>` use standard URI validation                                   | External SVG resources via `<use href="external.svg#x">` load arbitrary SVG                                                                        | —                                                                                                                                                     |
-| MathML                                                                                         | Allowed in correct context with attribute allowlist; `href`, `xlink:href`, `on*` removed                                   | Prevents XSS via invalid MathML nesting or href abuse                                                                                              | —                                                                                                                                                     |
-| DOM clobbering (`id`, `name`)                                                                  | Values that shadow `window`/`document` properties filtered                                                                 | Prevents `id="cookie"` from overriding `document.cookie` etc.                                                                                      | —                                                                                                                                                     |
-| mXSS / obfuscated encoding                                                                     | Entity decoding happens at Lexbor parse time; `containsMxssPattern` run on all attribute values; CSS content AST-sanitized | No serialize/re-parse step means no parse-differential surface                                                                                     | Text nodes inside SVG `<title>`, `<desc>`, `<text>` are not pattern-checked — low risk because `foreignObject` (the main SVG escape hatch) is blocked |
-| `<iframe>`                                                                                     | Allowed only with `sandbox` attribute; `src` and `srcdoc` validated                                                        | Prevents loading of arbitrary external content                                                                                                     | `allow-scripts` in `sandbox` is blocked; other dangerous combinations not exhaustively validated                                                      |
-| Framework attributes (`v-html`, `ng-bind-html`, `x-html`, `:innerHTML`)                        | Removed by default; configurable via `allow_framework_attrs`                                                               | These attributes trigger HTML injection in their respective runtimes                                                                               | When allowed, values are checked against `DANGEROUS_JS_PATTERNS` but not fully sanitized                                                              |
-| CSP generation                                                                                 | Not provided                                                                                                               | CSP is a server/browser responsibility, not a DOM sanitizer responsibility                                                                         | Caller must set appropriate `Content-Security-Policy` headers when serving sanitized output                                                           |
-
----
 
 ## First examples
 
-### Render an HTML file
+### Use dynamic HTML with `htm` and paint
+
+<details><summary>We use `htm` to build dynamic HTML and render it as an image</summary>
+
+[Source](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/teset_html.html")
+
+```html
+<html>
+  <head>
+    <script>
+      const { html } = zxp; // embedded in the code
+      const name = "Zexplorer";
+      const version = "0.1.0";
+      const features = ["Lexbor DOM", "QuickJS", "Yoga Layout", "ThorVG"];
+
+      const card = html`
+        <div style=${{
+          background: "#1a1a2e",
+          color: "#e0e0e0",
+          padding: "20px",
+        }}>
+          <div style=${{
+            background: "#16213e",
+            padding: "10px",
+            color: "#f7a41d",
+          }}>
+            ${name} v${version}
+          </div>
+          <ul style=${{ padding: "10px" }}>
+            ${features.map(
+              (f) => html`
+                <li style=${{
+                  background: "#0f3460",
+                  padding: "5px",
+                  margin: "4px",
+                  color: "#e94560",
+                }}>${f}</li>
+              `
+            )}
+          </ul>
+        </div>
+      `;
+
+      document.body.appendChild(card);
+    </script>
+  </head>
+  <body></body>
+</html>
+```
+
+</details>
+
+We will use two methods:
+
+- use the dev-server and POST an HTTP request whose payload is a JS snippet
+- use the CLI
+  
+**dev-server**: we will pass the following JavaScript snippet to the dev-server: we used the custom methods `zxp.loadHTML` and `zxp.paintDOM` and `zxp.save`.
+
+```js
+// src/examples/frameworks/htm/run.js
+async function run() {    
+    const res = await fetch("file://src/examples/frameworks/htm/test_htm.html");
+    const html = await res.text();
+    zxp.loadHTML(html);
+    await zxp.runScripts();
+    zxp.save(zxp.paintDOM(document.body), "src/examples/frameworks/htm/paint.png")
+
+}
+
+run();
+```
+
+We start the dev-server with:
+
+```sh
+./zig-out/bin/zxp serve
+```
+
+and send a POST request with the content of the JavaScript snippet:
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
+```
+
+It takes 38ms to run the code, paint the image and save it:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/paint.png" alt="demo htm" width="400" height="300">
+
+<br>
+
+**CLI**: we can alternatively use the CLI with the verb `convert` and use the flag `-o` to output into the format you want (PNG, JPEG, WEBP or PDF).
+
+```sh
+./zig-out/bin/zxp convert src/examples/frameworks/htm/test_htm.html -o src/examples/frameworks/htm/paint.jpeg
+```
+
+### Render an HTML file in the terminal
 
 We want to render this HTML:
 
@@ -306,18 +351,9 @@ We want to render this HTML:
 
 </details>
 
-We will use the three methods: use the dev-server and send a POST HTTP request whose payload is JavaScript code, use the CLI with the verb `convert`, and run `Zig` code.
+We will use again the two methods: the long running dev-server and the CLI
 
-#### Dev-server
-
-The pipeline is described in a JavaScript snippet where we:
-
-- read the HTML file using `fetch(url, headers)`,
-- load (parse, load JS chunks, load and sync CSS) the full HTML with `zxp.loadHTML(html, {sanitize: ?})`
-- paint the DOM using `zxp.paintDOM(node)` and get an ImageData.
-- Then we can either print it in the terminal as a PNG using `kitty` and use `zxp.encode(imageData, mimeType)`, or save the image locally, with `zxp.save(path, imageData)`.
-  
-In the example below, we encode in WEBP and will pipe the output to render an image in the terminal using `kitty`.
+**dev-server**: the JS snippet below uses the custom methods `zxp.loadHTML` and `zxp.paintDOM` and `zxp.encode`. This last method encodes the ImageData into the format given by the MIME type.
 
 ```js
 const file = "file://src/examples/render_grid_1d/grid_1d.html";
@@ -343,7 +379,7 @@ and send an HTTP request with the content of the JavaScript snippet and pipe to 
 
 ```sh
 curl -s -X POST http://localhost:9984/run  \
---data-binary @src/examples/render_grid_1d/grid_1d.js \
+--data-binary @src/examples/render_grid_1d/grid_1d_kitty.js \
 | kitty +kitten icat
 ```
 
@@ -353,18 +389,10 @@ and get in your terminal the image:
 
 <br>
 
-If you want to save the image to a say JPEG, you can instead use `zxp.save()` and the file extension will use the proper encoding (amonst PNG, WEBP, JPEG and PDF).
-
-```js
-zxp.save(img, "src/examples/render_grid_1d/serve_grid_1d.webp");
-```
-
-#### CLI
-
-We use the verb `convert` to load and draw the HTML and output it in the desired format (PDF chosen here)
+**CLI**: we pipe `cat` with  `zxp render` to run the snippet and express the desired format with the `-f` flag (defaults to PNG)
 
 ```sh
-./zig-out/bin/zxp convert src/examples/render_grid_1d/grid_1d.html -dpi 72 -o src/examples/render_grid_1d/grid_1d.webp
+cat src/examples/render_grid_1d/grid_1d.js | ./zig-out/bin/zxp render - -f webp | kitty +kitten icat
 ```
 
 #### The library
@@ -430,8 +458,6 @@ zig build example -Dname=render_grid_1d/grid_1d
 
 Let's fetch the newest posts from the "hacker news" website.
 
-#### Dev-server
-
 We start the dev-server with:
 
 ```sh
@@ -473,99 +499,11 @@ We get back:
 ]
 ```
 
-#### CLI
-
-We use the verb `scrape` and pass a JavaScript snippet to be executed, using the `-e` flag:
+If you use the CLI, we use the verb `scrape` and pass a JavaScript snippet to be executed, using the `-e` flag:
 
 ```sh
 ./zig-out/bin/zxp scrape https://news.ycombinator.com -e "Array.from(document.querySelectorAll('.titleline a')).map(a=>([a.textContent,a.href]))" --pretty
 ```
-
-
-#### Library
-
-<details><summary>The source code:</summary>
-
-<https://github.com/zexplorer/blob/main/src/examples/combinator/hacker.zig>
-
-```zig
-const std = @import("std");
-const builtin = @import("builtin");
-const z = @import("zexplorer");
-const ScriptEngine = z.ScriptEngine;
-const ZxpRuntime = z.ZxpRuntime;
-
-var debug_gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
-pub fn main() !void {
-    const gpa, const is_debug = gpa: {
-        break :gpa switch (builtin.mode) {
-            .Debug, .ReleaseSafe => .{ debug_gpa.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
-        };
-    };
-
-    defer if (is_debug) {
-        _ = .ok == debug_gpa.deinit();
-    };
-
-    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
-    defer gpa.free(sandbox_root);
-
-    var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
-    defer zxp_rt.deinit();
-    var engine = try ScriptEngine.init(gpa, zxp_rt);
-    defer engine.deinit();
-
-    const script =
-        \\async function scrape() {
-        \\    url = "https://news.ycombinator.com/newest";
-        \\    await zxp.goto(url);
-        \\    return Array.from(document.querySelectorAll(".titleline a")).map((a) => [a.textContent, a.href]);
-        \\}
-    ;
-
-    const val = try engine.eval(script, "<hacker>", .global);
-    defer engine.ctx.freeValue(val);
-
-    const items = try engine.evalAsyncAs(gpa, []const []const []const u8, "scrape()", "<scrape>");
-    defer {
-        for (items) |pair| {
-            for (pair) |s| gpa.free(s);
-            gpa.free(pair);
-        }
-        gpa.free(items);
-    }
-
-    // Join with newlines for file output
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
-    for (items) |pair| {
-        for (pair, 0..) |s, i| {
-            try buf.appendSlice(gpa, s);
-            if (i < pair.len - 1) try buf.append(gpa, '\t');
-        }
-        try buf.append(gpa, '\n');
-    }
-
-    try std.fs.cwd().writeFile(
-        .{
-            .sub_path = "src/examples/combinator/data.txt",
-            .data = buf.items,
-        },
-    );
-}
-
-```
-
-</details>
-
-We run:
-
-```sh
-zig build example -Dname=combinator/hacker
-```
-
----
 
 We can take a snapshot of the website. The rendering is very dependant upon the CSS and we currently support only Flexbox based CSS with no grid-2d nor media-querries no CSS functions and variables.
 
@@ -574,11 +512,6 @@ Using the CLI, you can pipe the verb `scrape` with the verb `convert`. Note that
 ```sh
 ./zig-out/bin/zxp scrape https://news.ycombinator.com | ./zig-out/bin/zxp convert - --base https://news.ycombinator.com  -o src/examples/combinator/hacker.webp
 ```
-
-Using th dev-server (the server is still running `./zig-out/bin/zxp serve`):
-
-
-
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/combinator/hacker.webp" alt="hacer news" width="400" height="300">
 
@@ -738,44 +671,207 @@ You can serve this HTML via the LiveServer to have a snapshot of the Vercel demo
 
 ---
 
-### Stream html chunks
+### CSV input to draw D3.js chart
 
-## Showcase
+A first quick example using the CLI: we will execute a JavaScript snippet (`run -e "..."`) that reads from stdin (`zxp.stdin.read()`), parses the CSV data (`zxp.csv.parse()`) and conversely stringify it back (`zxp.csv.stringify()`).
+
+```sh
+echo "name,age\nAlice,30\nBob,25\n" | \
+./zig-out/bin/zxp run -e \
+"const csv = zxp.stdin.read();
+const rows = zxp.csv.parse(csv);
+console.log(rows); 
+const back = zxp.csv.stringify(rows); 
+console.log(back);"
+```
+
+gives you as expected:
+
+```txt
+[{"name": "Alice", "age": "30"},{"name": "Bob","age": "25"}]
+
+"name","age"
+Alice,30
+Bob,25
+```
+
+An example that shows you can use CSV data to build a [D3.js](https://github.com/d3/d3) chart easily.
+
+We use the following functions: `zxp.csv.parse()` and `zxp.loadHTML()` and `await zxp.runScripts()` and `zxp.paintElement()` (to extract the exact HTMLElement you want) and `zxp.encode()` (generate WEBP encoded binary) and `zxp.fs.writeFileSync()` to save it locally.
+
+<details><summary>JS code snippet to draw D3 chart from CSV data</summary>
+
+Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/example_d3.js>
+
+```js
+async function gdp(country) {
+    const resp = await fetch('https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv');
+    const raw_data = await resp.text();
+    const csv = zxp.csv.parse(raw_data);
+    const country_data = csv.filter((row) => row['Country Code'] == country && row['Year'] > 2000)
+        .map((row) => ({year: row['Year'], gdp: row['Value']}))
+    
+    zxp.loadHTML(`
+    <html>
+        <head>
+            <script src="https://d3js.org/d3.v7.min.js"></script>
+        </head>
+        <body>
+            <div id="chart" style="width: 800px; height: 600px;"></div>
+        </body>
+    </html>
+  `);
+
+    await zxp.runScripts();
+
+
+    const width = 800, height = 600;
+    const margin = { top: 40, right: 40, bottom: 60, left: 100 };
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+
+    const svg = d3.select('#chart')
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .attr('xmlns', 'http://www.w3.org/2000/svg')
+        .append('g')
+        // Shift the inner chart to make room for axes labels!
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Define the X and Y Scales
+    // X Scale: Years (Band scale for bars)
+    const xScale = d3.scaleBand()
+        .domain(country_data.map(d => d.year))
+        .range([0, innerWidth])
+        .padding(0.1);
+
+    // Y Scale: GDP (Linear scale from 0 to max GDP)
+    const yScale = d3.scaleLinear()
+        .domain([0, d3.max(country_data, d => d.gdp)])
+        .range([innerHeight, 0]);
+
+    // Draw the X and Y Axes
+    // X Axis (Bottom)
+    svg.append('g')
+        .attr('transform', `translate(0,${innerHeight})`)
+        .call(d3.axisBottom(xScale).tickValues(
+            // Only show every 5th year so the labels don't overlap
+            xScale.domain().filter((d, i) => i % 5 === 0)
+        ))
+        .attr('font-size', '12px');
+
+    // Y Axis (Left)
+    svg.append('g')
+        .call(d3.axisLeft(yScale).ticks(10, 's')) 
+        .attr('font-size', '12px');
+
+    // Draw the Bars
+    svg.selectAll('rect')
+        .data(country_data)
+        .join('rect')
+        .attr('x', d => xScale(d.year))
+        .attr('y', d => yScale(d.gdp))
+        .attr('width', xScale.bandwidth())
+        .attr('height', d => innerHeight - yScale(d.gdp))
+        .attr('fill', '#3b82f6'); // Tailwind Blue
+
+    // Add a Title
+    svg.append('text')
+        .attr('x', innerWidth / 2)
+        .attr('y', -10)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'sans-serif')
+        .attr('font-size', '20px')
+        .attr('font-weight', 'bold')
+        .text(`GDP of ${country} Over Time`);
+
+    const chartEl = document.querySelector('#chart');
+
+    // return the SVG
+    zxp.fs.writeFileSync('src/examples/csv_chart/output_chart.html', chartEl.outnerHTML);
+
+    // return a painted image for the SVG chart.
+    const imgObj = zxp.paintElement(chartEl, {width: 800}); 
+    // Returns ImageData{data, width, height}
+    // Encode raw RGBA pixels to a standard ArrayBuffer (WEBP here)
+    const imgBytes = zxp.encode(imgObj, 'webp');
+    zxp.fs.writeFileSync('src/examples/csv_chart/output_chart.webp', imgBytes);
+
+}
+
+gdp('FRA');
+```
+
+</details>
+
+We run the dev-server:
+
+```sh
+./zig-out/bin/zxp serve
+```
+
+We send a POST request to the endpoint where the payload is the snippet:
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/csv_chart/example_d3.js
+```
+
+The result is:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/output_cart.webp" alt="D3 chart from CSV" width="400">
+
+---
+
+### Stream html chunks
 
 ### Generative template
 
-You want to use a LLM to generate some HTML with CSS for you. The LLM uses SSE. The engine handles _text/event-stream_  and 
+You want to use a LLM to generate some HTML with CSS for you. We showcase `ollama` here.
+
+The engine handles the _text/event-stream_  sent by the LLM.
 
 The HTML file becomes a generative template — declarative, stateless, reproducible. Just swap the prompt.
 
 ```js
-async function run() {
+// src/examples/generative/test_llm.js
+async function run(prompt= "") {
   const html = await zxp.llmHTML({
     model: "llama3.1",
-    prompt: "3 metric cards in a row using flexbox: Revenue $12k, Users 340, Uptime 99.9%. White background, colored cards.",
+    prompt,
   });
  
   document.body.innerHTML = html;
   const img = zxp.paintDOM(document.body, 800);
   return zxp.encode(img, "webp");
 }
-run();
+run("3 metric cards in a row using flexbox: Revenue $12k, Users 340, Uptime 99.9%. White background, colored cards.");
 ```
+
+Run it with the CLI:
 
 ```sh
 ./zig-out/bin/zxp run src/examples/generative/test_llm.js -o src/examples/generative/test_llm.webp
 ```
 
-The result is an LLM generated image. We rendered an image for demonstration but you can use it directly in a rendered HTML.
+The result is:
 
-<img src="http://localhost:9984/render" alt="llm generated" width="300">
+<img src="" alt="generative template" width="400">
+<br>
 
-SSE format:
+We can knwo use it directly in a rendered HTML.
 
+```html
+<body>
+  <img src="http://localhost:9984/render" alt="llm generated" width="300">
+</body>
+```
+
+#### Note about SSE format
 
 |Provider	|Content path	|End signal|
 |--|--|--|
-|OpenAI	|.choices[0].delta.content	|data: [DONE]|
+|OpenAI / groq / mistral / together / ollama_v1	|.choices[0].delta.content	|data: [DONE]|
 |Anthropic	|.delta.text (on content_block_delta events)	|event: message_stop|
 |Gemini	|.candidates[0].content.parts[0].text	|.finishReason == "STOP"|
 |Ollama	|.message.content	|no SSE — raw NDJSON|
@@ -786,6 +882,8 @@ if anthropic                                           → .delta.text
 if gemini                                             → .candidates[0].content.parts[0].text
 ```
 
+The general prompt that we use:
+ 
 ```txt
 You are a UI generator. Output ONLY raw HTML.
 Use ONLY: display:flex, flex-direction, justify-content, align-items,
@@ -803,7 +901,6 @@ Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map wit
 See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-and-output-a-pdf) below.
 
 ---
-
 
 ## Library quick start
 
@@ -1187,7 +1284,7 @@ TODO
 
 ---
 
-### Sanitize HTML & CSS
+## Sanitize HTML & CSS
 
 Four CSS threat vectors are sanitized in a single pass — covering every way untrusted CSS can reach a document:
 
@@ -1202,7 +1299,7 @@ Vectors 1–3 are static (present in the HTML source). Vector 4 is dynamic — i
 
 ---
 
-#### Vectors 1–3: static CSS (`<link>`, `<style>`, inline)
+### Vectors 1–3: static CSS (`<link>`, `<style>`, inline)
 
 <details><summary>src/examples/test_example.css</summary>
 
@@ -1334,7 +1431,7 @@ if (z.querySelector(doc, "div.untrusted")) |el| {
 
 ---
 
-#### Vector 4: JS DOM mutation
+### Vector 4: JS DOM mutation
 
 JavaScript can inject HTML at runtime via `innerHTML`, `outerHTML`, `insertAdjacentHTML`, or `createElement` + `setAttribute`. Each mutation is intercepted and sanitized at the point of injection when `sanitize = true`.
 
@@ -1529,9 +1626,6 @@ The result is:
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/template_generated.png" alt="OG image" width="600" height="300">
 
-
-2) 
-[TODO] CLI...
 
 ---
 
@@ -2352,20 +2446,13 @@ zig build example -Dname=test_vue --release=fast
 
 | Operation            | zexplorer | JSDOM+DOMPurify |
 | -------------------- | --------- | --------------- |
-| Cold start           | 1.5ms     | 30ms            |
+| Cold start           | 2.5ms     | 30ms            |
 | Sanitize 36kB HTML   | 2.1ms     | 11ms            |
 | Create 10k DOM nodes | 26ms      | 191ms           |
 
-### zexplorer running js-framework-benchmark code
+### Running framework code
 
-To ensure the Web primitives are correctly implemented in `zexplorer`, we run code from the [js-vanilla-bench-framework tests](https://github.com/krausest/js-framework-benchmark).
-
-The examples can be built and run with the commands:
-
-```sh
-cd src/examples
-zig build example -Dname=js-bench-* -Doptimize=ReleaseFast
-```
+To ensure the Web primitives are correctly implemented in `zexplorer`, we tested various frameworks and used the [js-vanilla-bench-framework tests](https://github.com/krausest/js-framework-benchmark).
 
 Source:
 
@@ -2373,7 +2460,6 @@ Source:
 - [Vanilla-2-non-keyd](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/vanillajs-3/src/Main.js)
 - [Vanilla-3-k](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/vanillajs-3/src/Main.js)
 - [bau](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/non-keyed/bau/main.js)
-
 
 Ref: browser Vanilla
 
@@ -2391,21 +2477,6 @@ Ref: browser Vanilla
 | --               | --   | --        | --           | --        | --  | --    |
 | Total Engine     | --   | 78        | 84           | 82        |     | 57    |
 
-**[Lit-html](https://github.com/krausest/js-framework-benchmark/tree/master/frameworks/non-keyed/lit-html)**
-
-| Test                 | Lit-html |
-| -------------------- | -------- |
-| Create 1k            | 16.7 ms  |
-| Replace 1k           | 4.4 ms   |
-| Partial Update (10k) | 28.6 ms  |
-| Select Row           | 25.9 ms  |
-| Swap Rows            | 2.8 ms   |
-| Remove Row           | 3.9 ms   |
-| Create 10k           | 164.6 ms |
-| Append 1k            | 54.1 ms  |
-| Clear                | 13.2 ms  |
-| Total engine (c)     | 597ms    |
-
 (c) CDN import
 
 - [Comp(*) Solid](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/solid/src/main.jsx)
@@ -2414,21 +2485,7 @@ Ref: browser Vanilla
 - [Vue3](https://github.com/ndrean/zexplorer/src/examples/js-bench-vue3.js)
 - 
 
-| Test             | Ref  | Solid (*) | Solid (**) | Svelte5  | Vue3 (***) |
-| ---------------- | ---- | --------- | ---------- | -------- | ---------- |
-|                  |      | compiled  | templated  | compiled | templated  |
-| ---------------- | ---- | --------  | ---------  | -------- | ---------- |
-| Create 1k        | 22.0 | 18.5      | 16.7       | 26.0     | 54.7       |
-| Replace 1k       | 24.4 | 17.0      | 17.6       | 26.9     | 55.2       |
-| Partial Up (10k) | 9.5  | 7.0       | 138.4      | 8.7      | 205.2      |
-| Select Row       | 2.2  | 3.7       | 127.9      | 3.0      | 199.2      |
-| Swap Rows        | 11.7 | 1.2       | 10.3       | 1.1      | 21.7       |
-| Remove Row       | 9.2  | 0.5       | 10.8       | 0.7      | 20.5       |
-| Create 10k       | 229  | 143.5     | 142.0      | 422.1    | 473.2      |
-| Append 1k        | 25.6 | 16.5      | 173.7      | 22.8     | 245.8      |
-| Clear            | 9.0  | 32.8      | 23.7       | 9.1      | 37.8       |
-| -----            | ---  | --        | --         | --       | --         |
-| Total Engine     | --   | 486       | 1087       | 954      | 2086 (***) |
+
 
 (*) compiled JSX->JS with `bun`
 
@@ -2460,6 +2517,301 @@ Ref: browser Vanilla
 (^^) Preact/compat production build (same JSX source as React, aliased via build plugin)
 
 Svelte 5's compiled approach generates direct imperative DOM operations (no VDOM), making it the fastest compiled framework on QuickJS — on par with Compiled Solid for 1k operations and significantly faster than React/Preact/Vue. Preact is lighter than React (3KB vs 45KB) but its microtask-scheduled rendering creates more GC pressure at scale. React's fiber architecture pays off for partial updates where its diffing skips unchanged subtrees more efficiently.
+
+#### SolidJS
+
+[SolidJS](https://www.solidjs.com/)
+
+##### SolidJS js-framework-benchmark
+
+Source from js-framework-benchmark: <https://github.com/ndrean/zexplorer/blob/main/src/examples/zxp-frams/BenchSolid.js>
+
+We used two forms:
+
+- we transformed the previous inot a "templated version" using `solid-js/html`. The source is: <https://github.com/ndrean/zexplorer/blob/main/src/examples/zxp-frams/BenchSolid.js>
+- We used a compiled form. We transform the JSX->JS with `babel` and bundled the code with `bun`. The resulting compiled code is:
+<https://github.com/ndrean/zexplorer/src/examples/vendor/bench-solid.js>.
+
+The following script that we run using `bun build_bench_solid.js`: <https://github.com/ndrean/zexplorer/blob/main/src/examples/zxp-frams/build_bench_solid.js>
+
+We provide a Zig file to compile and run directly
+
+```sh
+zig build example -Dname=frameworks/solidjs/js-bench-solid --release=fast
+```
+
+or use the `serve` mode
+
+```sh
+./zig-out/bin/zxp serve
+```
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/solidjs/run-templated.js
+
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/solidjs/run-compiled.js
+```
+
+| Test             | Ref  | Solid (compiled) | Solid (templated) | 
+| ---------------- | ---- | --------- | ---------- |
+| Create 1k        | 22.0 | 20.5      | 18       |
+| Replace 1k       | 24.4 | 19      | 17       |
+| Partial Up (10k) | 9.5  | 7       | 102      |
+| Select Row       | 2.2  | 3.3       | 108      |
+| Swap Rows        | 11.7 | 1.0       | 8       |
+| Remove Row       | 9.2  | 0.5       | 8       |
+| Create 10k       | 229  | 123     | 95      |
+| Append 1k        | 25.6 | 13.5      | 108      |
+| Clear            | 9.0  | 31      | 23       |
+
+> In the templated with `html`, we use `map` instead of the optimzed `For`.
+
+##### SolidJS example
+
+<details><summary>HTML with embedded JavaScript code running SolidJS simulating three clicks on a button</summary>
+
+[Source](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/solidjs/test_solidjs.html)
+
+```html
+<html>
+  <body>
+    <h1>Testing CDN import: SolidJS (Nested Components)</h1>
+    <div id="root"></div>
+    <script type="module">
+      import { createSignal, createEffect, onMount } from "solid-js";
+      import { render } from "solid-js/web";
+      import html from "solid-js/html";
+
+      console.log("[JS] SolidJS loaded");
+      const root = document.getElementById("root");
+
+      // --- Nested Components ---
+      // Note: solid-js/html's dynamicProperty wraps ALL function-valued
+      // component props as reactive getters (calls them on access).
+      // Unlike JSX (where Babel distinguishes signal accessors from
+      // regular functions), html templates treat all functions as
+      // reactive accessors. So we pass event handlers wrapped in an
+      // object to avoid auto-calling.
+
+      const Button = (props) => {
+        const handleClick = () => props.actions.increment();
+        return html`
+          <button type="button" id="btn" onclick=${handleClick}>
+            ${props.children}
+          </button>
+        `;
+      };
+
+      function Counter(props) {
+        createEffect(() => {
+          console.log("[JS] Effect: count =", props.count);
+        });
+
+        return html`
+          <div class="counter-app">
+            <h2>SolidJS Counter (Nested)</h2>
+            <p id="count-display">Count: ${() => props.count}</p>
+            <${Button} actions=${props.actions} children=${"👍 +1"} />
+          </div>
+        `;
+      }
+
+      const App = () => {
+        const [localCount, setLocalCount] = createSignal(0);
+        // Wrap handlers in an object so dynamicProperty doesn't
+        // auto-call them (objects are not functions)
+        const actions = { increment: () => setLocalCount((c) => c + 1) };
+
+        onMount(() => {
+          console.log("[JS] App mounted");
+          console.log("[JS] initial innerHTML:", root.innerHTML);
+        });
+
+        return html`<${Counter} count=${localCount} actions=${actions} />`;
+      };
+
+      try {
+        render(() => html`<${App} />`, root);
+        console.log("[JS] First render:", root.innerHTML);
+
+        // Simulate periodic clicks
+        let iterations = 0;
+        const interval = setInterval(() => {
+          iterations++;
+          const btn = document.getElementById("btn");
+          if (btn) {
+            console.log("[JS] dispatching click", iterations);
+            btn.dispatchEvent(new Event("click", { bubbles: true }));
+          }
+          if (iterations >= 3) {
+            clearInterval(interval);
+            console.log("[JS] Auto-increment stopped after 3 iterations");
+            console.log(
+              "[JS] Final:",
+              document.getElementById("count-display")?.textContent,
+            );
+          }
+        }, 100);
+      } catch (e) {
+        console.log("[JS] SolidJS Error:", e.message);
+        if (e.stack)
+          console.log(
+            "[JS] Stack:",
+            e.stack.split("\n").slice(0, 5).join("\n"),
+          );
+      }
+    </script>
+  </body>
+</html>
+```
+
+</details>
+
+You can run it either:
+
+```sh
+zig build example -Dname=frameworks/solidjs/test_solidjs
+```
+
+or using the dev-server:
+
+```sh
+./zig-out/bin/zxp serve
+```
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/solidjs/test_solid.js
+```
+
+The output shows the counter being incremented as expected:
+
+```txt
+[JS] SolidJS loaded
+[JS] App mounted
+[JS] initial innerHTML: <div class="counter-app"><h2>SolidJS Counter (Nested)</h2><p id="count-display">Count: 0<!--#--></p><button type="button" id="btn">👍 +1</button><!--#--></div>
+[JS] Effect: count = 0
+[JS] First render: <div class="counter-app"><h2>SolidJS Counter (Nested)</h2><p id="count-display">Count: 0<!--#--></p><button type="button" id="btn">👍 +1</button><!--#--></div>
+[JS] dispatching click 1
+[JS] Effect: count = 1
+[JS] dispatching click 2
+[JS] Effect: count = 2
+[JS] dispatching click 3
+[JS] Effect: count = 3
+[JS] Auto-increment stopped after 3 iterations
+[JS] Final: Count: 3
+```
+
+---
+
+#### React
+
+#### Lit
+
+[Lit](https://lit.dev/docs/v1/lit-html/introduction/)
+
+- [Lit-html js-framework-benchmark source](https://github.com/krausest/js-framework-benchmark/tree/master/frameworks/non-keyed/lit-html)
+- [Source in the repo](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/lit-html/js-bench-lit-html.js)
+
+To run it, you can either run a Zig build:
+
+```sh
+zig build example -Dname=frameworks/lit-html/js-bench-lit-html --release=fast
+```
+
+or use the `serve` mode and send an HTTP request where the payload is a JS snippet to load the HTML and run the embedded scripts:
+
+```sh
+./zig-out/bin/zxp serve
+```
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/lit-html/run.js
+```
+
+| Test                 | Lit-html |
+| -------------------- | -------- |
+| Create 1k            | 20 ms    |
+| Replace 1k           | 5 ms     |
+| Partial Update (10k) | 25 ms    |
+| Select Row           | 25 ms    |
+| Swap Rows            | 2.5 ms   |
+| Remove Row           | 3.3 ms   |
+| Create 10k           | 122 ms   |
+| Append 1k            | 38 ms    |
+| Clear                | 11 ms    |
+
+---
+
+#### Svelte 5
+
+[Svelte](https://svelte.dev/)
+
+- [Svelte 5 js-framework-benchmark source](https://github.com/krausest/js-framework-benchmark/blob/master/frameworks/keyed/svelte/src/App.svelte)
+- [Source in the repo](https://github.com/ndrean/zexplorer/blob/main/src/examples/zxp-frams/BenchSvelte.svelte)
+
+The Svelte code is compiled using `bun`: [bun runner](httsp://github.com/ndrean/zexplorer/blob/main/src/examples/zxp-frams/build_bench_svelte.js)
+
+The compiled [code source](https://github.com/ndrean/zexplorer/src/examples/vendor/bench-svelte.js)
+
+We provide a Zig file to compile and run directly
+
+```sh
+zig build example -Dname=frameworks/svelte/js-benchsvelte --release=fast
+```
+
+or use the `serve` mode:
+
+```sh
+./zig-out/bin/zxp serve   
+```
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/svelte/run.js
+```
+
+| Test             |Svelte5 (compiled)  |
+| ---------------- |--------            |
+| Create 1k        | 26                 |
+| Replace 1k       | 26.9               |
+| Partial Up (10k) | 8.7                |
+| Select Row       | 3.0                |
+| Swap Rows        | 1.1                |
+| Remove Row       | 0.7                |
+| Create 10k       | 422.1              |
+| Append 1k        | 22.8               |
+| Clear            | 9.1                |
+
+#### Vue 3
+
+[Vue](https://vuejs.org/)
+
+- [Vue js-framework-benchmark source](https://github.com/ndrean/zexplorer/src/examples/js-bench-vue3.js)
+- [Source in the repo](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/vue/js-bench-vue.js)
+
+We provide a Zig file to compile and run directly
+
+```sh
+zig build example -Dname=frameworks/vue/js-bench-vue --release=fastor use the `serve` mode:
+
+```sh
+./zig-out/bin/zxp serve   
+```
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/vue/run.js
+```
+
+| Test             | Vue 3 (templated) |
+| ---------------- |--------           |
+| Create 1k        | 50                |
+| Replace 1k       | 49                |
+| Partial Up (10k) | 191               |
+| Select Row       | 177               |
+| Swap Rows        | 19                |
+| Remove Row       | 17                |
+| Create 10k       | 422               |
+| Append 1k        | 220               |
+| Clear            | 32                |
 
 ### zexplorer vs jsdom
 
@@ -3735,80 +4087,6 @@ std.debug.assert(!footer_token_list.contains("new-footer"));
 
 ---
 
-### Provide other examples
-
-Move main() to src/examples
-
----
-
-## Notes
-
-### Notes on `lexbor` DOM memory management: Document Ownership and zero-copy functions
-
-In `lexbor`, nodes belong to documents, and the document acts as the memory manager.
-
-When a node is attached to a document (either directly or through a fragment that gets appended), the document owns it.
-
-Every time you create a document, you need to call `destroyDocument()`: it automatically destroys ALL nodes that belong to it.
-
-When a node is NOT attached to any document, you must manually destroy it.
-
-Some functions borrow memory from `lexbor` for zero-copy operations: their result is consumed immediately.
-
-We opted for the following convention: add `_zc` (for _zero_copy_) to the **non allocated** version of a function. For example, you can get the qualifiedName of an HTMLElement with the allocated version `qualifiedName(allocator, node)` or by mapping to `lexbor` memory with `qualifiedName_zc(node)`. The non-allocated must be consumed immediately whilst the allocated result can outlive the calling function.
-
-### **The Event Loop**
-
-<details><summary>TO BE MOVED INTO TECH DOCS</summary>
-
-```mermaid
-graph TD
-    %% Nodes
-    Start((Loop Start)) --> SignalCheck{Ctrl+C?}
-    SignalCheck -- Yes --> Exit
-    SignalCheck -- No --> Microtasks1
-
-    subgraph "Phase 1: Microtasks (High Priority)"
-    Microtasks1[Flush Pending Jobs]
-    note1[Executes all .then callbacks]
-    end
-
-    Microtasks1 --> ExitCheck{Can Exit?}
-    ExitCheck -- Empty Queue & No Timers --> Exit
-    ExitCheck -- Active --> Timers
-
-    subgraph "Phase 2: Timers (Macrotask)"
-    Timers[Check Timers]
-    note2[Did a timer fire?]
-    end
-
-    Timers -- Yes! Fired one --> Start
-    Timers -- No, all waiting --> Workers
-
-    subgraph "Phase 3: Native Workers (Macrotask)"
-    Workers[Check Worker Queue]
-    note3[Did a thread finish?]
-    end
-
-    Workers -- Yes! Task Resolved --> Start
-    Workers -- No, queue empty --> Sleep
-
-    subgraph "Phase 4: Idle"
-    Sleep[Sleep for Min Timer, 10ms]
-    end
-
-    Sleep --> Start
-
-    %% Styling
-    style Microtasks1 fill:#f96,stroke:#333,stroke-width:2px
-    style Start fill:#bbf,stroke:#333
-    style Exit fill:#f66,stroke:#333
-```
-
-</details>
-
----
-
 ## Install
 
 [![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)](http://github.com/ndrean/z-html)
@@ -3938,38 +4216,3 @@ grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 - `htm`[htm](https://github.com/developit/htm/blob/master/LICENSE)
 - `turndown.js` [License MIT](https://github.com/mixmark-io/turndown/blob/master/LICENSE)
 - `md4c` [License MIT](https://github.com/mity/md4c/blob/master/LICENSE.md)
-
----
-
-## COCOMO analysis
-
-Curious? Check <https://github.com/boyter/scc>
-
-```txt
-───────────────────────────────────────────────────────────────────────────────
-Language            Files       Lines    Blanks  Comments       Code Complexity
-───────────────────────────────────────────────────────────────────────────────
-Zig                   190      85,131     7,977     8,311     68,843     11,998
-JavaScript             87       8,074       703       520      6,851      1,158
-HTML                   55       7,825       814       165      6,846          0
-SVG                    11         335        43        30        262          0
-Markdown                8       5,490     1,354         0      4,136          0
-JSON                    7       1,176         3         0      1,173          0
-CSS                     3          41         3         1         37          0
-JSX                     3         336        41         3        292          7
-Plain Text              3         397        57         0        340          0
-C                       2         406        61       102        243         77
-Shell                   2         143        25        28         90          7
-License                 1          21         4         0         17          0
-Svelte                  1         181         6         0        175          3
-TypeScript              1           1         0         0          1          0
-───────────────────────────────────────────────────────────────────────────────
-Total                 374     109,557    11,091     9,160     89,306     13,250
-───────────────────────────────────────────────────────────────────────────────
-Estimated Cost to Develop (organic) $3,020,090
-Estimated Schedule Effort (organic) 20.93 months
-Estimated People Required (organic) 12.82
-───────────────────────────────────────────────────────────────────────────────
-Processed 5719486 bytes, 5.719 megabytes (SI)
-───────────────────────────────────────────────────────────────────────────────
-```

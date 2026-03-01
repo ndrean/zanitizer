@@ -9,8 +9,8 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const w = zqjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+const RuntimeContext = z.RuntimeContext;
+const DOMBridge = z.DOMBridge;
 
 // NodeFilter whatToShow bitmask constants (DOM spec)
 const SHOW_ALL: u32 = 0xFFFFFFFF;

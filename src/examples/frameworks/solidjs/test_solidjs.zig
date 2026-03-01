@@ -1,7 +1,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const z = @import("zexplorer");
+const z = @import("zxp");
 const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
+const zxp_runtime = z.zxp_runtime;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -11,6 +13,7 @@ pub fn main() !void {
             .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
         };
     };
+
     defer if (is_debug) {
         _ = debug_allocator.deinit();
     };
@@ -18,26 +21,25 @@ pub fn main() !void {
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
 
-    try testRun(gpa, sandbox_root);
+    try run_test(gpa, sandbox_root);
 }
 
-fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
-
+fn run_test(gpa: std.mem.Allocator, sandbox_root: []const u8) !void {
+    var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(gpa, zxp_rt);
     defer engine.deinit();
 
-    z.print("\n=== JS-framework-Svelte5-Runes -----------------------------\n\n", .{});
-
-    const start = std.time.nanoTimestamp();
-
-    const html = @embedFile("js-bench-svelte.html");
-
+    const html = @embedFile("test_solidjs.html");
     try engine.loadHTML(html);
-    try engine.executeScripts(allocator, ".");
 
-    try engine.run();
+    try engine.executeScripts(gpa, ".");
 
-    const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000);
-    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n\n", .{ms});
+    engine.run() catch |err| {
+        z.print("Run error: {}\n", .{err});
+        return err;
+    };
+    const root = z.getElementById(engine.dom.doc, "root");
+
+    try z.prettyPrint(gpa, z.elementToNode(root.?));
 }

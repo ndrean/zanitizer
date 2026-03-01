@@ -3,16 +3,19 @@
 
 const std = @import("std");
 const z = @import("root.zig");
-const w = @import("wrapper.zig");
+const w = z.wrapper;
 const qjs = z.qjs;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_CSSStyleDeclaration = @import("js_CSSStyleDeclaration.zig");
+const DOMBridge = z.DOMBridge;
+const RuntimeContext = z.RuntimeContext;
+// const js_CSSStyleDeclaration = @import("js_CSSStyleDeclaration.zig");
+const js_CSSStyleDeclaration = z.js_CSSStyleDeclaration;
 
 /// Warn-and-ignore setter for read-only properties (browsers ignore writes, QuickJS throws).
 /// Uses JSCFunctionData signature so the property name is passed as closure data[0].
 fn js_noop_setter(ctx: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, argv: [*c]qjs.JSValue, _: c_int, func_data: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = ctx; _ = argv; _ = func_data;
+    _ = ctx;
+    _ = argv;
+    _ = func_data;
     // Uncomment for debugging which read-only properties are being written to:
     // const name_str = qjs.JS_ToCString(ctx, func_data[0]);
     // if (name_str) |s| {
@@ -49,7 +52,9 @@ pub fn js_parseHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 }
 /// Generated wrapper for z.documentRoot
 pub fn js_documentRoot(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv; _ = this_val;
+    _ = argc;
+    _ = argv;
+    _ = this_val;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const global = ctx.getGlobalObject();
@@ -138,7 +143,8 @@ pub fn js_createComment(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 /// Generated wrapper for z.createDocumentFragmentNode
 pub fn js_createDocumentFragment(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
@@ -184,7 +190,8 @@ pub fn js_parseFromString(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // Property Getter for type
 pub fn js_get_type(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -193,7 +200,8 @@ pub fn js_get_type(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 // Property Getter for bubbles
 pub fn js_get_bubbles(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -202,7 +210,8 @@ pub fn js_get_bubbles(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 // Property Getter for defaultPrevented
 pub fn js_get_defaultPrevented(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -211,7 +220,8 @@ pub fn js_get_defaultPrevented(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // Property Getter for target
 pub fn js_get_target(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -221,7 +231,8 @@ pub fn js_get_target(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_in
 }
 // Property Getter for currentTarget
 pub fn js_get_currentTarget(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -231,7 +242,8 @@ pub fn js_get_currentTarget(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 /// Generated wrapper for z.events.stopPropagation
 pub fn js_stopPropagation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -240,7 +252,8 @@ pub fn js_stopPropagation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 /// Generated wrapper for z.events.preventDefault
 pub fn js_preventDefault(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ev = ctx.getOpaqueAs(z.events.DomEvent, this_val, rc.classes.event) orelse return ctx.throwTypeError("Object is not an Event");
@@ -309,18 +322,20 @@ pub fn js_cloneNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 /// Generated wrapper for z.getRootNode
 pub fn js_getRootNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
-    
+
     const result = z.getRootNode(node);
     return DOMBridge.wrapNode(ctx, result) catch w.EXCEPTION;
 }
 /// Generated wrapper for z.removeNode
 pub fn js_remove(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return ctx.throwTypeError("'this' is not a Node");
-    
+
     z.removeNode(node);
     return w.UNDEFINED;
 }
@@ -418,7 +433,8 @@ pub fn js_setHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 }
 /// Generated wrapper for z.getHTML
 pub fn js_getHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -432,7 +448,8 @@ pub fn js_getHTML(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 }
 // Property Getter for parentNode (special handling for documents)
 pub fn js_get_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
 
@@ -450,7 +467,8 @@ pub fn js_get_parentNode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // Property Getter for ownerDocument
 pub fn js_get_ownerDocument(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.ownerDocument(node);
@@ -458,7 +476,8 @@ pub fn js_get_ownerDocument(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // Property Getter for documentElement
 pub fn js_get_documentElement(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
@@ -470,7 +489,8 @@ pub fn js_get_documentElement(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // Property Getter for body
 pub fn js_get_body(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
@@ -482,7 +502,8 @@ pub fn js_get_body(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 // Property Getter for head
 pub fn js_get_head(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const doc = ctx.getOpaqueAs(z.HTMLDocument, this_val, rc.classes.document) orelse
@@ -494,7 +515,8 @@ pub fn js_get_head(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 // Property Getter for textContent
 pub fn js_get_textContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.textContent_zc(node);
@@ -515,7 +537,8 @@ pub fn js_set_textContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // Property Getter for nodeValue
 pub fn js_get_nodeValue(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.nodeValue_zc(node);
@@ -536,7 +559,8 @@ pub fn js_set_nodeValue(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // Property Getter for data
 pub fn js_get_data(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.nodeValue_zc(node);
@@ -557,7 +581,8 @@ pub fn js_set_data(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 // Property Getter for innerText
 pub fn js_get_innerText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.textContent_zc(node);
@@ -578,7 +603,8 @@ pub fn js_set_innerText(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // Property Getter for nextSibling
 pub fn js_get_nextSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.nextSibling(node);
@@ -587,7 +613,8 @@ pub fn js_get_nextSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // Property Getter for previousSibling
 pub fn js_get_previousSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.previousSibling(node);
@@ -596,7 +623,8 @@ pub fn js_get_previousSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // Property Getter for firstChild
 pub fn js_get_firstChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.firstChild(node);
@@ -605,7 +633,8 @@ pub fn js_get_firstChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // Property Getter for lastChild
 pub fn js_get_lastChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.lastChild(node);
@@ -614,7 +643,8 @@ pub fn js_get_lastChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // Property Getter for firstElementChild
 pub fn js_get_firstElementChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const node = DOMBridge.unwrapNode(ctx, this_val) orelse return w.EXCEPTION;
     const result = z.firstElementChild(node);
@@ -623,7 +653,8 @@ pub fn js_get_firstElementChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // Property Getter for nextElementSibling
 pub fn js_get_nextElementSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
@@ -633,7 +664,8 @@ pub fn js_get_nextElementSibling(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // Property Getter for lastElementChild
 pub fn js_get_lastElementChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
@@ -643,7 +675,8 @@ pub fn js_get_lastElementChild(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // Property Getter for className
 pub fn js_get_className(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
@@ -666,7 +699,8 @@ pub fn js_set_className(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // Property Getter for namespaceURI
 pub fn js_get_namespaceURI(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Object is not an HTMLElement");
@@ -675,7 +709,8 @@ pub fn js_get_namespaceURI(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // Property Getter for classList -> DOMTokenList
 pub fn js_get_classList(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = ctx.getOpaque(this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Not an HTMLElement");
@@ -686,7 +721,8 @@ pub fn js_get_classList(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // Property Getter for dataset -> DOMStringMap
 pub fn js_get_dataset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const ptr = ctx.getOpaque(this_val, rc.classes.html_element) orelse return ctx.throwTypeError("Not an HTMLElement");
@@ -697,7 +733,8 @@ pub fn js_get_dataset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 // Boolean Getter for disabled
 pub fn js_get_disabled(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -719,7 +756,8 @@ pub fn js_set_disabled(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // Boolean Getter for hidden
 pub fn js_get_hidden(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -741,7 +779,8 @@ pub fn js_set_hidden(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_in
 }
 // Boolean Getter for checked
 pub fn js_get_checked(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -763,7 +802,8 @@ pub fn js_set_checked(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 // Reflected String Getter for id -> id
 pub fn js_get_id(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -787,7 +827,8 @@ pub fn js_set_id(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, a
 }
 // Reflected String Getter for title -> title
 pub fn js_get_title(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -811,7 +852,8 @@ pub fn js_set_title(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 }
 // Reflected String Getter for lang -> lang
 pub fn js_get_lang(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -835,7 +877,8 @@ pub fn js_set_lang(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 // Reflected String Getter for dir -> dir
 pub fn js_get_dir(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -859,7 +902,8 @@ pub fn js_set_dir(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, 
 }
 // Reflected String Getter for role -> role
 pub fn js_get_role(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -883,7 +927,8 @@ pub fn js_set_role(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int,
 }
 // Reflected String Getter for nonce -> nonce
 pub fn js_get_nonce(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.html_element) orelse return w.EXCEPTION;
@@ -912,7 +957,8 @@ pub fn js_set_nonce(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int
 
 // CSS Property Getter: style.accentColor
 pub fn js_css_get_accentColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -934,7 +980,8 @@ pub fn js_css_set_accentColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.alignContent
 pub fn js_css_get_alignContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -956,7 +1003,8 @@ pub fn js_css_set_alignContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.alignItems
 pub fn js_css_get_alignItems(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -978,7 +1026,8 @@ pub fn js_css_set_alignItems(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.alignSelf
 pub fn js_css_get_alignSelf(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1000,7 +1049,8 @@ pub fn js_css_set_alignSelf(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.all
 pub fn js_css_get_all(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1022,7 +1072,8 @@ pub fn js_css_set_all(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 // CSS Property Getter: style.animation
 pub fn js_css_get_animation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1044,7 +1095,8 @@ pub fn js_css_set_animation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.animationDelay
 pub fn js_css_get_animationDelay(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1066,7 +1118,8 @@ pub fn js_css_set_animationDelay(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.animationDirection
 pub fn js_css_get_animationDirection(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1088,7 +1141,8 @@ pub fn js_css_set_animationDirection(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.animationDuration
 pub fn js_css_get_animationDuration(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1110,7 +1164,8 @@ pub fn js_css_set_animationDuration(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.animationFillMode
 pub fn js_css_get_animationFillMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1132,7 +1187,8 @@ pub fn js_css_set_animationFillMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.animationIterationCount
 pub fn js_css_get_animationIterationCount(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1154,7 +1210,8 @@ pub fn js_css_set_animationIterationCount(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.animationName
 pub fn js_css_get_animationName(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1176,7 +1233,8 @@ pub fn js_css_set_animationName(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.animationPlayState
 pub fn js_css_get_animationPlayState(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1198,7 +1256,8 @@ pub fn js_css_set_animationPlayState(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.animationTimingFunction
 pub fn js_css_get_animationTimingFunction(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1220,7 +1279,8 @@ pub fn js_css_set_animationTimingFunction(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.appearance
 pub fn js_css_get_appearance(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1242,7 +1302,8 @@ pub fn js_css_set_appearance(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.aspectRatio
 pub fn js_css_get_aspectRatio(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1264,7 +1325,8 @@ pub fn js_css_set_aspectRatio(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.backdropFilter
 pub fn js_css_get_backdropFilter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1286,7 +1348,8 @@ pub fn js_css_set_backdropFilter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.backfaceVisibility
 pub fn js_css_get_backfaceVisibility(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1308,7 +1371,8 @@ pub fn js_css_set_backfaceVisibility(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.background
 pub fn js_css_get_background(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1330,7 +1394,8 @@ pub fn js_css_set_background(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.backgroundAttachment
 pub fn js_css_get_backgroundAttachment(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1352,7 +1417,8 @@ pub fn js_css_set_backgroundAttachment(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.backgroundBlendMode
 pub fn js_css_get_backgroundBlendMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1374,7 +1440,8 @@ pub fn js_css_set_backgroundBlendMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.backgroundClip
 pub fn js_css_get_backgroundClip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1396,7 +1463,8 @@ pub fn js_css_set_backgroundClip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.backgroundColor
 pub fn js_css_get_backgroundColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1418,7 +1486,8 @@ pub fn js_css_set_backgroundColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.backgroundImage
 pub fn js_css_get_backgroundImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1440,7 +1509,8 @@ pub fn js_css_set_backgroundImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.backgroundOrigin
 pub fn js_css_get_backgroundOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1462,7 +1532,8 @@ pub fn js_css_set_backgroundOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.backgroundPosition
 pub fn js_css_get_backgroundPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1484,7 +1555,8 @@ pub fn js_css_set_backgroundPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.backgroundPositionX
 pub fn js_css_get_backgroundPositionX(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1506,7 +1578,8 @@ pub fn js_css_set_backgroundPositionX(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.backgroundPositionY
 pub fn js_css_get_backgroundPositionY(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1528,7 +1601,8 @@ pub fn js_css_set_backgroundPositionY(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.backgroundRepeat
 pub fn js_css_get_backgroundRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1550,7 +1624,8 @@ pub fn js_css_set_backgroundRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.backgroundSize
 pub fn js_css_get_backgroundSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1572,7 +1647,8 @@ pub fn js_css_set_backgroundSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.blockSize
 pub fn js_css_get_blockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1594,7 +1670,8 @@ pub fn js_css_set_blockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.border
 pub fn js_css_get_border(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1616,7 +1693,8 @@ pub fn js_css_set_border(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.borderBlock
 pub fn js_css_get_borderBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1638,7 +1716,8 @@ pub fn js_css_set_borderBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.borderBlockColor
 pub fn js_css_get_borderBlockColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1660,7 +1739,8 @@ pub fn js_css_set_borderBlockColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderBlockEnd
 pub fn js_css_get_borderBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1682,7 +1762,8 @@ pub fn js_css_set_borderBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.borderBlockEndColor
 pub fn js_css_get_borderBlockEndColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1704,7 +1785,8 @@ pub fn js_css_set_borderBlockEndColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.borderBlockEndStyle
 pub fn js_css_get_borderBlockEndStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1726,7 +1808,8 @@ pub fn js_css_set_borderBlockEndStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.borderBlockEndWidth
 pub fn js_css_get_borderBlockEndWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1748,7 +1831,8 @@ pub fn js_css_set_borderBlockEndWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.borderBlockStart
 pub fn js_css_get_borderBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1770,7 +1854,8 @@ pub fn js_css_set_borderBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderBlockStartColor
 pub fn js_css_get_borderBlockStartColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1792,7 +1877,8 @@ pub fn js_css_set_borderBlockStartColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.borderBlockStartStyle
 pub fn js_css_get_borderBlockStartStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1814,7 +1900,8 @@ pub fn js_css_set_borderBlockStartStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.borderBlockStartWidth
 pub fn js_css_get_borderBlockStartWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1836,7 +1923,8 @@ pub fn js_css_set_borderBlockStartWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.borderBlockStyle
 pub fn js_css_get_borderBlockStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1858,7 +1946,8 @@ pub fn js_css_set_borderBlockStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderBlockWidth
 pub fn js_css_get_borderBlockWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1880,7 +1969,8 @@ pub fn js_css_set_borderBlockWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderBottom
 pub fn js_css_get_borderBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1902,7 +1992,8 @@ pub fn js_css_set_borderBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.borderBottomColor
 pub fn js_css_get_borderBottomColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1924,7 +2015,8 @@ pub fn js_css_set_borderBottomColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderBottomLeftRadius
 pub fn js_css_get_borderBottomLeftRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1946,7 +2038,8 @@ pub fn js_css_set_borderBottomLeftRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.borderBottomRightRadius
 pub fn js_css_get_borderBottomRightRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1968,7 +2061,8 @@ pub fn js_css_set_borderBottomRightRadius(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.borderBottomStyle
 pub fn js_css_get_borderBottomStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -1990,7 +2084,8 @@ pub fn js_css_set_borderBottomStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderBottomWidth
 pub fn js_css_get_borderBottomWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2012,7 +2107,8 @@ pub fn js_css_set_borderBottomWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderCollapse
 pub fn js_css_get_borderCollapse(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2034,7 +2130,8 @@ pub fn js_css_set_borderCollapse(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.borderColor
 pub fn js_css_get_borderColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2056,7 +2153,8 @@ pub fn js_css_set_borderColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.borderEndEndRadius
 pub fn js_css_get_borderEndEndRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2078,7 +2176,8 @@ pub fn js_css_set_borderEndEndRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.borderEndStartRadius
 pub fn js_css_get_borderEndStartRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2100,7 +2199,8 @@ pub fn js_css_set_borderEndStartRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.borderImage
 pub fn js_css_get_borderImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2122,7 +2222,8 @@ pub fn js_css_set_borderImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.borderImageOutset
 pub fn js_css_get_borderImageOutset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2144,7 +2245,8 @@ pub fn js_css_set_borderImageOutset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderImageRepeat
 pub fn js_css_get_borderImageRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2166,7 +2268,8 @@ pub fn js_css_set_borderImageRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderImageSlice
 pub fn js_css_get_borderImageSlice(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2188,7 +2291,8 @@ pub fn js_css_set_borderImageSlice(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderImageSource
 pub fn js_css_get_borderImageSource(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2210,7 +2314,8 @@ pub fn js_css_set_borderImageSource(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderImageWidth
 pub fn js_css_get_borderImageWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2232,7 +2337,8 @@ pub fn js_css_set_borderImageWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderInline
 pub fn js_css_get_borderInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2254,7 +2360,8 @@ pub fn js_css_set_borderInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.borderInlineColor
 pub fn js_css_get_borderInlineColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2276,7 +2383,8 @@ pub fn js_css_set_borderInlineColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderInlineEnd
 pub fn js_css_get_borderInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2298,7 +2406,8 @@ pub fn js_css_set_borderInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.borderInlineEndColor
 pub fn js_css_get_borderInlineEndColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2320,7 +2429,8 @@ pub fn js_css_set_borderInlineEndColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.borderInlineEndStyle
 pub fn js_css_get_borderInlineEndStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2342,7 +2452,8 @@ pub fn js_css_set_borderInlineEndStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.borderInlineEndWidth
 pub fn js_css_get_borderInlineEndWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2364,7 +2475,8 @@ pub fn js_css_set_borderInlineEndWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.borderInlineStart
 pub fn js_css_get_borderInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2386,7 +2498,8 @@ pub fn js_css_set_borderInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderInlineStartColor
 pub fn js_css_get_borderInlineStartColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2408,7 +2521,8 @@ pub fn js_css_set_borderInlineStartColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.borderInlineStartStyle
 pub fn js_css_get_borderInlineStartStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2430,7 +2544,8 @@ pub fn js_css_set_borderInlineStartStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.borderInlineStartWidth
 pub fn js_css_get_borderInlineStartWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2452,7 +2567,8 @@ pub fn js_css_set_borderInlineStartWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.borderInlineStyle
 pub fn js_css_get_borderInlineStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2474,7 +2590,8 @@ pub fn js_css_set_borderInlineStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderInlineWidth
 pub fn js_css_get_borderInlineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2496,7 +2613,8 @@ pub fn js_css_set_borderInlineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.borderLeft
 pub fn js_css_get_borderLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2518,7 +2636,8 @@ pub fn js_css_set_borderLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.borderLeftColor
 pub fn js_css_get_borderLeftColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2540,7 +2659,8 @@ pub fn js_css_set_borderLeftColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.borderLeftStyle
 pub fn js_css_get_borderLeftStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2562,7 +2682,8 @@ pub fn js_css_set_borderLeftStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.borderLeftWidth
 pub fn js_css_get_borderLeftWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2584,7 +2705,8 @@ pub fn js_css_set_borderLeftWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.borderRadius
 pub fn js_css_get_borderRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2606,7 +2728,8 @@ pub fn js_css_set_borderRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.borderRight
 pub fn js_css_get_borderRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2628,7 +2751,8 @@ pub fn js_css_set_borderRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.borderRightColor
 pub fn js_css_get_borderRightColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2650,7 +2774,8 @@ pub fn js_css_set_borderRightColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderRightStyle
 pub fn js_css_get_borderRightStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2672,7 +2797,8 @@ pub fn js_css_set_borderRightStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderRightWidth
 pub fn js_css_get_borderRightWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2694,7 +2820,8 @@ pub fn js_css_set_borderRightWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.borderSpacing
 pub fn js_css_get_borderSpacing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2716,7 +2843,8 @@ pub fn js_css_set_borderSpacing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.borderStartEndRadius
 pub fn js_css_get_borderStartEndRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2738,7 +2866,8 @@ pub fn js_css_set_borderStartEndRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.borderStartStartRadius
 pub fn js_css_get_borderStartStartRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2760,7 +2889,8 @@ pub fn js_css_set_borderStartStartRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.borderStyle
 pub fn js_css_get_borderStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2782,7 +2912,8 @@ pub fn js_css_set_borderStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.borderTop
 pub fn js_css_get_borderTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2804,7 +2935,8 @@ pub fn js_css_set_borderTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.borderTopColor
 pub fn js_css_get_borderTopColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2826,7 +2958,8 @@ pub fn js_css_set_borderTopColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.borderTopLeftRadius
 pub fn js_css_get_borderTopLeftRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2848,7 +2981,8 @@ pub fn js_css_set_borderTopLeftRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.borderTopRightRadius
 pub fn js_css_get_borderTopRightRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2870,7 +3004,8 @@ pub fn js_css_set_borderTopRightRadius(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.borderTopStyle
 pub fn js_css_get_borderTopStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2892,7 +3027,8 @@ pub fn js_css_set_borderTopStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.borderTopWidth
 pub fn js_css_get_borderTopWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2914,7 +3050,8 @@ pub fn js_css_set_borderTopWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.borderWidth
 pub fn js_css_get_borderWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2936,7 +3073,8 @@ pub fn js_css_set_borderWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.bottom
 pub fn js_css_get_bottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2958,7 +3096,8 @@ pub fn js_css_set_bottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.boxDecorationBreak
 pub fn js_css_get_boxDecorationBreak(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -2980,7 +3119,8 @@ pub fn js_css_set_boxDecorationBreak(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.boxShadow
 pub fn js_css_get_boxShadow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3002,7 +3142,8 @@ pub fn js_css_set_boxShadow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.boxSizing
 pub fn js_css_get_boxSizing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3024,7 +3165,8 @@ pub fn js_css_set_boxSizing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.breakAfter
 pub fn js_css_get_breakAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3046,7 +3188,8 @@ pub fn js_css_set_breakAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.breakBefore
 pub fn js_css_get_breakBefore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3068,7 +3211,8 @@ pub fn js_css_set_breakBefore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.breakInside
 pub fn js_css_get_breakInside(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3090,7 +3234,8 @@ pub fn js_css_set_breakInside(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.captionSide
 pub fn js_css_get_captionSide(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3112,7 +3257,8 @@ pub fn js_css_set_captionSide(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.caretColor
 pub fn js_css_get_caretColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3134,7 +3280,8 @@ pub fn js_css_set_caretColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.clear
 pub fn js_css_get_clear(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3156,7 +3303,8 @@ pub fn js_css_set_clear(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.clip
 pub fn js_css_get_clip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3178,7 +3326,8 @@ pub fn js_css_set_clip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // CSS Property Getter: style.clipPath
 pub fn js_css_get_clipPath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3200,7 +3349,8 @@ pub fn js_css_set_clipPath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.color
 pub fn js_css_get_color(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3222,7 +3372,8 @@ pub fn js_css_set_color(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.colorScheme
 pub fn js_css_get_colorScheme(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3244,7 +3395,8 @@ pub fn js_css_set_colorScheme(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.columnCount
 pub fn js_css_get_columnCount(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3266,7 +3418,8 @@ pub fn js_css_set_columnCount(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.columnFill
 pub fn js_css_get_columnFill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3288,7 +3441,8 @@ pub fn js_css_set_columnFill(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.columnGap
 pub fn js_css_get_columnGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3310,7 +3464,8 @@ pub fn js_css_set_columnGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.columnRule
 pub fn js_css_get_columnRule(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3332,7 +3487,8 @@ pub fn js_css_set_columnRule(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.columnRuleColor
 pub fn js_css_get_columnRuleColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3354,7 +3510,8 @@ pub fn js_css_set_columnRuleColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.columnRuleStyle
 pub fn js_css_get_columnRuleStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3376,7 +3533,8 @@ pub fn js_css_set_columnRuleStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.columnRuleWidth
 pub fn js_css_get_columnRuleWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3398,7 +3556,8 @@ pub fn js_css_set_columnRuleWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.columnSpan
 pub fn js_css_get_columnSpan(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3420,7 +3579,8 @@ pub fn js_css_set_columnSpan(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.columnWidth
 pub fn js_css_get_columnWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3442,7 +3602,8 @@ pub fn js_css_set_columnWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.columns
 pub fn js_css_get_columns(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3464,7 +3625,8 @@ pub fn js_css_set_columns(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.contain
 pub fn js_css_get_contain(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3486,7 +3648,8 @@ pub fn js_css_set_contain(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.containIntrinsicBlockSize
 pub fn js_css_get_containIntrinsicBlockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3508,7 +3671,8 @@ pub fn js_css_set_containIntrinsicBlockSize(ctx_ptr: ?*qjs.JSContext, this_val: 
 }
 // CSS Property Getter: style.containIntrinsicHeight
 pub fn js_css_get_containIntrinsicHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3530,7 +3694,8 @@ pub fn js_css_set_containIntrinsicHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.containIntrinsicInlineSize
 pub fn js_css_get_containIntrinsicInlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3552,7 +3717,8 @@ pub fn js_css_set_containIntrinsicInlineSize(ctx_ptr: ?*qjs.JSContext, this_val:
 }
 // CSS Property Getter: style.containIntrinsicSize
 pub fn js_css_get_containIntrinsicSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3574,7 +3740,8 @@ pub fn js_css_set_containIntrinsicSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.containIntrinsicWidth
 pub fn js_css_get_containIntrinsicWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3596,7 +3763,8 @@ pub fn js_css_set_containIntrinsicWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.container
 pub fn js_css_get_container(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3618,7 +3786,8 @@ pub fn js_css_set_container(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.containerName
 pub fn js_css_get_containerName(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3640,7 +3809,8 @@ pub fn js_css_set_containerName(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.containerType
 pub fn js_css_get_containerType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3662,7 +3832,8 @@ pub fn js_css_set_containerType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.content
 pub fn js_css_get_content(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3684,7 +3855,8 @@ pub fn js_css_set_content(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.contentVisibility
 pub fn js_css_get_contentVisibility(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3706,7 +3878,8 @@ pub fn js_css_set_contentVisibility(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.counterIncrement
 pub fn js_css_get_counterIncrement(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3728,7 +3901,8 @@ pub fn js_css_set_counterIncrement(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.counterReset
 pub fn js_css_get_counterReset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3750,7 +3924,8 @@ pub fn js_css_set_counterReset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.counterSet
 pub fn js_css_get_counterSet(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3772,7 +3947,8 @@ pub fn js_css_set_counterSet(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.cursor
 pub fn js_css_get_cursor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3794,7 +3970,8 @@ pub fn js_css_set_cursor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.direction
 pub fn js_css_get_direction(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3816,7 +3993,8 @@ pub fn js_css_set_direction(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.display
 pub fn js_css_get_display(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3838,7 +4016,8 @@ pub fn js_css_set_display(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.emptyCells
 pub fn js_css_get_emptyCells(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3860,7 +4039,8 @@ pub fn js_css_set_emptyCells(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.filter
 pub fn js_css_get_filter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3882,7 +4062,8 @@ pub fn js_css_set_filter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.flex
 pub fn js_css_get_flex(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3904,7 +4085,8 @@ pub fn js_css_set_flex(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // CSS Property Getter: style.flexBasis
 pub fn js_css_get_flexBasis(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3926,7 +4108,8 @@ pub fn js_css_set_flexBasis(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.flexDirection
 pub fn js_css_get_flexDirection(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3948,7 +4131,8 @@ pub fn js_css_set_flexDirection(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.flexFlow
 pub fn js_css_get_flexFlow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3970,7 +4154,8 @@ pub fn js_css_set_flexFlow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.flexGrow
 pub fn js_css_get_flexGrow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -3992,7 +4177,8 @@ pub fn js_css_set_flexGrow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.flexShrink
 pub fn js_css_get_flexShrink(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4014,7 +4200,8 @@ pub fn js_css_set_flexShrink(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.flexWrap
 pub fn js_css_get_flexWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4036,7 +4223,8 @@ pub fn js_css_set_flexWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.cssFloat
 pub fn js_css_get_cssFloat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4058,7 +4246,8 @@ pub fn js_css_set_cssFloat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.font
 pub fn js_css_get_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4080,7 +4269,8 @@ pub fn js_css_set_font(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // CSS Property Getter: style.fontFamily
 pub fn js_css_get_fontFamily(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4102,7 +4292,8 @@ pub fn js_css_set_fontFamily(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.fontFeatureSettings
 pub fn js_css_get_fontFeatureSettings(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4124,7 +4315,8 @@ pub fn js_css_set_fontFeatureSettings(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.fontKerning
 pub fn js_css_get_fontKerning(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4146,7 +4338,8 @@ pub fn js_css_set_fontKerning(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.fontLanguageOverride
 pub fn js_css_get_fontLanguageOverride(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4168,7 +4361,8 @@ pub fn js_css_set_fontLanguageOverride(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.fontOpticalSizing
 pub fn js_css_get_fontOpticalSizing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4190,7 +4384,8 @@ pub fn js_css_set_fontOpticalSizing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.fontPalette
 pub fn js_css_get_fontPalette(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4212,7 +4407,8 @@ pub fn js_css_set_fontPalette(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.fontSize
 pub fn js_css_get_fontSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4234,7 +4430,8 @@ pub fn js_css_set_fontSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.fontSizeAdjust
 pub fn js_css_get_fontSizeAdjust(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4256,7 +4453,8 @@ pub fn js_css_set_fontSizeAdjust(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.fontStretch
 pub fn js_css_get_fontStretch(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4278,7 +4476,8 @@ pub fn js_css_set_fontStretch(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.fontStyle
 pub fn js_css_get_fontStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4300,7 +4499,8 @@ pub fn js_css_set_fontStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.fontSynthesis
 pub fn js_css_get_fontSynthesis(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4322,7 +4522,8 @@ pub fn js_css_set_fontSynthesis(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.fontVariant
 pub fn js_css_get_fontVariant(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4344,7 +4545,8 @@ pub fn js_css_set_fontVariant(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.fontVariantAlternates
 pub fn js_css_get_fontVariantAlternates(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4366,7 +4568,8 @@ pub fn js_css_set_fontVariantAlternates(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.fontVariantCaps
 pub fn js_css_get_fontVariantCaps(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4388,7 +4591,8 @@ pub fn js_css_set_fontVariantCaps(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.fontVariantEastAsian
 pub fn js_css_get_fontVariantEastAsian(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4410,7 +4614,8 @@ pub fn js_css_set_fontVariantEastAsian(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.fontVariantLigatures
 pub fn js_css_get_fontVariantLigatures(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4432,7 +4637,8 @@ pub fn js_css_set_fontVariantLigatures(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.fontVariantNumeric
 pub fn js_css_get_fontVariantNumeric(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4454,7 +4660,8 @@ pub fn js_css_set_fontVariantNumeric(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.fontVariantPosition
 pub fn js_css_get_fontVariantPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4476,7 +4683,8 @@ pub fn js_css_set_fontVariantPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.fontVariationSettings
 pub fn js_css_get_fontVariationSettings(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4498,7 +4706,8 @@ pub fn js_css_set_fontVariationSettings(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.fontWeight
 pub fn js_css_get_fontWeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4520,7 +4729,8 @@ pub fn js_css_set_fontWeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.forcedColorAdjust
 pub fn js_css_get_forcedColorAdjust(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4542,7 +4752,8 @@ pub fn js_css_set_forcedColorAdjust(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.gap
 pub fn js_css_get_gap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4564,7 +4775,8 @@ pub fn js_css_set_gap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 // CSS Property Getter: style.grid
 pub fn js_css_get_grid(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4586,7 +4798,8 @@ pub fn js_css_set_grid(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // CSS Property Getter: style.gridArea
 pub fn js_css_get_gridArea(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4608,7 +4821,8 @@ pub fn js_css_set_gridArea(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.gridAutoColumns
 pub fn js_css_get_gridAutoColumns(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4630,7 +4844,8 @@ pub fn js_css_set_gridAutoColumns(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.gridAutoFlow
 pub fn js_css_get_gridAutoFlow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4652,7 +4867,8 @@ pub fn js_css_set_gridAutoFlow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.gridAutoRows
 pub fn js_css_get_gridAutoRows(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4674,7 +4890,8 @@ pub fn js_css_set_gridAutoRows(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.gridColumn
 pub fn js_css_get_gridColumn(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4696,7 +4913,8 @@ pub fn js_css_set_gridColumn(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.gridColumnEnd
 pub fn js_css_get_gridColumnEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4718,7 +4936,8 @@ pub fn js_css_set_gridColumnEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.gridColumnGap
 pub fn js_css_get_gridColumnGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4740,7 +4959,8 @@ pub fn js_css_set_gridColumnGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.gridColumnStart
 pub fn js_css_get_gridColumnStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4762,7 +4982,8 @@ pub fn js_css_set_gridColumnStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.gridGap
 pub fn js_css_get_gridGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4784,7 +5005,8 @@ pub fn js_css_set_gridGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.gridRow
 pub fn js_css_get_gridRow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4806,7 +5028,8 @@ pub fn js_css_set_gridRow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.gridRowEnd
 pub fn js_css_get_gridRowEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4828,7 +5051,8 @@ pub fn js_css_set_gridRowEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.gridRowGap
 pub fn js_css_get_gridRowGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4850,7 +5074,8 @@ pub fn js_css_set_gridRowGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.gridRowStart
 pub fn js_css_get_gridRowStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4872,7 +5097,8 @@ pub fn js_css_set_gridRowStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.gridTemplate
 pub fn js_css_get_gridTemplate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4894,7 +5120,8 @@ pub fn js_css_set_gridTemplate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.gridTemplateAreas
 pub fn js_css_get_gridTemplateAreas(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4916,7 +5143,8 @@ pub fn js_css_set_gridTemplateAreas(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.gridTemplateColumns
 pub fn js_css_get_gridTemplateColumns(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4938,7 +5166,8 @@ pub fn js_css_set_gridTemplateColumns(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.gridTemplateRows
 pub fn js_css_get_gridTemplateRows(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4960,7 +5189,8 @@ pub fn js_css_set_gridTemplateRows(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.hangingPunctuation
 pub fn js_css_get_hangingPunctuation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -4982,7 +5212,8 @@ pub fn js_css_set_hangingPunctuation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.height
 pub fn js_css_get_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5004,7 +5235,8 @@ pub fn js_css_set_height(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.hyphenateCharacter
 pub fn js_css_get_hyphenateCharacter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5026,7 +5258,8 @@ pub fn js_css_set_hyphenateCharacter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.hyphenateLimitChars
 pub fn js_css_get_hyphenateLimitChars(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5048,7 +5281,8 @@ pub fn js_css_set_hyphenateLimitChars(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.hyphens
 pub fn js_css_get_hyphens(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5070,7 +5304,8 @@ pub fn js_css_set_hyphens(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.imageOrientation
 pub fn js_css_get_imageOrientation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5092,7 +5327,8 @@ pub fn js_css_set_imageOrientation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.imageRendering
 pub fn js_css_get_imageRendering(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5114,7 +5350,8 @@ pub fn js_css_set_imageRendering(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.inlineSize
 pub fn js_css_get_inlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5136,7 +5373,8 @@ pub fn js_css_set_inlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.inset
 pub fn js_css_get_inset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5158,7 +5396,8 @@ pub fn js_css_set_inset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.insetBlock
 pub fn js_css_get_insetBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5180,7 +5419,8 @@ pub fn js_css_set_insetBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.insetBlockEnd
 pub fn js_css_get_insetBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5202,7 +5442,8 @@ pub fn js_css_set_insetBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.insetBlockStart
 pub fn js_css_get_insetBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5224,7 +5465,8 @@ pub fn js_css_set_insetBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.insetInline
 pub fn js_css_get_insetInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5246,7 +5488,8 @@ pub fn js_css_set_insetInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.insetInlineEnd
 pub fn js_css_get_insetInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5268,7 +5511,8 @@ pub fn js_css_set_insetInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.insetInlineStart
 pub fn js_css_get_insetInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5290,7 +5534,8 @@ pub fn js_css_set_insetInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.isolation
 pub fn js_css_get_isolation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5312,7 +5557,8 @@ pub fn js_css_set_isolation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.justifyContent
 pub fn js_css_get_justifyContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5334,7 +5580,8 @@ pub fn js_css_set_justifyContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.justifyItems
 pub fn js_css_get_justifyItems(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5356,7 +5603,8 @@ pub fn js_css_set_justifyItems(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.justifySelf
 pub fn js_css_get_justifySelf(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5378,7 +5626,8 @@ pub fn js_css_set_justifySelf(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.left
 pub fn js_css_get_left(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5400,7 +5649,8 @@ pub fn js_css_set_left(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // CSS Property Getter: style.letterSpacing
 pub fn js_css_get_letterSpacing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5422,7 +5672,8 @@ pub fn js_css_set_letterSpacing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.lineBreak
 pub fn js_css_get_lineBreak(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5444,7 +5695,8 @@ pub fn js_css_set_lineBreak(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.lineHeight
 pub fn js_css_get_lineHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5466,7 +5718,8 @@ pub fn js_css_set_lineHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.listStyle
 pub fn js_css_get_listStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5488,7 +5741,8 @@ pub fn js_css_set_listStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.listStyleImage
 pub fn js_css_get_listStyleImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5510,7 +5764,8 @@ pub fn js_css_set_listStyleImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.listStylePosition
 pub fn js_css_get_listStylePosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5532,7 +5787,8 @@ pub fn js_css_set_listStylePosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.listStyleType
 pub fn js_css_get_listStyleType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5554,7 +5810,8 @@ pub fn js_css_set_listStyleType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.margin
 pub fn js_css_get_margin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5576,7 +5833,8 @@ pub fn js_css_set_margin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.marginBlock
 pub fn js_css_get_marginBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5598,7 +5856,8 @@ pub fn js_css_set_marginBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.marginBlockEnd
 pub fn js_css_get_marginBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5620,7 +5879,8 @@ pub fn js_css_set_marginBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.marginBlockStart
 pub fn js_css_get_marginBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5642,7 +5902,8 @@ pub fn js_css_set_marginBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.marginBottom
 pub fn js_css_get_marginBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5664,7 +5925,8 @@ pub fn js_css_set_marginBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.marginInline
 pub fn js_css_get_marginInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5686,7 +5948,8 @@ pub fn js_css_set_marginInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.marginInlineEnd
 pub fn js_css_get_marginInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5708,7 +5971,8 @@ pub fn js_css_set_marginInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.marginInlineStart
 pub fn js_css_get_marginInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5730,7 +5994,8 @@ pub fn js_css_set_marginInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.marginLeft
 pub fn js_css_get_marginLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5752,7 +6017,8 @@ pub fn js_css_set_marginLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.marginRight
 pub fn js_css_get_marginRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5774,7 +6040,8 @@ pub fn js_css_set_marginRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.marginTop
 pub fn js_css_get_marginTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5796,7 +6063,8 @@ pub fn js_css_set_marginTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.mask
 pub fn js_css_get_mask(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5818,7 +6086,8 @@ pub fn js_css_set_mask(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_
 }
 // CSS Property Getter: style.maskBorder
 pub fn js_css_get_maskBorder(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5840,7 +6109,8 @@ pub fn js_css_set_maskBorder(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.maskBorderMode
 pub fn js_css_get_maskBorderMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5862,7 +6132,8 @@ pub fn js_css_set_maskBorderMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.maskBorderOutset
 pub fn js_css_get_maskBorderOutset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5884,7 +6155,8 @@ pub fn js_css_set_maskBorderOutset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.maskBorderRepeat
 pub fn js_css_get_maskBorderRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5906,7 +6178,8 @@ pub fn js_css_set_maskBorderRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.maskBorderSlice
 pub fn js_css_get_maskBorderSlice(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5928,7 +6201,8 @@ pub fn js_css_set_maskBorderSlice(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.maskBorderSource
 pub fn js_css_get_maskBorderSource(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5950,7 +6224,8 @@ pub fn js_css_set_maskBorderSource(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.maskBorderWidth
 pub fn js_css_get_maskBorderWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5972,7 +6247,8 @@ pub fn js_css_set_maskBorderWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.maskClip
 pub fn js_css_get_maskClip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -5994,7 +6270,8 @@ pub fn js_css_set_maskClip(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.maskComposite
 pub fn js_css_get_maskComposite(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6016,7 +6293,8 @@ pub fn js_css_set_maskComposite(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.maskImage
 pub fn js_css_get_maskImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6038,7 +6316,8 @@ pub fn js_css_set_maskImage(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.maskMode
 pub fn js_css_get_maskMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6060,7 +6339,8 @@ pub fn js_css_set_maskMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.maskOrigin
 pub fn js_css_get_maskOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6082,7 +6362,8 @@ pub fn js_css_set_maskOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.maskPosition
 pub fn js_css_get_maskPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6104,7 +6385,8 @@ pub fn js_css_set_maskPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.maskRepeat
 pub fn js_css_get_maskRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6126,7 +6408,8 @@ pub fn js_css_set_maskRepeat(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.maskSize
 pub fn js_css_get_maskSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6148,7 +6431,8 @@ pub fn js_css_set_maskSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.maskType
 pub fn js_css_get_maskType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6170,7 +6454,8 @@ pub fn js_css_set_maskType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.maxBlockSize
 pub fn js_css_get_maxBlockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6192,7 +6477,8 @@ pub fn js_css_set_maxBlockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.maxHeight
 pub fn js_css_get_maxHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6214,7 +6500,8 @@ pub fn js_css_set_maxHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.maxInlineSize
 pub fn js_css_get_maxInlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6236,7 +6523,8 @@ pub fn js_css_set_maxInlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.maxWidth
 pub fn js_css_get_maxWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6258,7 +6546,8 @@ pub fn js_css_set_maxWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.minBlockSize
 pub fn js_css_get_minBlockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6280,7 +6569,8 @@ pub fn js_css_set_minBlockSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.minHeight
 pub fn js_css_get_minHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6302,7 +6592,8 @@ pub fn js_css_set_minHeight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.minInlineSize
 pub fn js_css_get_minInlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6324,7 +6615,8 @@ pub fn js_css_set_minInlineSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.minWidth
 pub fn js_css_get_minWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6346,7 +6638,8 @@ pub fn js_css_set_minWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.mixBlendMode
 pub fn js_css_get_mixBlendMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6368,7 +6661,8 @@ pub fn js_css_set_mixBlendMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.objectFit
 pub fn js_css_get_objectFit(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6390,7 +6684,8 @@ pub fn js_css_set_objectFit(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.objectPosition
 pub fn js_css_get_objectPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6412,7 +6707,8 @@ pub fn js_css_set_objectPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.offset
 pub fn js_css_get_offset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6434,7 +6730,8 @@ pub fn js_css_set_offset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.offsetAnchor
 pub fn js_css_get_offsetAnchor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6456,7 +6753,8 @@ pub fn js_css_set_offsetAnchor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.offsetDistance
 pub fn js_css_get_offsetDistance(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6478,7 +6776,8 @@ pub fn js_css_set_offsetDistance(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.offsetPath
 pub fn js_css_get_offsetPath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6500,7 +6799,8 @@ pub fn js_css_set_offsetPath(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.offsetPosition
 pub fn js_css_get_offsetPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6522,7 +6822,8 @@ pub fn js_css_set_offsetPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.offsetRotate
 pub fn js_css_get_offsetRotate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6544,7 +6845,8 @@ pub fn js_css_set_offsetRotate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.opacity
 pub fn js_css_get_opacity(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6566,7 +6868,8 @@ pub fn js_css_set_opacity(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.order
 pub fn js_css_get_order(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6588,7 +6891,8 @@ pub fn js_css_set_order(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.orphans
 pub fn js_css_get_orphans(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6610,7 +6914,8 @@ pub fn js_css_set_orphans(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.outline
 pub fn js_css_get_outline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6632,7 +6937,8 @@ pub fn js_css_set_outline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.outlineColor
 pub fn js_css_get_outlineColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6654,7 +6960,8 @@ pub fn js_css_set_outlineColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.outlineOffset
 pub fn js_css_get_outlineOffset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6676,7 +6983,8 @@ pub fn js_css_set_outlineOffset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.outlineStyle
 pub fn js_css_get_outlineStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6698,7 +7006,8 @@ pub fn js_css_set_outlineStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.outlineWidth
 pub fn js_css_get_outlineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6720,7 +7029,8 @@ pub fn js_css_set_outlineWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.overflow
 pub fn js_css_get_overflow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6742,7 +7052,8 @@ pub fn js_css_set_overflow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.overflowAnchor
 pub fn js_css_get_overflowAnchor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6764,7 +7075,8 @@ pub fn js_css_set_overflowAnchor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.overflowBlock
 pub fn js_css_get_overflowBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6786,7 +7098,8 @@ pub fn js_css_set_overflowBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.overflowClipMargin
 pub fn js_css_get_overflowClipMargin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6808,7 +7121,8 @@ pub fn js_css_set_overflowClipMargin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.overflowInline
 pub fn js_css_get_overflowInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6830,7 +7144,8 @@ pub fn js_css_set_overflowInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.overflowWrap
 pub fn js_css_get_overflowWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6852,7 +7167,8 @@ pub fn js_css_set_overflowWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.overflowX
 pub fn js_css_get_overflowX(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6874,7 +7190,8 @@ pub fn js_css_set_overflowX(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.overflowY
 pub fn js_css_get_overflowY(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6896,7 +7213,8 @@ pub fn js_css_set_overflowY(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.overscrollBehavior
 pub fn js_css_get_overscrollBehavior(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6918,7 +7236,8 @@ pub fn js_css_set_overscrollBehavior(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.overscrollBehaviorBlock
 pub fn js_css_get_overscrollBehaviorBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6940,7 +7259,8 @@ pub fn js_css_set_overscrollBehaviorBlock(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.overscrollBehaviorInline
 pub fn js_css_get_overscrollBehaviorInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6962,7 +7282,8 @@ pub fn js_css_set_overscrollBehaviorInline(ctx_ptr: ?*qjs.JSContext, this_val: q
 }
 // CSS Property Getter: style.overscrollBehaviorX
 pub fn js_css_get_overscrollBehaviorX(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -6984,7 +7305,8 @@ pub fn js_css_set_overscrollBehaviorX(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.overscrollBehaviorY
 pub fn js_css_get_overscrollBehaviorY(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7006,7 +7328,8 @@ pub fn js_css_set_overscrollBehaviorY(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.padding
 pub fn js_css_get_padding(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7028,7 +7351,8 @@ pub fn js_css_set_padding(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.paddingBlock
 pub fn js_css_get_paddingBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7050,7 +7374,8 @@ pub fn js_css_set_paddingBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.paddingBlockEnd
 pub fn js_css_get_paddingBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7072,7 +7397,8 @@ pub fn js_css_set_paddingBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.paddingBlockStart
 pub fn js_css_get_paddingBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7094,7 +7420,8 @@ pub fn js_css_set_paddingBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.paddingBottom
 pub fn js_css_get_paddingBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7116,7 +7443,8 @@ pub fn js_css_set_paddingBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.paddingInline
 pub fn js_css_get_paddingInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7138,7 +7466,8 @@ pub fn js_css_set_paddingInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.paddingInlineEnd
 pub fn js_css_get_paddingInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7160,7 +7489,8 @@ pub fn js_css_set_paddingInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.paddingInlineStart
 pub fn js_css_get_paddingInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7182,7 +7512,8 @@ pub fn js_css_set_paddingInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.paddingLeft
 pub fn js_css_get_paddingLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7204,7 +7535,8 @@ pub fn js_css_set_paddingLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.paddingRight
 pub fn js_css_get_paddingRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7226,7 +7558,8 @@ pub fn js_css_set_paddingRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.paddingTop
 pub fn js_css_get_paddingTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7248,7 +7581,8 @@ pub fn js_css_set_paddingTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.pageBreakAfter
 pub fn js_css_get_pageBreakAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7270,7 +7604,8 @@ pub fn js_css_set_pageBreakAfter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.pageBreakBefore
 pub fn js_css_get_pageBreakBefore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7292,7 +7627,8 @@ pub fn js_css_set_pageBreakBefore(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.pageBreakInside
 pub fn js_css_get_pageBreakInside(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7314,7 +7650,8 @@ pub fn js_css_set_pageBreakInside(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.paintOrder
 pub fn js_css_get_paintOrder(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7336,7 +7673,8 @@ pub fn js_css_set_paintOrder(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.perspective
 pub fn js_css_get_perspective(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7358,7 +7696,8 @@ pub fn js_css_set_perspective(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.perspectiveOrigin
 pub fn js_css_get_perspectiveOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7380,7 +7719,8 @@ pub fn js_css_set_perspectiveOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.placeContent
 pub fn js_css_get_placeContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7402,7 +7742,8 @@ pub fn js_css_set_placeContent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.placeItems
 pub fn js_css_get_placeItems(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7424,7 +7765,8 @@ pub fn js_css_set_placeItems(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.placeSelf
 pub fn js_css_get_placeSelf(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7446,7 +7788,8 @@ pub fn js_css_set_placeSelf(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.pointerEvents
 pub fn js_css_get_pointerEvents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7468,7 +7811,8 @@ pub fn js_css_set_pointerEvents(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.position
 pub fn js_css_get_position(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7490,7 +7834,8 @@ pub fn js_css_set_position(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.printColorAdjust
 pub fn js_css_get_printColorAdjust(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7512,7 +7857,8 @@ pub fn js_css_set_printColorAdjust(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.quotes
 pub fn js_css_get_quotes(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7534,7 +7880,8 @@ pub fn js_css_set_quotes(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.resize
 pub fn js_css_get_resize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7556,7 +7903,8 @@ pub fn js_css_set_resize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.right
 pub fn js_css_get_right(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7578,7 +7926,8 @@ pub fn js_css_set_right(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.rotate
 pub fn js_css_get_rotate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7600,7 +7949,8 @@ pub fn js_css_set_rotate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.rowGap
 pub fn js_css_get_rowGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7622,7 +7972,8 @@ pub fn js_css_set_rowGap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.rubyPosition
 pub fn js_css_get_rubyPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7644,7 +7995,8 @@ pub fn js_css_set_rubyPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.scale
 pub fn js_css_get_scale(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7666,7 +8018,8 @@ pub fn js_css_set_scale(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.scrollBehavior
 pub fn js_css_get_scrollBehavior(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7688,7 +8041,8 @@ pub fn js_css_set_scrollBehavior(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.scrollMargin
 pub fn js_css_get_scrollMargin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7710,7 +8064,8 @@ pub fn js_css_set_scrollMargin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.scrollMarginBlock
 pub fn js_css_get_scrollMarginBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7732,7 +8087,8 @@ pub fn js_css_set_scrollMarginBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.scrollMarginBlockEnd
 pub fn js_css_get_scrollMarginBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7754,7 +8110,8 @@ pub fn js_css_set_scrollMarginBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.scrollMarginBlockStart
 pub fn js_css_get_scrollMarginBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7776,7 +8133,8 @@ pub fn js_css_set_scrollMarginBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.scrollMarginBottom
 pub fn js_css_get_scrollMarginBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7798,7 +8156,8 @@ pub fn js_css_set_scrollMarginBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.scrollMarginInline
 pub fn js_css_get_scrollMarginInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7820,7 +8179,8 @@ pub fn js_css_set_scrollMarginInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.scrollMarginInlineEnd
 pub fn js_css_get_scrollMarginInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7842,7 +8202,8 @@ pub fn js_css_set_scrollMarginInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.scrollMarginInlineStart
 pub fn js_css_get_scrollMarginInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7864,7 +8225,8 @@ pub fn js_css_set_scrollMarginInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.scrollMarginLeft
 pub fn js_css_get_scrollMarginLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7886,7 +8248,8 @@ pub fn js_css_set_scrollMarginLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.scrollMarginRight
 pub fn js_css_get_scrollMarginRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7908,7 +8271,8 @@ pub fn js_css_set_scrollMarginRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.scrollMarginTop
 pub fn js_css_get_scrollMarginTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7930,7 +8294,8 @@ pub fn js_css_set_scrollMarginTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.scrollPadding
 pub fn js_css_get_scrollPadding(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7952,7 +8317,8 @@ pub fn js_css_set_scrollPadding(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.scrollPaddingBlock
 pub fn js_css_get_scrollPaddingBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7974,7 +8340,8 @@ pub fn js_css_set_scrollPaddingBlock(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.scrollPaddingBlockEnd
 pub fn js_css_get_scrollPaddingBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -7996,7 +8363,8 @@ pub fn js_css_set_scrollPaddingBlockEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.scrollPaddingBlockStart
 pub fn js_css_get_scrollPaddingBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8018,7 +8386,8 @@ pub fn js_css_set_scrollPaddingBlockStart(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.scrollPaddingBottom
 pub fn js_css_get_scrollPaddingBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8040,7 +8409,8 @@ pub fn js_css_set_scrollPaddingBottom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.scrollPaddingInline
 pub fn js_css_get_scrollPaddingInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8062,7 +8432,8 @@ pub fn js_css_set_scrollPaddingInline(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.scrollPaddingInlineEnd
 pub fn js_css_get_scrollPaddingInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8084,7 +8455,8 @@ pub fn js_css_set_scrollPaddingInlineEnd(ctx_ptr: ?*qjs.JSContext, this_val: qjs
 }
 // CSS Property Getter: style.scrollPaddingInlineStart
 pub fn js_css_get_scrollPaddingInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8106,7 +8478,8 @@ pub fn js_css_set_scrollPaddingInlineStart(ctx_ptr: ?*qjs.JSContext, this_val: q
 }
 // CSS Property Getter: style.scrollPaddingLeft
 pub fn js_css_get_scrollPaddingLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8128,7 +8501,8 @@ pub fn js_css_set_scrollPaddingLeft(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.scrollPaddingRight
 pub fn js_css_get_scrollPaddingRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8150,7 +8524,8 @@ pub fn js_css_set_scrollPaddingRight(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.scrollPaddingTop
 pub fn js_css_get_scrollPaddingTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8172,7 +8547,8 @@ pub fn js_css_set_scrollPaddingTop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVal
 }
 // CSS Property Getter: style.scrollSnapAlign
 pub fn js_css_get_scrollSnapAlign(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8194,7 +8570,8 @@ pub fn js_css_set_scrollSnapAlign(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.scrollSnapStop
 pub fn js_css_get_scrollSnapStop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8216,7 +8593,8 @@ pub fn js_css_set_scrollSnapStop(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.scrollSnapType
 pub fn js_css_get_scrollSnapType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8238,7 +8616,8 @@ pub fn js_css_set_scrollSnapType(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.scrollbarColor
 pub fn js_css_get_scrollbarColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8260,7 +8639,8 @@ pub fn js_css_set_scrollbarColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.scrollbarGutter
 pub fn js_css_get_scrollbarGutter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8282,7 +8662,8 @@ pub fn js_css_set_scrollbarGutter(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.scrollbarWidth
 pub fn js_css_get_scrollbarWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8304,7 +8685,8 @@ pub fn js_css_set_scrollbarWidth(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.shapeImageThreshold
 pub fn js_css_get_shapeImageThreshold(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8326,7 +8708,8 @@ pub fn js_css_set_shapeImageThreshold(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.shapeMargin
 pub fn js_css_get_shapeMargin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8348,7 +8731,8 @@ pub fn js_css_set_shapeMargin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.shapeOutside
 pub fn js_css_get_shapeOutside(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8370,7 +8754,8 @@ pub fn js_css_set_shapeOutside(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.tabSize
 pub fn js_css_get_tabSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8392,7 +8777,8 @@ pub fn js_css_set_tabSize(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
 }
 // CSS Property Getter: style.tableLayout
 pub fn js_css_get_tableLayout(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8414,7 +8800,8 @@ pub fn js_css_set_tableLayout(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.textAlign
 pub fn js_css_get_textAlign(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8436,7 +8823,8 @@ pub fn js_css_set_textAlign(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.textAlignLast
 pub fn js_css_get_textAlignLast(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8458,7 +8846,8 @@ pub fn js_css_set_textAlignLast(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.textCombineUpright
 pub fn js_css_get_textCombineUpright(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8480,7 +8869,8 @@ pub fn js_css_set_textCombineUpright(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.textDecoration
 pub fn js_css_get_textDecoration(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8502,7 +8892,8 @@ pub fn js_css_set_textDecoration(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.textDecorationColor
 pub fn js_css_get_textDecorationColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8524,7 +8915,8 @@ pub fn js_css_set_textDecorationColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.textDecorationLine
 pub fn js_css_get_textDecorationLine(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8546,7 +8938,8 @@ pub fn js_css_set_textDecorationLine(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.textDecorationSkipInk
 pub fn js_css_get_textDecorationSkipInk(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8568,7 +8961,8 @@ pub fn js_css_set_textDecorationSkipInk(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.textDecorationStyle
 pub fn js_css_get_textDecorationStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8590,7 +8984,8 @@ pub fn js_css_set_textDecorationStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.textDecorationThickness
 pub fn js_css_get_textDecorationThickness(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8612,7 +9007,8 @@ pub fn js_css_set_textDecorationThickness(ctx_ptr: ?*qjs.JSContext, this_val: qj
 }
 // CSS Property Getter: style.textEmphasis
 pub fn js_css_get_textEmphasis(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8634,7 +9030,8 @@ pub fn js_css_set_textEmphasis(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.textEmphasisColor
 pub fn js_css_get_textEmphasisColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8656,7 +9053,8 @@ pub fn js_css_set_textEmphasisColor(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.textEmphasisPosition
 pub fn js_css_get_textEmphasisPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8678,7 +9076,8 @@ pub fn js_css_set_textEmphasisPosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.J
 }
 // CSS Property Getter: style.textEmphasisStyle
 pub fn js_css_get_textEmphasisStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8700,7 +9099,8 @@ pub fn js_css_set_textEmphasisStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSVa
 }
 // CSS Property Getter: style.textIndent
 pub fn js_css_get_textIndent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8722,7 +9122,8 @@ pub fn js_css_set_textIndent(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.textJustify
 pub fn js_css_get_textJustify(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8744,7 +9145,8 @@ pub fn js_css_set_textJustify(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.textOrientation
 pub fn js_css_get_textOrientation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8766,7 +9168,8 @@ pub fn js_css_set_textOrientation(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.textOverflow
 pub fn js_css_get_textOverflow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8788,7 +9191,8 @@ pub fn js_css_set_textOverflow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.textRendering
 pub fn js_css_get_textRendering(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8810,7 +9214,8 @@ pub fn js_css_set_textRendering(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.textShadow
 pub fn js_css_get_textShadow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8832,7 +9237,8 @@ pub fn js_css_set_textShadow(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.textTransform
 pub fn js_css_get_textTransform(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8854,7 +9260,8 @@ pub fn js_css_set_textTransform(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.textUnderlineOffset
 pub fn js_css_get_textUnderlineOffset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8876,7 +9283,8 @@ pub fn js_css_set_textUnderlineOffset(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JS
 }
 // CSS Property Getter: style.textUnderlinePosition
 pub fn js_css_get_textUnderlinePosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8898,7 +9306,8 @@ pub fn js_css_set_textUnderlinePosition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.
 }
 // CSS Property Getter: style.textWrap
 pub fn js_css_get_textWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8920,7 +9329,8 @@ pub fn js_css_set_textWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.top
 pub fn js_css_get_top(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8942,7 +9352,8 @@ pub fn js_css_set_top(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_i
 }
 // CSS Property Getter: style.touchAction
 pub fn js_css_get_touchAction(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8964,7 +9375,8 @@ pub fn js_css_set_touchAction(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.transform
 pub fn js_css_get_transform(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -8986,7 +9398,8 @@ pub fn js_css_set_transform(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.transformBox
 pub fn js_css_get_transformBox(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9008,7 +9421,8 @@ pub fn js_css_set_transformBox(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, 
 }
 // CSS Property Getter: style.transformOrigin
 pub fn js_css_get_transformOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9030,7 +9444,8 @@ pub fn js_css_set_transformOrigin(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.transformStyle
 pub fn js_css_get_transformStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9052,7 +9467,8 @@ pub fn js_css_set_transformStyle(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue
 }
 // CSS Property Getter: style.transition
 pub fn js_css_get_transition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9074,7 +9490,8 @@ pub fn js_css_set_transition(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.transitionDelay
 pub fn js_css_get_transitionDelay(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9096,7 +9513,8 @@ pub fn js_css_set_transitionDelay(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValu
 }
 // CSS Property Getter: style.transitionDuration
 pub fn js_css_get_transitionDuration(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9118,7 +9536,8 @@ pub fn js_css_set_transitionDuration(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.transitionProperty
 pub fn js_css_get_transitionProperty(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9140,7 +9559,8 @@ pub fn js_css_set_transitionProperty(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSV
 }
 // CSS Property Getter: style.transitionTimingFunction
 pub fn js_css_get_transitionTimingFunction(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9162,7 +9582,8 @@ pub fn js_css_set_transitionTimingFunction(ctx_ptr: ?*qjs.JSContext, this_val: q
 }
 // CSS Property Getter: style.translate
 pub fn js_css_get_translate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9184,7 +9605,8 @@ pub fn js_css_set_translate(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.unicodeBidi
 pub fn js_css_get_unicodeBidi(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9206,7 +9628,8 @@ pub fn js_css_set_unicodeBidi(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.userSelect
 pub fn js_css_get_userSelect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9228,7 +9651,8 @@ pub fn js_css_set_userSelect(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.verticalAlign
 pub fn js_css_get_verticalAlign(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9250,7 +9674,8 @@ pub fn js_css_set_verticalAlign(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue,
 }
 // CSS Property Getter: style.visibility
 pub fn js_css_get_visibility(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9272,7 +9697,8 @@ pub fn js_css_set_visibility(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.whiteSpace
 pub fn js_css_get_whiteSpace(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9294,7 +9720,8 @@ pub fn js_css_set_whiteSpace(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.widows
 pub fn js_css_get_widows(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9316,7 +9743,8 @@ pub fn js_css_set_widows(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.width
 pub fn js_css_get_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9338,7 +9766,8 @@ pub fn js_css_set_width(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c
 }
 // CSS Property Getter: style.willChange
 pub fn js_css_get_willChange(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9360,7 +9789,8 @@ pub fn js_css_set_willChange(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, ar
 }
 // CSS Property Getter: style.wordBreak
 pub fn js_css_get_wordBreak(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9382,7 +9812,8 @@ pub fn js_css_set_wordBreak(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, arg
 }
 // CSS Property Getter: style.wordSpacing
 pub fn js_css_get_wordSpacing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9404,7 +9835,8 @@ pub fn js_css_set_wordSpacing(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.wordWrap
 pub fn js_css_get_wordWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9426,7 +9858,8 @@ pub fn js_css_set_wordWrap(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc
 }
 // CSS Property Getter: style.writingMode
 pub fn js_css_get_writingMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9448,7 +9881,8 @@ pub fn js_css_set_writingMode(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, a
 }
 // CSS Property Getter: style.zIndex
 pub fn js_css_get_zIndex(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");
@@ -9470,7 +9904,8 @@ pub fn js_css_set_zIndex(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: 
 }
 // CSS Property Getter: style.zoom
 pub fn js_css_get_zoom(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    _ = argc; _ = argv;
+    _ = argc;
+    _ = argv;
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
     const el = ctx.getOpaqueAs(z.HTMLElement, this_val, rc.classes.css_style_decl) orelse return ctx.throwTypeError("Not a CSSStyleDeclaration");

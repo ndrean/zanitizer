@@ -77,22 +77,27 @@ pub fn build(b: *std.Build) void {
     );
     const curl_module = dep_curl.module("curl");
 
-    // Zexplorer Zig module (root.zig + all C deps)
-    const zexplorer_module = buildZexplorerModule(b, target, optimize, paths, libs, curl_module);
+    // gen_bytecode compiled for the build HOST — runs during `zig build` to
+    // precompile boot JS files.  Host target is required so the tool can
+    // execute on the machine running the build (important for cross-compilation).
+    const gen_bytecode_host = buildGenBytecodeHost(b, paths);
+
+    // Zexplorer Zig module (root.zig + all C deps + precompiled boot JS)
+    const zexplorer = buildZexplorerModule(b, target, optimize, paths, libs, curl_module, gen_bytecode_host);
 
     b.installArtifact(libs.zexplorer);
 
     // CLI executable
-    buildMainExe(b, target, optimize, paths, libs, zexplorer_module, curl_module);
+    buildMainExe(b, target, optimize, paths, libs, zexplorer, curl_module);
 
     // Code generators
-    buildCodeGenerators(b, target, optimize, paths, libs);
+    buildCodeGenerators(b, target, optimize, paths, libs, gen_bytecode_host);
 
     // Tests
-    buildTests(b, target, optimize, paths, libs, curl_module);
+    buildTests(b, target, optimize, paths, libs, curl_module, zexplorer);
 
     // Examples: zig build example -Dname=test_sanitize_injection
-    buildExample(b, target, optimize, paths, libs, curl_module, zexplorer_module);
+    buildExample(b, target, optimize, paths, libs, curl_module, zexplorer.module);
 
     // Documentation
     buildDocs(b, target, optimize);
@@ -356,7 +361,57 @@ fn buildZexplorerLib(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
 // Zig Module & Targets
 // =============================================================================
 
-fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module) *std.Build.Module {
+// =============================================================================
+// Host Bytecode Tool
+// =============================================================================
+
+/// Build gen_bytecode for the BUILD HOST (not the target).
+/// This executable runs during `zig build` to precompile JS boot scripts.
+fn buildGenBytecodeHost(b: *std.Build, paths: Paths) *std.Build.Step.Compile {
+    // QJS compiled for the host — needed so the tool can run on the build machine.
+    const host_qjs = buildQuickJS(b, b.graph.host, .ReleaseFast, paths);
+    const tool = b.addExecutable(.{
+        .name = "gen-bytecode",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/gen_bytecode.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseFast,
+        }),
+    });
+    tool.addIncludePath(paths.quickjs_src);
+    tool.linkLibrary(host_qjs);
+    tool.linkLibC();
+    return tool;
+}
+
+/// Boot JS files compiled to QuickJS bytecode at build time.
+/// Accessed in script_engine.zig via @import("zexplorer_bc").data etc.
+const BootScript = struct { src: []const u8, name: []const u8 };
+const boot_scripts = [_]BootScript{
+    .{ .src = "src/zexplorer.js", .name = "zexplorer_bc" },
+    .{ .src = "src/polyfills.js", .name = "polyfills_bc" },
+    .{ .src = "src/vendor/turndown722.js", .name = "turndown_bc" },
+    .{ .src = "src/vendor/turndown-plugin-gfm.js", .name = "turndown_gfm_bc" },
+    .{ .src = "src/browser_profile.js", .name = "browser_profile_bc" },
+};
+
+/// Result of buildZexplorerModule — module plus shared bytecode LazyPaths so
+/// other modules (main exe, tests) can also declare the anonymous imports
+/// without re-running gen_bytecode.
+const ZexplorerResult = struct {
+    module: *std.Build.Module,
+    bytecodes: [boot_scripts.len]std.Build.LazyPath,
+};
+
+/// Add the precompiled boot bytecode as anonymous imports to any module.
+/// Call this on every module that transitively imports root.zig / script_engine.zig.
+fn addBytecodeImports(mod: *std.Build.Module, res: ZexplorerResult) void {
+    for (boot_scripts, res.bytecodes) |s, lp| {
+        mod.addAnonymousImport(s.name, .{ .root_source_file = lp });
+    }
+}
+
+fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module, gen_bytecode_host: *std.Build.Step.Compile) ZexplorerResult {
     const mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -387,7 +442,18 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     mod.addIncludePath(b.path("vendor/yoga/yoga"));
     mod.link_libc = true;
     mod.link_libcpp = true;
-    return mod;
+
+    // Build gen_bytecode run steps once; store outputs for reuse by other modules.
+    var bytecodes: [boot_scripts.len]std.Build.LazyPath = undefined;
+    for (boot_scripts, 0..) |s, i| {
+        const run = b.addRunArtifact(gen_bytecode_host);
+        run.addFileArg(b.path(s.src));
+        const out = run.addOutputFileArg(b.fmt("{s}.zig", .{s.name}));
+        mod.addAnonymousImport(s.name, .{ .root_source_file = out });
+        bytecodes[i] = out;
+    }
+
+    return .{ .module = mod, .bytecodes = bytecodes };
 }
 
 /// Link all C libraries and include paths to an executable or test artifact
@@ -416,7 +482,7 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
     artifact.addIncludePath(paths.md4c_src);
 }
 
-fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, zexplorer_module: *std.Build.Module, curl_module: *std.Build.Module) void {
+fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, zexplorer: ZexplorerResult, curl_module: *std.Build.Module) void {
     const httpz = b.dependency("httpz", .{
         .target = target,
         .optimize = optimize,
@@ -429,11 +495,15 @@ fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "zxp", .module = zexplorer_module },
+                .{ .name = "zxp", .module = zexplorer.module },
                 .{ .name = "curl", .module = curl_module },
             },
         }),
     });
+    // Files in main.zig's chain (serve.zig, zxp_runtime.zig, …) do @import("root.zig")
+    // as a file-relative import, which creates a fresh compilation of root.zig inside
+    // the exe's root_module — without bytecode deps unless we add them here too.
+    addBytecodeImports(exe.root_module, zexplorer);
     exe.addCSourceFiles(.{ .files = &.{"src/c/stb_image.c"}, .flags = &.{ "-g", "-fno-sanitize=undefined", "-fwrapv" } });
     // Legacy: nanosvg replaced by ThorVG
     // exe.addCSourceFiles(.{ .files = &.{"src/c/nanosvg.c"}, .flags = &.{"-std=c99"} });
@@ -451,7 +521,10 @@ fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
 // Code Generators
 // =============================================================================
 
-fn buildCodeGenerators(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries) void {
+fn buildCodeGenerators(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, gen_bytecode_host: *std.Build.Step.Compile) void {
+    _ = paths;
+    _ = libs;
+
     // QuickJS bindings generator
     const gen_bindings = b.addExecutable(.{
         .name = "gen_bindings",
@@ -478,37 +551,31 @@ fn buildCodeGenerators(b: *std.Build, target: std.Build.ResolvedTarget, optimize
     gen_async_run.addArg("src/async_bindings_generated.zig");
     b.step("gen-async-bindings", "Generate Async QuickJS bindings code").dependOn(&gen_async_run.step);
 
-    // Bytecode generator
-    const gen_bytecode = b.addExecutable(.{
-        .name = "gen-bytecode",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tools/gen_bytecode.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    gen_bytecode.addIncludePath(paths.quickjs_src);
-    gen_bytecode.linkLibrary(libs.qjs);
-    gen_bytecode.linkLibC();
-    b.installArtifact(gen_bytecode);
-    b.step("gen-bytecode", "Build bytecode compiler tool").dependOn(&gen_bytecode.step);
+    // Bytecode compiler — host-compiled tool, also installed for manual use.
+    // `zig build gen-bytecode` installs it; the build itself runs it automatically
+    // via buildZexplorerModule to precompile all boot JS files.
+    b.installArtifact(gen_bytecode_host);
+    b.step("gen-bytecode", "Build bytecode compiler tool").dependOn(&gen_bytecode_host.step);
 }
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-fn buildTests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module) void {
+fn buildTests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module, zexplorer: ZexplorerResult) void {
     const lib_test = b.step("test", "Run unit tests");
 
-    var unit_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{.{ .name = "curl", .module = curl_module }},
-        }),
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "curl", .module = curl_module }},
     });
+    // script_engine.zig uses @import("zexplorer_bc") etc. — same anonymous
+    // imports required here as for the main exe module.
+    addBytecodeImports(test_mod, zexplorer);
+
+    var unit_tests = b.addTest(.{ .root_module = test_mod });
 
     linkAllLibs(unit_tests, paths, libs);
 
@@ -544,7 +611,7 @@ fn buildExample(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.b
                 .optimize = optimize,
                 .imports = &.{
                     .{ .name = "curl", .module = curl_module },
-                    .{ .name = "zexplorer", .module = zexplorer_module },
+                    .{ .name = "zxp", .module = zexplorer_module },
                 },
             }),
         });

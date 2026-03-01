@@ -1023,7 +1023,7 @@ pub const Context = packed struct {
     }
 
     pub inline fn callConstructor(self: Context, func_obj: Value, args: []const Value) Value {
-        return qjs.JS_CallConstructor(self.ptr, func_obj, @intCast(args.len), args.ptr);
+        return qjs.JS_CallConstructor(self.ptr, func_obj, @intCast(args.len), @constCast(args.ptr));
     }
 
     // ArrayBuffer related methods

@@ -1,7 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const z = @import("zexplorer");
+const z = @import("zxp");
 const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -18,10 +19,12 @@ pub fn main() !void {
     const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
     defer gpa.free(sandbox_root);
 
-    var engine = try ScriptEngine.init(gpa, sandbox_root);
+    var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(gpa, zxp_rt);
     defer engine.deinit();
 
-    const html = @embedFile("test_htm_paint.html");
+    const html = @embedFile("test_htm.html");
     try engine.loadPage(html, .{});
 
     // Print DOM
@@ -31,7 +34,7 @@ pub fn main() !void {
     // Paint
     const script =
         \\ const body = document.querySelector("body");
-        \\ zxp.save(zxp.paintDOM(body), "htm_paint.png")
+        \\ zxp.save(zxp.paintDOM(body), "src/examples/frameworks/htm/paint.webp")
     ;
     const val = try engine.eval(script, "<htm-paint>", .global);
     engine.ctx.freeValue(val);

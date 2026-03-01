@@ -2,8 +2,8 @@ const std = @import("std");
 const z = @import("root.zig");
 const qjs = z.qjs;
 const w = z.wrapper;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DOMBridge = z.dom_bridge.DOMBridge;
+const RuntimeContext = z.RuntimeContext;
+const DOMBridge = z.DOMBridge;
 
 /// Stateless — exists only to satisfy the class/opaque pattern.
 const XMLSerializerState = struct {};

@@ -5,7 +5,7 @@ const w = z.wrapper;
 
 const Stdout = *std.Io.Writer;
 
-// Helper to print a single value
+// Helper to print a single value to a Writer
 fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue, stdout: Stdout) void {
     // 1. Handle Errors (print stack trace or message)
     if (z.wrapper.Context.isError(val)) {
@@ -51,6 +51,49 @@ fn printValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue, stdou
     }
 }
 
+// Helper to append a single value's string representation to an ArrayList (for serve mode)
+fn appendValue(ctx: w.Context, val: qjs.JSValue, stringify_fn: qjs.JSValue, list: *std.ArrayListUnmanaged(u8)) void {
+    const alloc = std.heap.c_allocator;
+
+    if (z.wrapper.Context.isError(val)) {
+        if (ctx.toCString(val)) |str| {
+            list.appendSlice(alloc, std.mem.span(str)) catch {};
+            ctx.freeCString(str);
+        } else |_| {
+            list.appendSlice(alloc, "[Error]") catch {};
+        }
+        return;
+    }
+
+    if (ctx.isObject(val) and !ctx.isNull(val)) {
+        const space = ctx.newInt32(2);
+        var args = [_]qjs.JSValue{ val, w.NULL, space };
+        const json_str = ctx.call(stringify_fn, w.UNDEFINED, &args);
+        defer ctx.freeValue(space);
+
+        if (!ctx.isException(json_str)) {
+            if (ctx.toCString(json_str)) |c_str| {
+                list.appendSlice(alloc, std.mem.span(c_str)) catch {};
+                ctx.freeCString(c_str);
+            } else |_| {
+                list.appendSlice(alloc, "[Object]") catch {};
+            }
+            ctx.freeValue(json_str);
+            return;
+        } else {
+            const err = ctx.getException();
+            ctx.freeValue(err);
+        }
+    }
+
+    if (ctx.toCString(val)) |str| {
+        list.appendSlice(alloc, std.mem.span(str)) catch {};
+        ctx.freeCString(str);
+    } else |_| {
+        list.appendSlice(alloc, "[Unknown]") catch {};
+    }
+}
+
 pub fn js_console_print(
     ctx_ptr: ?*qjs.JSContext,
     _: qjs.JSValue,
@@ -59,27 +102,39 @@ pub fn js_console_print(
 ) callconv(.c) qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);
 
-    var buf: [4096]u8 = undefined;
-    var sw = std.fs.File.stdout().writer(&buf);
-    const stdout: Stdout = &sw.interface;
-
-    // Grab JSON.stringify once for this batch
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
-
     const json_obj = ctx.getPropertyStr(global, "JSON");
     defer ctx.freeValue(json_obj);
-
     const stringify_fn = ctx.getPropertyStr(json_obj, "stringify");
     defer ctx.freeValue(stringify_fn);
 
-    var i: usize = 0;
-    while (i < @as(usize, @intCast(argc))) : (i += 1) {
-        if (i > 0) stdout.print(" ", .{}) catch {};
-        printValue(ctx, argv[i], stringify_fn, stdout);
+    if (tl_chunk_fn) |fn_ptr| {
+        // Serve mode: buffer into heap, send as HTTP response chunk
+        var line: std.ArrayListUnmanaged(u8) = .empty;
+        defer line.deinit(std.heap.c_allocator);
+
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(argc))) : (i += 1) {
+            if (i > 0) line.append(std.heap.c_allocator, ' ') catch {};
+            appendValue(ctx, argv[i], stringify_fn, &line);
+        }
+        line.append(std.heap.c_allocator, '\n') catch {};
+        fn_ptr(tl_chunk_ctx.?, line.items);
+    } else {
+        // CLI mode: write to stdout (safe for piping)
+        var buf: [4096]u8 = undefined;
+        var sw = std.fs.File.stdout().writer(&buf);
+        const stdout: Stdout = &sw.interface;
+
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(argc))) : (i += 1) {
+            if (i > 0) stdout.print(" ", .{}) catch {};
+            printValue(ctx, argv[i], stringify_fn, stdout);
+        }
+        stdout.print("\n", .{}) catch {};
+        stdout.flush() catch {};
     }
-    stdout.print("\n", .{}) catch {};
-    stdout.flush() catch {};
 
     return w.UNDEFINED;
 }

@@ -4,39 +4,40 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const w = @import("wrapper.zig");
 const bindings = @import("bindings_generated.zig");
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_DocFragment = @import("js_DocFragment.zig");
-const js_DOMParser = @import("js_DomParser.zig");
+const RuntimeContext = z.RuntimeContext;
+const js_DocFragment = z.js_DocFragment;
+const js_DOMParser = z.js_DOMParser;
 const CssSelectorEngine = z.CssSelectorEngine;
-const js_style = @import("js_CSSStyleDeclaration.zig");
-const js_classList = @import("js_classList.zig");
-const js_dataset = @import("js_dataset.zig");
-pub const js_url = @import("js_url.zig");
-const js_headers = @import("js_headers.zig");
-const js_events = @import("js_events.zig");
-const js_blob = @import("js_blob.zig");
-const js_file = @import("js_File.zig");
-const js_formData = @import("js_formData.zig");
-const js_polyfills = @import("js_polyfills.zig");
-const js_filelist = @import("js_filelist.zig");
-const js_file_reader_sync = @import("js_file_reader_sync.zig");
-const js_file_reader = @import("js_file_reader.zig");
-const js_text_encoding = @import("js_text_encoding.zig");
-const js_readable_stream = @import("js_readable_stream.zig");
-const js_writable_stream = @import("js_writable_stream.zig");
-const js_range = @import("js_range.zig");
-const js_tree_walker = @import("js_tree_walker.zig");
-const js_XMLSerializer = @import("js_XMLSerializer.zig");
-const js_streamfrom = @import("js_streamfrom.zig");
-const js_llm = @import("js_llm.zig");
-const js_markdown = @import("js_markdown.zig");
-const js_csv = @import("js_csv.zig");
-const js_canvas = @import("js_canvas.zig");
+const js_style = z.js_CSSStyleDeclaration;
+const js_classList = z.js_classList;
+const js_dataset = z.js_dataset;
+pub const js_url = z.js_url;
+const js_headers = z.js_headers;
+const js_events = z.js_events;
+const js_blob = z.js_blob;
+const js_file = z.js_File;
+const js_formData = z.js_formData;
+const js_polyfills = z.js_polyfills;
+const js_filelist = z.js_filelist;
+const js_file_reader_sync = z.js_file_reader_sync;
+const js_file_reader = z.js_file_reader;
+const js_text_encoding = z.js_text_encoding;
+const js_readable_stream = z.js_readable_stream;
+const js_writable_stream = z.js_writable_stream;
+const js_range = z.js_range;
+const js_tree_walker = z.js_tree_walker;
+const js_XMLSerializer = z.js_XMLSerializer;
+const js_streamfrom = z.js_streamfrom;
+const js_llm = z.js_llm;
+const js_markdown = z.js_markdown;
+const js_csv = z.js_csv;
+const js_canvas = z.js_canvas;
 const js_image = z.js_image;
 const js_pdf = z.js_pdf;
-const js_utils = @import("js_utils.zig");
-const js_compositor = @import("js_compositor.zig");
-const SanitizeOptions = @import("modules/sanitizer.zig").SanitizeOptions;
+const js_utils = z.js_utils;
+const js_compositor = z.js_compositor;
+const js_stdin = z.js_stdin;
+const SanitizeOptions = z.sanitize.SanitizeOptions;
 
 pub const DOMBridge = struct {
     allocator: std.mem.Allocator,
@@ -415,13 +416,17 @@ pub const DOMBridge = struct {
         // Compositor: generateRoutePng(mapData, svgString, filename)
         try ctx.setPropertyStr(global, "__native_generateRoutePng", ctx.newCFunction(js_compositor.js_generateRoutePng, "generateRoutePng", 5));
 
+        try ctx.setPropertyStr(global, "__native_stdinRead", ctx.newCFunction(js_stdin.js_native_stdinRead, "stdinRead", 0));
+        try ctx.setPropertyStr(global, "__native_stdinReadBytes", ctx.newCFunction(js_stdin.js_native_stdinReadBytes, "stdinReadBytes", 0));
         try ctx.setPropertyStr(global, "__native_paintDOM", ctx.newCFunction(js_compositor.js_paintDOM, "paintDOM", 5));
+        try ctx.setPropertyStr(global, "__native_paintElement", ctx.newCFunction(js_compositor.js_paintElement, "paintElement", 2));
         try ctx.setPropertyStr(global, "__native_streamFrom", ctx.newCFunction(js_streamfrom.js_native_streamFrom, "streamFrom", 1));
         try ctx.setPropertyStr(global, "__native_llmHTML", ctx.newCFunction(js_llm.js_native_llmHTML, "llmHTML", 1));
         try ctx.setPropertyStr(global, "__native_llmStream", ctx.newCFunction(js_llm.js_native_llmStream, "llmStream", 1));
         try ctx.setPropertyStr(global, "__native_markdownToHTML", ctx.newCFunction(js_markdown.js_native_markdownToHTML, "markdownToHTML", 1));
         try ctx.setPropertyStr(global, "__native_parseCSV", ctx.newCFunction(js_csv.js_native_parseCSV, "parseCSV", 1));
         try ctx.setPropertyStr(global, "__native_stringifyCSV", ctx.newCFunction(js_csv.js_native_stringifyCSV, "stringifyCSV", 1));
+        try ctx.setPropertyStr(global, "__native_evalModule", ctx.newCFunction(js_native_evalModule, "evalModule", 2));
 
         // HTMLElement constructor is now exposed in init() before polyfills
 
@@ -2461,4 +2466,28 @@ fn js_crypto_getRandomValues(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc:
 
     // Return the same array back to JS
     return ctx.dupValue(argv[0]);
+}
+
+/// __native_evalModule(code, filename) — eval a string as an ES module (JS_EVAL_TYPE_MODULE).
+/// Used by zxp.runScripts() to handle <script type="module"> tags.
+/// The module loader (js_security.zig) resolves 'import' specifiers — including HTTPS URLs.
+fn js_native_evalModule(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 2) return w.UNDEFINED;
+
+    var code_len: usize = 0;
+    const code_ptr = z.qjs.JS_ToCStringLen(ctx_ptr, &code_len, argv[0]);
+    if (code_ptr == null) return w.EXCEPTION;
+    defer z.qjs.JS_FreeCString(ctx_ptr, code_ptr);
+
+    const filename_ptr = z.qjs.JS_ToCString(ctx_ptr, argv[1]);
+    if (filename_ptr == null) return w.EXCEPTION;
+    defer z.qjs.JS_FreeCString(ctx_ptr, filename_ptr);
+
+    // JS_ToCStringLen guarantees null termination: code_ptr[code_len] == '\0'
+    const val = z.qjs.JS_Eval(ctx_ptr, code_ptr, code_len, filename_ptr, z.qjs.JS_EVAL_TYPE_MODULE);
+    if (z.qjs.JS_IsException(val)) {
+        const ctx = w.Context.from(ctx_ptr);
+        _ = ctx.checkAndPrintException();
+    }
+    return val;
 }

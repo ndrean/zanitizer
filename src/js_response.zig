@@ -7,7 +7,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const js_readable_stream = @import("js_readable_stream.zig");
+const js_readable_stream = z.js_readable_stream;
 
 // ============================================================
 // Response Body Methods
@@ -19,11 +19,8 @@ fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
 
     if (ctx.isUndefined(body_val)) return ctx.newString("");
 
-    var len: usize = 0;
-    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &len, body_val);
-    if (ptr == null) return ctx.newString("");
-
-    return ctx.newString(ptr[0..len]);
+    const ab = ctx.getArrayBuffer(body_val) catch return ctx.newString("");
+    return ctx.newString(ab);
 }
 
 fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -50,6 +47,8 @@ fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
     defer ctx.freeValue(blob_ctor);
     if (ctx.isUndefined(blob_ctor)) return ctx.throwTypeError("Blob class not found");
 
+    // new Blob([body], [type: mime])]) with mime = headers.content--type
+    // constructors borrows, does not consume => defer
     const parts = ctx.newArray();
     defer ctx.freeValue(parts);
     ctx.setPropertyInt64(parts, 0, ctx.dupValue(body_val)) catch {};
@@ -65,9 +64,7 @@ fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
             _ = ctx.setPropertyStr(options, "type", ctx.dupValue(ct)) catch {};
         }
     }
-
-    var args = [_]qjs.JSValue{ parts, options };
-    return qjs.JS_CallConstructor(ctx.ptr, blob_ctor, 2, &args);
+    return ctx.callConstructor(blob_ctor, &.{ parts, options });
 }
 
 fn js_res_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
@@ -94,16 +91,8 @@ fn js_res_body(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs
         return zqjs.NULL;
     }
 
-    var len: usize = 0;
-    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &len, body_val);
-    if (ptr == null) {
-        return zqjs.NULL;
-    }
-
-    // Create ReadableStream from the buffer
-    const stream = js_readable_stream.createStreamFromBuffer(ctx, ptr[0..len]) catch {
-        return ctx.throwOutOfMemory();
-    };
+    const ab = ctx.getArrayBuffer(body_val) catch return zqjs.NULL;
+    const stream = js_readable_stream.createStreamFromBuffer(ctx, ab) catch return ctx.throwOutOfMemory();
 
     // Cache it on the response
     ctx.setPropertyStr(this, "_stream", ctx.dupValue(stream)) catch {};
@@ -153,6 +142,35 @@ fn js_arrayBuffer_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*
 
 // ==========================================================
 // Public API
+
+pub const ResponseInit = struct {
+    status: i64 = 200,
+    ok: bool = true,
+    url: []const u8 = "",
+    status_text: []const u8 = "OK",
+    response_type: []const u8 = "basic",
+    redirected: bool = false,
+};
+
+/// Build a standard network Response object from an ArrayBuffer body.
+/// Transfers ownership of `body` and `headers` to the returned object.
+pub fn buildResponse(ctx: zqjs.Context, init: ResponseInit, body: qjs.JSValue, headers: qjs.JSValue) qjs.JSValue {
+    const resp = ctx.newObject();
+    ctx.setPropertyStr(resp, "status", ctx.newInt64(init.status)) catch {};
+    ctx.setPropertyStr(resp, "ok", ctx.newBool(init.ok)) catch {};
+    ctx.setPropertyStr(resp, "url", ctx.newString(init.url)) catch {};
+    ctx.setPropertyStr(resp, "statusText", ctx.newString(init.status_text)) catch {};
+    ctx.setPropertyStr(resp, "type", ctx.newString(init.response_type)) catch {};
+    ctx.setPropertyStr(resp, "redirected", ctx.newBool(init.redirected)) catch {};
+    ctx.setPropertyStr(resp, "_body", body) catch {
+        ctx.freeValue(body);
+    };
+    ctx.setPropertyStr(resp, "headers", headers) catch {
+        ctx.freeValue(headers);
+    };
+    addResponseMethods(ctx, resp);
+    return resp;
+}
 
 /// Add all standard Response methods to a JS Response object.
 /// The Response object must have `_body` property set to an ArrayBuffer.

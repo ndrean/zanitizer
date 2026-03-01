@@ -5,7 +5,7 @@ async function render() {
   const html = await file_data.text();
   zxp.loadHTML(html);
   const img = zxp.paintDOM(document.body);
-  return zxp.encode(img, "webp");
+  return zxp.encode(img, "png");
 }
 
 render();

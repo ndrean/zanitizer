@@ -2,7 +2,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const RuntimeContext = z.RuntimeContext;
 
 // Helper to install functions with specific length (argument count)
 fn installFn(ctx: zqjs.Context, func: qjs.JSCFunction, obj: zqjs.Value, name: [:0]const u8, prop: [:0]const u8, len: c_int) !void {

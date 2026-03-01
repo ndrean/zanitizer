@@ -1,27 +1,26 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const z = @import("root.zig");
-const ZxpRuntime = @import("zxp_runtime.zig").ZxpRuntime;
-const zxp_runtime = @import("zxp_runtime.zig");
+const z = @import("zxp");
+const ZxpRuntime = z.ZxpRuntime;
+const zxp_runtime = z.zxp_runtime;
 const curl = z.curl;
 const zqjs = z.wrapper;
-const event_loop_mod = @import("event_loop.zig");
-const EventLoop = event_loop_mod.EventLoop;
-const DOMBridge = z.dom_bridge.DOMBridge;
-const RCtx = @import("runtime_context.zig").RuntimeContext;
-const ScriptEngine = @import("script_engine.zig").ScriptEngine;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const parseCSV = @import("csv_parser.zig");
+// const event_loop_mod = @import("event_loop.zig");
+const EventLoop = z.EventLoop;
+const DOMBridge = z.DOMBridge;
+const ScriptEngine = z.ScriptEngine;
+const RuntimeContext = z.RuntimeContext;
+// const parseCSV = @import("csv_parser.zig");
 
-const AsyncTask = event_loop_mod.AsyncTask;
-const AsyncBridge = @import("async_bridge.zig");
-const NativeBridge = @import("js_native_bridge.zig");
-const Pt = @import("js_Point.zig");
-const Pt2 = @import("Point2.zig");
-const JSWorker = @import("js_worker.zig");
-const Reflect = @import("reflection.zig");
-const Mocks = @import("dom_mocks.zig");
-const Native = @import("js_native_bridge.zig");
+// const AsyncTask = z.AsyncTask;
+// const AsyncBridge = @import("async_bridge.zig");
+// const NativeBridge = @import("js_native_bridge.zig");
+// const Pt = @import("js_Point.zig");
+// const Pt2 = @import("Point2.zig");
+// const JSWorker = @import("js_worker.zig");
+// const Reflect = @import("reflection.zig");
+// const Mocks = @import("dom_mocks.zig");
+// const Native = @import("js_native_bridge.zig");
 const Server = @import("serve.zig").Server;
 const Handler = @import("serve.zig").Handler;
 
@@ -99,9 +98,12 @@ pub fn main() !void {
             // Order matters:
             //  1. server.deinit() joins the thread pool — all workers finish.
             //  2. destroyAll() frees thread-local ZxpRuntimes — safe now.
+            //  3. deinitCache() frees the importScript bytecode cache.
             // Both must run before debug_gpa.deinit() (the outer defer).
             app_server.deinit();
             zxp_runtime.destroyAll(gpa);
+            z.js_import_script.deinitCache();
+            z.js_security.deinitModuleCache();
         }
         server_instance = &app_server.server; // set BEFORE listen so shutdown() can reach it
         try app_server.listen(); // blocks until stop() is called
@@ -115,7 +117,7 @@ pub fn main() !void {
         var load_html_path: ?[]const u8 = null;
         var format_override: ?[]const u8 = null;
         var pretty: bool = false;
-        var cli_args: std.ArrayListUnmanaged([]const u8) = .empty;
+        var cli_args: std.ArrayList([]const u8) = .empty;
         defer cli_args.deinit(gpa);
 
         while (args.next()) |arg| {
@@ -169,6 +171,17 @@ pub fn main() !void {
             "<inline>";
 
         const format = determineFormat(verb, output_path, format_override);
+
+        // For binary output formats (PNG/JPEG/WebP/PDF), redirect console.log
+        // to stderr BEFORE ScriptEngine.init() so the boot log and any script
+        // console output don't corrupt the binary stdout stream.
+        const binary_out = switch (format) {
+            .binary_png, .binary_jpeg, .binary_pdf, .binary_webp => true,
+            else => false,
+        };
+        var stderr_dummy: u8 = 0;
+        if (binary_out) z.js_console.setChunkWriter(stderrChunkWriter, &stderr_dummy);
+        defer if (binary_out) z.js_console.clearChunkWriter();
 
         var zxp_rt = try ZxpRuntime.init(gpa, sandbox_root);
         defer zxp_rt.deinit();
@@ -631,6 +644,10 @@ fn prettyJson(allocator: std.mem.Allocator, json_str: []const u8) ![]u8 {
     var out: std.Io.Writer.Allocating = .init(allocator);
     try std.json.Stringify.value(parsed.value, .{ .whitespace = .indent_4 }, &out.writer);
     return out.toOwnedSlice();
+}
+
+fn stderrChunkWriter(_: *anyopaque, data: []const u8) void {
+    std.fs.File.stderr().writeAll(data) catch {};
 }
 
 fn determineFormat(verb: []const u8, out_path: ?[]const u8, format_override: ?[]const u8) TargetFormat {

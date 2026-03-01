@@ -3,10 +3,10 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const EventLoop = @import("event_loop.zig").EventLoop;
-const js_blob = @import("js_blob.zig");
-const js_file = @import("js_file.zig");
+const RuntimeContext = z.RuntimeContext;
+const EventLoop = z.EventLoop;
+const js_blob = z.js_blob;
+const js_file = z.js_File;
 
 // States
 const EMPTY = 0;

@@ -1,9 +1,9 @@
 const std = @import("std");
-const z = @import("root.zig");
+const z = @import("zxp");
 const httpz = @import("httpz");
-const zxp_runtime = @import("zxp_runtime.zig");
-const js_streamfrom = @import("js_streamfrom.zig");
-const js_llm = @import("js_llm.zig");
+const zxp_runtime = z.zxp_runtime;
+const js_streamfrom = z.js_streamfrom;
+const js_llm = z.js_llm;
 
 const WriterContext = struct {
     res: *httpz.Response,
@@ -26,16 +26,6 @@ pub const Handler = struct {
                 res.header("Connection", "keep-alive");
             }
         }
-
-        // Create the context on the stack (valid for the duration of this function/request)
-        var writer_ctx = WriterContext{
-            .res = res,
-            .is_sse = is_sse,
-        };
-
-        // Hook the console.log / zxp.write output to this response
-        z.js_console.setChunkWriter(chunkWriter, &writer_ctx);
-        defer z.js_console.clearChunkWriter();
 
         tl_is_sse = is_sse;
         defer tl_is_sse = false;
@@ -152,6 +142,12 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
     var engine = try z.ScriptEngine.init(alloc, zxp_rt);
     defer engine.deinit();
 
+    // Hook console.log / zxp.write to the HTTP response — placed AFTER engine init
+    // so the zexplorer.js boot log does not pollute the response body.
+    var rh_writer_ctx = WriterContext{ .res = res, .is_sse = tl_is_sse };
+    z.js_console.setChunkWriter(chunkWriter, &rh_writer_ctx);
+    defer z.js_console.clearChunkWriter();
+
     // Set up zxp.write + zxp.flags + zxp.args, mirroring runCliRequest in main.zig.
     {
         const scope = z.wrapper.Context.GlobalScope.init(engine.ctx);
@@ -168,6 +164,14 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
     // Evaluate — keep the raw JS value so we can inspect its type.
     const val = try engine.evalAsync(body, "<serve>");
     defer engine.ctx.freeValue(val);
+
+    // Drain remaining timers/callbacks after the top-level Promise settles.
+    // evalAsync exits as soon as the Promise is no longer Pending, but
+    // setInterval/setTimeout callbacks registered during script execution
+    // haven't fired yet. engine.run() continues until all pending work is
+    // exhausted (or the 30s deadline). If nothing is pending, it exits
+    // immediately — safe to always call.
+    try engine.run();
 
     // ── Binary (ArrayBuffer) ─────────────────────────────────────────────────
     // Script returned raw bytes (e.g. PNG from zxp.paintDOM).
@@ -256,11 +260,13 @@ pub fn streamHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Resp
     try engine.endStream(opts);
 
     // Serialize the processed document and return it.
+    // Use res.chunk() so this works whether or not inline scripts already sent chunks
+    // (mixing res.body with prior res.chunk() calls silently discards the body in httpz).
     const out = try engine.evalAsyncAs(alloc, []const u8, "document.documentElement.outerHTML", "<stream>");
     defer alloc.free(out);
 
     res.header("Content-Type", "text/html; charset=utf-8");
-    res.body = try res.arena.dupe(u8, out);
+    try res.chunk(out);
 }
 
 /// POST /render?url=<url>[&width=800][&format=webp]
@@ -297,9 +303,7 @@ pub fn renderProxyHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz
     try js_streamfrom.streamFromUrl(engine, url);
 
     // Paint and encode the fully-processed DOM.
-    const js = try std.fmt.allocPrint(alloc,
-        "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")",
-        .{ width, format });
+    const js = try std.fmt.allocPrint(alloc, "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")", .{ width, format });
     defer alloc.free(js);
 
     const val = try engine.evalAsync(js, "<render>");
@@ -327,7 +331,7 @@ pub fn renderLlmHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.R
     const qs = try req.query();
 
     const prompt = qs.get("prompt") orelse "A simple table";
-    const model = qs.get("model") orelse "llama3.2";
+    const model = qs.get("model") orelse "qwen2.5-coder:3b";
     const system = qs.get("system") orelse js_llm.default_system;
     const base_url = qs.get("base_url") orelse "http://localhost:11434";
     const width: u32 = if (qs.get("width")) |w| std.fmt.parseInt(u32, w, 10) catch 800 else 800;
@@ -342,9 +346,7 @@ pub fn renderLlmHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.R
     try js_llm.streamLLMtoDOM(engine, base_url, model, system, prompt);
 
     // Paint and encode the fully-processed DOM.
-    const js = try std.fmt.allocPrint(alloc,
-        "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")",
-        .{ width, format });
+    const js = try std.fmt.allocPrint(alloc, "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")", .{ width, format });
     defer alloc.free(js);
 
     const val = try engine.evalAsync(js, "<render_llm>");

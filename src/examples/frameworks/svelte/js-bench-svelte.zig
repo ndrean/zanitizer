@@ -1,7 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const z = @import("zexplorer");
+const z = @import("zxp");
 const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
 
 pub fn main() !void {
     var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
@@ -22,26 +23,23 @@ pub fn main() !void {
 }
 
 fn testRun(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
-
+    var zxp_rt = try ZxpRuntime.init(allocator, sbx);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(allocator, zxp_rt);
     defer engine.deinit();
 
-    z.print("\n=== JS-framework-Lit-HTML -----------------------------\n\n", .{});
+    z.print("\n=== JS-framework-Svelte5-Runes -----------------------------\n\n", .{});
 
     const start = std.time.nanoTimestamp();
 
-    const html = @embedFile("js-bench-lit-html.html");
+    const html = @embedFile("js-bench-svelte.html");
 
     try engine.loadHTML(html);
     try engine.executeScripts(allocator, ".");
 
     try engine.run();
 
-    const clicker = @embedFile("js-bench-lit-html-clicker.js");
-    const val = try engine.evalModule(clicker, "<clicker.js>");
-    engine.ctx.freeValue(val);
-
     const end = std.time.nanoTimestamp();
-    const ms = @divFloor(end - start, 1_000_000);
-    std.debug.print("\n⚡️ Zexplorer Engine Total Time: {d}ms\n\n", .{ms});
+    const ms = @divFloor(end - start, 1_000);
+    std.debug.print("\n⚡️ Zig Engine Time: {d}ns\n\n", .{ms});
 }

@@ -4,17 +4,16 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const EventLoop = @import("event_loop.zig").EventLoop;
+const EventLoop = z.EventLoop;
 const Mailbox = z.Mailbox;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_security = @import("js_security.zig");
-const workers = @import("workers.zig");
-const js_fetch_easy = @import("js_fetch_easy.zig");
-// const js_fetch = @import("js_fetch.zig");
-const js_blob = @import("js_blob.zig");
-const js_formData = @import("js_formData.zig");
-const js_headers = @import("js_headers.zig");
-const js_fs = @import("js_fs.zig");
+const RuntimeContext = z.RuntimeContext;
+const js_security = z.js_security;
+const workers = z.workers;
+const js_fetch_easy = z.js_fetch_easy;
+const js_blob = z.js_blob;
+const js_formData = z.js_formData;
+const js_headers = z.js_headers;
+const js_fs = z.js_fs;
 
 // -------------------------------------------------------------------------
 

@@ -2,8 +2,8 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+const RuntimeContext = z.RuntimeContext;
+const DOMBridge = z.DOMBridge;
 
 pub const RangeObject = struct {
     // We only store the "Start" node.

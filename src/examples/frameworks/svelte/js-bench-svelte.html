@@ -1,17 +1,14 @@
-<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vue Benchmark</title>
+    <meta charset="utf-8" />
+    <title>Svelte 5 (Runes) keyed</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="main"><!-- Svelte container --></div>
+    <script src="src/examples/vendor/bench-svelte.js"></script>
     <script type="module">
-      // SVGElement/Element polyfills are now in js_polyfills.zig
-      // (import hoisting runs the module before inline polyfills execute)
-      import "src/examples/js-bench-vue.js";
-      __flush();
+      // Svelte 5 uses synchronous rendering with $state.raw —
+      // no microtask scheduling needed. Just dispatch + __flush().
 
       function click(selector) {
         const el = document.querySelector(selector);
@@ -29,7 +26,8 @@
         console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
       }
 
-      console.log("\n=== Vue3 Benchmark ===\n");
+      console.log("\n=== Svelte 5 Benchmark ===\n");
+
 
       // Warmup
       click("#run");
@@ -39,16 +37,21 @@
       } else {
         measure("Create 1k", () => click("#run"));
         measure("Replace 1k", () => click("#run"));
-        click("#runlots"); // Setup 10k
-        measure("Partial Update (10k)", () => click("#update"));
-
-        measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
-        click("#run"); // Reset to 1k
+        measure("Select Row", () => click("tbody tr:nth-child(2) td:nth-child(2) a"));
         measure("Swap Rows", () => click("#swaprows"));
-        measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
-        measure("Create 10k", () => click("#runlots"));
+        measure("Remove Row", () => click("tbody tr:nth-child(2) span.glyphicon-remove"));
         measure("Append 1k", () => click("#add"));
         measure("Clear", () => click("#clear"));
+
+        // 10k tests - may trigger GC issues with heavy DOM operations
+        try {
+          click("#runlots");
+          measure("Partial Update (10k)", () => click("#update"));
+          measure("Create 10k", () => click("#runlots"));
+          click("#clear");
+        } catch (e) {
+          console.log("10k test skipped: " + e.message);
+        }
 
         const count = document.querySelectorAll("tr").length;
         console.log(`\nFinal Row Count: ${count} (expected 0)`);

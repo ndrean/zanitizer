@@ -3,13 +3,13 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const utils = z.utils;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const RuntimeContext = z.RuntimeContext;
 // [FIX] Disabled because generated bindings use global state (not thread-safe).
 // We use manual bindings for Timers below instead.
 const AsyncBindings = @import("async_bindings_generated.zig");
-const JSWorker = @import("js_worker.zig").JSWorker;
-const js_timers = @import("js_timers.zig");
-const js_console = @import("js_console.zig");
+const JSWorker = z.js_worker.JSWorker;
+const js_timers = z.js_timers;
+const js_console = z.js_console;
 const CurlMulti = @import("curl_multi.zig").CurlMulti;
 
 pub const RunMode = enum {

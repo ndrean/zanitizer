@@ -15,7 +15,7 @@ const curl = @import("curl");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const js_response = @import("js_response.zig");
+const js_response = z.js_response;
 
 // Access raw libcurl C API for constants
 const c = curl.libcurl;

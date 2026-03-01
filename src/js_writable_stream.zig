@@ -15,9 +15,8 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const EL = @import("event_loop.zig");
-const EventLoop = EL.EventLoop;
+const RuntimeContext = z.RuntimeContext;
+const EventLoop = z.EventLoop;
 
 // ============================================================================
 // STRUCTS

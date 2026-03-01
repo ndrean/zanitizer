@@ -4,11 +4,11 @@ const qjs = z.qjs;
 const zqjs = z.wrapper;
 const RuntimeContext = z.RuntimeContext;
 const DOMBridge = z.DOMBridge;
-const BlobObject = @import("js_blob.zig").BlobObject;
-const css_color = @import("css_color.zig");
+const BlobObject = z.js_blob.BlobObject;
+const css_color = z.css_color;
 const js_utils = z.js_utils;
 const js_image = z.js_image;
-const Font = @import("font.zig").Font;
+const Font = z.font.Font;
 
 // stb_image_write C bindings - manual declaration since stbi_write_png_to_mem
 // is only defined in the implementation section, not declared in the header

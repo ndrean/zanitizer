@@ -2,9 +2,9 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_blob = @import("js_blob.zig");
-const js_file = @import("js_file.zig");
+const RuntimeContext = z.RuntimeContext;
+const js_blob = z.js_blob;
+const js_file = z.js_File;
 
 // Shared Enum (matching your Async Reader)
 const ReadType = enum { ArrayBuffer, Text, DataURL };

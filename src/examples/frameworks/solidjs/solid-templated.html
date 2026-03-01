@@ -1,14 +1,13 @@
-<html lang="en">
+<!doctype html>
+<html>
   <head>
-    <meta charset="utf-8" />
-    <title>Svelte 5 (Runes) keyed</title>
   </head>
   <body>
-    <div id="main"><!-- Svelte container --></div>
-    <script src="src/examples/vendor/bench-svelte.js"></script>
+    <div id="main"></div>
+    <script src="src/examples/frameworks/solidjs/bench-solid-templated.js" type="module"></script>
+
     <script type="module">
-      // Svelte 5 uses synchronous rendering with $state.raw —
-      // no microtask scheduling needed. Just dispatch + __flush().
+      __flush();
 
       function click(selector) {
         const el = document.querySelector(selector);
@@ -17,20 +16,17 @@
           return;
         }
         el.dispatchEvent(new Event("click", { bubbles: true }));
-        __flush();
       }
 
       function measure(name, fn) {
         const start = performance.now();
         fn();
+
         const end = performance.now();
         console.log(`[${name}] ${(end - start).toFixed(2)} ms`);
       }
 
-      console.log("\n=== Svelte 5 Benchmark ===\n");
-
-      // Flush initial render
-      __flush();
+      console.log("\n=== SolidJS Benchmark Templated\n");
 
       // Warmup
       click("#run");
@@ -40,23 +36,16 @@
       } else {
         measure("Create 1k", () => click("#run"));
         measure("Replace 1k", () => click("#run"));
-        measure("Select Row", () => click("tbody tr:nth-child(2) td:nth-child(2) a"));
+        click("#runlots"); // Setup 10k
+        measure("Partial Update (10k)", () => click("#update"));
+
+        measure("Select Row", () => click("tbody tr:nth-child(2) a.lbl"));
+        click("#run"); // Reset to 1k
         measure("Swap Rows", () => click("#swaprows"));
-        measure("Remove Row", () => click("tbody tr:nth-child(2) span.glyphicon-remove"));
+        measure("Remove Row", () => click("tbody tr:nth-child(2) span.remove"));
+        measure("Create 10k", () => click("#runlots"));
         measure("Append 1k", () => click("#add"));
         measure("Clear", () => click("#clear"));
-
-        // 10k tests - may trigger GC issues with heavy DOM operations
-        try {
-          click("#runlots");
-          __flush();
-          measure("Partial Update (10k)", () => click("#update"));
-          measure("Create 10k", () => click("#runlots"));
-          click("#clear");
-          __flush();
-        } catch (e) {
-          console.log("10k test skipped: " + e.message);
-        }
 
         const count = document.querySelectorAll("tr").length;
         console.log(`\nFinal Row Count: ${count} (expected 0)`);

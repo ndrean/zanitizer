@@ -9,11 +9,12 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const js_security = z.js_security;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
-const js_formData = @import("js_formData.zig");
+const RuntimeContext = z.RuntimeContext;
+const js_formData = z.js_formData;
 const js_blob = z.js_blob;
-const js_file = z.js_file;
-const js_response = @import("js_response.zig");
+const js_file = z.js_File;
+const js_response = z.js_response;
+
 const curl_multi_mod = @import("curl_multi.zig");
 const CurlMulti = curl_multi_mod.CurlMulti;
 const MultipartEntry = curl_multi_mod.MultipartEntry;

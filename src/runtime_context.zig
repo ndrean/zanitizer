@@ -2,13 +2,14 @@ const std = @import("std");
 const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
-const EventLoop = @import("event_loop.zig").EventLoop;
-const DOMBridge = @import("dom_bridge.zig").DOMBridge;
-const js_security = @import("js_security.zig");
-const Font = @import("font.zig").Font;
-const default_font_data = @embedFile("fonts/Roboto-Regular.ttf");
-const sanitizer_mod = @import("modules/sanitizer.zig");
+const EventLoop = z.EventLoop;
+const DOMBridge = z.DOMBridge;
+const js_security = z.js_security;
+const sanitizer_mod = z.sanitizer_mod;
 pub const SanitizeOptions = sanitizer_mod.SanitizeOptions;
+
+const Font = z.font.Font;
+const default_font_data = @embedFile("fonts/Roboto-Regular.ttf");
 
 pub const RuntimeContext = struct {
     allocator: std.mem.Allocator,

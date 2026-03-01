@@ -38,7 +38,7 @@ const colours = [
   "brown",
   "white",
   "black",
-  "orange",
+  "orange"
 ];
 const nouns = [
   "table",

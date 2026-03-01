@@ -64,7 +64,7 @@ fn js_get_children(
     var idx: u32 = 0;
     while (child) |c| : (child = z.nextSibling(c)) {
         if (z.nodeToElement(c)) |el| {
-            const DOMBridge = @import("dom_bridge.zig").DOMBridge;
+            const DOMBridge = z.DOMBridge;
             const wrapped = DOMBridge.wrapElement(ctx, el) catch continue;
             _ = ctx.setPropertyUint32(array, idx, wrapped) catch {};
             idx += 1;

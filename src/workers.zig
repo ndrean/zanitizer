@@ -2,10 +2,10 @@
 
 const std = @import("std");
 const z = @import("root.zig");
-const zqjs = @import("root.zig").wrapper; // Zig QuickJS wrapper
-const qjs = @import("root.zig").qjs; // C-bindings
-const EventLoop = @import("event_loop.zig").EventLoop;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const zqjs = z.wrapper; // Zig QuickJS wrapper
+const qjs = z.qjs; // C-bindings
+const EventLoop = z.EventLoop;
+const RuntimeContext = z.RuntimeContext;
 const curl = @import("curl");
 
 // ============================================================================

@@ -8,7 +8,7 @@ const std = @import("std");
 const z = @import("root.zig");
 const w = @import("wrapper.zig");
 const qjs = z.qjs;
-const RuntimeContext = @import("runtime_context.zig").RuntimeContext;
+const RuntimeContext = z.RuntimeContext;
 
 // ============================================================================
 // TextDecoder Object (stores encoding type)
@@ -77,11 +77,16 @@ fn js_TextEncoder_encode(
     var len: usize = 0;
     const str = qjs.JS_ToCStringLen(ctx.ptr, &len, argv[0]);
     if (str == null) return w.EXCEPTION;
-    defer qjs.JS_FreeCString(ctx.ptr, str);
+    // defer qjs.JS_FreeCString(ctx.ptr, str);
+    defer ctx.freeCString(str);
 
+    // TODO CHECK
     // Create Uint8Array from the UTF-8 bytes
-    const array_buffer = qjs.JS_NewArrayBufferCopy(ctx.ptr, @ptrCast(str), len);
-    if (qjs.JS_IsException(array_buffer)) return w.EXCEPTION;
+    const array_buffer = ctx.newArrayBufferCopy(@as([*]const u8, @ptrCast(str))[0..len]);
+    if (ctx.isException(array_buffer)) return w.EXCEPTION;
+
+    // const array_buffer = qjs.JS_NewArrayBufferCopy(ctx.ptr, @ptrCast(str), len);
+    // if (qjs.JS_IsException(array_buffer)) return w.EXCEPTION;
 
     // Wrap in Uint8Array
     const global = ctx.getGlobalObject();

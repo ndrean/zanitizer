@@ -195,6 +195,14 @@ globalThis.zxp = {
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
   },
 
+  // stdin — reads piped input. Returns "" / empty buffer when nothing is piped (TTY).
+  // CLI:   cat data.csv | zxp run script.js  → zxp.stdin.read()
+  // Serve: use fetch() instead — stdin is not meaningful in HTTP request context.
+  stdin: {
+    read:      () => __native_stdinRead(),       // → string  (UTF-8 text)
+    readBytes: () => __native_stdinReadBytes(),  // → ArrayBuffer (binary)
+  },
+
   csv: {
     // parse(csvString) → Array of Objects (headers from first row)
     parse: (csv) => __native_parseCSV(csv),
@@ -366,10 +374,64 @@ globalThis.zxp = {
     return __native_paintDOM(node, w);
   },
 
+  /*
+  paintElement(element, opts?) → { data: ArrayBuffer, width, height }
+  Renders a single DOM element with full CSS inheritance from ancestor elements.
+  Builds the full layout tree from document.body, finds the element's position
+  after Yoga layout, then crops to that element's bounding box.
+  opts: { width?: number, dpi?: number } — page layout width (default 800)
+  Use zxp.encode(img, format) or zxp.save(img, path) on the result.
+  */
+  paintElement(element, opts) {
+    let w = 800;
+    if (opts !== undefined && opts !== null) {
+      if (typeof opts === "number") w = opts;
+      else if (opts.width) w = opts.width;
+      else if (opts.dpi) w = Math.round(8.2677 * opts.dpi);
+    }
+    return __native_paintElement(element, w);
+  },
+
   // save(img, path) — encode RGBA + write to disk; extension decides format
   // Supported: .png  .jpg/.jpeg  .webp  .pdf
   save(img, path) {
     __native_save(img.data, img.width, img.height, path);
+  },
+
+  /*
+  runScripts(root?) — fetch and eval all <script> tags in the document (or subtree).
+  Mirrors the browser's script execution phase after HTML parsing.
+  Scripts run in DOM order. External src= are fetched transparently.
+  Skips: type="module", type="application/json", and other non-JS types.
+  Note: DOMContentLoaded / window.onload handlers inside scripts do not fire.
+  */
+  async runScripts(root) {
+    const scripts = Array.from((root ?? document).querySelectorAll('script'));
+    for (const script of scripts) {
+      const type = script.getAttribute('type') ?? '';
+      const isModule = type === 'module';
+      if (type && type !== 'text/javascript' && type !== 'application/javascript' && !isModule) continue;
+      const src = script.getAttribute('src');
+      if (src) {
+        const fetchUrl = src.includes('://') ? src : 'file://' + src;
+        const res = await fetch(fetchUrl);
+        const code = await res.text();
+        if (isModule) {
+          __native_evalModule(code, fetchUrl);
+        } else {
+          eval(code);
+        }
+      } else {
+        const code = script.textContent;
+        if (code) {
+          if (isModule) {
+            __native_evalModule(code, '<inline-module>');
+          } else {
+            eval(code);
+          }
+        }
+      }
+    }
   },
 
   /*

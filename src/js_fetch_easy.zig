@@ -1,13 +1,8 @@
 //! Threaded fetch(). Used in Worker() context
 //!
-//! FormData is manually serialized via `js_formData.serializeFormData()``
-//!
-//! inline procies `js_text_proxy`, js_json_proxy` wrapps sync functions in promises
-//!
+//! FormData is manually serialized via `js_formData.serializeFormData()`
+//! Response methods delegated to `js_response.buildResponse()` / `addResponseMethods()`.
 //! uses hardenEasy()
-//!
-//! `text()`, `arrayBuffer()`, `json()`
-//! `blob()` is non-standard: it returns a promise
 
 const std = @import("std");
 const z = @import("root.zig");
@@ -19,7 +14,8 @@ const EventLoop = z.EventLoop;
 const RuntimeContext = z.RuntimeContext;
 const js_formData = z.js_formData;
 const js_blob = z.js_blob;
-const js_file = z.js_file;
+const js_file = z.js_File;
+const js_response = z.js_response;
 
 // ============================================================================
 // STRUCTS
@@ -239,7 +235,6 @@ fn fetchFile(ctx: zqjs.Context, url: []const u8) zqjs.Value {
     const rc = RuntimeContext.get(ctx);
     const allocator = rc.loop.allocator;
 
-    // Strip "file://" prefix to get the actual path
     const path = url["file://".len..];
 
     const file = js_security.openFileNoSymlinkEscape(rc.sandbox, path) catch {
@@ -252,147 +247,9 @@ fn fetchFile(ctx: zqjs.Context, url: []const u8) zqjs.Value {
     };
     defer allocator.free(data);
 
-    const resp = ctx.newObject();
-
-    ctx.setPropertyStr(resp, "status", ctx.newInt64(200)) catch {};
-    ctx.setPropertyStr(resp, "ok", ctx.newBool(true)) catch {};
-    ctx.setPropertyStr(resp, "url", ctx.newString(url)) catch {};
-
-    const ab = ctx.newArrayBufferCopy(data);
-    ctx.setPropertyStr(resp, "_body", ab) catch {
-        ctx.freeValue(ab);
-    };
-
-    const headers_obj = ctx.newObject();
-    ctx.setPropertyStr(resp, "headers", headers_obj) catch {
-        ctx.freeValue(headers_obj);
-    };
-
-    const text_fn = qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0);
-    ctx.setPropertyStr(resp, "text", text_fn) catch {
-        ctx.freeValue(text_fn);
-    };
-    const json_fn = qjs.JS_NewCFunction(ctx.ptr, js_json_proxy, "json", 0);
-    ctx.setPropertyStr(resp, "json", json_fn) catch {
-        ctx.freeValue(json_fn);
-    };
-    const blob_fn = qjs.JS_NewCFunction(ctx.ptr, js_blob_proxy, "blob", 0);
-    ctx.setPropertyStr(resp, "blob", blob_fn) catch {
-        ctx.freeValue(blob_fn);
-    };
-    const ab_fn = qjs.JS_NewCFunction(ctx.ptr, js_arrayBuffer_proxy, "arrayBuffer", 0);
-    ctx.setPropertyStr(resp, "arrayBuffer", ab_fn) catch {
-        ctx.freeValue(ab_fn);
-    };
-
-    const prom = createPromiseResolved(ctx, resp);
-    ctx.freeValue(resp);
-    return prom;
-}
-
-// ===========================================================
-// NETWORK RESPONSE PROXIES: .text(), .json(), .blob(), .arrayBuffer()
-
-fn js_res_text(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context.from(ctx_ptr);
-    const body_val = ctx.getPropertyStr(this, "_body");
-    defer ctx.freeValue(body_val);
-
-    if (ctx.isUndefined(body_val)) return ctx.newString("");
-
-    var len: usize = 0;
-    const ptr = qjs.JS_GetArrayBuffer(ctx.ptr, &len, body_val);
-    if (ptr == null) return ctx.newString("");
-
-    return ctx.newString(ptr[0..len]);
-}
-
-fn js_res_json(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context.from(ctx_ptr);
-    const text_val = js_res_text(ctx_ptr, this, 0, null);
-    defer ctx.freeValue(text_val);
-
-    if (ctx.isException(text_val)) return text_val;
-
-    const str = ctx.toZString(text_val) catch return ctx.throwOutOfMemory();
-    defer ctx.freeZString(str);
-
-    return ctx.parseJSON(str, "<json>");
-}
-
-fn js_res_blob(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context.from(ctx_ptr);
-    const body_val = ctx.getPropertyStr(this, "_body");
-    defer ctx.freeValue(body_val);
-
-    const global = ctx.getGlobalObject();
-    defer ctx.freeValue(global);
-    const blob_ctor = ctx.getPropertyStr(global, "Blob");
-    defer ctx.freeValue(blob_ctor);
-    if (ctx.isUndefined(blob_ctor)) return ctx.throwTypeError("Blob class not found");
-
-    const parts = ctx.newArray();
-    defer ctx.freeValue(parts);
-    ctx.setPropertyInt64(parts, 0, ctx.dupValue(body_val)) catch {};
-    const options = ctx.newObject();
-    defer ctx.freeValue(options);
-
-    const headers = ctx.getPropertyStr(this, "headers");
-    defer ctx.freeValue(headers);
-    if (!ctx.isUndefined(headers)) {
-        const ct = ctx.getPropertyStr(headers, "content-type");
-        defer ctx.freeValue(ct);
-        if (!ctx.isUndefined(ct)) {
-            _ = ctx.setPropertyStr(options, "type", ctx.dupValue(ct)) catch {};
-        }
-    }
-
-    var args = [_]qjs.JSValue{ parts, options };
-    return qjs.JS_CallConstructor(ctx.ptr, blob_ctor, 2, &args);
-}
-
-fn js_res_arrayBuffer(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    const ctx = zqjs.Context.from(ctx_ptr);
-    return ctx.getPropertyStr(this, "_body");
-}
-
-fn js_async_wrapper(ctx_ptr: ?*qjs.JSContext, this: qjs.JSValue, workFn: fn (?*qjs.JSContext, qjs.JSValue, c_int, [*c]qjs.JSValue) callconv(.c) qjs.JSValue) qjs.JSValue {
-    const ctx = zqjs.Context.from(ctx_ptr);
-    var resolvers: [2]qjs.JSValue = undefined;
-    const promise = qjs.JS_NewPromiseCapability(ctx.ptr, &resolvers);
-    const resolve = resolvers[0];
-    const reject = resolvers[1];
-    defer ctx.freeValue(resolve);
-    defer ctx.freeValue(reject);
-    const result = workFn(ctx_ptr, this, 0, null);
-
-    if (ctx.isException(result)) {
-        const err = ctx.getException();
-        _ = ctx.call(reject, zqjs.UNDEFINED, &.{err});
-        ctx.freeValue(err);
-    } else {
-        _ = ctx.call(resolve, zqjs.UNDEFINED, &.{result});
-    }
-    ctx.freeValue(result);
-    return promise;
-}
-
-fn js_text_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_text);
-}
-fn js_json_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_json);
-}
-fn js_blob_proxy(ctx: ?*qjs.JSContext, this: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_blob);
-}
-fn js_arrayBuffer_proxy(
-    ctx: ?*qjs.JSContext,
-    this: qjs.JSValue,
-    _: c_int,
-    _: [*c]qjs.JSValue,
-) callconv(.c) qjs.JSValue {
-    return js_async_wrapper(ctx, this, js_res_arrayBuffer);
+    const resp = js_response.buildResponse(ctx, .{ .url = url }, ctx.newArrayBufferCopy(data), ctx.newObject());
+    defer ctx.freeValue(resp);
+    return createPromiseResolved(ctx, resp);
 }
 
 // ===========================================================
@@ -547,29 +404,7 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
         return;
     }
 
-    const resp = ctx.newObject();
-    defer ctx.freeValue(resp);
-
-    const status_val = ctx.newInt64(res.status);
-    ctx.setPropertyStr(resp, "status", status_val) catch {
-        ctx.freeValue(status_val);
-    };
-
-    const ok_val = ctx.newBool(res.ok);
-    ctx.setPropertyStr(resp, "ok", ok_val) catch {
-        ctx.freeValue(ok_val);
-    };
-
-    const url_val = ctx.newString(res.url);
-    ctx.setPropertyStr(resp, "url", url_val) catch {
-        ctx.freeValue(url_val);
-    };
-
-    const ab = ctx.newArrayBufferCopy(res.body);
-    ctx.setPropertyStr(resp, "_body", ab) catch {
-        ctx.freeValue(ab);
-    };
-
+    // Build Headers object from response header lines
     const headers_init = ctx.newObject();
     for (res.headers) |line| {
         if (std.mem.indexOfScalar(u8, line, ':')) |idx| {
@@ -581,7 +416,6 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
             _ = qjs.JS_SetProperty(ctx.ptr, headers_init, atom, val_js);
         }
     }
-
     const global = ctx.getGlobalObject();
     defer ctx.freeValue(global);
     const headers_ctor = ctx.getPropertyStr(global, "Headers");
@@ -589,27 +423,13 @@ fn finishFetch(ctx: zqjs.Context, data: *anyopaque) void {
     var args = [_]qjs.JSValue{headers_init};
     const headers_obj = qjs.JS_CallConstructor(ctx.ptr, headers_ctor, 1, &args);
     ctx.freeValue(headers_init);
-    ctx.setPropertyStr(resp, "headers", headers_obj) catch {
-        ctx.freeValue(headers_obj);
-    };
 
-    const text_fn = qjs.JS_NewCFunction(ctx.ptr, js_text_proxy, "text", 0);
-    ctx.setPropertyStr(resp, "text", text_fn) catch {
-        ctx.freeValue(text_fn);
-    };
-    const json_fn = qjs.JS_NewCFunction(ctx.ptr, js_json_proxy, "json", 0);
-    ctx.setPropertyStr(resp, "json", json_fn) catch {
-        ctx.freeValue(json_fn);
-    };
-    const blob_fn = qjs.JS_NewCFunction(ctx.ptr, js_blob_proxy, "blob", 0);
-    ctx.setPropertyStr(resp, "blob", blob_fn) catch {
-        ctx.freeValue(blob_fn);
-    };
-    const ab_fn = qjs.JS_NewCFunction(ctx.ptr, js_arrayBuffer_proxy, "arrayBuffer", 0);
-    ctx.setPropertyStr(resp, "arrayBuffer", ab_fn) catch {
-        ctx.freeValue(ab_fn);
-    };
-
+    const resp = js_response.buildResponse(ctx, .{
+        .status = res.status,
+        .ok = res.ok,
+        .url = res.url,
+    }, ctx.newArrayBufferCopy(res.body), headers_obj);
+    defer ctx.freeValue(resp);
     _ = ctx.call(real_resolve, zqjs.UNDEFINED, &.{resp});
 }
 

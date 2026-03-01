@@ -93,7 +93,11 @@ const JpegWriteContext = struct {
 extern fn stbi_write_jpg_to_func(
     func: *const fn (?*anyopaque, ?*anyopaque, c_int) callconv(.c) void,
     context: ?*anyopaque,
-    x: c_int, y: c_int, comp: c_int, data: ?*const anyopaque, quality: c_int,
+    x: c_int,
+    y: c_int,
+    comp: c_int,
+    data: ?*const anyopaque,
+    quality: c_int,
 ) c_int;
 fn stbiJpegWriteCallback(context: ?*anyopaque, data: ?*anyopaque, size: c_int) callconv(.c) void {
     const jctx: *JpegWriteContext = @ptrCast(@alignCast(context));
@@ -1169,6 +1173,44 @@ fn parseHexByte(hex: *const [2]u8) ?u8 {
     return (hi << 4) | lo;
 }
 
+/// Result of searching for a DOM node in the post-layout Yoga tree
+const FoundYogaNode = struct {
+    abs_x: f32,
+    abs_y: f32,
+    width: f32,
+    height: f32,
+};
+
+/// Depth-first search: find the Yoga node whose NodeInfo.dom_node matches `target`.
+/// Accumulates absolute x/y by summing yoga.getLeft/getTop down the tree
+/// as nodes know only their position relative to thier parent
+fn findYogaNode(
+    yg: yoga.Node,
+    target: *z.DomNode,
+    parent_x: f32,
+    parent_y: f32,
+) ?FoundYogaNode {
+    const ctx_ptr = yoga.getContext(yg) orelse return null;
+    const info: *const NodeInfo = @ptrCast(@alignCast(ctx_ptr));
+    const x = parent_x + yoga.getLeft(yg);
+    const y = parent_y + yoga.getTop(yg);
+
+    if (info.dom_node == target) {
+        return .{
+            .abs_x = x,
+            .abs_y = y,
+            .width = yoga.getWidth(yg),
+            .height = yoga.getHeight(yg),
+        };
+    }
+
+    const child_count = yoga.getChildCount(yg);
+    for (0..child_count) |i| {
+        if (findYogaNode(yoga.getChild(yg, i), target, x, y)) |found| return found;
+    }
+    return null;
+}
+
 /// Walk the Yoga tree after layout and paint each node using ThorVG
 fn paintYogaTree(
     yg: yoga.Node,
@@ -1391,11 +1433,95 @@ pub fn js_paintDOM(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv
 
     // Return raw RGBA as { data: ArrayBuffer, width, height }
     const master_u8: [*]const u8 = @ptrCast(master_buffer.ptr);
-    const pixel_bytes = master_u8[0..@as(usize, page_width) * page_height * 4];
+    const pixel_bytes = master_u8[0 .. @as(usize, page_width) * page_height * 4];
     const result = ctx.newObject();
     ctx.setPropertyStr(result, "data", ctx.newArrayBufferCopy(pixel_bytes)) catch return w.UNDEFINED;
     ctx.setPropertyStr(result, "width", ctx.newFloat64(@floatFromInt(page_width))) catch return w.UNDEFINED;
     ctx.setPropertyStr(result, "height", ctx.newFloat64(@floatFromInt(page_height))) catch return w.UNDEFINED;
+    return result;
+}
+
+/// Render a single DOM element by building the full layout tree from document body,
+/// finding the element's absolute position after Yoga layout, then painting into a
+/// canvas sized to that element and shifting the scene so the element is at the origin.
+/// This ensures CSS inheritance from ancestor elements (body, parents) is respected.
+///
+/// JS signature: __native_paintElement(element, page_width) → { data, width, height }
+pub fn js_paintElement(ctx_ptr: ?*z.qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    if (argc < 1) return w.UNDEFINED;
+
+    const rc = RuntimeContext.get(ctx);
+
+    // 1. Unwrap target DOM node from argv[0]
+    var ptr = ctx.getOpaque(argv[0], rc.classes.html_element);
+    if (ptr == null) ptr = ctx.getOpaque(argv[0], rc.classes.dom_node);
+    if (ptr == null) return w.UNDEFINED;
+    const target_node: *z.DomNode = @ptrCast(@alignCast(ptr));
+
+    // 2. Page layout width (argv[1]: number, default 800)
+    const page_width: u32 = blk: {
+        if (argc >= 2 and !ctx.isUndefined(argv[1]) and !ctx.isNull(argv[1])) {
+            var w_f64: f64 = 800;
+            if (qjs.JS_ToFloat64(ctx.ptr, &w_f64, argv[1]) == 0 and w_f64 > 0)
+                break :blk @as(u32, @intFromFloat(w_f64));
+        }
+        break :blk 800;
+    };
+
+    // 3. Find document body — the root for full CSS-aware layout
+    const doc = z.ownerDocument(target_node);
+    const body_el = z.bodyElement(doc) orelse return w.UNDEFINED;
+    const root_node = z.elementToNode(@ptrCast(body_el));
+
+    // 4. Initialize ThorVG (needed for text measurement during tree build)
+    _ = tvg_engine_init(0);
+    defer _ = tvg_engine_term();
+    thorvg.loadEmbeddedFonts() catch {};
+
+    // 5. Build Yoga tree from document body (arena-allocated)
+    var arena = std.heap.ArenaAllocator.init(rc.allocator);
+    defer arena.deinit();
+    const arena_alloc = arena.allocator();
+
+    const yg_root = buildYogaTree(root_node, arena_alloc, rc.base_dir) orelse return w.UNDEFINED;
+    defer yoga.nodeFreeRecursive(yg_root);
+
+    yoga.setWidth(yg_root, @floatFromInt(page_width));
+    yoga.calculateLayout(yg_root, @floatFromInt(page_width), yoga.Undefined, yoga.DIRECTION_LTR);
+
+    // 6. Locate the target element in the post-layout Yoga tree
+    const found = findYogaNode(yg_root, target_node, 0, 0) orelse {
+        std.debug.print("[Compositor] paintElement: target element not found in Yoga tree\n", .{});
+        return w.UNDEFINED;
+    };
+
+    const elem_w = @max(1, @as(u32, @intFromFloat(@ceil(found.width))));
+    const elem_h = @max(1, @as(u32, @intFromFloat(@ceil(found.height))));
+
+    // 7. Allocate pixel buffer sized to the element
+    const buffer = rc.allocator.alloc(u32, elem_w * elem_h) catch return w.UNDEFINED;
+    defer rc.allocator.free(buffer);
+    @memset(buffer, 0xFFFFFFFF); // white background
+
+    const canvas = tvg_swcanvas_create(0) orelse return w.UNDEFINED;
+    defer _ = tvg_canvas_destroy(canvas);
+    _ = tvg_swcanvas_set_target(canvas, buffer.ptr, elem_w, elem_w, elem_h, 2);
+
+    // 8. Paint the full scene shifted so the target element appears at (0,0).
+    //    ThorVG clips to the canvas bounds — only the element's region is rendered.
+    paintYogaTree(yg_root, canvas, -found.abs_x, -found.abs_y, .{ 0, 0, 0 }, arena_alloc);
+
+    _ = tvg_canvas_draw(canvas, false);
+    _ = tvg_canvas_sync(canvas);
+
+    // 9. Return { data: ArrayBuffer, width, height }
+    const u8_buf: [*]const u8 = @ptrCast(buffer.ptr);
+    const pixel_bytes = u8_buf[0 .. @as(usize, elem_w) * elem_h * 4];
+    const result = ctx.newObject();
+    ctx.setPropertyStr(result, "data", ctx.newArrayBufferCopy(pixel_bytes)) catch return w.UNDEFINED;
+    ctx.setPropertyStr(result, "width", ctx.newFloat64(@floatFromInt(elem_w))) catch return w.UNDEFINED;
+    ctx.setPropertyStr(result, "height", ctx.newFloat64(@floatFromInt(elem_h))) catch return w.UNDEFINED;
     return result;
 }
 
