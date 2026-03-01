@@ -185,7 +185,7 @@ curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks
 
 It takes 38ms to run the code, paint the image and save it:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/paint.png" alt="demo htm" width="400" height="300">
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/paint.png" alt="demo htm" width="500" height="400">
 
 <br>
 
@@ -371,7 +371,7 @@ curl -s -X POST http://localhost:9984/run  \
 
 and get in your terminal the image:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.webp" alt="grid_1d.png" width="300" height="200">
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/render_grid_1d/grid_1d.webp" alt="grid_1d.png" width="500" height="400">
 
 <br>
 
