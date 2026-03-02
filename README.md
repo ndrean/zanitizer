@@ -43,8 +43,6 @@ It can:
 - cannot scrape arbitrary bot protected public websites,
 - cannot paint complex CSS using grid-2d, position:fixed, CSS functions...
 
-              |
-
 ## Security
 
 If you use your own trusted code, you can skip sanitization entirely. For untrusted content:
@@ -69,7 +67,7 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 | [CSV → D3.js chart](#csv-input-to-draw-d3js-chart) | CSV parse → D3 SVG → rasterize | WEBP | – | ✓ |
 | [LLM generative UI](#generative-template) | Ollama/OpenAI SSE → DOM → image | WEBP | ✓ | ✓ |
 | [Leaflet map PDF](#generate-a-leaflet-map-pdf-report) | GeoJSON route → OSM tiles → SVG → PDF | PDF | – | ✓ |
-| MCP server | Give Claude Desktop / Gemini visual eyes | PNG | – | ✓ |
+| [MCP server](#mcp-server) | Give Claude Desktop / Gemini visual eyes | PNG | – | ✓ |
 
 ---
 
@@ -77,7 +75,7 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 
 ### Use dynamic HTML with `htm` and paint
 
-<details><summary>We use `htm` to build dynamic HTML and render it as an image</summary>
+<details><summary>We use htm to build dynamic HTML and render it as an image</summary>
 
 [Source](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/teset_html.html")
 
@@ -129,32 +127,34 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 
 We will use two methods:
 
-- use the dev-server and POST an HTTP request whose payload is a JS snippet
-- use the CLI
+- the dev-server:  the `serve` verb. You POST an HTTP request whose payload is a JS snippet
+- the CLI: the `convert` verb.
   
-**dev-server**: we will pass the following JavaScript snippet to the dev-server: we used the custom methods `zxp.loadHTML` and `zxp.paintDOM` and `zxp.save`.
+**dev-server**: the following JavaScript snippet is our payload. We use the custom methods `zxp.loadHTML`, `zxp.paintDOM` and `zxp.save`.
 
 ```js
 // src/examples/frameworks/htm/run.js
-async function run() {    
-    const res = await fetch("file://src/examples/frameworks/htm/test_htm.html");
+async function run(input, output) {    
+    const res = await fetch(input);
     const html = await res.text();
     zxp.loadHTML(html);
     await zxp.runScripts();
-    zxp.save(zxp.paintDOM(document.body), "src/examples/frameworks/htm/paint.png")
+    zxp.save(zxp.paintDOM(document.body), output)
 
 }
 
-run();
+const input = "file://src/examples/frameworks/htm/test_htm.html"
+const output = "src/examples/frameworks/htm/paint.png"
+run(input, output);
 ```
 
-We start the dev-server with:
+We have built our server (`zig build --release=fast`). We start the dev-server with:
 
 ```sh
 ./zig-out/bin/zxp serve
 ```
 
-and send a POST request with the content of the JavaScript snippet:
+and send a POST request with the the JavaScript snippet:
 
 ```sh
   curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
@@ -427,9 +427,7 @@ Using the CLI, you can pipe the verb `scrape` with the verb `convert`. Note that
 
 Scrape <https://demo.vercel.store> and get structured data extracted:
 
-#### Dev-server
-  
-You prepare a JavaScript snippet to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `await zxp.goto()` ot fetch, execute all the received JS chunks and CSS files and parse and sync the DOM and CSS to be able to `await zxp.waitForSelector()` which extracts the data using _querySelector_ against the DOM.
+**Dev-server**: You prepare a JavaScript snippet to reach the website and pass the selector of your choice. We mimic `puppeteer`'s API with `await zxp.goto()` ot fetch, execute all the received JS chunks and CSS files and parse and sync the DOM and CSS to be able to `await zxp.waitForSelector()` which extracts the data using _querySelector_ against the DOM.
 
 ```js
 //  src/examples/vercel-demo/inline-select.js 
@@ -470,21 +468,12 @@ You receive in your terminal:
 ["Acme Circles T-Shirt$20.00USD", "Acme Drawstring Bag$12.00USD", "Acme Cup$15.00USD",...]
 ```
 
-#### CLI
-
-You use the verb `run`
+**CLI**: You use the verb `run`
 
 ```sh
 zxp run src/examples/vercel-demo/inline-select.js --pretty
 ```
 
-#### The library
-
-Source: <https://github.com/zexplorer/blob/main/src/examples/vercel-demo/inline-select.zig>
-
-```sh
-zig build example -Dname=vercel-demo/vercel
-```
 
 ---
 
@@ -805,6 +794,100 @@ Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map wit
 See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-and-output-a-pdf) below.
 
 ---
+
+### MCP server
+
+**tools/list**: check with:
+
+```sh
+curl -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+```
+
+The list of available methods are:
+
+```txt
+{"jsonrpc":"2.0","id":1,"result":{"tools":[
+  {"name": "render_html",...},
+  {"name": "render_markdown",...},
+  {"name": "render_url",...},
+  {"name": "run_script",...}
+}
+```
+
+Let's make a call to the MCP: run a JS script.
+
+```sh
+curl -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "run_script",
+      "arguments": {
+        "script": "const a = 10; const b = 32; `The answer is ${a + b}`"
+      }
+    }
+  }'
+```
+
+The output is:
+
+```txt
+{
+  "jsonrpc":"2.0",
+  "id":2,
+  "result":{
+    "content":[
+      {
+        "type":"text",
+        "text":"The answer is 42"
+      }
+    ]
+  }
+}
+```
+
+Let's make another call: we make an RCP to `render_html` of a styled `<h1>` element:
+
+```sh
+curl -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "render_html",
+      "arguments": {
+        "html": "<h1 style=\"color: red;\">Hello MCP!</h1>",
+        "width": 400
+      }
+    }
+  }'
+```
+
+We get the response in 22ms: a B64 encoded string of a PNG image.
+
+```txt
+{
+  "jsonrpc":"2.0",
+  "id":3,
+  "result":{
+    "content":[
+      {
+        "type":"image",
+        "data":"iVBORw0KGgo....",
+        "mimeType":"image/png"
+      }
+    ]
+  }
+}
+```
+
 
 ## Library quick start
 

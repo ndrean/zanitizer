@@ -221,6 +221,7 @@ globalThis.zxp = {
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Upgrade-Insecure-Requests": "1",
+        "ngrok-skip-browser-warning": "true"
       },
     });
     const html = await res.text();

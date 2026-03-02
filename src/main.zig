@@ -21,8 +21,8 @@ const RuntimeContext = z.RuntimeContext;
 // const Reflect = @import("reflection.zig");
 // const Mocks = @import("dom_mocks.zig");
 // const Native = @import("js_native_bridge.zig");
-const Server = @import("serve.zig").Server;
-const Handler = @import("serve.zig").Handler;
+const Server = z.serve.Server;
+const Handler = z.serve.Handler;
 
 const httpz = @import("httpz");
 

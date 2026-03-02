@@ -548,52 +548,73 @@ fn buildYogaTree(
             var img_loaded = false;
             if (z.getAttribute_zc(el, "src")) |src| {
                 if (src.len > 0) {
-                    // Derive origin from base_dir for use as Referer (e.g. "https://demo.vercel.store")
-                    const referer: ?[]const u8 = if (isRemoteUrl(base_dir)) blk: {
-                        const after_scheme = (std.mem.indexOf(u8, base_dir, "://") orelse break :blk null) + 3;
-                        const host_end = std.mem.indexOfScalarPos(u8, base_dir, after_scheme, '/') orelse base_dir.len;
-                        break :blk base_dir[0..host_end];
-                    } else null;
-
-                    // Resolve src against base_dir (handles relative, absolute-path, and protocol-relative)
-                    const resolved = resolveUrl(allocator, base_dir, src) catch null;
-                    defer if (resolved) |r| allocator.free(r);
-                    const maybe_data: ?[]const u8 = if (resolved) |r| blk: {
-                        if (isRemoteUrl(r)) {
-                            break :blk fetchImageBytes(allocator, r, referer);
-                        } else {
-                            break :blk std.fs.cwd().readFileAlloc(allocator, r, 32 * 1024 * 1024) catch {
-                                std.debug.print("⚠️ [Compositor] Failed to load image: {s}\n", .{r});
-                                break :blk null;
-                            };
-                        }
-                    } else null;
-
-                    if (maybe_data) |data| {
-                        info.img_data = data;
-                        info.img_is_svg = std.mem.endsWith(u8, src, ".svg") or
-                            std.mem.endsWith(u8, src, ".svg?v=1") or
-                            std.mem.indexOf(u8, src, ".svg?") != null;
-
-                        // 1. HTML width/height attributes
-                        var attr_w: f32 = 0;
-                        var attr_h: f32 = 0;
-                        if (z.getAttribute_zc(el, "width")) |ws| attr_w = parseFloat(ws) orelse 0;
-                        if (z.getAttribute_zc(el, "height")) |hs| attr_h = parseFloat(hs) orelse 0;
-                        if (attr_w > 0) yoga.setWidth(yg, attr_w);
-                        if (attr_h > 0) yoga.setHeight(yg, attr_h);
-
-                        // 2. Natural size fallback via stbi (raster only)
-                        if (attr_w == 0 and attr_h == 0 and !info.img_is_svg) {
-                            var iw: c_int = 0;
-                            var ih: c_int = 0;
-                            var ic: c_int = 0;
-                            if (stbi.stbi_info_from_memory(data.ptr, @intCast(data.len), &iw, &ih, &ic) != 0) {
-                                yoga.setWidth(yg, @floatFromInt(iw));
-                                yoga.setHeight(yg, @floatFromInt(ih));
+                    if (std.mem.startsWith(u8, src, "data:")) {
+                        // Decode base64 data URI directly — no file/network fetch needed.
+                        // Format: data:[mime][;base64],<payload>
+                        if (std.mem.indexOfScalar(u8, src, ',')) |comma| {
+                            const header = src[5..comma]; // after "data:"
+                            const payload = src[comma + 1 ..];
+                            if (std.mem.endsWith(u8, header, ";base64")) {
+                                const decoder = std.base64.standard.Decoder;
+                                if (decoder.calcSizeForSlice(payload) catch null) |decoded_len| {
+                                    if (allocator.alloc(u8, decoded_len) catch null) |buf| {
+                                        if (decoder.decode(buf, payload)) {
+                                            info.img_data = buf;
+                                            info.img_is_svg = std.mem.startsWith(u8, header, "image/svg");
+                                            img_loaded = true;
+                                        } else |_| allocator.free(buf);
+                                    }
+                                }
                             }
                         }
-                        img_loaded = true;
+                    } else {
+                        // Derive origin from base_dir for use as Referer (e.g. "https://demo.vercel.store")
+                        const referer: ?[]const u8 = if (isRemoteUrl(base_dir)) blk: {
+                            const after_scheme = (std.mem.indexOf(u8, base_dir, "://") orelse break :blk null) + 3;
+                            const host_end = std.mem.indexOfScalarPos(u8, base_dir, after_scheme, '/') orelse base_dir.len;
+                            break :blk base_dir[0..host_end];
+                        } else null;
+
+                        // Resolve src against base_dir (handles relative, absolute-path, and protocol-relative)
+                        const resolved = resolveUrl(allocator, base_dir, src) catch null;
+                        defer if (resolved) |r| allocator.free(r);
+                        const maybe_data: ?[]const u8 = if (resolved) |r| blk: {
+                            if (isRemoteUrl(r)) {
+                                break :blk fetchImageBytes(allocator, r, referer);
+                            } else {
+                                break :blk std.fs.cwd().readFileAlloc(allocator, r, 32 * 1024 * 1024) catch {
+                                    std.debug.print("⚠️ [Compositor] Failed to load image: {s}\n", .{r});
+                                    break :blk null;
+                                };
+                            }
+                        } else null;
+
+                        if (maybe_data) |data| {
+                            info.img_data = data;
+                            info.img_is_svg = std.mem.endsWith(u8, src, ".svg") or
+                                std.mem.endsWith(u8, src, ".svg?v=1") or
+                                std.mem.indexOf(u8, src, ".svg?") != null;
+
+                            // 1. HTML width/height attributes
+                            var attr_w: f32 = 0;
+                            var attr_h: f32 = 0;
+                            if (z.getAttribute_zc(el, "width")) |ws| attr_w = parseFloat(ws) orelse 0;
+                            if (z.getAttribute_zc(el, "height")) |hs| attr_h = parseFloat(hs) orelse 0;
+                            if (attr_w > 0) yoga.setWidth(yg, attr_w);
+                            if (attr_h > 0) yoga.setHeight(yg, attr_h);
+
+                            // 2. Natural size fallback via stbi (raster only)
+                            if (attr_w == 0 and attr_h == 0 and !info.img_is_svg) {
+                                var iw: c_int = 0;
+                                var ih: c_int = 0;
+                                var ic: c_int = 0;
+                                if (stbi.stbi_info_from_memory(data.ptr, @intCast(data.len), &iw, &ih, &ic) != 0) {
+                                    yoga.setWidth(yg, @floatFromInt(iw));
+                                    yoga.setHeight(yg, @floatFromInt(ih));
+                                }
+                            }
+                            img_loaded = true;
+                        }
                     }
                 }
             }

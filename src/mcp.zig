@@ -16,7 +16,7 @@
 //!   { "mcpServers": { "zexplorer": { "url": "http://localhost:9984/mcp" } } }
 
 const std = @import("std");
-const z = @import("zxp");
+const z = @import("root.zig");
 const httpz = @import("httpz");
 const zxp_runtime = z.zxp_runtime;
 const js_streamfrom = z.js_streamfrom;

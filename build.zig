@@ -412,6 +412,12 @@ fn addBytecodeImports(mod: *std.Build.Module, res: ZexplorerResult) void {
 }
 
 fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, curl_module: *std.Build.Module, gen_bytecode_host: *std.Build.Step.Compile) ZexplorerResult {
+    const httpz = b.dependency("httpz", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const httpz_module = httpz.module("httpz");
+
     const mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -440,6 +446,7 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     mod.addIncludePath(b.path("vendor/libharu/include"));
     mod.addIncludePath(paths.md4c_src);
     mod.addIncludePath(b.path("vendor/yoga/yoga"));
+    mod.addImport("httpz", httpz_module);
     mod.link_libc = true;
     mod.link_libcpp = true;
 

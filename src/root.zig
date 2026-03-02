@@ -27,6 +27,8 @@ pub const qjs = @cImport({
     @cInclude("quickjs.h");
 });
 
+pub const httpz = @import("httpz");
+
 pub const MAX_WORKERS = 8;
 pub const FETCH_TIMEOUT_MS = curl_multi.FETCH_TIMEOUT_MS;
 pub const FETCH_CONNECT_TIMEOUT_MS = curl_multi.FETCH_CONNECT_TIMEOUT_MS;
@@ -37,6 +39,7 @@ pub const curl = @import("curl");
 pub const curl_multi = @import("curl_multi.zig");
 pub const hardenEasy = curl_multi.hardenEasy;
 pub const isBlockedUrl = curl_multi.isBlockedUrl;
+
 // Import wrapper for cleaner QuickJS API
 pub const wrapper = @import("wrapper.zig");
 pub const dom_bridge = @import("dom_bridge.zig");
