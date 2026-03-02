@@ -105,6 +105,8 @@ pub const js_import_script = @import("js_import_script.zig");
 pub const js_bytecode = @import("js_bytecode.zig");
 pub const js_file_writeFileSync = @import("js_file_writeFileSync.zig");
 pub const mime = @import("mime.zig");
+pub const serve = @import("serve.zig");
+pub const mcp = @import("mcp.zig");
 
 pub const native_bridge = @import("js_native_bridge.zig");
 // TODO : remove js_httpbin
@@ -156,7 +158,7 @@ const frag_temp = @import("modules/fragment_template.zig");
 const norm = @import("modules/normalize.zig");
 const text = @import("modules/text_content.zig");
 pub const sanitize = @import("modules/sanitizer.zig");
-const sanitize_css = @import("modules/sanitizer_css.zig");
+pub const sanitize_css = @import("modules/sanitizer_css.zig");
 const sanitizer_config = @import("sanitizer_config.zig");
 const sanitizer_test_vectors = @import("modules/sanitizer_test_vectors.zig");
 const parse = @import("modules/parsing.zig");

@@ -4,6 +4,7 @@ const httpz = @import("httpz");
 const zxp_runtime = z.zxp_runtime;
 const js_streamfrom = z.js_streamfrom;
 const js_llm = z.js_llm;
+const mcp = z.mcp;
 
 const WriterContext = struct {
     res: *httpz.Response,
@@ -81,6 +82,7 @@ pub const Server = struct {
         router.post("/stream", streamHandler, .{});
         router.post("/render", renderProxyHandler, .{});
         router.get("/render_llm", renderLlmHandler, .{});
+        router.post("/mcp", mcp.mcpHandler, .{});
 
         return Server{ .allocator = allocator, .app_ctx = app_ctx, .server = server };
     }
@@ -96,6 +98,17 @@ pub const Server = struct {
         self.allocator.destroy(self.app_ctx);
     }
 };
+
+// const McpRequest = struct {
+//     jsonpc: []const u8,
+//     id: ?std.json.Value,
+//     method: []const u8,
+//     params: ?std.json.Value = null,
+// };
+
+// pub fn mcpHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
+//     const body = req.body() orelse {};
+// }
 
 pub fn healthHandler(_: *AppContext, _: *httpz.Request, res: *httpz.Response) !void {
     res.status = 200;
@@ -198,7 +211,7 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
             try res.chunk("\n\n");
         } else {
             res.header("Content-Type", "text/plain; charset=utf-8");
-            res.body = try res.arena.dupe(u8, z_str);
+            try res.chunk(z_str);
         }
         return;
     }
@@ -214,7 +227,7 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
         try res.chunk("\n\n");
     } else {
         res.header("Content-Type", "application/json");
-        res.body = try res.arena.dupe(u8, json_str);
+        try res.chunk(json_str);
     }
 }
 

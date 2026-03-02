@@ -2,13 +2,11 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
-`zexplorer` is a stateless, composable and embeddable engine designed for HTML based document content pipelines: a mini Swiss Army knife that runs fast, delivers, and dies.
-
-It is a native DOM + JS runtime with some layout rendering capabilities (**Flexbox** layout rendering and raster compositing). 
-Feed the dev-server with a JavaScript snippet, or pass your HTML documents to the CLI, and get back structured data or a layout as PNG, JPEG, WEBP, or PDF, without booting a massive browser.
+`zexplorer` is a fast, zero-dependency HTML+JS engine. Think `ffmpeg` for the web.
+You can use it as a _command-line tool_, an _HTTP dev-server_ or an _MCP server_ for LLM agents — no browser, no Node.js, no Python, no runtime.
 
 <p align="center">
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="600" height="600" />
+<img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="700" height="700" />
 </p>
 
 <br>
@@ -18,27 +16,22 @@ Feed the dev-server with a JavaScript snippet, or pass your HTML documents to th
 - Cold start: ~3ms
 - Memory: ~10MB
 - Zero dependencies. Single statically-compiled binary.
-- Powered by: QuickJS (ES2020), Lexbor (HTML5/DOM), Yoga (Flexbox), and ThorVG (Vector/Raster Graphics).
+- Stateless and Composable
 - Pipelines: Native support for parsing Markdown, CSV, and SVG.
-- Outputs: Return raw data (JSON, strings, binary arrays) or render to PNG, JPEG, WEBP, and PDF.
-- Use Cases: Composable CLI tool (think `ffmpeg` for the web) or a high-concurrency HTTP rendering service.
-
-You can use it :
-
- 1) as a library if you need to add native functionalities and are ready to use Zig,
- 2) via the CLI for composing/piping as a one-shot multi-steps process,
- 3) as a service: you pass a JavaScript snippet and POST it to the dev-server.
+- Outputs: Return raw data (JSON, strings, binary arrays), Markdown or render layouts (**Flexbox**) to PNG, JPEG, WEBP, and PDF.
+- Use Cases: Composable CLI tool or a high-concurrency HTTP rendering service, or giving your LLM a visual output channel.
 
 ---
 
 ## What can it do?
 
-Think of `ffmpeg` for documents: an engine including lightweight versions of [JSDOM](https://github.com/jsdom/jsdom) + [DOMPurify](https://github.com/cure53/DOMPurify) + [node-canvas](https://github.com/Automattic/node-canvas) + [Satori](https://github.com/vercel/satori) with its built-in HTTP server or its composable CLI.
+Think of `ffmpeg` for documents: a single binary with its built-in HTTP - MCP server and its composable CLI for DOM manipulation, HTML sanitization, canvas rendering, and layout-driven image export — no Node, no browser, no runtime.
 
 It can:
 
 - **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
-- **Stream**  - communicate with an LLM via SSE. It can receive HTML chunks and rebuild a real DOM.
+- **Stream** — consume LLM output via SSE (currently local Ollama, extendable to  any OpenAI-compatible endpoint); receive HTML chunks and rebuild a live DOM incrementally.
+- **Expose** — serve as an MCP server so LLM agents (Claude Desktop, Gemini CLI…) can call `render_html`, `render_markdown`, `render_url`, or `run_script` and receive screenshots directly in the conversation.
 - **Render** — `Flexbox` based and no CSS functions.  HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
 - **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
 - **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
@@ -46,19 +39,9 @@ It can:
 
 **Limitations**:
 
-❗️No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
-
-It is not
-
-- a `Node.js` or `Bun` alternative
-- a headless browser — no layout engine, no visual rendering
-- a full Web API implementation — however, it has "essential" coverage, focused on what frameworks actually need
-- a multi-tenant platform — it assumes process-level isolation (microVM/container)
-
-It cannot:
-
-- scrape arbitrary bot protected public websites,
-- paint complex CSS using grid-2d, position:fixed, CSS functions...
+- No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
+- cannot scrape arbitrary bot protected public websites,
+- cannot paint complex CSS using grid-2d, position:fixed, CSS functions...
 
 ## How is it built?
 
@@ -88,13 +71,21 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 > - **Network hardening** — timeouts, redirect/size limits, SSRF pre-flight filtering, HTTPS-only remote imports.
 > - **Resource limits** — worker fan-out caps, busy-loop interrupts, max stack/GC/memory, wall-clock deadlines.
 
-## The Showcase
+## Examples
 
-1) Generative template
-2) OG images
-3) Leaflet
-4) CSV to D3
+| Example | What it shows | Output | CLI | Server |
+| ------- | ------------- | ------ | :---: | :---: |
+| [Dynamic HTML card](#use-dynamic-html-with-htm-and-paint) | `htm` tagged templates → paintDOM | PNG | ✓ | ✓ |
+| [CSS grid / flexbox layout](#render-an-html-file-in-the-terminal) | grid-1D + flexbox → terminal image | PNG | ✓ | ✓ |
+| [Scrape Hacker News](#scrape-hacker-news) | fetch → DOM query → structured data | JSON | ✓ | ✓ |
+| [Vercel SPA scrape](#scrape-a-vercel-site-in-less-than-1s) | Next.js hydration → `waitForSelector` | JSON | ✓ | ✓ |
+| [Vercel site snapshot](#render-the-vercel-side) | SSR page → inlined images → render | WEBP | ✓ | ✓ |
+| [CSV → D3.js chart](#csv-input-to-draw-d3js-chart) | CSV parse → D3 SVG → rasterize | WEBP | – | ✓ |
+| [LLM generative UI](#generative-template) | Ollama/OpenAI SSE → DOM → image | WEBP | ✓ | ✓ |
+| [Leaflet map PDF](#generate-a-leaflet-map-pdf-report) | GeoJSON route → OSM tiles → SVG → PDF | PDF | – | ✓ |
+| MCP server | Give Claude Desktop / Gemini visual eyes | PNG | – | ✓ |
 
+---
 
 ## First examples
 

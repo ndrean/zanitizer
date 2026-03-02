@@ -8,6 +8,7 @@
 #   /run          — markdownToHTML, toMarkdown, MD round-trip
 #   /stream       — basic HTML, CSS, script-driven DOM mutation,
 #                   markdown conversion inside a script
+#   /mcp          — initialize, tools/list, render_html (PNG), run_script (text + image)
 #
 # Prerequisites:
 #   ./zig-out/bin/zxp serve .
@@ -242,6 +243,64 @@ HTML_TOMD_SCRIPT='<html><body>
 OUT=$(curl -sf -X POST "$BASE/stream" --data-binary "$HTML_TOMD_SCRIPT")
 assert_contains "/stream toMarkdown: heading" "Turndown Test" "$OUT"
 assert_contains "/stream toMarkdown: bold"    "bold"          "$OUT"
+
+# ── /mcp — JSON-RPC 2.0 ──────────────────────────────────────────────────────
+
+echo ""
+echo "═══ /mcp — JSON-RPC 2.0 ════════════════════════════════════════════════"
+
+MCP_INIT=$(curl -sf -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}')
+assert_contains "/mcp initialize: version"    '"protocolVersion"' "$MCP_INIT"
+assert_contains "/mcp initialize: serverInfo" '"zexplorer"'       "$MCP_INIT"
+
+MCP_LIST=$(curl -sf -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}')
+assert_contains "/mcp tools/list: render_html"     '"render_html"'     "$MCP_LIST"
+assert_contains "/mcp tools/list: render_markdown" '"render_markdown"' "$MCP_LIST"
+assert_contains "/mcp tools/list: render_url"      '"render_url"'      "$MCP_LIST"
+assert_contains "/mcp tools/list: run_script"      '"run_script"'      "$MCP_LIST"
+
+MCP_HTML=$(curl -sf -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"render_html","arguments":{"html":"<h1>MCP</h1>","width":200}}}')
+assert_contains "/mcp render_html: image type" '"type":"image"' "$MCP_HTML"
+assert_contains "/mcp render_html: png mime"   '"image/png"'    "$MCP_HTML"
+
+# Verify the base64 data decodes to a valid PNG
+MCP_PNG_B64=$(echo "$MCP_HTML" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['result']['content'][0]['data'])" 2>/dev/null)
+if [ -n "$MCP_PNG_B64" ]; then
+  echo "$MCP_PNG_B64" | base64 -d > /tmp/mcp_smoke.png 2>/dev/null
+  if xxd -l 4 /tmp/mcp_smoke.png 2>/dev/null | grep -q "8950"; then
+    green "/mcp render_html: valid PNG magic bytes"
+    PASS=$((PASS + 1))
+  else
+    red "/mcp render_html: invalid PNG bytes"
+    FAIL=$((FAIL + 1))
+  fi
+else
+  red "/mcp render_html: could not extract base64 data"
+  FAIL=$((FAIL + 1))
+fi
+
+MCP_SCRIPT=$(curl -sf -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"run_script","arguments":{"script":"40 + 2"}}}')
+assert_contains "/mcp run_script: text type"  '"type":"text"' "$MCP_SCRIPT"
+assert_contains "/mcp run_script: value 42"   '"42"'          "$MCP_SCRIPT"
+
+MCP_IMG=$(curl -sf -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"run_script","arguments":{"script":"zxp.loadHTML(\"<h1>Hi</h1>\"); zxp.encode(zxp.paintDOM(document.body,200),\"png\")"}}}')
+assert_contains "/mcp run_script image: image type" '"type":"image"' "$MCP_IMG"
+assert_contains "/mcp run_script image: png mime"   '"image/png"'    "$MCP_IMG"
+
+MCP_ERR=$(curl -sf -X POST "$BASE/mcp" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":6,"method":"unknown_method"}')
+assert_contains "/mcp unknown method: error code" '"code":-32601' "$MCP_ERR"
 
 # ── summary ──────────────────────────────────────────────────────────────────
 
