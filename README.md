@@ -43,21 +43,7 @@ It can:
 - cannot scrape arbitrary bot protected public websites,
 - cannot paint complex CSS using grid-2d, position:fixed, CSS functions...
 
-## How is it built?
-
-A native Zig engine that wires together purpose-built C/C++ libraries — no runtime dependencies:
-
-| Layer                    | Library                                                                                         | Role                                   |
-| ------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
-| DOM & CSS                | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors     |
-| JavaScript               | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT)    |
-| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode          |
-| Raster rendering         | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization & thorvg-canvas |
-| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation & text layer            |
-| Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)      |
-| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi                 |
-| WebServer                | [httpz-zig](https://github.com/karlseguin/http.zig)                                             | Serve over HTTP                        |
-| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                     |
+              |
 
 ## Security
 
@@ -171,7 +157,7 @@ We start the dev-server with:
 and send a POST request with the content of the JavaScript snippet:
 
 ```sh
-curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
+  curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
 ```
 
 It takes 38ms to run the code, paint the image and save it:
@@ -4128,6 +4114,22 @@ find vendor/lexbor_src_master/source -name "*.h" | xargs grep -l "lxb_html_seral
 
 grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ```
+
+## How is it built?
+
+A native Zig engine that wires together purpose-built C/C++ libraries — no runtime dependencies:
+
+| Layer                    | Library                                                                                         | Role                                   |
+| ------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
+| DOM & CSS                | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors     |
+| JavaScript               | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT)    |
+| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode          |
+| Raster rendering         | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization & thorvg-canvas |
+| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation & text layer            |
+| Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)      |
+| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi                 |
+| WebServer                | [httpz-zig](https://github.com/karlseguin/http.zig)                                             | Serve over HTTP                        |
+| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation       
 
 ## Licenses
 
