@@ -270,7 +270,7 @@ Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/r
 
 We have selected to render a table (this is a POST request to "/render_llm"). You can get for example:
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/srs/examples/generative/browser_render_llm_demo.png" alt="browser screenshot" width="600">
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/browser_render_llm_demo.png" alt="browser screenshot" width="600">
 
 <br/>
 
