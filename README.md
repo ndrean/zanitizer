@@ -161,7 +161,7 @@ We showcase the local provider `ollama`. We used the 4.7G model "qwen2.5-coder:7
 
 Let's "live-serve" this component in a browser. The browser will send a GET request to the dev-servern which. in turn will reach the LLM. Depending upon the mood of the LLML, you can get this image:
 
-<img src="https://github.com/zexplorer/ndrean/blob/main/src/examples/generative/img_embedded.png" alt="generative template" width="400">
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/img_embedded.png" alt="generative template" width="400">
 
 **Second example**: interactive generative form
 
@@ -270,7 +270,7 @@ Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/r
 
 We have selected to render a table (this is a POST request to "/render_llm"). You can get for example:
 
-<img src="https://github.com/ndrean/zexplorer/blob.main/srsc/examples/generative/browser_render_llm_demo.png" alt="browser screenshot" width="600">
+<img src="https://github.com/ndrean/zexplorer/blob/main/srs/examples/generative/browser_render_llm_demo.png" alt="browser screenshot" width="600">
 
 <br/>
 
