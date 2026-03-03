@@ -854,7 +854,7 @@ fn applyInlineStyle(yg: yoga.Node, info: *NodeInfo, style: []const u8) void {
             if (parsePixelValue(val)) |v| yoga.setMargin(yg, yoga.EDGE_BOTTOM, v);
         } else if (std.mem.eql(u8, prop, "gap")) {
             if (parsePixelValue(val)) |v| yoga.setGap(yg, yoga.c.YGGutterAll, v);
-        } else if (std.mem.eql(u8, prop, "background") or std.mem.eql(u8, prop, "background-color")) {
+        } else if (std.mem.eql(u8, prop, "background") or std.mem.eql(u8, prop, "background-color") or std.mem.eql(u8, prop, "fill")) {
             if (parseCSSColor(val)) |clr| {
                 info.bg_color = clr;
             }
@@ -1788,7 +1788,7 @@ pub fn js_native_encode(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, a
     defer if (lower.ptr != fmt.ptr) std.heap.c_allocator.free(lower);
 
     if (std.mem.eql(u8, lower, "jpg") or std.mem.eql(u8, lower, "jpeg")) {
-        var list = std.ArrayListUnmanaged(u8){};
+        var list: std.ArrayList(u8) = .empty;
         defer list.deinit(rc.allocator);
         var jctx = JpegWriteContext{ .data = &list, .allocator = rc.allocator };
         _ = stbi_write_jpg_to_func(stbiJpegWriteCallback, &jctx, @intCast(width), @intCast(height), 4, rgba.ptr, 90);

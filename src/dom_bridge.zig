@@ -18,6 +18,7 @@ const js_blob = z.js_blob;
 const js_file = z.js_File;
 const js_formData = z.js_formData;
 const js_polyfills = z.js_polyfills;
+const js_store = z.js_store;
 const js_filelist = z.js_filelist;
 const js_file_reader_sync = z.js_file_reader_sync;
 const js_file_reader = z.js_file_reader;
@@ -106,6 +107,16 @@ pub const DOMBridge = struct {
 
             // Link opaque pointer
             ctx.setOpaque(obj, canvas_struct) catch return w.EXCEPTION;
+
+            // Register in node_cache keyed by the backing DOM element so that
+            // querySelector / wrapNode returns this Canvas object (not a plain html_element).
+            if (canvas_struct.element) |el| {
+                const bridge: *DOMBridge = @ptrCast(@alignCast(rc.dom_bridge.?));
+                const ptr_addr = @intFromPtr(@as(*z.DomNode, @ptrCast(@alignCast(el))));
+                const dup_for_cache = ctx.dupValue(obj);
+                bridge.node_cache.put(ptr_addr, dup_for_cache) catch {};
+            }
+
             return obj;
         }
 
@@ -422,6 +433,7 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "__native_stdinReadBytes", ctx.newCFunction(js_stdin.js_native_stdinReadBytes, "stdinReadBytes", 0));
         try ctx.setPropertyStr(global, "__native_paintDOM", ctx.newCFunction(js_compositor.js_paintDOM, "paintDOM", 5));
         try ctx.setPropertyStr(global, "__native_paintElement", ctx.newCFunction(js_compositor.js_paintElement, "paintElement", 2));
+        try ctx.setPropertyStr(global, "__native_paintSVG", ctx.newCFunction(js_paintSVG, "paintSVG", 1));
         try ctx.setPropertyStr(global, "__native_streamFrom", ctx.newCFunction(js_streamfrom.js_native_streamFrom, "streamFrom", 1));
         try ctx.setPropertyStr(global, "__native_llmHTML", ctx.newCFunction(js_llm.js_native_llmHTML, "llmHTML", 1));
         try ctx.setPropertyStr(global, "__native_llmStream", ctx.newCFunction(js_llm.js_native_llmStream, "llmStream", 1));
@@ -429,6 +441,12 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "__native_parseCSV", ctx.newCFunction(js_csv.js_native_parseCSV, "parseCSV", 1));
         try ctx.setPropertyStr(global, "__native_stringifyCSV", ctx.newCFunction(js_csv.js_native_stringifyCSV, "stringifyCSV", 1));
         try ctx.setPropertyStr(global, "__native_evalModule", ctx.newCFunction(js_native_evalModule, "evalModule", 2));
+
+        // Persistent store — zxp.store.* (backed by SQLite in {sandbox_root}/zxp_store.db)
+        try ctx.setPropertyStr(global, "__native_store_save", ctx.newCFunction(js_store.js_store_save, "store_save", 3));
+        try ctx.setPropertyStr(global, "__native_store_get", ctx.newCFunction(js_store.js_store_get, "store_get", 1));
+        try ctx.setPropertyStr(global, "__native_store_list", ctx.newCFunction(js_store.js_store_list, "store_list", 0));
+        try ctx.setPropertyStr(global, "__native_store_delete", ctx.newCFunction(js_store.js_store_delete, "store_delete", 1));
 
         // HTMLElement constructor is now exposed in init() before polyfills
 
@@ -458,6 +476,8 @@ pub const DOMBridge = struct {
 
         try ctx.setOpaque(doc_obj, self.doc);
         try ctx.setPropertyStr(doc_obj, "_native_doc", ctx.dupValue(doc_obj));
+        // nodeType = 9 (DOCUMENT_NODE) — required by DOMPurify's isSupported check
+        try ctx.setPropertyStr(doc_obj, "nodeType", ctx.newInt32(9));
 
         // Manual Bindings (querySelector, createRange)
         const qs_fn = ctx.newCFunction(js_querySelector, "querySelector", 1);
@@ -2509,20 +2529,35 @@ fn formHasProperty(
     obj: z.qjs.JSValue,
     prop: z.qjs.JSAtom,
 ) callconv(.c) c_int {
+    // IMPORTANT: JS_HasProperty returns the exotic handler's result immediately, without
+    // searching the prototype chain. We must do the prototype-chain fallback ourselves.
     const ctx = w.Context.from(ctx_ptr);
     const rc = RuntimeContext.get(ctx);
-    const ptr = ctx.getOpaque(obj, rc.classes.html_element) orelse return 0;
+    const ptr = ctx.getOpaque(obj, rc.classes.html_element) orelse return protoHasProperty(ctx_ptr, obj, prop);
     const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
-    if (!std.ascii.eqlIgnoreCase(z.tagName_zc(el), "form")) return 0;
 
-    var prop_len: usize = 0;
-    const prop_cstr = z.qjs.JS_AtomToCStringLen(ctx_ptr, &prop_len, prop);
-    if (prop_cstr == null) return 0;
-    defer z.qjs.JS_FreeCString(ctx_ptr, prop_cstr);
-    const prop_name = prop_cstr[0..prop_len];
-    if (prop_name.len == 0) return 0;
+    if (std.ascii.eqlIgnoreCase(z.tagName_zc(el), "form")) {
+        var prop_len: usize = 0;
+        const prop_cstr = z.qjs.JS_AtomToCStringLen(ctx_ptr, &prop_len, prop);
+        if (prop_cstr != null) {
+            defer z.qjs.JS_FreeCString(ctx_ptr, prop_cstr);
+            const prop_name = prop_cstr[0..prop_len];
+            if (prop_name.len > 0 and findNamedControl(z.firstChild(z.elementToNode(el)), prop_name) != null)
+                return 1;
+        }
+    }
 
-    return if (findNamedControl(z.firstChild(z.elementToNode(el)), prop_name) != null) 1 else 0;
+    return protoHasProperty(ctx_ptr, obj, prop);
+}
+
+// Fall back to normal prototype-chain lookup when the exotic handler doesn't own the property.
+// We call JS_HasProperty on the object's __proto__ so we skip the exotic handler on `obj`
+// itself (which would cause infinite recursion) and let QuickJS walk the rest of the chain.
+fn protoHasProperty(ctx_ptr: ?*z.qjs.JSContext, obj: z.qjs.JSValue, prop: z.qjs.JSAtom) c_int {
+    const proto = z.qjs.JS_GetPrototype(ctx_ptr, obj);
+    defer z.qjs.JS_FreeValue(ctx_ptr, proto);
+    if (z.qjs.JS_IsNull(proto) or z.qjs.JS_IsUndefined(proto)) return 0;
+    return z.qjs.JS_HasProperty(ctx_ptr, proto, prop);
 }
 
 const form_exotic_methods = z.qjs.JSClassExoticMethods{
@@ -2645,4 +2680,75 @@ fn js_native_evalModule(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_in
         _ = ctx.checkAndPrintException();
     }
     return val;
+}
+
+/// __native_paintSVG(svgBytes) — rasterize raw SVG bytes → { data: ArrayBuffer, width, height }
+/// Input: Uint8Array or ArrayBuffer containing SVG source text.
+/// ThorVG reads the viewBox and scales so the longest side ≥ 800px.
+/// Returns the same { data, width, height } shape as paintDOM / paintElement.
+fn js_paintSVG(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    if (argc < 1) return w.UNDEFINED;
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+
+    // Accept: string | ArrayBuffer | TypedArray
+    var svg_slice: []const u8 = undefined;
+    var maybe_owned_buf: ?w.Value = null;
+    var maybe_cstr: ?[*:0]const u8 = null;
+    defer if (maybe_owned_buf) |v| ctx.freeValue(v);
+    defer if (maybe_cstr) |s| ctx.freeCString(s);
+
+    if (ctx.isString(argv[0])) {
+        const s = ctx.toCString(argv[0]) catch return w.UNDEFINED;
+        maybe_cstr = s;
+        svg_slice = std.mem.span(s);
+    } else if (ctx.isArrayBuffer(argv[0])) {
+        svg_slice = ctx.getArrayBuffer(argv[0]) catch return w.UNDEFINED;
+    } else {
+        const ta = ctx.getTypedArrayBuffer(argv[0]) catch return w.UNDEFINED;
+        maybe_owned_buf = ta.buffer;
+        const full = ctx.getArrayBuffer(ta.buffer) catch return w.UNDEFINED;
+        svg_slice = full[ta.byte_offset .. ta.byte_offset + ta.byte_length];
+    }
+
+    // ThorVG doesn't recognise the CSS keyword "transparent" — it falls back to the
+    // SVG default fill (black). Replace it only inside attribute values ("transparent")
+    // and CSS style values (:transparent) so text content is not affected.
+    const needs_fixup = std.mem.indexOf(u8, svg_slice, "transparent") != null;
+    const svg_to_render: []const u8 = if (needs_fixup) blk: {
+        var buf = std.ArrayList(u8).empty;
+        buf.ensureTotalCapacity(rc.allocator, svg_slice.len) catch break :blk svg_slice;
+        var rest = svg_slice;
+        while (std.mem.indexOf(u8, rest, "transparent")) |pos| {
+            // Check that it appears inside a quoted attribute value or after a CSS colon
+            const before = if (pos > 0) rest[pos - 1] else 0;
+            const after_end = pos + "transparent".len;
+            const after = if (after_end < rest.len) rest[after_end] else 0;
+            const in_attr = (before == '"' or before == '\'') and (after == '"' or after == '\'');
+            const in_css = (before == ':' or before == ' ') and (after == ';' or after == '"' or after == '\'' or after == ' ');
+            buf.appendSlice(rc.allocator, rest[0..pos]) catch break :blk svg_slice;
+            if (in_attr or in_css) {
+                buf.appendSlice(rc.allocator, "none") catch break :blk svg_slice;
+            } else {
+                buf.appendSlice(rc.allocator, "transparent") catch break :blk svg_slice;
+            }
+            rest = rest[after_end..];
+        }
+        buf.appendSlice(rc.allocator, rest) catch break :blk svg_slice;
+        break :blk buf.toOwnedSlice(rc.allocator) catch svg_slice;
+    } else svg_slice;
+    defer if (needs_fixup and svg_to_render.ptr != svg_slice.ptr) rc.allocator.free(svg_to_render);
+
+    const img = js_image.Image.initFromSvg(rc.allocator, svg_to_render, 0) catch |err| {
+        std.debug.print("[paintSVG] initFromSvg failed: {}\n", .{err});
+        return w.UNDEFINED;
+    };
+    defer img.deinit();
+
+    const pixel_bytes: []const u8 = img.pixels[0 .. @as(usize, @intCast(img.width)) * @as(usize, @intCast(img.height)) * 4];
+    const result = ctx.newObject();
+    ctx.setPropertyStr(result, "data", ctx.newArrayBufferCopy(pixel_bytes)) catch return w.UNDEFINED;
+    ctx.setPropertyStr(result, "width", ctx.newFloat64(@floatFromInt(img.width))) catch return w.UNDEFINED;
+    ctx.setPropertyStr(result, "height", ctx.newFloat64(@floatFromInt(img.height))) catch return w.UNDEFINED;
+    return result;
 }

@@ -87,6 +87,7 @@ pub const js_File = @import("js_File.zig");
 pub const js_stdin = @import("js_stdin.zig");
 pub const js_formData = @import("js_formData.zig");
 pub const js_polyfills = @import("js_polyfills.zig");
+pub const js_store = @import("js_store.zig");
 pub const js_filelist = @import("js_filelist.zig");
 pub const js_file_reader_sync = @import("js_file_reader_sync.zig");
 pub const js_file_reader = @import("js_file_reader.zig");

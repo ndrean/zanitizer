@@ -20,6 +20,7 @@ const z = @import("root.zig");
 const httpz = @import("httpz");
 const zxp_runtime = z.zxp_runtime;
 const js_streamfrom = z.js_streamfrom;
+const js_store = z.js_store;
 const AppContext = z.serve.AppContext;
 
 const MCP_VERSION = "2024-11-05";
@@ -150,7 +151,7 @@ const TOOLS_JSON =
     \\  },
     \\  {
     \\    "name": "run_script",
-    \\    "description": "Execute JavaScript in a headless DOM+JS engine (QuickJS, browser-like). Returns plain text/JSON, or a base64 image if the script returns an ArrayBuffer from zxp.encode().\n\nENVIRONMENT: Full DOM (document, querySelector, innerHTML, events), fetch(), URL, setTimeout, TextDecoder/Encoder.\n\nZXP API:\n  zxp.goto(url)                       - fetch URL with browser headers, parse HTML+CSS, run scripts\n  zxp.streamFrom(url)                 - streaming fetch into parser (better for large pages)\n  zxp.fetchAll(urlArray, hdrsArray)   - parallel fetch; returns [{ok,status,data,type}] — use for batch image replacement\n  zxp.loadHTML(html)                  - parse an HTML string into document\n  zxp.paintDOM(node, width)           - render DOM node to RGBA canvas {data,width,height}\n  zxp.paintElement(el, width)         - render a single element (cropped to its bbox)\n  zxp.encode(img, format)             - encode canvas to ArrayBuffer (png/webp/jpeg/pdf) — return this for an image response\n  zxp.arrayBufferToBase64DataUri(buf,mime) - convert ArrayBuffer to data URI string\n  zxp.markdownToHTML(md)              - Markdown to HTML (GFM: tables, strikethrough, tasks)\n  zxp.toMarkdown(element)             - DOM element to Markdown string (compact for LLM input)\n  zxp.llmHTML({model,prompt,...})     - call Ollama, stream HTML response, return as string\n  zxp.llmStream({model,prompt,...})   - stream LLM tokens directly into DOM\n  zxp.csv.parse(str)                  - CSV string to array of objects\n  zxp.csv.stringify(rows)             - array of objects to CSV string\n  zxp.fs.readFileSync(path)           - read file to ArrayBuffer\n  zxp.stdin.read()                    - read stdin as string (CLI only)\n\nSCRAPING:\n  await zxp.goto('https://news.ycombinator.com');\n  return Array.from(document.querySelectorAll('.titleline a')).map(a => a.textContent);\n\nSCRAPE + REPLACE IMAGES (render a live page with real images):\n  await zxp.goto('https://example.com');\n  const imgs = Array.from(document.querySelectorAll('img[src]'));\n  const urls = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));\n  const fetched = await zxp.fetchAll(urls, urls.map(() => ({})));\n  fetched.forEach((r,i) => { if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type)); });\n  return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');\n\nCall get_zxp_docs before writing scripts to get worked examples and understand CSS rendering constraints.",
+    \\    "description": "Execute JavaScript in a headless DOM+JS engine (QuickJS, browser-like). Returns plain text/JSON, or a base64 image if the script returns an ArrayBuffer from zxp.encode().\n\nENVIRONMENT: Full DOM (document, querySelector, innerHTML, events), fetch(), URL, setTimeout, TextDecoder/Encoder.\n\nZXP API:\n  zxp.goto(url)                       - fetch URL with browser headers, parse HTML+CSS, run scripts\n  zxp.streamFrom(url)                 - streaming fetch into parser (better for large pages)\n  zxp.fetchAll(urlArray, hdrsArray)   - parallel fetch; returns [{ok,status,data,type}] — use for batch image replacement\n  zxp.loadHTML(html)                  - parse an HTML string into document\n  zxp.paintDOM(node, width)           - render DOM node to RGBA canvas {data,width,height}\n  zxp.paintElement(el, width)         - render a single element (cropped to its bbox)\n  zxp.encode(img, format)             - encode canvas to ArrayBuffer (png/webp/jpeg/pdf) — return this for an image response\n  zxp.arrayBufferToBase64DataUri(buf,mime) - convert ArrayBuffer to data URI string\n  zxp.markdownToHTML(md)              - Markdown to HTML (GFM: tables, strikethrough, tasks)\n  zxp.toMarkdown(element)             - DOM element to Markdown string (compact for LLM input)\n  zxp.llmHTML({model,prompt,...})     - call Ollama, stream HTML response, return as string\n  zxp.llmStream({model,prompt,...})   - stream LLM tokens directly into DOM\n  zxp.csv.parse(str)                  - CSV string to array of objects\n  zxp.csv.stringify(rows)             - array of objects to CSV string\n  zxp.fs.readFileSync(path)           - read file to ArrayBuffer\n  zxp.stdin.read()                    - read stdin as string (CLI only)\n  zxp.store.save(name, data, opts?)   - persist text/ArrayBuffer to SQLite; opts: {mime,note}\n  zxp.store.get(name)                 - retrieve entry → {name,mime,note,hash,data:ArrayBuffer}\n  zxp.store.list()                    - list all entries (metadata only)\n  zxp.store.delete(name)              - delete entry by name\n\nSCRAPING:\n  await zxp.goto('https://news.ycombinator.com');\n  return Array.from(document.querySelectorAll('.titleline a')).map(a => a.textContent);\n\nSCRAPE + REPLACE IMAGES (render a live page with real images):\n  await zxp.goto('https://example.com');\n  const imgs = Array.from(document.querySelectorAll('img[src]'));\n  const urls = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));\n  const fetched = await zxp.fetchAll(urls, urls.map(() => ({})));\n  fetched.forEach((r,i) => { if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type)); });\n  return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');\n\nCall get_zxp_docs before writing scripts to get worked examples and understand CSS rendering constraints.",
     \\    "inputSchema": {
     \\      "type": "object",
     \\      "properties": {
@@ -171,6 +172,50 @@ const TOOLS_JSON =
     \\          "description": "Doc section to return (default: all). examples=worked code patterns; api=full function signatures; rendering=CSS constraints and layout tips; scraping=goto/fetchAll/toMarkdown patterns."
     \\        }
     \\      }
+    \\    }
+    \\  },
+    \\  {
+    \\    "name": "store_save",
+    \\    "description": "Save a binary blob or text string to the persistent store (SQLite). Use this to persist intermediate render results across tool calls so you can reference them later without re-computing. Upserts by name (replaces if name already exists).",
+    \\    "inputSchema": {
+    \\      "type": "object",
+    \\      "properties": {
+    \\        "name":  {"type": "string",  "description": "Unique key to store the value under"},
+    \\        "value": {"type": "string",  "description": "Text or base64-encoded binary content to store"},
+    \\        "mime":  {"type": "string",  "description": "MIME type hint (e.g. image/png, text/plain)"},
+    \\        "note":  {"type": "string",  "description": "Optional human-readable description"}
+    \\      },
+    \\      "required": ["name", "value"]
+    \\    }
+    \\  },
+    \\  {
+    \\    "name": "store_get",
+    \\    "description": "Retrieve a previously saved value from the persistent store by name. Returns the value as text or as a base64-encoded image if the mime type is an image type.",
+    \\    "inputSchema": {
+    \\      "type": "object",
+    \\      "properties": {
+    \\        "name": {"type": "string", "description": "Key to retrieve"}
+    \\      },
+    \\      "required": ["name"]
+    \\    }
+    \\  },
+    \\  {
+    \\    "name": "store_list",
+    \\    "description": "List all entries in the persistent store (name, mime, note, hash, created_at). Does not return data blobs — use store_get to retrieve a specific entry.",
+    \\    "inputSchema": {
+    \\      "type": "object",
+    \\      "properties": {}
+    \\    }
+    \\  },
+    \\  {
+    \\    "name": "store_delete",
+    \\    "description": "Delete an entry from the persistent store by name. Returns true if the entry existed and was deleted.",
+    \\    "inputSchema": {
+    \\      "type": "object",
+    \\      "properties": {
+    \\        "name": {"type": "string", "description": "Key to delete"}
+    \\      },
+    \\      "required": ["name"]
     \\    }
     \\  }
     \\]
@@ -266,6 +311,137 @@ const DOC_EXAMPLES =
     \\    return zxp.encode(zxp.paintDOM(document.body, 900), 'png');
     \\  }
     \\  run();
+    \\
+    \\## 7. D3 bar chart from CSV data (via zxp.importScript)
+    \\
+    \\  async function run() {
+    \\    const resp = await fetch('https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv');
+    \\    const rows = zxp.csv.parse(await resp.text())
+    \\      .filter(r => r['Country Code'] === 'FRA' && r['Year'] > 2000)
+    \\      .map(r => ({ year: r['Year'], gdp: r['Value'] }));
+    \\
+    \\    zxp.loadHTML('<html><body><div id="chart" style="width:800px;height:600px"></div></body></html>');
+    \\    await zxp.importScript('https://d3js.org/d3.v7.min.js');
+    \\
+    \\    const margin = { top: 40, right: 40, bottom: 60, left: 100 };
+    \\    const W = 800, H = 600;
+    \\    const iW = W - margin.left - margin.right, iH = H - margin.top - margin.bottom;
+    \\    const svg = d3.select('#chart').append('svg')
+    \\      .attr('width', W).attr('height', H).attr('xmlns', 'http://www.w3.org/2000/svg')
+    \\      .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    \\    const xScale = d3.scaleBand().domain(rows.map(d => d.year)).range([0, iW]).padding(0.1);
+    \\    const yScale = d3.scaleLinear().domain([0, d3.max(rows, d => d.gdp)]).range([iH, 0]);
+    \\    svg.append('g').attr('transform', `translate(0,${iH})`).call(d3.axisBottom(xScale));
+    \\    svg.append('g').call(d3.axisLeft(yScale).ticks(10, 's'));
+    \\    svg.selectAll('rect').data(rows).join('rect')
+    \\      .attr('x', d => xScale(d.year)).attr('y', d => yScale(d.gdp))
+    \\      .attr('width', xScale.bandwidth()).attr('height', d => iH - yScale(d.gdp))
+    \\      .attr('fill', '#3b82f6');
+    \\    svg.append('text').attr('x', iW/2).attr('y', -10).attr('text-anchor', 'middle')
+    \\      .attr('font-size', '18px').attr('font-weight', 'bold').text('GDP of FRA Over Time');
+    \\
+    \\    return zxp.encode(zxp.paintElement(document.querySelector('#chart'), { width: 800 }), 'png');
+    \\  }
+    \\  run();
+    \\
+    \\## 8. Leaflet map with GeoJSON route overlay (via zxp.importScript)
+    \\
+    \\  async function run() {
+    \\    zxp.loadHTML('<html><body><div id="map" style="width:800px;height:600px"></div></body></html>');
+    \\    await zxp.importScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+    \\
+    \\    const map = L.map('map', { zoomControl: false, attributionControl: false })
+    \\      .setView([51.505, -0.09], 13);
+    \\    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    \\    L.geoJSON({ type: 'LineString', coordinates: [[-0.15,51.505],[-0.12,51.51],[-0.076,51.508]] },
+    \\      { style: { color: 'red', weight: 6 } }).addTo(map);
+    \\
+    \\    // Extract tile positions + SVG overlay, fetch tile buffers, composite to PNG
+    \\    const tiles = Array.from(document.querySelectorAll('img.leaflet-tile'))
+    \\      .map(img => ({ url: img.src, x: parseInt(img.style.left||0,10), y: parseInt(img.style.top||0,10) }));
+    \\    const svgString = document.querySelector('.leaflet-overlay-pane svg')?.outerHTML || '';
+    \\    const readyTiles = [];
+    \\    for (const t of tiles) {
+    \\      try { readyTiles.push({ buffer: await (await fetch(t.url)).arrayBuffer(), x: t.x, y: t.y }); }
+    \\      catch(_) {}
+    \\    }
+    \\    // NOTE: generateRoutePng writes to disk and returns undefined — no image content in MCP response
+    \\    zxp.generateRoutePng(readyTiles, svgString, 'london_route.png');
+    \\    return 'Wrote london_route.png';
+    \\  }
+    \\  run();
+    \\
+    \\## 9. Mermaid.js — NOT SUPPORTED
+    \\
+    \\  // Mermaid cannot be rendered correctly by zexplorer.
+    \\  //
+    \\  // Root cause: Mermaid calls getBBox() on the root SVG group to compute the
+    \\  // viewBox. zexplorer has no geometry engine at JS runtime, so getBBox() always
+    \\  // returns {x:0, y:0, width:0, height:0}. The resulting viewBox is near-zero
+    \\  // and ThorVG produces a blank or near-blank image.
+    \\  //
+    \\  // Post-processing the SVG to fix the viewBox is not viable: node sizes depend
+    \\  // on rendered text metrics, and shapes vary by diagram type (flowchart, sequence,
+    \\  // ER…). There is no general solution without a full SVG geometry engine during
+    \\  // JS execution.
+    \\  //
+    \\  // Alternative: use ECharts (example 10) or hand-crafted SVG for diagrams.
+    \\
+    \\## 10. ECharts line chart → PNG (SVG renderer recommended)
+    \\
+    \\  // ECharts has two renderers: 'svg' and 'canvas'.
+    \\  // Use SVG: ThorVG rasterizes the output perfectly (no browser geometry engine needed).
+    \\  // Canvas works (querySelector now returns the native Canvas via node_cache fix),
+    \\  // but stroke() artifacts appear on open paths (e.g. axis ticks get triangle fills).
+    \\
+    \\  async function run() {
+    \\    window.requestAnimationFrame = cb => setTimeout(cb, 0);
+    \\    zxp.loadHTML('<!DOCTYPE html><html><body><div id="chart" style="width:800px;height:600px;"></div></body></html>');
+    \\    await zxp.importScript('https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js');
+    \\
+    \\    const chart = echarts.init(document.getElementById('chart'), null, { renderer: 'svg', animation: false });
+    \\    chart.setOption({
+    \\      animation: false,
+    \\      title: { text: 'Monthly Sales' },
+    \\      xAxis: { type: 'category', data: ['Jan','Feb','Mar','Apr','May','Jun'] },
+    \\      yAxis: { type: 'value' },
+    \\      series: [{ type: 'line', data: [820, 932, 901, 934, 1290, 1330] }]
+    \\    });
+    \\
+    \\    const svgStr = new XMLSerializer().serializeToString(document.querySelector('#chart svg'));
+    \\    return zxp.encode(zxp.paintSVG(svgStr), 'png');
+    \\  }
+    \\  run();
+    \\
+    \\## 11. Persist and retrieve results across tool calls (zxp.store)
+    \\
+    \\  // Save a rendered PNG for later reference
+    \\  zxp.loadHTML('<h1 style="color:#2563eb;font-size:48px">Report v1</h1>');
+    \\  const img = zxp.encode(zxp.paintDOM(document.body, 600), 'png');
+    \\  zxp.store.save('report_v1', img, { mime: 'image/png', note: 'first draft' });
+    \\  return { saved: true };
+    \\
+    \\  // — in a later tool call, retrieve and decode it —
+    \\  const entry = zxp.store.get('report_v1');
+    \\  // entry.data is an ArrayBuffer — return it directly to get an image in MCP
+    \\  return zxp.encode(zxp.paintSVG(entry.data), 'png'); // or just: return entry.data;
+    \\
+    \\  // List what is stored
+    \\  return zxp.store.list();   // [{name, mime, note, hash, created_at}, ...]
+    \\
+    \\  // Clean up
+    \\  zxp.store.delete('report_v1');
+    \\
+    \\  // Save scraped markdown so the next call can use it without re-fetching
+    \\  await zxp.goto('https://example.com');
+    \\  const md = zxp.toMarkdown(document.body);
+    \\  zxp.store.save('example_md', md, { mime: 'text/markdown' });
+    \\  return md;
+    \\
+    \\  // — next call —
+    \\  const entry = zxp.store.get('example_md');
+    \\  const text = new TextDecoder().decode(entry.data);
+    \\  return text; // markdown ready for LLM processing
 ;
 
 const DOC_API =
@@ -323,11 +499,53 @@ const DOC_API =
     \\  zxp.csv.parse(csv: string): object[]     — CSV string → array of objects (headers = keys)
     \\  zxp.csv.stringify(rows: object[]): string — array of objects → CSV string
     \\
+    \\## Remote libraries (zxp.importScript)
+    \\  zxp.importScript(url: string): Promise<void>
+    \\    Fetch a JS library, eval it in the current context, then compile to bytecode
+    \\    and cache it process-wide (~10x faster on repeat calls — no re-fetch, no re-parse).
+    \\    Works with any CDN-hosted UMD/IIFE library. Tested: D3 v7, Leaflet 1.9.
+    \\    After awaiting, the library's globals (d3, L, etc.) are available immediately.
+    \\
+    \\    // D3 bar chart
+    \\    await zxp.importScript('https://d3js.org/d3.v7.min.js');
+    \\    // Leaflet map
+    \\    await zxp.importScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
+    \\
+    \\## SVG rendering
+    \\  zxp.paintSVG(svg: string | Uint8Array | ArrayBuffer): { data: ArrayBuffer, width, height }
+    \\    Rasterize SVG via ThorVG. Accepts a plain string (most convenient), Uint8Array,
+    \\    or ArrayBuffer. Reads the SVG viewBox and auto-scales so the longest side is ≥ 800px.
+    \\    Returns { data, width, height } — same shape as paintDOM/paintElement.
+    \\    Use zxp.encode(img, 'png') to get a PNG ArrayBuffer.
+    \\    Note: fill="transparent" is automatically normalised to fill="none" (ThorVG quirk).
+    \\    Prefer SVG output over canvas for chart libraries — pixel-perfect with no browser
+    \\    geometry engine required. Works great with ECharts, D3, any SVG-generating lib.
+    \\
     \\## File I/O
     \\  zxp.fs.readFileSync(path: string): ArrayBuffer
     \\  zxp.fs.writeFileSync(path: string, buf: ArrayBuffer): void
     \\  zxp.stdin.read(): string    — piped stdin as UTF-8 text (CLI only)
     \\  zxp.stdin.readBytes(): ArrayBuffer
+    \\
+    \\## Persistent Store (SQLite, sandbox-local)
+    \\  zxp.store.save(name: string, data: string | ArrayBuffer | Uint8Array, opts?): { id, hash }
+    \\    Upsert by name. opts: { mime?: string, note?: string }
+    \\    Use to persist render outputs, scraped content, or intermediate data across tool calls.
+    \\
+    \\  zxp.store.get(name: string): { id, name, mime, note, hash, data: ArrayBuffer, created_at } | null
+    \\    Retrieve a stored entry. data is always an ArrayBuffer — use TextDecoder for text.
+    \\
+    \\  zxp.store.list(): { id, name, mime, note, hash, created_at }[]
+    \\    List all entries (metadata only, no blobs).
+    \\
+    \\  zxp.store.delete(name: string): boolean
+    \\    Delete an entry by name. Returns true if it existed.
+    \\
+    \\  // Pattern: save a rendered image, retrieve it in the next tool call
+    \\  zxp.store.save('my_chart', zxp.encode(zxp.paintDOM(el, 800), 'png'), { mime: 'image/png' });
+    \\  // later:
+    \\  const { data } = zxp.store.get('my_chart');
+    \\  return data;  // returns the PNG as an image in MCP
 ;
 
 const DOC_SCRAPING =
@@ -482,6 +700,14 @@ fn handleToolsCall(
         try toolRunScript(app_ctx, id, args, out, aa, alloc);
     } else if (std.mem.eql(u8, name, "get_zxp_docs")) {
         try toolGetZxpDocs(id, args, out, aa);
+    } else if (std.mem.eql(u8, name, "store_save")) {
+        try toolStoreSave(app_ctx, id, args, out, aa);
+    } else if (std.mem.eql(u8, name, "store_get")) {
+        try toolStoreGet(app_ctx, id, args, out, aa);
+    } else if (std.mem.eql(u8, name, "store_list")) {
+        try toolStoreList(app_ctx, id, out, aa);
+    } else if (std.mem.eql(u8, name, "store_delete")) {
+        try toolStoreDelete(app_ctx, id, args, out, aa);
     } else {
         try buildError(id, -32602, "Unknown tool", out);
     }
@@ -801,4 +1027,140 @@ fn toolRunScript(
 
     const content = try textContent(text, aa);
     try buildToolResult(id, content, out);
+}
+
+// ── store_save ─────────────────────────────────────────────────────────────────
+
+fn toolStoreSave(app_ctx: *AppContext, id: ?std.json.Value, args: std.json.Value, out: *std.Io.Writer.Allocating, aa: std.mem.Allocator) !void {
+    const name = getStrArg(args, "name") orelse {
+        try buildError(id, -32602, "store_save: missing required argument 'name'", out);
+        return;
+    };
+    const value = getStrArg(args, "value") orelse {
+        try buildError(id, -32602, "store_save: missing required argument 'value'", out);
+        return;
+    };
+    const mime = getStrArg(args, "mime");
+    const note = getStrArg(args, "note");
+
+    const store = js_store.getOrOpen(aa, app_ctx.sandbox_root) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_save: failed to open DB: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    const result = store.save(name, value, mime, note) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_save: DB error: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    const text = try std.fmt.allocPrint(aa, "Saved '{s}' (id={d}, hash={s})", .{ name, result.id, result.hash });
+    const cnt = try textContent(text, aa);
+    try buildToolResult(id, cnt, out);
+}
+
+// ── store_get ──────────────────────────────────────────────────────────────────
+
+fn toolStoreGet(app_ctx: *AppContext, id: ?std.json.Value, args: std.json.Value, out: *std.Io.Writer.Allocating, aa: std.mem.Allocator) !void {
+    const name = getStrArg(args, "name") orelse {
+        try buildError(id, -32602, "store_get: missing required argument 'name'", out);
+        return;
+    };
+
+    const store = js_store.getOrOpen(aa, app_ctx.sandbox_root) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_get: failed to open DB: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    var row = store.get(name) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_get: DB error: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    if (row == null) {
+        const msg = try std.fmt.allocPrint(aa, "store_get: '{s}' not found", .{name});
+        const cnt = try textContent(msg, aa);
+        try buildToolResult(id, cnt, out);
+        return;
+    }
+    defer row.?.deinit();
+    const r = row.?;
+
+    // If mime is an image type, return as MCP image content
+    const is_image = if (r.mime) |m| std.mem.startsWith(u8, m, "image/") else false;
+    if (is_image) {
+        const cnt = try imageContent(r.data, r.mime.?, aa);
+        try buildToolResult(id, cnt, out);
+    } else {
+        const cnt = try textContent(r.data, aa);
+        try buildToolResult(id, cnt, out);
+    }
+}
+
+// ── store_list ─────────────────────────────────────────────────────────────────
+
+fn toolStoreList(app_ctx: *AppContext, id: ?std.json.Value, out: *std.Io.Writer.Allocating, aa: std.mem.Allocator) !void {
+    const store = js_store.getOrOpen(aa, app_ctx.sandbox_root) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_list: failed to open DB: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    const entries = store.list(aa) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_list: DB error: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    var buf: std.Io.Writer.Allocating = .init(aa);
+    const w = &buf.writer;
+    try w.writeAll("[");
+    for (entries, 0..) |e, i| {
+        if (i > 0) try w.writeAll(",");
+        try w.print("{{\"id\":{d},\"name\":", .{e.id});
+        try std.json.Stringify.value(e.name, .{}, w);
+        try w.writeAll(",\"mime\":");
+        if (e.mime) |m| try std.json.Stringify.value(m, .{}, w) else try w.writeAll("null");
+        try w.writeAll(",\"note\":");
+        if (e.note) |n| try std.json.Stringify.value(n, .{}, w) else try w.writeAll("null");
+        try w.writeAll(",\"hash\":");
+        if (e.hash) |h| try std.json.Stringify.value(h, .{}, w) else try w.writeAll("null");
+        try w.print(",\"created_at\":{d}}}", .{e.created_at});
+    }
+    try w.writeAll("]");
+    const json = try buf.toOwnedSlice();
+
+    const cnt = try textContent(json, aa);
+    try buildToolResult(id, cnt, out);
+}
+
+// ── store_delete ───────────────────────────────────────────────────────────────
+
+fn toolStoreDelete(app_ctx: *AppContext, id: ?std.json.Value, args: std.json.Value, out: *std.Io.Writer.Allocating, aa: std.mem.Allocator) !void {
+    const name = getStrArg(args, "name") orelse {
+        try buildError(id, -32602, "store_delete: missing required argument 'name'", out);
+        return;
+    };
+
+    const store = js_store.getOrOpen(aa, app_ctx.sandbox_root) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_delete: failed to open DB: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    const deleted = store.delete(name) catch |err| {
+        const msg = try std.fmt.allocPrint(aa, "store_delete: DB error: {s}", .{@errorName(err)});
+        try buildError(id, -32603, msg, out);
+        return;
+    };
+
+    const text = if (deleted)
+        try std.fmt.allocPrint(aa, "Deleted '{s}'", .{name})
+    else
+        try std.fmt.allocPrint(aa, "'{s}' not found", .{name});
+    const cnt = try textContent(text, aa);
+    try buildToolResult(id, cnt, out);
 }

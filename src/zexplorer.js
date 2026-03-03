@@ -210,6 +210,22 @@ globalThis.zxp = {
     stringify: (rows) => __native_stringifyCSV(rows),
   },
 
+  // Persistent blob/text store — backed by SQLite at {sandbox_root}/zxp_store.db.
+  // Created automatically on first use (CREATE TABLE IF NOT EXISTS).
+  // Useful for LLMs to persist intermediate results across MCP tool calls.
+  store: {
+    // save(name, data, opts?) → { id, hash }
+    // data: string | ArrayBuffer | Uint8Array
+    // opts: { mime?: string, note?: string }
+    save: (name, data, opts) => __native_store_save(name, data, opts ?? {}),
+    // get(name) → { id, name, mime, note, hash, data: ArrayBuffer, created_at } | null
+    get: (name) => __native_store_get(name),
+    // list() → [{ id, name, mime, note, hash, created_at }]  (no data blob)
+    list: () => __native_store_list(),
+    // delete(name) → boolean
+    delete: (name) => __native_store_delete(name),
+  },
+
   async goto(url, options = {}) {
     applyLocationPolyfill(url);
     // JS handles the network — send mobile browser headers matching the scrape CLI path
@@ -391,6 +407,14 @@ globalThis.zxp = {
       else if (opts.dpi) w = Math.round(8.2677 * opts.dpi);
     }
     return __native_paintElement(element, w);
+  },
+
+  // paintSVG(svgBytes) → { data: ArrayBuffer, width, height }
+  // Rasterize raw SVG bytes via ThorVG. ThorVG reads the viewBox and auto-scales
+  // so the longest side is ≥ 800px. Returns the same shape as paintDOM / paintElement.
+  // Use zxp.encode(img, 'png') to get a PNG ArrayBuffer.
+  paintSVG(svgBytes) {
+    return __native_paintSVG(svgBytes);
   },
 
   // save(img, path) — encode RGBA + write to disk; extension decides format

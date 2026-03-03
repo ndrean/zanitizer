@@ -13,6 +13,72 @@ if (typeof self === "undefined") {
 }
 window.devicePixelRatio = window.devicePixelRatio || 1;
 
+// Intl — QuickJS has no built-in Intl. Minimal stub so libraries like Chart.js
+// that call `new Intl.NumberFormat(locale, opts).format(n)` don't crash.
+if (typeof globalThis.Intl === 'undefined') {
+  globalThis.Intl = {
+    NumberFormat: function(_locale, opts) {
+      var style = opts && opts.notation === 'compact' ? 'compact' : 'default';
+      return {
+        format: function(n) {
+          if (style === 'compact') {
+            if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+            if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+            if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+          }
+          return String(n);
+        },
+      };
+    },
+    DateTimeFormat: function() { return { format: function(d) { return String(d); } }; },
+    Collator: function() { return { compare: function(a, b) { return a < b ? -1 : a > b ? 1 : 0; } }; },
+  };
+}
+
+// CSS.escape — used by Mermaid and other libs to safely escape strings for CSS selectors
+if (typeof globalThis.CSS === 'undefined') {
+  globalThis.CSS = {};
+}
+if (typeof globalThis.CSS.escape !== 'function') {
+  globalThis.CSS.escape = function(value) {
+    var str = String(value);
+    var result = '';
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      if (c === 0) { result += '\uFFFD'; continue; }
+      if ((c >= 0x0001 && c <= 0x001F) || c === 0x007F ||
+          (i === 0 && c >= 0x0030 && c <= 0x0039) ||
+          (i === 1 && c >= 0x0030 && c <= 0x0039 && str.charCodeAt(0) === 0x002D)) {
+        result += '\\' + c.toString(16) + ' '; continue;
+      }
+      if (i === 0 && str.length === 1 && c === 0x002D) { result += '\\' + str[i]; continue; }
+      if (c >= 0x0080 || c === 0x002D || c === 0x005F ||
+          (c >= 0x0030 && c <= 0x0039) || (c >= 0x0041 && c <= 0x005A) || (c >= 0x0061 && c <= 0x007A)) {
+        result += str[i];
+      } else {
+        result += '\\' + str[i];
+      }
+    }
+    return result;
+  };
+}
+
+// CSS.supports — Mermaid uses this as a feature check; stub returns false (safe default)
+if (typeof globalThis.CSS !== 'undefined' && typeof globalThis.CSS.supports !== 'function') {
+  globalThis.CSS.supports = function() { return false; };
+}
+
+// document.styleSheets — Mermaid accesses this to inspect/inject page styles.
+// We expose an empty live-ish array (no real stylesheets in headless mode).
+if (typeof document !== 'undefined' && typeof document.styleSheets === 'undefined') {
+  Object.defineProperty(document, 'styleSheets', { get: function() { return []; }, configurable: true });
+}
+
+// structuredClone — QuickJS doesn't have it; JSON round-trip covers most library uses
+if (typeof globalThis.structuredClone === 'undefined') {
+  globalThis.structuredClone = function(obj) { return JSON.parse(JSON.stringify(obj)); };
+}
+
 if (typeof globalThis.process === "undefined") {
   globalThis.process = { env: { NODE_ENV: "production" } };
 }
@@ -142,10 +208,80 @@ if (!globalThis.Element.prototype.createSVGMatrix) {
     return new SVGMatrix();
   };
 }
-// Leaflet asks paths for their bounding box — return a fake empty rect.
+// getBoundingClientRect — improve the Zig stub which only reads integer width/height attrs.
+// The Zig stub misses "2000px" attr values and inline max-width. Estimate from content here.
+// Used by Mermaid/Dagre to compute SVG node sizes; without it viewBox = "-8 -8 16 16".
+(function () {
+  var _native = globalThis.Element.prototype.getBoundingClientRect;
+  globalThis.Element.prototype.getBoundingClientRect = function () {
+    var base = _native ? _native.call(this) : { x: 0, y: 0, top: 0, left: 0, width: 0, height: 0, bottom: 0, right: 0 };
+    if (base.width > 0 && base.height > 0) return base;
+
+    // Try to read width/height from attributes (handles "200px", "200", "100%")
+    function parseAttrPx(val) {
+      if (!val) return 0;
+      var n = parseFloat(val);
+      return isNaN(n) ? 0 : n;
+    }
+    var w = parseAttrPx(this.getAttribute && this.getAttribute('width'))
+         || parseAttrPx(this.style && this.style.width)
+         || parseAttrPx(this.style && this.style.maxWidth);
+    var h = parseAttrPx(this.getAttribute && this.getAttribute('height'))
+         || parseAttrPx(this.style && this.style.height);
+
+    // For text-containing elements, estimate from textContent length (≈7px/char, 16px line-height)
+    if (w === 0) {
+      var text = this.textContent || '';
+      if (text.length > 0) w = Math.min(text.length * 7, 200);
+      else w = 100;
+    }
+    if (h === 0) h = 24;
+
+    return { x: 0, y: 0, top: 0, left: 0, width: w, height: h, bottom: h, right: w };
+  };
+})();
+
+// getBBox — SVG element bounding box.
+// Leaflet uses it for path bounds (zeros OK there).
+// Mermaid/Dagre uses it on foreignObject elements to size graph nodes.
+// For foreignObjects, try width/height attrs then fall back to textContent estimation.
 if (!globalThis.Element.prototype.getBBox) {
   globalThis.Element.prototype.getBBox = function () {
-    return new SVGRect();
+    function parseAttrPx(v) { if (!v) return 0; var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+    var w = parseAttrPx(this.getAttribute && this.getAttribute('width'));
+    var h = parseAttrPx(this.getAttribute && this.getAttribute('height'));
+    // For text-containing elements, estimate from content (node labels etc.)
+    if (w === 0) {
+      var text = (this.textContent || '').trim();
+      w = text.length > 0 ? Math.min(text.length * 7 + 20, 200) : 60;
+    }
+    if (h === 0) h = 30;
+    return { x: 0, y: 0, width: w, height: h };
+  };
+}
+// SVG text measurement — Mermaid/Dagre use this for node sizing.
+// Rough estimate: ~7px per character at default font size.
+if (!globalThis.Element.prototype.getComputedTextLength) {
+  globalThis.Element.prototype.getComputedTextLength = function () {
+    var text = this.textContent || '';
+    return text.length * 7;
+  };
+}
+if (!globalThis.Element.prototype.getSubStringLength) {
+  globalThis.Element.prototype.getSubStringLength = function (_charnum, nchars) {
+    return nchars * 7;
+  };
+}
+// Element.getElementsByTagName — standard DOM method, also needed on elements (not just document).
+if (!globalThis.Element.prototype.getElementsByTagName) {
+  globalThis.Element.prototype.getElementsByTagName = function (tag) {
+    return this.querySelectorAll(tag === '*' ? '*' : tag);
+  };
+}
+// Element.getElementsByClassName — same story.
+if (!globalThis.Element.prototype.getElementsByClassName) {
+  globalThis.Element.prototype.getElementsByClassName = function (cls) {
+    return this.querySelectorAll('.' + cls.trim().split(/\s+/).join('.'));
   };
 }
 

@@ -15,6 +15,7 @@ const Paths = struct {
     libharu_include: std.Build.LazyPath,
     fake_zlib: std.Build.LazyPath,
     md4c_src: std.Build.LazyPath,
+    sqlite_src: std.Build.LazyPath,
 };
 
 /// All C libraries needed by the project
@@ -26,6 +27,7 @@ const Libraries = struct {
     miniz: *std.Build.Step.Compile,
     haru: *std.Build.Step.Compile,
     md4c: *std.Build.Step.Compile,
+    sqlite: *std.Build.Step.Compile,
     zexplorer: *std.Build.Step.Compile,
 };
 
@@ -47,6 +49,7 @@ pub fn build(b: *std.Build) void {
         .libharu_include = b.path("vendor/libharu/include"),
         .fake_zlib = b.path("vendor/fake_zlib"),
         .md4c_src = b.path("vendor/md4c/src"),
+        .sqlite_src = b.path("vendor/sqlite"),
     };
 
     // Build all C libraries
@@ -58,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .miniz = buildMiniz(b, target, optimize, paths),
         .haru = buildLibHaru(b, target, optimize, paths),
         .md4c = buildMd4c(b, target, optimize, paths),
+        .sqlite = buildSqlite(b, target, optimize, paths),
         .zexplorer = buildZexplorerLib(b, target, optimize, paths),
     };
 
@@ -69,6 +73,7 @@ pub fn build(b: *std.Build) void {
     libs.zexplorer.linkLibrary(libs.miniz);
     libs.zexplorer.linkLibrary(libs.haru);
     libs.zexplorer.linkLibrary(libs.md4c);
+    libs.zexplorer.linkLibrary(libs.sqlite);
 
     // Curl dependency
     const dep_curl = b.dependency(
@@ -106,6 +111,27 @@ pub fn build(b: *std.Build) void {
 // =============================================================================
 // C Library Builders
 // =============================================================================
+
+fn buildSqlite(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths) *std.Build.Step.Compile {
+    const lib = b.addLibrary(.{
+        .name = "sqlite3",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    lib.addIncludePath(paths.sqlite_src);
+    lib.addCSourceFiles(.{
+        .root = paths.sqlite_src,
+        .files = &.{"sqlite3.c"},
+        .flags = &.{
+            "-O3",
+            "-DSQLITE_THREADSAFE=2", // multi-thread: safe for per-thread connections
+            "-DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1",
+            "-DSQLITE_ENABLE_FTS5",
+        },
+    });
+    lib.linkLibC();
+    return lib;
+}
 
 fn buildMiniz(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths) *std.Build.Step.Compile {
     const lib = b.addLibrary(.{
@@ -418,6 +444,12 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     });
     const httpz_module = httpz.module("httpz");
 
+    const zqlite_dep = b.dependency("zqlite", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const zqlite_module = zqlite_dep.module("zqlite");
+
     const mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -433,6 +465,7 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     mod.linkLibrary(libs.miniz);
     mod.linkLibrary(libs.haru);
     mod.linkLibrary(libs.md4c);
+    mod.linkLibrary(libs.sqlite);
     mod.addIncludePath(paths.quickjs_src);
     mod.addIncludePath(paths.lexbor_src);
     mod.addIncludePath(paths.stb_image_src);
@@ -445,8 +478,10 @@ fn buildZexplorerModule(b: *std.Build, target: std.Build.ResolvedTarget, optimiz
     mod.addIncludePath(paths.fake_zlib);
     mod.addIncludePath(b.path("vendor/libharu/include"));
     mod.addIncludePath(paths.md4c_src);
+    mod.addIncludePath(paths.sqlite_src);
     mod.addIncludePath(b.path("vendor/yoga/yoga"));
     mod.addImport("httpz", httpz_module);
+    mod.addImport("zqlite", zqlite_module);
     mod.link_libc = true;
     mod.link_libcpp = true;
 
@@ -486,7 +521,9 @@ fn linkAllLibs(artifact: *std.Build.Step.Compile, paths: Paths, libs: Libraries)
     artifact.linkLibrary(libs.miniz);
     artifact.linkLibrary(libs.haru);
     artifact.linkLibrary(libs.md4c);
+    artifact.linkLibrary(libs.sqlite);
     artifact.addIncludePath(paths.md4c_src);
+    artifact.addIncludePath(paths.sqlite_src);
 }
 
 fn buildMainExe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, paths: Paths, libs: Libraries, zexplorer: ZexplorerResult, curl_module: *std.Build.Module) void {

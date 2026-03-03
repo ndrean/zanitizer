@@ -19,6 +19,7 @@ const z = @import("root.zig");
 const zqjs = z.wrapper;
 const qjs = z.qjs;
 const js_security = z.js_security;
+const js_store = z.js_store;
 
 // ---------------------------------------------------------------------------
 // Interrupt deadline — written by ScriptEngine, read by js_interrupt_handler.
@@ -82,6 +83,7 @@ pub const ZxpRuntime = struct {
         self.rt.runGC();
         self.rt.deinit();
         self.sandbox.deinit();
+        js_store.closeThreadLocal(self.allocator);
         self.allocator.free(self.sandbox_root);
         self.allocator.destroy(self);
     }

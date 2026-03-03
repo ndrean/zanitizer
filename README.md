@@ -5,6 +5,8 @@
 `zexplorer` is a fast, zero-dependency HTML+JS engine. Think `ffmpeg` for the web.
 You can use it as a _command-line tool_, an _HTTP dev-server_ or an _MCP server_ for LLM agents — no browser, no Node.js, no Python, no runtime.
 
+The MCP service gives your LLM agent eyes and persistent local storage, zero infra.
+
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/main/images/zexplorer.png" alt="logo" width="700" height="700" />
 </p>
@@ -14,34 +16,34 @@ You can use it as a _command-line tool_, an _HTTP dev-server_ or an _MCP server_
 **TL;DR**:
 
 - Cold start: ~3ms
-- Memory: ~10MB
+- Memory: ~12MB
 - Zero dependencies. Single statically-compiled binary.
-- Stateless and Composable
+- Stateless by default, Stateful on demand with a zero-config embedded SQLite storage for local persistence.
 - Pipelines: Native support for parsing Markdown, CSV, and SVG.
 - Outputs: Return raw data (JSON, strings, binary arrays), Markdown or render layouts (**Flexbox**) to PNG, JPEG, WEBP, and PDF.
-- Use Cases: Composable CLI tool or a high-concurrency HTTP rendering service, or giving your LLM a visual output channel.
+- MCP service - the token saver - let the LLM run scripts server-side, such as scrape, transform or render and get back the result.
+- Usage: Composable CLI tool or a high-concurrency HTTP rendering service.
 
 ---
 
 ## What can it do?
 
-Think of `ffmpeg` for documents: a single binary with its built-in HTTP - MCP server and its composable CLI for DOM manipulation, HTML sanitization, canvas rendering, and layout-driven image export — no Node, no browser, no runtime.
-
 It can:
 
-- **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit, WebComponents, extract data. No headless browser.
+- **Scrape** — fetch a URL, hydrate React, render Vue/Svelte/Lit/SolidJS, WebComponents, extract data. No headless browser.
 - **Stream** — consume LLM output via SSE (currently local Ollama, extendable to  any OpenAI-compatible endpoint); receive HTML chunks and rebuild a live DOM incrementally.
-- **Expose** — serve as an MCP server so LLM agents (Claude Desktop, Gemini CLI…) can call `render_html`, `render_markdown`, `render_url`, or `run_script` and receive screenshots directly in the conversation.
-- **Render** — `Flexbox` based and no CSS functions.  HTML+JS+SVG (D3, Chart.js, Leaflet, Canvas API), output PNG/JPEG/WEBP/PDF.
+- **Expose** — serve as an MCP server so LLM agents (Claude Desktop, Gemini CLI…) can `run_script` using the custom API, or use the shortcuts `render_html`, `render_markdown`, `render_url`, and receive data or screenshots directly in the conversation.
+- **Render** — `Flexbox` based only, all static:  HTML+JS+SVG such as D3, Chart.js, Leaflet, ECharts. Basic support for Canvas API, output PNG/JPEG/WEBP/PDF.
 - **Generate** — design an SVG in Figma, plug in data, batch-produce OG images or PDF reports.
 - **Sanitize** — DOM+CSS-aware HTML sanitization (stylesheets, inline styles, XSS/mXSS). Built-in.
 - **Run JS** — execute ES2020 scripts against a real DOM with fetch, timers, workers, and an event loop.
+- **Store & Persist** - drop text, blobs, images in the local storage, no ceremony.
 
 **Limitations**:
 
-- No TypeScript support. JSX is supported via "tagged templates" (using `htm`).
+- no TypeScript support. JSX is supported via "tagged templates" (using `htm`).
 - cannot scrape arbitrary bot protected public websites,
-- cannot paint complex CSS using grid-2d, position:fixed, CSS functions...
+- cannot paint complex CSS using grid-2d nor position:fixed, no CSS functions or variables nor complex canvas nor media queries...
 
 ## Security
 
@@ -71,177 +73,101 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 
 ---
 
-## First examples
 
 ### MCP server
 
-The dev-server is up and running (`./zig-out/bin.zxp serve`).
-
-**tools/list**: you can check the available methods with:
+Start the server (the `.` sets the sandbox root for file access and the SQLite store):
 
 ```sh
-curl -X POST http://localhost:9984/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+./zig-out/bin/zxp serve .
 ```
 
-The list of available methods are:
+**Connect Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
-```txt
-{"jsonrpc":"2.0","id":1,"result":{"tools":[
-  {"name": "render_html",...},
-  {"name": "render_markdown",...},
-  {"name": "render_url",...},
-  {"name": "run_script",...}
-  ...
+```json
+{
+  "mcpServers": {
+    "zexplorer": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:9984/mcp"]
+    }
+  }
 }
 ```
 
-Let's make a call to the MCP: run a JS script.
+**Available tools:**
+
+| Tool | What it does |
+| ---- | ----------- |
+| `render_html` | Render an HTML string → PNG/WEBP/JPEG (base64 image in MCP response) |
+| `render_markdown` | Render GFM Markdown → image |
+| `render_url` | Fetch a URL, run its scripts, render → image |
+| `run_script` | Execute arbitrary JavaScript in the headless DOM+JS engine; returns text, JSON, or an image |
+| `get_zxp_docs` | Return API docs and worked examples — call this before writing a `run_script` |
+| `store_save` | Persist text or binary data (e.g. a rendered PNG) to a local SQLite store |
+| `store_get` | Retrieve a stored entry by name; `data` is an ArrayBuffer |
+| `store_list` | List store entries (metadata only) |
+| `store_delete` | Delete a store entry by name |
+
+The typical LLM workflow is: call `get_zxp_docs` to learn the `zxp.*` API, then call `run_script` with composed JavaScript to scrape, render, or process data. `store_*` lets the LLM persist intermediate results across stateless tool calls.
+
+Your local storage is just:
+
+```js
+// zexplorer runs this instantly. No DB connection setup needed.
+const pageTitle = document.querySelector('title').textContent;
+zxp.store.save("last_scraped_title", pageTitle); // Saved instantly to SQLite
+zxp.store.get("last_scraped_title");
+```
+
+**Smoke-test with curl:**
 
 ```sh
-curl -X POST http://localhost:9984/mcp \
+# Text result
+curl -s -X POST http://localhost:9984/mcp \
   -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-      "name": "run_script",
-      "arguments": {
-        "script": "const a = 10; const b = 32; `The answer is ${a + b}`"
-      }
-    }
-  }'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_script","arguments":{"script":"const a=10,b=32; `The answer is ${a+b}`"}}}'
+# → {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"The answer is 42"}]}}
+
+# Image result
+curl -s -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"render_html","arguments":{"html":"<h1 style=\"color:red\">Hello MCP!</h1>","width":400}}}'
+# → {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"image","data":"iVBORw0KGgo....","mimeType":"image/png"}]}}
 ```
 
-The output is:
-
-```txt
-{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"The answer is 42"}]}}
-```
-
-The _"/run_script"_ allows the LLM to build knowledge about the `zxp` API and use it to run code. This means that the LLM can compose JS snippets using zxp primitives. I gains knowledge by exploring the available documentation and examples.
-
-**Use 'run_script' to build a D3 chart from CSV**: the LLM can compose JS and let zexplorer run it, and get an image back. No animation of coursse is allowed so it comes with limitations.
+**Use `run_script` to build a D3 chart from CSV data** — the LLM composes the JS and gets an image back:
 
 Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/example_d3.js>
-
-You get back an image:
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/output_chart.webp" alt="output_chart" width="500">
 
 <br>
 
-**Let the LLM evaluate HTML**: The LLM can make a call and ask for `render_html` and pass the HTML and receive back an image which he can read.
-Note that the CSS that can be rendered is _very_ limited and constrainted.
-We illustrate this with a styled `<h1>` element:
-
-```sh
-curl -X POST http://localhost:9984/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-      "name": "render_html",
-      "arguments": {
-        "html": "<h1 style=\"color: red;\">Hello MCP!</h1>",
-        "width": 400
-      }
-    }
-  }'
-```
-
-We get the response in 22ms: a B64 encoded string of a PNG image.
-
-```txt
-{"jsonrpc":"2.0","id":3,"result":{"content":[
-      {
-        "type":"image",
-        "data":"iVBORw0KGgo....",
-        "mimeType":"image/png"
-      }
-]}}
-```
-
-The "/run_script" method is
-
 ### Generative template
 
 You want to use an LLM to generate some HTML with CSS for us as the engine has builtin support for SSE' text/event-stream' content-type support.
 
-> [!NOTE]
-> Rendering images on demand unlocks two use case:
->
-> - with the MCP, the LLM is no more blind. It can build some HTML and send it to the engine "/mcp" endpoint and get back a painted image and can evaluate the result,
-> - you can directly insert LLM generated images in your markup, either statically or dynamically.
+We showcase the local provider `ollama`. We used the 4.7G model "qwen2.5-coder:7b". This can be extended to any provider (OpenAI, Anthropic, Gemini) if you adapt the LLM response parsing.
 
-We showcase the local provider `ollama` with the 4.7G model "qwen2.5-coder:7b".
+- Our local LLM `ollama` is up and running: `curl -s http://localhost:11434/api/tags | head -c 200` returns _{"models":[{"name":"qwen2.5-coder:7b",....}_.
+- The dev-server is up and running: `./zig-out.bin/zxp server .`
 
-This can be extended to any provider (OpenAI, Anthropic, Gemini) if you adapt the LLM response parsing.
-
-> Note the credentails are hold in the dev-server, not by the client code.
-
-**First test**: send a query to the LLM (`ollama` is running on your server):
-
-```js
-// src/examples/generative/test_llm.js
-async function run(prompt= "") {
-  const html = await zxp.llmHTML({model: "qwen2.5-coder:3b",prompt});
- 
-  document.body.innerHTML = html;
-  const img = zxp.paintDOM(document.body, 800);
-  return zxp.encode(img, "webp");
-}
-run("3 metric cards in a row using flexbox: Revenue $12k, Users 340, Uptime 99.9%. White background, colored cards.");
-```
-
-Run it with the CLI:
-
-```sh
-./zig-out/bin/zxp run src/examples/generative/test_llm.js -o src/examples/generative/test_llm.webp
-```
-
-The result is:
-
-<img src="" alt="generative template" width="400">
-
-<br>
-
-Now that we are confident that we can comminucate with the LLM and receive a response, We can know use it directly in a rendered HTML.
-The HTML file becomes a generative template — declarative, stateless, reproducible. Just swap the prompt.
-
-**Second test**: static source.
-
-- The dev-server is up and running (`./zig-out/bin.zxp serve`).
-- `ollama` is up and running: `curl -s http://localhost:11434/api/tags | head -c 200` returns _{"models":[{"name":"qwen2.5-coder:7b",....}_.
-
-Let's "live-serve" the HTML file below in a browser. The image source points to the dev-server GET "/render_llm" endpoint to which we pass a query string that contains a small prompt.
+**First example**: render a generative `<img>` component.
 
 ```html
-<body>
-  <section>
-    [...]
-    <img
-      class="static-img"
-      src="http://localhost:9984/render_llm?prompt=3+metric+cards+Revenue+%2412k+Users+340+MRR+%244.2k&width=600&format=webp"
-      alt="Generated metric cards"
-    >
-  </section>
-</body>
+<img src="http://localhost:9984/render_llm?prompt=3+metric+cards+Revenue+%2412k+Users+340+MRR+%244.2k&width=600&format=png">
 ```
 
-In the browser, we observe that a GET request to "http://localhost:9984/render_llm?prompt=3+metric+cards+Revenue+%2412k+Users+340+MRR+%244.2k&width=600&format=webp" is made in the browser and you can inspect the response.
+Let's "live-serve" this component in a browser. The browser will send a GET request to the dev-servern which. in turn will reach the LLM. Depending upon the mood of the LLML, you can get this image:
 
-An example of the LLM generated image response:
+<img src="https://github.com/zexplorer/ndrean/blob/main/src/examples/generative/test_llm.webp" alt="generative template" width="400">
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/static_img_generated_response.png" alt="generative template" width="600">
+**Second example**: interactive generative form
 
-**Third example**: interactive form
+The HTML below is a HTML form where we select a more elaborated prompt. On submission, a JavaScript snippet will POST the prompt to the dev-server "/render_llm" endpoint.
 
-The HTML below is a simple HTML form with a JavaScript snippet which will POST a more elaborated prompt to the dev-server "/render_llm" endpoint.
+Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/render_llm_demo.html>
 
 <details><summary>a FORM textarea INPUT populated by four buttons with a submit button</summary>
 
@@ -340,6 +266,135 @@ The HTML below is a simple HTML form with a JavaScript snippet which will POST a
 ```
 
 </details>
+<br>
+
+We have selected to render a table (this is a POST request to "/render_llm"). You can get for example:
+
+<img src="https://github.com/ndrean/zexplorer/blob.main/srsc/examples/browser_render_llm_demo.png" alt="browser screenshot" width="600">
+
+<br/>
+
+### CSV input to draw D3.js chart
+
+An example that shows how to collect public data from a CSV source and build a [D3.js](https://github.com/d3/d3) chart.
+
+We use the following functions: `zxp.csv.parse()` and `zxp.loadHTML()` and `await zxp.runScripts()` and `zxp.paintElement()` (to extract the exact HTMLElement you want) and `zxp.encode()` (generate WEBP encoded binary) and `zxp.fs.writeFileSync()` to save it locally.
+
+Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/example_d3.js>
+
+<details><summary>JS code snippet to draw D3 chart from CSV data</summary>
+
+```js
+async function gdp(country) {
+    const resp = await fetch('https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv');
+    const raw_data = await resp.text();
+    const csv = zxp.csv.parse(raw_data);
+    const country_data = csv.filter((row) => row['Country Code'] == country && row['Year'] > 2000)
+        .map((row) => ({year: row['Year'], gdp: row['Value']}))
+    
+    zxp.loadHTML(`
+    <html>
+        <head>
+            <script src="https://d3js.org/d3.v7.min.js"></script>
+        </head>
+        <body>
+            <div id="chart" style="width: 800px; height: 600px;"></div>
+        </body>
+    </html>
+  `);
+
+    await zxp.runScripts();
+
+
+    const width = 800, height = 600;
+    const margin = { top: 40, right: 40, bottom: 60, left: 100 };
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+
+    const svg = d3.select('#chart')
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height)
+        .attr('xmlns', 'http://www.w3.org/2000/svg')
+        .append('g')
+        // Shift the inner chart to make room for axes labels!
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Define the X and Y Scales
+    // X Scale: Years (Band scale for bars)
+    const xScale = d3.scaleBand()
+        .domain(country_data.map(d => d.year))
+        .range([0, innerWidth])
+        .padding(0.1);
+
+    // Y Scale: GDP (Linear scale from 0 to max GDP)
+    const yScale = d3.scaleLinear()
+        .domain([0, d3.max(country_data, d => d.gdp)])
+        .range([innerHeight, 0]);
+
+    // Draw the X and Y Axes
+    // X Axis (Bottom)
+    svg.append('g')
+        .attr('transform', `translate(0,${innerHeight})`)
+        .call(d3.axisBottom(xScale).tickValues(
+            // Only show every 5th year so the labels don't overlap
+            xScale.domain().filter((d, i) => i % 5 === 0)
+        ))
+        .attr('font-size', '12px');
+
+    // Y Axis (Left)
+    svg.append('g')
+        .call(d3.axisLeft(yScale).ticks(10, 's')) 
+        .attr('font-size', '12px');
+
+    // Draw the Bars
+    svg.selectAll('rect')
+        .data(country_data)
+        .join('rect')
+        .attr('x', d => xScale(d.year))
+        .attr('y', d => yScale(d.gdp))
+        .attr('width', xScale.bandwidth())
+        .attr('height', d => innerHeight - yScale(d.gdp))
+        .attr('fill', '#3b82f6'); // Tailwind Blue
+
+    // Add a Title
+    svg.append('text')
+        .attr('x', innerWidth / 2)
+        .attr('y', -10)
+        .attr('text-anchor', 'middle')
+        .attr('font-family', 'sans-serif')
+        .attr('font-size', '20px')
+        .attr('font-weight', 'bold')
+        .text(`GDP of ${country} Over Time`);
+
+    const chartEl = document.querySelector('#chart');
+
+    // option: return the SVG -> render in a browser
+    // zxp.fs.writeFileSync('src/examples/d3_chart/output_chart.html', chartEl.outerHTML);
+
+    // return a painted image for the SVG chart.
+    const imgObj = zxp.paintElement(chartEl, {width: 800}); 
+    // Returns ImageData{data, width, height}
+    // Encode raw RGBA pixels to a standard ArrayBuffer (WEBP here)
+    const imgBytes = zxp.encode(imgObj, 'webp');
+    zxp.fs.writeFileSync('src/examples/d3_chart/output_chart.webp', imgBytes);
+
+}
+
+gdp('FRA');
+```
+
+</details>
+
+The dev-server is up and running. We send a POST request to the endpoint where the payload is the snippet:
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/d3_chart/output_chart.webp
+```
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/output_cart.webp" alt="D3 chart from CSV" width="400">
+
+<br>
 
 #### Note about SSE format
 
@@ -356,15 +411,44 @@ if anthropic                                           → .delta.text
 if gemini                                             → .candidates[0].content.parts[0].text
 ```
 
-The general prompt that we use:
- 
-```txt
-You are a UI generator. Output ONLY raw HTML.
-Use ONLY: display:flex, flex-direction, justify-content, align-items,
-gap, padding, margin, color, background, font-size, border-radius.
-No external fonts. No animations. No @media. No CSS variables.
-Inline styles only OR a single <style> block.
+Due to our limitations in the CSS that we are able to render, and because we are using a small model, we had to set hard and explicit constraints in our prompt.
+
+<details><summary>The general system prompt that we use</summary>
+
+```zig
+pub const default_system =
+    "You are a UI generator. Output ONLY raw HTML — no markdown, no code fences, no backticks, no explanation. " ++
+    "Start your response directly with an HTML tag. " ++
+    "Use ONLY <div> and <span> elements — NEVER <table>, <tr>, <td>, <th>, <thead>, <tbody>. " ++
+    "Use ONLY inline styles with these CSS properties: display (flex or block), flex-direction, " ++
+    "justify-content, align-items, flex-wrap, gap, padding, margin, color, background, " ++
+    "font-size, font-weight, border-radius, width, height, border, text-align, white-space. " ++
+    "No external fonts. No CSS variables. No animations. No <script> tags. " ++
+    "CRITICAL: Every opened <div> MUST be explicitly closed with </div> before opening the next sibling <div>. " ++
+    "CARD PATTERN — row of sibling cards, each card has stacked label+value (NEVER nest cards): " ++
+    "<div style=\"display:flex;flex-direction:row;gap:16px;padding:16px\">" ++
+    "<div style=\"width:30%;background:#fff;border-radius:8px;padding:16px\">" ++
+    "<div style=\"font-size:13px;color:#666\">Label A</div>" ++
+    "<div style=\"font-size:24px;font-weight:bold\">Value A</div>" ++
+    "</div>" ++
+    "<div style=\"width:30%;background:#fff;border-radius:8px;padding:16px\">" ++
+    "<div style=\"font-size:13px;color:#666\">Label B</div>" ++
+    "<div style=\"font-size:24px;font-weight:bold\">Value B</div>" ++
+    "</div>" ++
+    "</div> " ++
+    "TABLE PATTERN — outer column container, SIBLING row divs inside it (NEVER nest rows): " ++
+    "<div style=\"display:flex;flex-direction:column\">" ++
+    "<div style=\"display:flex;flex-direction:row\">" ++
+    "<div style=\"width:40%\">Header A</div><div style=\"width:60%\">Header B</div>" ++
+    "</div>" ++
+    "<div style=\"display:flex;flex-direction:row\">" ++
+    "<div style=\"width:40%\">Cell A1</div><div style=\"width:60%\">Cell B1</div>" ++
+    "</div>" ++
+    "</div>";
 ```
+
+</details>
+
 
 ### Use dynamic HTML with `htm` and paint
 
@@ -418,12 +502,11 @@ Inline styles only OR a single <style> block.
 
 </details>
 
-We will use two methods:
-
-- the dev-server:  the `serve` verb. You POST an HTTP request whose payload is a JS snippet
-- the CLI: the `convert` verb.
+We can use either the dev-server or the CLI.
   
 **dev-server**: the following JavaScript snippet is our payload. We use the custom methods `zxp.loadHTML`, `zxp.paintDOM` and `zxp.save`.
+
+The dev-server is up and running. We send a POST request with the the JavaScript snippet:
 
 ```js
 // src/examples/frameworks/htm/run.js
@@ -441,29 +524,21 @@ const output = "src/examples/frameworks/htm/paint.png"
 run(input, output);
 ```
 
-We have built our server (`zig build --release=fast`). We start the dev-server with:
-
-```sh
-./zig-out/bin/zxp serve
-```
-
-and send a POST request with the the JavaScript snippet:
+We POST the request to the dev-server:
 
 ```sh
   curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
 ```
 
-It takes 38ms to run the code, paint the image and save it:
-
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/paint.png" alt="demo htm" width="500" height="400">
-
-<br>
-
-**CLI**: we can alternatively use the CLI with the verb `convert` and use the flag `-o` to output into the format you want (PNG, JPEG, WEBP or PDF).
+or alternatively with the CLI (`-o` to output into the format you want, PNG, JPEG, WEBP or PDF):
 
 ```sh
 ./zig-out/bin/zxp convert src/examples/frameworks/htm/test_htm.html -o src/examples/frameworks/htm/paint.jpeg
 ```
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/paint.png" alt="demo htm" width="500" height="400">
+
+---
 
 ### Render an HTML file in the terminal
 
@@ -857,161 +932,6 @@ You can serve this HTML via the LiveServer to have a snapshot of the Vercel demo
 
 ---
 
-### CSV input to draw D3.js chart
-
-A first quick example using the CLI: we will execute a JavaScript snippet (`run -e "..."`) that reads from stdin (`zxp.stdin.read()`), parses the CSV data (`zxp.csv.parse()`) and conversely stringify it back (`zxp.csv.stringify()`).
-
-```sh
-echo "name,age\nAlice,30\nBob,25\n" | \
-./zig-out/bin/zxp run -e \
-"const csv = zxp.stdin.read();
-const rows = zxp.csv.parse(csv);
-console.log(rows); 
-const back = zxp.csv.stringify(rows); 
-console.log(back);"
-```
-
-gives you as expected:
-
-```txt
-[{"name": "Alice", "age": "30"},{"name": "Bob","age": "25"}]
-
-"name","age"
-Alice,30
-Bob,25
-```
-
-An example that shows you can use CSV data to build a [D3.js](https://github.com/d3/d3) chart easily.
-
-We use the following functions: `zxp.csv.parse()` and `zxp.loadHTML()` and `await zxp.runScripts()` and `zxp.paintElement()` (to extract the exact HTMLElement you want) and `zxp.encode()` (generate WEBP encoded binary) and `zxp.fs.writeFileSync()` to save it locally.
-
-<details><summary>JS code snippet to draw D3 chart from CSV data</summary>
-
-Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/example_d3.js>
-
-```js
-async function gdp(country) {
-    const resp = await fetch('https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv');
-    const raw_data = await resp.text();
-    const csv = zxp.csv.parse(raw_data);
-    const country_data = csv.filter((row) => row['Country Code'] == country && row['Year'] > 2000)
-        .map((row) => ({year: row['Year'], gdp: row['Value']}))
-    
-    zxp.loadHTML(`
-    <html>
-        <head>
-            <script src="https://d3js.org/d3.v7.min.js"></script>
-        </head>
-        <body>
-            <div id="chart" style="width: 800px; height: 600px;"></div>
-        </body>
-    </html>
-  `);
-
-    await zxp.runScripts();
-
-
-    const width = 800, height = 600;
-    const margin = { top: 40, right: 40, bottom: 60, left: 100 };
-    const innerWidth = width - margin.left - margin.right;
-    const innerHeight = height - margin.top - margin.bottom;
-
-    const svg = d3.select('#chart')
-        .append('svg')
-        .attr('width', width)
-        .attr('height', height)
-        .attr('xmlns', 'http://www.w3.org/2000/svg')
-        .append('g')
-        // Shift the inner chart to make room for axes labels!
-        .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    // Define the X and Y Scales
-    // X Scale: Years (Band scale for bars)
-    const xScale = d3.scaleBand()
-        .domain(country_data.map(d => d.year))
-        .range([0, innerWidth])
-        .padding(0.1);
-
-    // Y Scale: GDP (Linear scale from 0 to max GDP)
-    const yScale = d3.scaleLinear()
-        .domain([0, d3.max(country_data, d => d.gdp)])
-        .range([innerHeight, 0]);
-
-    // Draw the X and Y Axes
-    // X Axis (Bottom)
-    svg.append('g')
-        .attr('transform', `translate(0,${innerHeight})`)
-        .call(d3.axisBottom(xScale).tickValues(
-            // Only show every 5th year so the labels don't overlap
-            xScale.domain().filter((d, i) => i % 5 === 0)
-        ))
-        .attr('font-size', '12px');
-
-    // Y Axis (Left)
-    svg.append('g')
-        .call(d3.axisLeft(yScale).ticks(10, 's')) 
-        .attr('font-size', '12px');
-
-    // Draw the Bars
-    svg.selectAll('rect')
-        .data(country_data)
-        .join('rect')
-        .attr('x', d => xScale(d.year))
-        .attr('y', d => yScale(d.gdp))
-        .attr('width', xScale.bandwidth())
-        .attr('height', d => innerHeight - yScale(d.gdp))
-        .attr('fill', '#3b82f6'); // Tailwind Blue
-
-    // Add a Title
-    svg.append('text')
-        .attr('x', innerWidth / 2)
-        .attr('y', -10)
-        .attr('text-anchor', 'middle')
-        .attr('font-family', 'sans-serif')
-        .attr('font-size', '20px')
-        .attr('font-weight', 'bold')
-        .text(`GDP of ${country} Over Time`);
-
-    const chartEl = document.querySelector('#chart');
-
-    // return the SVG
-    zxp.fs.writeFileSync('src/examples/csv_chart/output_chart.html', chartEl.outnerHTML);
-
-    // return a painted image for the SVG chart.
-    const imgObj = zxp.paintElement(chartEl, {width: 800}); 
-    // Returns ImageData{data, width, height}
-    // Encode raw RGBA pixels to a standard ArrayBuffer (WEBP here)
-    const imgBytes = zxp.encode(imgObj, 'webp');
-    zxp.fs.writeFileSync('src/examples/csv_chart/output_chart.webp', imgBytes);
-
-}
-
-gdp('FRA');
-```
-
-</details>
-
-We run the dev-server:
-
-```sh
-./zig-out/bin/zxp serve
-```
-
-We send a POST request to the endpoint where the payload is the snippet:
-
-```sh
-curl -s -X POST http://localhost:9984/run --data-binary @src/examples/csv_chart/example_d3.js
-```
-
-The result is:
-
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/output_cart.webp" alt="D3 chart from CSV" width="400">
-
----
-
-### Stream html chunks
-
-
 ### Generate a Leaflet map PDF report
 
 Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map with an SVG template, and output a multi-layered PDF — all in one shot:
@@ -1022,6 +942,27 @@ See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-
 
 ---
 
+### CSV parsing
+
+A quick example that uses the CLI: we will execute a JavaScript snippet (`run -e "..."`) that reads from stdin (`zxp.stdin.read()`), parses the CSV data (`zxp.csv.parse()`) and conversely stringify it back (`zxp.csv.stringify()`).
+
+**smoke test**: send a CSV, parse and stringify:
+
+```sh
+echo "name,age\nAlice,30\nBob,25\n" | \
+./zig-out/bin/zxp run -e \
+"const csv = zxp.stdin.read();
+const rows = zxp.csv.parse(csv);
+console.log(rows); 
+const back = zxp.csv.stringify(rows); 
+console.log(back);"
+
+# -> [{"name": "Alice", "age": "30"},{"name": "Bob","age": "25"}]
+
+#"name","age"
+#Alice,30
+#Bob,25
+```
 
 ## Library quick start
 
@@ -4339,14 +4280,15 @@ A native Zig engine that wires together purpose-built C/C++ libraries — no run
 | Layer                    | Library                                                                                         | Role                                   |
 | ------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------- |
 | DOM & CSS                | [lexbor](https://lexbor.com/)                                                                   | HTML/CSS parsing, CSSOM, selectors     |
-| JavaScript               | [QuickJS-ng](https://quickjs-ng.github.io/quickjs/)                                             | Full ES6 runtime (bytecode, no JIT)    |
-| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode          |
+| JavaScript               | [zig-quickjs](https://github.com/nDimensional/zig-quickjs) - QuickJS-ng                         | Full ES6 runtime (bytecode, no JIT)    |
+| Images                   | [stb_image](https://github.com/nothings/stb), [libwebp](https://github.com/webmproject/libwebp) | PNG/JPEG/WEBP decode & encode            |
 | Raster rendering         | [ThorVG](https://github.com/thorvg/thorvg)                                                      | Full SVG rasterization & thorvg-canvas |
-| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation & text layer            |
+| PDF                      | [libharu](https://github.com/libharu/libharu)                                                   | PDF generation & text layer    |
 | Text                     | [stb_truetype](https://github.com/nothings/stb)                                                 | Font rendering (Roboto preloaded)      |
-| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi                 |
-| WebServer                | [httpz-zig](https://github.com/karlseguin/http.zig)                                             | Serve over HTTP                        |
-| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation       
+| Network                  | [zig-curl](https://github.com/jiacai2050/zig-curl)                                              | HTTP via libcurl multi              |
+| WebServer                | [httpz-zig](https://github.com/karlseguin/http.zig)                                             | Serve over HTTP                       |
+| Flexbor Layout rendering | [yoga](https://github.com/facebook/yoga)                                                        | Layout computation                |
+| SQLite                   | [zsqlite](https://github.com/karlseguin/zqlite.zig)                                             | Local persistence                |
 
 ## Licenses
 
@@ -4361,3 +4303,4 @@ A native Zig engine that wires together purpose-built C/C++ libraries — no run
 - `htm`[htm](https://github.com/developit/htm/blob/master/LICENSE)
 - `turndown.js` [License MIT](https://github.com/mixmark-io/turndown/blob/master/LICENSE)
 - `md4c` [License MIT](https://github.com/mity/md4c/blob/master/LICENSE.md)
+- `zsqlite` [License MIT](https://github.com/karlseguin/zqlite.zig/blob/master/LICENSE)
