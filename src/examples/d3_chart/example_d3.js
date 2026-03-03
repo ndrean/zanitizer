@@ -86,8 +86,8 @@ async function gdp(country) {
     // Returns ImageData{data, width, height}
 
     // Encode raw RGBA pixels to a standard ArrayBuffer (WEBP encoded here)
-    const imgBytes = zxp.encode(imgObj, 'webp');
-    zxp.fs.writeFileSync('src/examples/d3_chart/output_chart.webp', imgBytes);
+    const imgBytes = zxp.encode(imgObj, 'png');
+    zxp.fs.writeFileSync('src/examples/d3_chart/output_chart.png', imgBytes);
     
     // return imgBytes; <-- run `... | kitty +kitten icat` to visualize in terminal
 

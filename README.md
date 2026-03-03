@@ -68,7 +68,7 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 | [Scrape Hacker News](#scrape-hacker-news) | fetch → DOM query → structured data | JSON | ✓ | ✓ |
 | [Vercel SPA scrape](#scrape-a-vercel-site-in-less-than-1s) | Next.js hydration → `waitForSelector` | JSON | ✓ | ✓ |
 | [Vercel site snapshot](#render-the-vercel-side) | SSR page → inlined images → render | WEBP | ✓ | ✓ |
-| [CSV → D3.js chart](#csv-input-to-draw-d3js-chart) | CSV parse → D3 SVG → rasterize | WEBP | – | ✓ |
+| [Echarts](#echarts) | Echarts SVG -> rasterize | WEBP | ✓ | ✓ |
 | [Leaflet map PDF](#generate-a-leaflet-map-pdf-report) | GeoJSON route → OSM tiles → SVG → PDF | PDF | – | ✓ |
 
 ---
@@ -138,7 +138,11 @@ curl -s -X POST http://localhost:9984/mcp \
 
 **Use `run_script` to build a D3 chart from CSV data** — the LLM composes the JS and gets an image back:
 
-Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/example_d3.js>
+Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/d3_chart/example_d3.js>
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/d3_chart/output_chart.webp
+```
 
 <img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/d3_chart/output_chart.webp" alt="output_chart" width="500">
 
@@ -274,128 +278,6 @@ We have selected to render a table (this is a POST request to "/render_llm"). Yo
 
 <br/>
 
-### CSV input to draw D3.js chart
-
-An example that shows how to collect public data from a CSV source and build a [D3.js](https://github.com/d3/d3) chart.
-
-We use the following functions: `zxp.csv.parse()` and `zxp.loadHTML()` and `await zxp.runScripts()` and `zxp.paintElement()` (to extract the exact HTMLElement you want) and `zxp.encode()` (generate WEBP encoded binary) and `zxp.fs.writeFileSync()` to save it locally.
-
-Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/example_d3.js>
-
-<details><summary>JS code snippet to draw D3 chart from CSV data</summary>
-
-```js
-async function gdp(country) {
-    const resp = await fetch('https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv');
-    const raw_data = await resp.text();
-    const csv = zxp.csv.parse(raw_data);
-    const country_data = csv.filter((row) => row['Country Code'] == country && row['Year'] > 2000)
-        .map((row) => ({year: row['Year'], gdp: row['Value']}))
-    
-    zxp.loadHTML(`
-    <html>
-        <head>
-            <script src="https://d3js.org/d3.v7.min.js"></script>
-        </head>
-        <body>
-            <div id="chart" style="width: 800px; height: 600px;"></div>
-        </body>
-    </html>
-  `);
-
-    await zxp.runScripts();
-
-
-    const width = 800, height = 600;
-    const margin = { top: 40, right: 40, bottom: 60, left: 100 };
-    const innerWidth = width - margin.left - margin.right;
-    const innerHeight = height - margin.top - margin.bottom;
-
-    const svg = d3.select('#chart')
-        .append('svg')
-        .attr('width', width)
-        .attr('height', height)
-        .attr('xmlns', 'http://www.w3.org/2000/svg')
-        .append('g')
-        // Shift the inner chart to make room for axes labels!
-        .attr('transform', `translate(${margin.left},${margin.top})`);
-
-    // Define the X and Y Scales
-    // X Scale: Years (Band scale for bars)
-    const xScale = d3.scaleBand()
-        .domain(country_data.map(d => d.year))
-        .range([0, innerWidth])
-        .padding(0.1);
-
-    // Y Scale: GDP (Linear scale from 0 to max GDP)
-    const yScale = d3.scaleLinear()
-        .domain([0, d3.max(country_data, d => d.gdp)])
-        .range([innerHeight, 0]);
-
-    // Draw the X and Y Axes
-    // X Axis (Bottom)
-    svg.append('g')
-        .attr('transform', `translate(0,${innerHeight})`)
-        .call(d3.axisBottom(xScale).tickValues(
-            // Only show every 5th year so the labels don't overlap
-            xScale.domain().filter((d, i) => i % 5 === 0)
-        ))
-        .attr('font-size', '12px');
-
-    // Y Axis (Left)
-    svg.append('g')
-        .call(d3.axisLeft(yScale).ticks(10, 's')) 
-        .attr('font-size', '12px');
-
-    // Draw the Bars
-    svg.selectAll('rect')
-        .data(country_data)
-        .join('rect')
-        .attr('x', d => xScale(d.year))
-        .attr('y', d => yScale(d.gdp))
-        .attr('width', xScale.bandwidth())
-        .attr('height', d => innerHeight - yScale(d.gdp))
-        .attr('fill', '#3b82f6'); // Tailwind Blue
-
-    // Add a Title
-    svg.append('text')
-        .attr('x', innerWidth / 2)
-        .attr('y', -10)
-        .attr('text-anchor', 'middle')
-        .attr('font-family', 'sans-serif')
-        .attr('font-size', '20px')
-        .attr('font-weight', 'bold')
-        .text(`GDP of ${country} Over Time`);
-
-    const chartEl = document.querySelector('#chart');
-
-    // option: return the SVG -> render in a browser
-    // zxp.fs.writeFileSync('src/examples/d3_chart/output_chart.html', chartEl.outerHTML);
-
-    // return a painted image for the SVG chart.
-    const imgObj = zxp.paintElement(chartEl, {width: 800}); 
-    // Returns ImageData{data, width, height}
-    // Encode raw RGBA pixels to a standard ArrayBuffer (WEBP here)
-    const imgBytes = zxp.encode(imgObj, 'webp');
-    zxp.fs.writeFileSync('src/examples/d3_chart/output_chart.webp', imgBytes);
-
-}
-
-gdp('FRA');
-```
-
-</details>
-
-The dev-server is up and running. We send a POST request to the endpoint where the payload is the snippet:
-
-```sh
-curl -s -X POST http://localhost:9984/run --data-binary @src/examples/d3_chart/output_chart.webp
-```
-
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_chart/output_cart.webp" alt="D3 chart from CSV" width="400">
-
-<br>
-
 #### Note about SSE format
 
 |Provider	|Content path	|End signal|
@@ -448,6 +330,25 @@ pub const default_system =
 ```
 
 </details>
+
+### ECharts
+
+An example that shows how to collect public data from a CSV source and build a [D3.js](https://github.com/d3/d3) chart.
+
+We use the following functions: `zxp.loadHTML()` , `zxp.runScripts()`, `new XMLSerializer()` (serialize the SVG), `zxp.paintSVG()` and `zxp.encode()` (generate WEBP encoded binary) and `zxp.fs.writeFileSync()` to save it locally.
+
+Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/echarts/echarts_svg.html>
+
+The dev-server is up and running. We send a POST request to the endpoint where the payload is the snippet:
+
+```sh
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/echarts/run_svg.js
+```
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/echarts/echarts_svg.png" alt="D3 chart from CSV" width="400">
+
+<br>
+
 
 
 ### Use dynamic HTML with `htm` and paint
