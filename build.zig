@@ -35,6 +35,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // zqlite bundles its own sqlite amalgamation (lib/sqlite3.c + lib/sqlite3.h)
+    // — use it directly instead of maintaining a separate vendor/sqlite submodule.
+    const zqlite_dep_early = b.dependency("zqlite", .{ .target = target, .optimize = optimize });
+
     const paths = Paths{
         .lexbor_static_lib = b.path("vendor/lexbor_src_master/build/liblexbor_static.a"),
         .lexbor_src = b.path("vendor/lexbor_src_master/source/"),
@@ -49,7 +53,7 @@ pub fn build(b: *std.Build) void {
         .libharu_include = b.path("vendor/libharu/include"),
         .fake_zlib = b.path("vendor/fake_zlib"),
         .md4c_src = b.path("vendor/md4c/src"),
-        .sqlite_src = b.path("vendor/sqlite"),
+        .sqlite_src = zqlite_dep_early.path("lib"),
     };
 
     // Build all C libraries

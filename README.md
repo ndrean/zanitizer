@@ -140,7 +140,7 @@ curl -s -X POST http://localhost:9984/mcp \
 
 Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/example_d3.js>
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/output_chart.webp" alt="output_chart" width="500">
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/d3_chart/output_chart.webp" alt="output_chart" width="500">
 
 <br>
 
