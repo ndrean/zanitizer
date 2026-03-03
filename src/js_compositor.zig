@@ -561,6 +561,26 @@ fn buildYogaTree(
                                         if (decoder.decode(buf, payload)) {
                                             info.img_data = buf;
                                             info.img_is_svg = std.mem.startsWith(u8, header, "image/svg");
+
+                                            // HTML width/height attributes (e.g. <img width="400">)
+                                            var attr_w: f32 = 0;
+                                            var attr_h: f32 = 0;
+                                            if (z.getAttribute_zc(el, "width")) |ws| attr_w = parseFloat(ws) orelse 0;
+                                            if (z.getAttribute_zc(el, "height")) |hs| attr_h = parseFloat(hs) orelse 0;
+                                            if (attr_w > 0) yoga.setWidth(yg, attr_w);
+                                            if (attr_h > 0) yoga.setHeight(yg, attr_h);
+
+                                            // Natural size fallback via stbi (raster only)
+                                            if (attr_w == 0 and attr_h == 0 and !info.img_is_svg) {
+                                                var iw: c_int = 0;
+                                                var ih: c_int = 0;
+                                                var ic: c_int = 0;
+                                                if (stbi.stbi_info_from_memory(buf.ptr, @intCast(buf.len), &iw, &ih, &ic) != 0) {
+                                                    yoga.setWidth(yg, @floatFromInt(iw));
+                                                    yoga.setHeight(yg, @floatFromInt(ih));
+                                                }
+                                            }
+
                                             img_loaded = true;
                                         } else |_| allocator.free(buf);
                                     }

@@ -17,6 +17,18 @@ threadlocal var tl_is_sse: bool = false;
 pub const Handler = struct {
     app_ctx: *AppContext,
     pub fn dispatch(self: *Handler, action: httpz.Action(*AppContext), req: *httpz.Request, res: *httpz.Response) !void {
+        // CORS — allow browser pages on any origin to call the local dev server.
+        res.header("Access-Control-Allow-Origin", "*");
+        res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.header("Access-Control-Allow-Headers", "Content-Type");
+
+        // Preflight: browsers send OPTIONS before cross-origin POST/PUT/PATCH.
+        // Return 200 immediately so the actual request is allowed.
+        if (req.method == .OPTIONS) {
+            res.status = 200;
+            return;
+        }
+
         var is_sse = false;
 
         if (req.header("accept")) |accept| {
@@ -82,7 +94,13 @@ pub const Server = struct {
         router.post("/stream", streamHandler, .{});
         router.post("/render", renderProxyHandler, .{});
         router.get("/render_llm", renderLlmHandler, .{});
+        router.post("/render_llm", renderLlmPostHandler, .{});
         router.post("/mcp", mcp.mcpHandler, .{});
+        // OPTIONS preflight — dispatch() adds the CORS headers; these just ensure
+        // the route is matched so dispatch is actually called.
+        router.options("/render_llm", corsPreflightHandler, .{});
+        router.options("/run", corsPreflightHandler, .{});
+        router.options("/mcp", corsPreflightHandler, .{});
 
         return Server{ .allocator = allocator, .app_ctx = app_ctx, .server = server };
     }
@@ -112,6 +130,11 @@ pub const Server = struct {
 
 pub fn healthHandler(_: *AppContext, _: *httpz.Request, res: *httpz.Response) !void {
     res.status = 200;
+}
+
+/// OPTIONS preflight — dispatch() already added the CORS headers; just return 204.
+pub fn corsPreflightHandler(_: *AppContext, _: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 204;
 }
 
 /// Detect MIME type from the first few magic bytes of a binary buffer.
@@ -217,7 +240,12 @@ pub fn runHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
     }
 
     // ── Object / array → JSON ────────────────────────────────────────────────
-    const json_val = engine.ctx.jsonStringifySimple(val) catch return;
+    const json_val = engine.ctx.jsonStringifySimple(val) catch |err| {
+        std.debug.print("❌ [serve] JSON stringify failed: {}\n", .{err});
+        res.status = 500;
+        res.body = "Internal Server Error: failed to serialize JS result";
+        return;
+    };
     defer engine.ctx.freeValue(json_val);
     const json_str = try engine.ctx.toZString(json_val);
     defer engine.ctx.freeZString(json_str);
@@ -333,6 +361,68 @@ pub fn renderProxyHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz
     res.body = try res.arena.dupe(u8, bytes);
 }
 
+/// POST /render_llm
+///
+/// Body: JSON { prompt, model?, system?, base_url?, width?, format? }
+/// Response: JSON { "data": "<base64>", "mime": "<content-type>" }
+///
+/// Designed for interactive use — a form submits a POST and the JS client
+/// sets img.src = `data:${mime};base64,${data}` to display the result.
+pub fn renderLlmPostHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
+    const body = req.body() orelse {
+        res.status = 400;
+        res.body = "Missing request body";
+        return;
+    };
+
+    const PostBody = struct {
+        prompt: []const u8 = "A simple table",
+        model: []const u8 = "qwen2.5-coder:7b",
+        system: []const u8 = js_llm.default_system,
+        base_url: []const u8 = "http://localhost:11434",
+        width: u32 = 800,
+        format: []const u8 = "png",
+    };
+
+    const parsed = std.json.parseFromSlice(PostBody, res.arena, body, .{ .ignore_unknown_fields = true }) catch {
+        res.status = 400;
+        res.body = "Invalid JSON body";
+        return;
+    };
+    const pb = parsed.value;
+
+    const alloc = app_ctx.allocator;
+    const zxp_rt = try zxp_runtime.getOrCreate(alloc, app_ctx.sandbox_root);
+    var engine = try z.ScriptEngine.init(alloc, zxp_rt);
+    defer engine.deinit();
+
+    const html_post = try js_llm.streamFromOllama(alloc, pb.base_url, pb.model, pb.system, pb.prompt);
+    defer alloc.free(html_post);
+    try engine.loadHTML(html_post);
+
+    const js = try std.fmt.allocPrint(alloc, "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")", .{ pb.width, pb.format });
+    defer alloc.free(js);
+
+    const val = try engine.evalAsync(js, "<render_llm_post>");
+    defer engine.ctx.freeValue(val);
+
+    if (!engine.ctx.isArrayBuffer(val)) {
+        res.status = 500;
+        res.body = "render_llm POST failed: paintDOM did not return an ArrayBuffer";
+        return;
+    }
+
+    const img_bytes = try engine.ctx.getArrayBuffer(val);
+    const mime = sniffMime(img_bytes);
+
+    const encoder = std.base64.standard.Encoder;
+    const b64_buf = try res.arena.alloc(u8, encoder.calcSize(img_bytes.len));
+    _ = encoder.encode(b64_buf, img_bytes);
+
+    const json = try std.fmt.allocPrint(res.arena, "{{\"data\":\"{s}\",\"mime\":\"{s}\"}}", .{ b64_buf, mime });
+    res.header("Content-Type", "application/json");
+    res.body = json;
+}
 /// GET /render_llm?prompt=<text>[&model=llama3.2][&system=<text>][&width=800][&format=png][&base_url=http://localhost:11434]
 ///
 /// Streams an LLM prompt directly into the headless DOM via Ollama, paints
@@ -344,7 +434,7 @@ pub fn renderLlmHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.R
     const qs = try req.query();
 
     const prompt = qs.get("prompt") orelse "A simple table";
-    const model = qs.get("model") orelse "qwen2.5-coder:3b";
+    const model = qs.get("model") orelse "qwen2.5-coder:7b";
     const system = qs.get("system") orelse js_llm.default_system;
     const base_url = qs.get("base_url") orelse "http://localhost:11434";
     const width: u32 = if (qs.get("width")) |w| std.fmt.parseInt(u32, w, 10) catch 800 else 800;
@@ -355,8 +445,11 @@ pub fn renderLlmHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.R
     var engine = try z.ScriptEngine.init(alloc, zxp_rt);
     defer engine.deinit();
 
-    // Stream Ollama tokens directly into the headless DOM — no HTML buffer.
-    try js_llm.streamLLMtoDOM(engine, base_url, model, system, prompt);
+    // Accumulate LLM output then parse at once — more reliable than streaming
+    // for image generation (client waits for the full image regardless).
+    const html = try js_llm.streamFromOllama(alloc, base_url, model, system, prompt);
+    defer alloc.free(html);
+    try engine.loadHTML(html);
 
     // Paint and encode the fully-processed DOM.
     const js = try std.fmt.allocPrint(alloc, "zxp.encode(zxp.paintDOM(document.body, {d}), \"{s}\")", .{ width, format });

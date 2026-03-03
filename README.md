@@ -59,19 +59,312 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 
 | Example | What it shows | Output | CLI | Server |
 | ------- | ------------- | ------ | :---: | :---: |
+| [MCP server](#mcp-server) | Give Claude Desktop / Gemini visual eyes | PNG | – | ✓ |
+| [LLM generative UI](#generative-template) | Ollama/OpenAI SSE → DOM → image | WEBP | ✓ | ✓ |
 | [Dynamic HTML card](#use-dynamic-html-with-htm-and-paint) | `htm` tagged templates → paintDOM | PNG | ✓ | ✓ |
 | [CSS grid / flexbox layout](#render-an-html-file-in-the-terminal) | grid-1D + flexbox → terminal image | PNG | ✓ | ✓ |
 | [Scrape Hacker News](#scrape-hacker-news) | fetch → DOM query → structured data | JSON | ✓ | ✓ |
 | [Vercel SPA scrape](#scrape-a-vercel-site-in-less-than-1s) | Next.js hydration → `waitForSelector` | JSON | ✓ | ✓ |
 | [Vercel site snapshot](#render-the-vercel-side) | SSR page → inlined images → render | WEBP | ✓ | ✓ |
 | [CSV → D3.js chart](#csv-input-to-draw-d3js-chart) | CSV parse → D3 SVG → rasterize | WEBP | – | ✓ |
-| [LLM generative UI](#generative-template) | Ollama/OpenAI SSE → DOM → image | WEBP | ✓ | ✓ |
 | [Leaflet map PDF](#generate-a-leaflet-map-pdf-report) | GeoJSON route → OSM tiles → SVG → PDF | PDF | – | ✓ |
-| [MCP server](#mcp-server) | Give Claude Desktop / Gemini visual eyes | PNG | – | ✓ |
 
 ---
 
 ## First examples
+
+### MCP server
+
+The dev-server is up and running (`./zig-out/bin.zxp serve`).
+
+**tools/list**: you can check the available methods with:
+
+```sh
+curl -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
+```
+
+The list of available methods are:
+
+```txt
+{"jsonrpc":"2.0","id":1,"result":{"tools":[
+  {"name": "render_html",...},
+  {"name": "render_markdown",...},
+  {"name": "render_url",...},
+  {"name": "run_script",...}
+  ...
+}
+```
+
+Let's make a call to the MCP: run a JS script.
+
+```sh
+curl -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "run_script",
+      "arguments": {
+        "script": "const a = 10; const b = 32; `The answer is ${a + b}`"
+      }
+    }
+  }'
+```
+
+The output is:
+
+```txt
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"The answer is 42"}]}}
+```
+
+The _"/run_script"_ allows the LLM to build knowledge about the `zxp` API and use it to run code. This means that the LLM can compose JS snippets using zxp primitives. I gains knowledge by exploring the available documentation and examples.
+
+**Use 'run_script' to build a D3 chart from CSV**: the LLM can compose JS and let zexplorer run it, and get an image back. No animation of coursse is allowed so it comes with limitations.
+
+Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/example_d3.js>
+
+You get back an image:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/csv_D3_chart/output_chart.webp" alt="output_chart" width="500">
+
+<br>
+
+**Let the LLM evaluate HTML**: The LLM can make a call and ask for `render_html` and pass the HTML and receive back an image which he can read.
+Note that the CSS that can be rendered is _very_ limited and constrainted.
+We illustrate this with a styled `<h1>` element:
+
+```sh
+curl -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "render_html",
+      "arguments": {
+        "html": "<h1 style=\"color: red;\">Hello MCP!</h1>",
+        "width": 400
+      }
+    }
+  }'
+```
+
+We get the response in 22ms: a B64 encoded string of a PNG image.
+
+```txt
+{"jsonrpc":"2.0","id":3,"result":{"content":[
+      {
+        "type":"image",
+        "data":"iVBORw0KGgo....",
+        "mimeType":"image/png"
+      }
+]}}
+```
+
+The "/run_script" method is
+
+### Generative template
+
+You want to use an LLM to generate some HTML with CSS for us as the engine has builtin support for SSE' text/event-stream' content-type support.
+
+> [!NOTE]
+> Rendering images on demand unlocks two use case:
+>
+> - with the MCP, the LLM is no more blind. It can build some HTML and send it to the engine "/mcp" endpoint and get back a painted image and can evaluate the result,
+> - you can directly insert LLM generated images in your markup, either statically or dynamically.
+
+We showcase the local provider `ollama` with the 4.7G model "qwen2.5-coder:7b".
+
+This can be extended to any provider (OpenAI, Anthropic, Gemini) if you adapt the LLM response parsing.
+
+> Note the credentails are hold in the dev-server, not by the client code.
+
+**First test**: send a query to the LLM (`ollama` is running on your server):
+
+```js
+// src/examples/generative/test_llm.js
+async function run(prompt= "") {
+  const html = await zxp.llmHTML({model: "qwen2.5-coder:3b",prompt});
+ 
+  document.body.innerHTML = html;
+  const img = zxp.paintDOM(document.body, 800);
+  return zxp.encode(img, "webp");
+}
+run("3 metric cards in a row using flexbox: Revenue $12k, Users 340, Uptime 99.9%. White background, colored cards.");
+```
+
+Run it with the CLI:
+
+```sh
+./zig-out/bin/zxp run src/examples/generative/test_llm.js -o src/examples/generative/test_llm.webp
+```
+
+The result is:
+
+<img src="" alt="generative template" width="400">
+
+<br>
+
+Now that we are confident that we can comminucate with the LLM and receive a response, We can know use it directly in a rendered HTML.
+The HTML file becomes a generative template — declarative, stateless, reproducible. Just swap the prompt.
+
+**Second test**: static source.
+
+- The dev-server is up and running (`./zig-out/bin.zxp serve`).
+- `ollama` is up and running: `curl -s http://localhost:11434/api/tags | head -c 200` returns _{"models":[{"name":"qwen2.5-coder:7b",....}_.
+
+Let's "live-serve" the HTML file below in a browser. The image source points to the dev-server GET "/render_llm" endpoint to which we pass a query string that contains a small prompt.
+
+```html
+<body>
+  <section>
+    [...]
+    <img
+      class="static-img"
+      src="http://localhost:9984/render_llm?prompt=3+metric+cards+Revenue+%2412k+Users+340+MRR+%244.2k&width=600&format=webp"
+      alt="Generated metric cards"
+    >
+  </section>
+</body>
+```
+
+In the browser, we observe that a GET request to "http://localhost:9984/render_llm?prompt=3+metric+cards+Revenue+%2412k+Users+340+MRR+%244.2k&width=600&format=webp" is made in the browser and you can inspect the response.
+
+An example of the LLM generated image response:
+
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/generative/static_img_generated_response.png" alt="generative template" width="600">
+
+**Third example**: interactive form
+
+The HTML below is a simple HTML form with a JavaScript snippet which will POST a more elaborated prompt to the dev-server "/render_llm" endpoint.
+
+<details><summary>a FORM textarea INPUT populated by four buttons with a submit button</summary>
+
+```html
+<section>
+  <h2>Interactive prompt (POST → base64)</h2>
+
+  <div class="quick-prompts">
+    <button type="button" data-prompt="A responsive table with 3 columns: Name, Status, Amount. 5 realistic sample rows, blue header.">Table</button>
+    <button type="button" data-prompt="A dashboard card grid: 4 KPI cards (Revenue $42k ↑12%, Users 3.4k ↑5%, Churn 2.1% ↓0.3%, MRR $8.2k ↑18%). Clean white cards, subtle shadows.">KPI cards</button>
+    <button type="button" data-prompt="A horizontal progress tracker with 4 steps: Ordered, Processing, Shipped, Delivered. Step 2 is active in blue.">Progress steps</button>
+    <button type="button" data-prompt="A minimal invoice: logo placeholder, billed-to block, line-item table (Qty, Description, Unit Price, Total), grand total row.">Invoice</button>
+  </div>
+
+  <form id="gen-form">
+    <textarea
+      name="prompt"
+      placeholder="Describe a UI component to generate…"
+    >A responsive table with 3 columns: Name, Status, Amount. Include 5 realistic sample rows. Use a blue header.</textarea>
+
+    <div class="options">
+      <label>Width <input name="width" type="number" value="800" min="200" max="2000" step="100"></label>
+      <label>Format
+        <select name="format">
+          <option value="png">PNG</option>
+          <option value="webp">WebP</option>
+          <option value="jpeg">JPEG</option>
+        </select>
+      </label>
+      <label>Model <input name="model" type="text" value="qwen2.5-coder:7b"></label>
+      <label>Ollama URL <input name="base_url" type="text" value="http://localhost:11434" style="width:16rem"></label>
+    </div>
+
+    <button type="submit" id="gen-btn">Generate</button>
+  </form>
+
+  <div class="status" id="status"></div>
+  <img class="result-img" id="result" src="" alt="Generated result">
+</section>
+
+<script>
+  const form   = document.getElementById('gen-form');
+  const btn    = document.getElementById('gen-btn');
+  const status = document.getElementById('status');
+  const result = document.getElementById('result');
+
+  // Quick-prompt buttons fill the textarea.
+  document.querySelectorAll('.quick-prompts button').forEach(b => {
+    b.addEventListener('click', () => {
+      form.prompt.value = b.dataset.prompt;
+    });
+  });
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+
+    const prompt = form.prompt.value.trim();
+    if (!prompt) return;
+
+    btn.disabled = true;
+    status.className = 'status';
+    status.textContent = 'Generating… (this may take a few seconds)';
+    result.style.opacity = '0.4';
+
+    try {
+      const res = await fetch('http://localhost:9984/render_llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          model:    form.model.value,
+          base_url: form.base_url.value,
+          width:    parseInt(form.width.value, 10) || 800,
+          format:   form.format.value,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+
+      const { data, mime } = await res.json();
+      result.src = `data:${mime};base64,${data}`;
+      result.style.opacity = '1';
+      status.textContent = '';
+    } catch (err) {
+      status.className = 'status error';
+      status.textContent = `Error: ${err.message}`;
+      result.style.opacity = '1';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+```
+
+</details>
+
+#### Note about SSE format
+
+|Provider	|Content path	|End signal|
+|--|--|--|
+|OpenAI / groq / mistral / together / ollama_v1	|.choices[0].delta.content	|data: [DONE]|
+|Anthropic	|.delta.text (on content_block_delta events)	|event: message_stop|
+|Gemini	|.candidates[0].content.parts[0].text	|.finishReason == "STOP"|
+|Ollama	|.message.content	|no SSE — raw NDJSON|
+
+```txt
+if openai || groq || mistral || together || ollama_v1 → .choices[0].delta.content
+if anthropic                                           → .delta.text
+if gemini                                             → .candidates[0].content.parts[0].text
+```
+
+The general prompt that we use:
+ 
+```txt
+You are a UI generator. Output ONLY raw HTML.
+Use ONLY: display:flex, flex-direction, justify-content, align-items,
+gap, padding, margin, color, background, font-size, border-radius.
+No external fonts. No animations. No @media. No CSS variables.
+Inline styles only OR a single <style> block.
+```
 
 ### Use dynamic HTML with `htm` and paint
 
@@ -718,72 +1011,6 @@ The result is:
 
 ### Stream html chunks
 
-### Generative template
-
-You want to use a LLM to generate some HTML with CSS for you. We showcase `ollama` here.
-
-The engine handles the _text/event-stream_  sent by the LLM.
-
-The HTML file becomes a generative template — declarative, stateless, reproducible. Just swap the prompt.
-
-```js
-// src/examples/generative/test_llm.js
-async function run(prompt= "") {
-  const html = await zxp.llmHTML({
-    model: "llama3.1",
-    prompt,
-  });
- 
-  document.body.innerHTML = html;
-  const img = zxp.paintDOM(document.body, 800);
-  return zxp.encode(img, "webp");
-}
-run("3 metric cards in a row using flexbox: Revenue $12k, Users 340, Uptime 99.9%. White background, colored cards.");
-```
-
-Run it with the CLI:
-
-```sh
-./zig-out/bin/zxp run src/examples/generative/test_llm.js -o src/examples/generative/test_llm.webp
-```
-
-The result is:
-
-<img src="" alt="generative template" width="400">
-<br>
-
-We can knwo use it directly in a rendered HTML.
-
-```html
-<body>
-  <img src="http://localhost:9984/render" alt="llm generated" width="300">
-</body>
-```
-
-#### Note about SSE format
-
-|Provider	|Content path	|End signal|
-|--|--|--|
-|OpenAI / groq / mistral / together / ollama_v1	|.choices[0].delta.content	|data: [DONE]|
-|Anthropic	|.delta.text (on content_block_delta events)	|event: message_stop|
-|Gemini	|.candidates[0].content.parts[0].text	|.finishReason == "STOP"|
-|Ollama	|.message.content	|no SSE — raw NDJSON|
-
-```txt
-if openai || groq || mistral || together || ollama_v1 → .choices[0].delta.content
-if anthropic                                           → .delta.text
-if gemini                                             → .candidates[0].content.parts[0].text
-```
-
-The general prompt that we use:
- 
-```txt
-You are a UI generator. Output ONLY raw HTML.
-Use ONLY: display:flex, flex-direction, justify-content, align-items,
-gap, padding, margin, color, background, font-size, border-radius.
-No external fonts. No animations. No @media. No CSS variables.
-Inline styles only OR a single <style> block.
-```
 
 ### Generate a Leaflet map PDF report
 
@@ -794,99 +1021,6 @@ Load Leaflet, draw a GeoJSON route on OpenStreetMap tiles, composite the map wit
 See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-and-output-a-pdf) below.
 
 ---
-
-### MCP server
-
-**tools/list**: check with:
-
-```sh
-curl -X POST http://localhost:9984/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'
-```
-
-The list of available methods are:
-
-```txt
-{"jsonrpc":"2.0","id":1,"result":{"tools":[
-  {"name": "render_html",...},
-  {"name": "render_markdown",...},
-  {"name": "render_url",...},
-  {"name": "run_script",...}
-}
-```
-
-Let's make a call to the MCP: run a JS script.
-
-```sh
-curl -X POST http://localhost:9984/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 2,
-    "method": "tools/call",
-    "params": {
-      "name": "run_script",
-      "arguments": {
-        "script": "const a = 10; const b = 32; `The answer is ${a + b}`"
-      }
-    }
-  }'
-```
-
-The output is:
-
-```txt
-{
-  "jsonrpc":"2.0",
-  "id":2,
-  "result":{
-    "content":[
-      {
-        "type":"text",
-        "text":"The answer is 42"
-      }
-    ]
-  }
-}
-```
-
-Let's make another call: we make an RCP to `render_html` of a styled `<h1>` element:
-
-```sh
-curl -X POST http://localhost:9984/mcp \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 3,
-    "method": "tools/call",
-    "params": {
-      "name": "render_html",
-      "arguments": {
-        "html": "<h1 style=\"color: red;\">Hello MCP!</h1>",
-        "width": 400
-      }
-    }
-  }'
-```
-
-We get the response in 22ms: a B64 encoded string of a PNG image.
-
-```txt
-{
-  "jsonrpc":"2.0",
-  "id":3,
-  "result":{
-    "content":[
-      {
-        "type":"image",
-        "data":"iVBORw0KGgo....",
-        "mimeType":"image/png"
-      }
-    ]
-  }
-}
-```
 
 
 ## Library quick start

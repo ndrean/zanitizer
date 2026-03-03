@@ -28,7 +28,7 @@ fn run_test(allocator: std.mem.Allocator, sbx: []const u8) !void {
     var engine = try ScriptEngine.init(allocator, zxp_rt);
     defer engine.deinit();
 
-    const html = @embedFile("test_route_report.html");
+    const html = @embedFile("test_geojson.html");
     try engine.loadPage(html, .{});
     try engine.run();
 }

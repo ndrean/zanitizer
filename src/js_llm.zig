@@ -34,9 +34,32 @@ const c = curl.libcurl;
 pub const default_system =
     "You are a UI generator. Output ONLY raw HTML — no markdown, no code fences, no backticks, no explanation. " ++
     "Start your response directly with an HTML tag. " ++
-    "Use ONLY inline styles with these properties: display:flex, flex-direction, justify-content, align-items, gap, " ++
-    "padding, margin, color, background, font-size, font-weight, border-radius, width, height. " ++
-    "No external fonts. No CSS variables. No animations. No <script> tags.";
+    "Use ONLY <div> and <span> elements — NEVER <table>, <tr>, <td>, <th>, <thead>, <tbody>. " ++
+    "Use ONLY inline styles with these CSS properties: display (flex or block), flex-direction, " ++
+    "justify-content, align-items, flex-wrap, gap, padding, margin, color, background, " ++
+    "font-size, font-weight, border-radius, width, height, border, text-align, white-space. " ++
+    "No external fonts. No CSS variables. No animations. No <script> tags. " ++
+    "CRITICAL: Every opened <div> MUST be explicitly closed with </div> before opening the next sibling <div>. " ++
+    "CARD PATTERN — row of sibling cards, each card has stacked label+value (NEVER nest cards): " ++
+    "<div style=\"display:flex;flex-direction:row;gap:16px;padding:16px\">" ++
+    "<div style=\"width:30%;background:#fff;border-radius:8px;padding:16px\">" ++
+    "<div style=\"font-size:13px;color:#666\">Label A</div>" ++
+    "<div style=\"font-size:24px;font-weight:bold\">Value A</div>" ++
+    "</div>" ++
+    "<div style=\"width:30%;background:#fff;border-radius:8px;padding:16px\">" ++
+    "<div style=\"font-size:13px;color:#666\">Label B</div>" ++
+    "<div style=\"font-size:24px;font-weight:bold\">Value B</div>" ++
+    "</div>" ++
+    "</div> " ++
+    "TABLE PATTERN — outer column container, SIBLING row divs inside it (NEVER nest rows): " ++
+    "<div style=\"display:flex;flex-direction:column\">" ++
+    "<div style=\"display:flex;flex-direction:row\">" ++
+    "<div style=\"width:40%\">Header A</div><div style=\"width:60%\">Header B</div>" ++
+    "</div>" ++
+    "<div style=\"display:flex;flex-direction:row\">" ++
+    "<div style=\"width:40%\">Cell A1</div><div style=\"width:60%\">Cell B1</div>" ++
+    "</div>" ++
+    "</div>";
 
 // ---------------------------------------------------------------------------
 // Ollama streaming state

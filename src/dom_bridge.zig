@@ -168,6 +168,7 @@ pub const DOMBridge = struct {
             try rt.newClass(rc.classes.html_element, .{
                 .class_name = "HTMLElement",
                 .finalizer = domFinalizer,
+                .exotic = &form_exotic_methods,
             });
 
             const el_proto = ctx.newObject();
@@ -193,6 +194,7 @@ pub const DOMBridge = struct {
             js_utils.defineAccessor(ctx, el_proto, "style", js_style.get_element_style, js_style.set_element_style);
             js_utils.defineAccessor(ctx, el_proto, "src", js_HTMLElement_get_src, js_HTMLElement_set_src);
             js_utils.defineAccessor(ctx, el_proto, "href", js_HTMLElement_get_href, js_HTMLElement_set_href);
+            js_utils.defineAccessor(ctx, el_proto, "value", js_get_value, js_set_value);
 
             // Getter-only properties
             js_utils.defineGetter(ctx, el_proto, "clientWidth", js_HTMLElement_clientWidth);
@@ -2025,8 +2027,20 @@ fn js_setAttribute_sanitized(
                 std.debug.print("setAttribute style error: {}\n", .{err});
                 return ctx.throwTypeError("Native Zig Error");
             };
+            // Re-parse the inline style so serializeElementStyles() sees the update.
+            z.parseElementStyle(el) catch {};
             return w.UNDEFINED;
         }
+    }
+
+    // Keep the style cascade in sync for non-sanitized setAttribute("style", ...) calls too.
+    if (std.ascii.eqlIgnoreCase(attr_name, "style")) {
+        z.setAttribute(el, attr_name, attr_value) catch |err| {
+            std.debug.print("setAttribute style (unsanitized) error: {}\n", .{err});
+            return ctx.throwTypeError("Native Zig Error");
+        };
+        z.parseElementStyle(el) catch {};
+        return w.UNDEFINED;
     }
 
     z.setAttribute(el, attr_name, attr_value) catch |err| {
@@ -2379,6 +2393,147 @@ fn js_HTMLElement_get_href(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, 
 fn js_HTMLElement_set_href(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     return reflectedAttrSetter(.{ .ptr = ctx_ptr }, this_val, argv, "href");
 }
+
+// ── HTMLFormControl .value accessor ──────────────────────────────────────────
+// textarea.value  → text content (read/write)
+// select.value    → first selected option's value attr (read), set selected (write)
+// input/button    → reflected "value" attribute
+
+fn getSelectValue(el: *z.HTMLElement) ?[]const u8 {
+    var first: ?[]const u8 = null;
+    var node = z.firstChild(z.elementToNode(el));
+    while (node) |n| {
+        if (z.nodeToElement(n)) |opt| {
+            if (std.ascii.eqlIgnoreCase(z.tagName_zc(opt), "option")) {
+                const v = z.getAttribute_zc(opt, "value") orelse z.textContent_zc(z.elementToNode(opt));
+                if (first == null) first = v;
+                if (z.hasAttribute(opt, "selected")) return v;
+            }
+        }
+        node = z.nextSibling(n);
+    }
+    return first;
+}
+
+fn js_get_value(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, _: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const ptr = ctx.getOpaque(this_val, rc.classes.html_element) orelse return ctx.newString("");
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const tag = z.tagName_zc(el);
+    if (std.ascii.eqlIgnoreCase(tag, "textarea")) {
+        return ctx.newString(z.textContent_zc(z.elementToNode(el)));
+    }
+    if (std.ascii.eqlIgnoreCase(tag, "select")) {
+        return ctx.newString(getSelectValue(el) orelse "");
+    }
+    return ctx.newString(z.getAttribute_zc(el, "value") orelse "");
+}
+
+fn js_set_value(ctx_ptr: ?*z.qjs.JSContext, this_val: z.qjs.JSValue, _: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const ptr = ctx.getOpaque(this_val, rc.classes.html_element) orelse return w.UNDEFINED;
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    const val = ctx.toZString(argv[0]) catch return w.EXCEPTION;
+    defer ctx.freeZString(val);
+    const tag = z.tagName_zc(el);
+    if (std.ascii.eqlIgnoreCase(tag, "textarea")) {
+        z.setTextContent(rc.allocator, z.elementToNode(el), val) catch {};
+    } else {
+        z.setAttribute(el, "value", val) catch {};
+    }
+    return w.UNDEFINED;
+}
+
+// ── HTMLFormElement named control access ──────────────────────────────────────
+// Implements form["controlName"] → HTMLElement via exotic get_own_property on
+// the shared html_element class.  Returning 0 (not-found) for non-FORM elements
+// leaves the normal prototype chain intact — getAttribute, querySelector, etc.
+// all continue to resolve normally for every element type.
+
+fn findNamedControl(start: ?*z.DomNode, name: []const u8) ?*z.HTMLElement {
+    var node = start;
+    while (node) |n| {
+        if (z.nodeToElement(n)) |el| {
+            const tag = z.tagName_zc(el);
+            const is_ctrl = std.ascii.eqlIgnoreCase(tag, "input") or
+                std.ascii.eqlIgnoreCase(tag, "textarea") or
+                std.ascii.eqlIgnoreCase(tag, "select") or
+                std.ascii.eqlIgnoreCase(tag, "button") or
+                std.ascii.eqlIgnoreCase(tag, "output");
+            if (is_ctrl) {
+                if (z.getAttribute_zc(el, "name")) |attr| {
+                    if (std.mem.eql(u8, attr, name)) return el;
+                }
+            }
+            if (findNamedControl(z.firstChild(n), name)) |found| return found;
+        }
+        node = z.nextSibling(n);
+    }
+    return null;
+}
+
+fn formGetOwnProperty(
+    ctx_ptr: ?*z.qjs.JSContext,
+    desc: ?*z.qjs.JSPropertyDescriptor,
+    obj: z.qjs.JSValue,
+    prop: z.qjs.JSAtom,
+) callconv(.c) c_int {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const ptr = ctx.getOpaque(obj, rc.classes.html_element) orelse return 0;
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    if (!std.ascii.eqlIgnoreCase(z.tagName_zc(el), "form")) return 0;
+
+    var prop_len: usize = 0;
+    const prop_cstr = z.qjs.JS_AtomToCStringLen(ctx_ptr, &prop_len, prop);
+    if (prop_cstr == null) return 0;
+    defer z.qjs.JS_FreeCString(ctx_ptr, prop_cstr);
+    const prop_name = prop_cstr[0..prop_len];
+    if (prop_name.len == 0) return 0;
+
+    const found = findNamedControl(z.firstChild(z.elementToNode(el)), prop_name) orelse return 0;
+
+    if (desc) |d| {
+        d.value = DOMBridge.wrapElement(ctx, found) catch return -1;
+        d.getter = w.UNDEFINED;
+        d.setter = w.UNDEFINED;
+        d.flags = z.qjs.JS_PROP_ENUMERABLE | z.qjs.JS_PROP_WRITABLE | z.qjs.JS_PROP_CONFIGURABLE;
+    }
+    return 1;
+}
+
+fn formHasProperty(
+    ctx_ptr: ?*z.qjs.JSContext,
+    obj: z.qjs.JSValue,
+    prop: z.qjs.JSAtom,
+) callconv(.c) c_int {
+    const ctx = w.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const ptr = ctx.getOpaque(obj, rc.classes.html_element) orelse return 0;
+    const el: *z.HTMLElement = @ptrCast(@alignCast(ptr));
+    if (!std.ascii.eqlIgnoreCase(z.tagName_zc(el), "form")) return 0;
+
+    var prop_len: usize = 0;
+    const prop_cstr = z.qjs.JS_AtomToCStringLen(ctx_ptr, &prop_len, prop);
+    if (prop_cstr == null) return 0;
+    defer z.qjs.JS_FreeCString(ctx_ptr, prop_cstr);
+    const prop_name = prop_cstr[0..prop_len];
+    if (prop_name.len == 0) return 0;
+
+    return if (findNamedControl(z.firstChild(z.elementToNode(el)), prop_name) != null) 1 else 0;
+}
+
+const form_exotic_methods = z.qjs.JSClassExoticMethods{
+    .get_own_property = formGetOwnProperty,
+    .get_own_property_names = null,
+    .delete_property = null,
+    .define_own_property = null,
+    .has_property = formHasProperty,
+    .get_property = null,
+    .set_property = null,
+};
 
 fn js_localStorage_setItem(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
     const ctx = w.Context.from(ctx_ptr);

@@ -38,17 +38,18 @@ const McpRequest = struct {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 pub fn mcpHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
-    const body = req.body() orelse {
-        res.status = 400;
-        return;
-    };
-
     const alloc = app_ctx.allocator;
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const aa = arena.allocator();
 
     res.header("Content-Type", "application/json");
+
+    const body = req.body() orelse {
+        res.status = 400;
+        res.body = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32700,\"message\":\"Parse error: empty request body\"}}";
+        return;
+    };
 
     const parsed = std.json.parseFromSlice(McpRequest, aa, body, .{
         .ignore_unknown_fields = true,
@@ -66,6 +67,11 @@ pub fn mcpHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Respons
         try out.writer.writeAll("{}");
     } else if (std.mem.eql(u8, mcp_req.method, "tools/list")) {
         try buildToolsList(mcp_req.id, &out);
+    } else if (std.mem.eql(u8, mcp_req.method, "resources/list")) {
+        try buildResourcesList(mcp_req.id, &out);
+    } else if (std.mem.eql(u8, mcp_req.method, "resources/read")) {
+        const params = mcp_req.params orelse .null;
+        try handleResourcesRead(mcp_req.id, params, &out);
     } else if (std.mem.eql(u8, mcp_req.method, "tools/call")) {
         const params = mcp_req.params orelse {
             try buildError(mcp_req.id, -32602, "Invalid params: missing params", &out);
@@ -95,7 +101,7 @@ fn buildInitialize(id: ?std.json.Value, out: *std.Io.Writer.Allocating) !void {
     try w.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
     try writeId(id, w);
     try w.print(
-        ",\"result\":{{\"protocolVersion\":\"{s}\",\"capabilities\":{{\"tools\":{{}}}},\"serverInfo\":{{\"name\":\"{s}\",\"version\":\"{s}\"}}}}}}",
+        ",\"result\":{{\"protocolVersion\":\"{s}\",\"capabilities\":{{\"tools\":{{}},\"resources\":{{}}}},\"serverInfo\":{{\"name\":\"{s}\",\"version\":\"{s}\"}}}}}}",
         .{ MCP_VERSION, SERVER_NAME, SERVER_VERSION },
     );
 }
@@ -144,13 +150,27 @@ const TOOLS_JSON =
     \\  },
     \\  {
     \\    "name": "run_script",
-    \\    "description": "Execute JavaScript in the headless DOM. Returns text/JSON, or a base64 image if the script returns an ArrayBuffer (e.g. from zxp.encode()). Has full access to the zxp API: zxp.paintDOM, zxp.encode, zxp.markdownToHTML, zxp.loadHTML, etc.",
+    \\    "description": "Execute JavaScript in a headless DOM+JS engine (QuickJS, browser-like). Returns plain text/JSON, or a base64 image if the script returns an ArrayBuffer from zxp.encode().\n\nENVIRONMENT: Full DOM (document, querySelector, innerHTML, events), fetch(), URL, setTimeout, TextDecoder/Encoder.\n\nZXP API:\n  zxp.goto(url)                       - fetch URL with browser headers, parse HTML+CSS, run scripts\n  zxp.streamFrom(url)                 - streaming fetch into parser (better for large pages)\n  zxp.fetchAll(urlArray, hdrsArray)   - parallel fetch; returns [{ok,status,data,type}] — use for batch image replacement\n  zxp.loadHTML(html)                  - parse an HTML string into document\n  zxp.paintDOM(node, width)           - render DOM node to RGBA canvas {data,width,height}\n  zxp.paintElement(el, width)         - render a single element (cropped to its bbox)\n  zxp.encode(img, format)             - encode canvas to ArrayBuffer (png/webp/jpeg/pdf) — return this for an image response\n  zxp.arrayBufferToBase64DataUri(buf,mime) - convert ArrayBuffer to data URI string\n  zxp.markdownToHTML(md)              - Markdown to HTML (GFM: tables, strikethrough, tasks)\n  zxp.toMarkdown(element)             - DOM element to Markdown string (compact for LLM input)\n  zxp.llmHTML({model,prompt,...})     - call Ollama, stream HTML response, return as string\n  zxp.llmStream({model,prompt,...})   - stream LLM tokens directly into DOM\n  zxp.csv.parse(str)                  - CSV string to array of objects\n  zxp.csv.stringify(rows)             - array of objects to CSV string\n  zxp.fs.readFileSync(path)           - read file to ArrayBuffer\n  zxp.stdin.read()                    - read stdin as string (CLI only)\n\nSCRAPING:\n  await zxp.goto('https://news.ycombinator.com');\n  return Array.from(document.querySelectorAll('.titleline a')).map(a => a.textContent);\n\nSCRAPE + REPLACE IMAGES (render a live page with real images):\n  await zxp.goto('https://example.com');\n  const imgs = Array.from(document.querySelectorAll('img[src]'));\n  const urls = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));\n  const fetched = await zxp.fetchAll(urls, urls.map(() => ({})));\n  fetched.forEach((r,i) => { if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type)); });\n  return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');\n\nCall get_zxp_docs before writing scripts to get worked examples and understand CSS rendering constraints.",
     \\    "inputSchema": {
     \\      "type": "object",
     \\      "properties": {
     \\        "script": {"type": "string", "description": "JavaScript code to execute"}
     \\      },
     \\      "required": ["script"]
+    \\    }
+    \\  },
+    \\  {
+    \\    "name": "get_zxp_docs",
+    \\    "description": "Return API documentation and worked code examples for the zxp JavaScript environment. Call this BEFORE writing a run_script to learn exact function signatures, which CSS properties the compositor supports, and copy-paste patterns for common tasks (scraping, image replacement, LLM rendering, CSV tables).",
+    \\    "inputSchema": {
+    \\      "type": "object",
+    \\      "properties": {
+    \\        "topic": {
+    \\          "type": "string",
+    \\          "enum": ["all", "examples", "api", "rendering", "scraping"],
+    \\          "description": "Doc section to return (default: all). examples=worked code patterns; api=full function signatures; rendering=CSS constraints and layout tips; scraping=goto/fetchAll/toMarkdown patterns."
+    \\        }
+    \\      }
     \\    }
     \\  }
     \\]
@@ -163,6 +183,244 @@ fn buildToolsList(id: ?std.json.Value, out: *std.Io.Writer.Allocating) !void {
     try w.writeAll(",\"result\":{\"tools\":");
     try w.writeAll(TOOLS_JSON);
     try w.writeAll("}}");
+}
+
+// ── Resources ─────────────────────────────────────────────────────────────────
+//
+// Resources expose documentation that Claude can read to understand the zxp API
+// before writing a run_script call.  URIs follow the scheme zxp://docs/<topic>.
+
+const RESOURCES_LIST_JSON =
+    \\[
+    \\  {"uri":"zxp://docs/examples","name":"zxp worked examples","description":"Concrete, copy-paste JS examples for common tasks: scraping, image replacement, rendering, CSV, LLM.","mimeType":"text/plain"},
+    \\  {"uri":"zxp://docs/api","name":"zxp full API reference","description":"Complete zxp.* function signatures with parameter types and return values.","mimeType":"text/plain"},
+    \\  {"uri":"zxp://docs/scraping","name":"Scraping guide","description":"How to use zxp.goto, zxp.fetchAll, and zxp.toMarkdown to extract content from live web pages.","mimeType":"text/plain"},
+    \\  {"uri":"zxp://docs/rendering","name":"Rendering guide","description":"How to load HTML/Markdown, paint the DOM, and return images via zxp.encode.","mimeType":"text/plain"}
+    \\]
+;
+
+const DOC_EXAMPLES =
+    \\# zxp run_script — worked examples
+    \\
+    \\## 1. Scrape Hacker News top stories
+    \\
+    \\  async function run() {
+    \\    await zxp.goto('https://news.ycombinator.com');
+    \\    return Array.from(document.querySelectorAll('.titleline a'))
+    \\      .slice(0, 10)
+    \\      .map(a => ({ title: a.textContent, href: a.href }));
+    \\  }
+    \\  run();
+    \\
+    \\## 2. Scrape and render a live page with real images
+    \\
+    \\  async function run() {
+    \\    await zxp.goto('https://demo.vercel.store');
+    \\    // Replace all img src with data URIs so the compositor can paint them
+    \\    const imgs = Array.from(document.querySelectorAll('img[src]'));
+    \\    const urls = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));
+    \\    const fetched = await zxp.fetchAll(urls, urls.map(() => ({})));
+    \\    fetched.forEach((r, i) => {
+    \\      if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type));
+    \\    });
+    \\    return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');
+    \\  }
+    \\  run();
+    \\
+    \\## 3. Render custom HTML to PNG
+    \\
+    \\  zxp.loadHTML(`
+    \\    <div style="padding:24px;font-family:system-ui;background:#f5f5f5">
+    \\      <h1 style="color:#2563eb">Hello from zxp</h1>
+    \\      <p>Rendered headlessly in Zig.</p>
+    \\    </div>
+    \\  `);
+    \\  return zxp.encode(zxp.paintDOM(document.body, 600), 'png');
+    \\
+    \\## 4. Extract page content as Markdown (for LLM input)
+    \\
+    \\  async function run() {
+    \\    await zxp.goto('https://example.com');
+    \\    return zxp.toMarkdown(document.body);
+    \\  }
+    \\  run();
+    \\
+    \\## 5. Parse a CSV and render it as a table image
+    \\
+    \\  const csv = `Name,Score\nAlice,95\nBob,82\nCarol,91`;
+    \\  const rows = zxp.csv.parse(csv);
+    \\  const thead = rows[0] ? '<tr>' + Object.keys(rows[0]).map(k => `<th style="background:#2563eb;color:#fff;padding:8px 12px">${k}</th>`).join('') + '</tr>' : '';
+    \\  const tbody = rows.map(r => '<tr>' + Object.values(r).map(v => `<td style="padding:8px 12px;border-bottom:1px solid #e5e7eb">${v}</td>`).join('') + '</tr>').join('');
+    \\  zxp.loadHTML(`<table style="border-collapse:collapse;font-family:system-ui">${thead}${tbody}</table>`);
+    \\  return zxp.encode(zxp.paintDOM(document.body, 600), 'png');
+    \\
+    \\## 6. Generate UI with a local LLM (Ollama)
+    \\
+    \\  async function run() {
+    \\    const html = await zxp.llmHTML({
+    \\      model: 'qwen2.5-coder:3b',
+    \\      prompt: '3 KPI cards: Revenue $42k, Users 3.4k, MRR $8.2k. Clean white cards, blue accents.',
+    \\      base_url: 'http://localhost:11434',
+    \\    });
+    \\    zxp.loadHTML(html);
+    \\    return zxp.encode(zxp.paintDOM(document.body, 900), 'png');
+    \\  }
+    \\  run();
+;
+
+const DOC_API =
+    \\# zxp API reference
+    \\
+    \\All functions are on the global `zxp` object.
+    \\
+    \\## Navigation / Loading
+    \\  zxp.goto(url: string, opts?): Promise<void>
+    \\    Fetch url with browser headers, parse HTML+CSS, execute inline scripts.
+    \\    opts: { sanitize?: bool, execute_scripts?: bool }
+    \\
+    \\  zxp.streamFrom(url: string): void
+    \\    Streaming fetch into lexbor parser. Better for large pages. Executes scripts.
+    \\
+    \\  zxp.loadHTML(html: string): void
+    \\    Parse an HTML string into document (no network, no scripts).
+    \\
+    \\## Fetch
+    \\  zxp.fetchAll(urls: string[], headers: object[]): Promise<{ok,status,data,type}[]>
+    \\    Parallel fetch of multiple URLs. headers array must have same length as urls
+    \\    (use urls.map(()=>({})) for no custom headers). data is ArrayBuffer.
+    \\
+    \\  zxp.arrayBufferToBase64DataUri(buf: ArrayBuffer, mime: string): string
+    \\    Convert ArrayBuffer to "data:<mime>;base64,<b64>" string.
+    \\
+    \\## Rendering
+    \\  zxp.paintDOM(node: Element, width: number): {data: ArrayBuffer, width, height}
+    \\    Render DOM node with Yoga layout + ThorVG. Returns RGBA canvas object.
+    \\
+    \\  zxp.paintElement(el: Element, width: number): {data: ArrayBuffer, width, height}
+    \\    Render a single element (crops to its bounding box).
+    \\
+    \\  zxp.encode(img: {data,width,height}, format: string): ArrayBuffer
+    \\    Encode RGBA canvas to compressed bytes. format: "png" | "webp" | "jpeg" | "pdf"
+    \\    Returning this ArrayBuffer from run_script sends it as a base64 image in MCP.
+    \\
+    \\  zxp.save(img, path: string): void
+    \\    Encode and write to disk. Extension determines format (.png .jpg .webp .pdf).
+    \\
+    \\## Text / Markdown
+    \\  zxp.markdownToHTML(md: string): string   — Markdown → HTML (md4c, GFM)
+    \\  zxp.toMarkdown(element: Element): string — DOM element → Markdown (compact)
+    \\
+    \\## LLM (requires local Ollama)
+    \\  zxp.llmHTML(config): Promise<string>
+    \\    config: { model, prompt, system?, base_url?, provider? }
+    \\    Calls Ollama /api/chat, streams HTML tokens, returns full HTML string.
+    \\
+    \\  zxp.llmStream(config): void
+    \\    Like llmHTML but streams tokens directly into the lexbor DOM parser.
+    \\    Lower memory, single parse pass. DOM is ready after this returns.
+    \\
+    \\## CSV
+    \\  zxp.csv.parse(csv: string): object[]     — CSV string → array of objects (headers = keys)
+    \\  zxp.csv.stringify(rows: object[]): string — array of objects → CSV string
+    \\
+    \\## File I/O
+    \\  zxp.fs.readFileSync(path: string): ArrayBuffer
+    \\  zxp.fs.writeFileSync(path: string, buf: ArrayBuffer): void
+    \\  zxp.stdin.read(): string    — piped stdin as UTF-8 text (CLI only)
+    \\  zxp.stdin.readBytes(): ArrayBuffer
+;
+
+const DOC_SCRAPING =
+    \\# Scraping guide
+    \\
+    \\Use zxp.goto() for single-page scraping:
+    \\
+    \\  await zxp.goto('https://example.com');
+    \\  const links = Array.from(document.querySelectorAll('a[href]'))
+    \\    .map(a => ({ text: a.textContent.trim(), href: a.getAttribute('href') }));
+    \\  return links;
+    \\
+    \\For just the text content (compact for LLMs):
+    \\
+    \\  await zxp.goto('https://example.com');
+    \\  return zxp.toMarkdown(document.body);
+    \\
+    \\To replace images so the compositor can paint them:
+    \\
+    \\  await zxp.goto('https://example.com');
+    \\  const imgs = Array.from(document.querySelectorAll('img[src]'));
+    \\  const srcs = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));
+    \\  const fetched = await zxp.fetchAll(srcs, srcs.map(() => ({})));
+    \\  fetched.forEach((r, i) => {
+    \\    if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type));
+    \\  });
+    \\  return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');
+    \\
+    \\ThorVG (the compositor) only supports PNG and JPEG images — WebP and SVG via data URIs work too.
+    \\Never leave img[src] pointing at http:// URLs; the compositor cannot fetch them.
+    \\Always replace with data URIs before calling paintDOM.
+;
+
+const DOC_RENDERING =
+    \\# Rendering guide
+    \\
+    \\## HTML string → PNG
+    \\  zxp.loadHTML('<h1 style="color:blue">Hello</h1>');
+    \\  return zxp.encode(zxp.paintDOM(document.body, 800), 'png');
+    \\
+    \\## Markdown → PNG
+    \\  const html = zxp.markdownToHTML('# Hello\n\n- item 1\n- item 2');
+    \\  zxp.loadHTML('<html><body style="padding:24px;font-family:system-ui">' + html + '</body></html>');
+    \\  return zxp.encode(zxp.paintDOM(document.body, 800), 'png');
+    \\
+    \\## Supported CSS (inline styles only for best results)
+    \\  display: flex, block, inline, none
+    \\  flex-direction, justify-content, align-items, flex-wrap, gap
+    \\  padding, margin (shorthand ok: "8px 16px")
+    \\  width, height (px or %)
+    \\  color, background, background-color
+    \\  font-size, font-weight, font-family
+    \\  border-radius, border
+    \\  box-shadow (simple values)
+    \\  text-align, white-space, overflow
+    \\  grid-template-columns: repeat(N, 1fr) — supported via flex shim
+    \\
+    \\## Tips
+    \\  - Use width in pixels for reliable layout (not 100% at top level)
+    \\  - External fonts are not loaded — system-ui, monospace, serif, sans-serif work
+    \\  - <link rel=stylesheet> from http:// URLs are not fetched; embed <style> tags instead
+    \\  - Return zxp.encode(..., 'png') from the script for an image MCP response
+;
+
+fn buildResourcesList(id: ?std.json.Value, out: *std.Io.Writer.Allocating) !void {
+    const w = &out.writer;
+    try w.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+    try writeId(id, w);
+    try w.writeAll(",\"result\":{\"resources\":");
+    try w.writeAll(RESOURCES_LIST_JSON);
+    try w.writeAll("}}");
+}
+
+fn handleResourcesRead(id: ?std.json.Value, params: std.json.Value, out: *std.Io.Writer.Allocating) !void {
+    const uri: []const u8 = switch (params) {
+        .object => |o| switch (o.get("uri") orelse return buildError(id, -32602, "resources/read: missing uri", out)) {
+            .string => |s| s,
+            else => return buildError(id, -32602, "resources/read: uri must be a string", out),
+        },
+        else => return buildError(id, -32602, "resources/read: params must be an object", out),
+    };
+
+    const text: []const u8 =
+        if (std.mem.eql(u8, uri, "zxp://docs/examples")) DOC_EXAMPLES else if (std.mem.eql(u8, uri, "zxp://docs/api")) DOC_API else if (std.mem.eql(u8, uri, "zxp://docs/scraping")) DOC_SCRAPING else if (std.mem.eql(u8, uri, "zxp://docs/rendering")) DOC_RENDERING else return buildError(id, -32002, "Resource not found", out);
+
+    const w = &out.writer;
+    try w.writeAll("{\"jsonrpc\":\"2.0\",\"id\":");
+    try writeId(id, w);
+    try w.writeAll(",\"result\":{\"contents\":[{\"uri\":");
+    try std.json.Stringify.value(uri, .{}, w);
+    try w.writeAll(",\"mimeType\":\"text/plain\",\"text\":");
+    try std.json.Stringify.value(text, .{}, w);
+    try w.writeAll("}]}}");
 }
 
 fn buildError(id: ?std.json.Value, code: i64, message: []const u8, out: *std.Io.Writer.Allocating) !void {
@@ -222,6 +480,8 @@ fn handleToolsCall(
         try toolRenderUrl(app_ctx, id, args, out, aa, alloc);
     } else if (std.mem.eql(u8, name, "run_script")) {
         try toolRunScript(app_ctx, id, args, out, aa, alloc);
+    } else if (std.mem.eql(u8, name, "get_zxp_docs")) {
+        try toolGetZxpDocs(id, args, out, aa);
     } else {
         try buildError(id, -32602, "Unknown tool", out);
     }
@@ -435,6 +695,35 @@ fn toolRenderUrl(
     try buildToolResult(id, content, out);
 }
 
+// ── get_zxp_docs ──────────────────────────────────────────────────────────────
+
+fn toolGetZxpDocs(
+    id: ?std.json.Value,
+    args: std.json.Value,
+    out: *std.Io.Writer.Allocating,
+    aa: std.mem.Allocator,
+) !void {
+    const topic = getStrArg(args, "topic") orelse "all";
+
+    const text: []const u8 = if (std.mem.eql(u8, topic, "examples"))
+        DOC_EXAMPLES
+    else if (std.mem.eql(u8, topic, "api"))
+        DOC_API
+    else if (std.mem.eql(u8, topic, "rendering"))
+        DOC_RENDERING
+    else if (std.mem.eql(u8, topic, "scraping"))
+        DOC_SCRAPING
+    else blk: {
+        // "all" — concatenate every section
+        break :blk try std.fmt.allocPrint(aa, "{s}\n\n{s}\n\n{s}\n\n{s}", .{
+            DOC_EXAMPLES, DOC_API, DOC_RENDERING, DOC_SCRAPING,
+        });
+    };
+
+    const content = try textContent(text, aa);
+    try buildToolResult(id, content, out);
+}
+
 // ── run_script ────────────────────────────────────────────────────────────────
 
 fn toolRunScript(
@@ -463,7 +752,24 @@ fn toolRunScript(
     };
     defer engine.ctx.freeValue(val);
 
-    engine.run() catch {};
+    if (engine.ctx.isException(val)) {
+        const ex = engine.ctx.getException();
+        defer engine.ctx.freeValue(ex);
+
+        if (engine.ctx.toZString(ex)) |err_str| {
+            defer engine.ctx.freeZString(err_str);
+            const msg = try std.fmt.allocPrint(aa, "JavaScript Error:\n{s}", .{err_str});
+            const content = try textContent(msg, aa);
+            try buildToolResult(id, content, out);
+        } else |_| {
+            try buildError(id, -32603, "run_script: Unknown JavaScript exception", out);
+        }
+        return;
+    }
+
+    engine.run() catch |err| {
+        std.debug.print("❌ [MCP run_script event loop error]: {}\n", .{err});
+    };
 
     // ArrayBuffer → base64 image
     if (engine.ctx.isArrayBuffer(val)) {
