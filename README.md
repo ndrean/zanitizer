@@ -73,7 +73,6 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 
 ---
 
-
 ### MCP server
 
 Start the server (the `.` sets the sandbox root for file access and the SQLite store):
@@ -847,7 +846,9 @@ See the [full Leaflet-to-PDF example](#embed-leaflet-geojson-path-map-in-an-svg-
 
 A quick example that uses the CLI: we will execute a JavaScript snippet (`run -e "..."`) that reads from stdin (`zxp.stdin.read()`), parses the CSV data (`zxp.csv.parse()`) and conversely stringify it back (`zxp.csv.stringify()`).
 
-**smoke test**: send a CSV, parse and stringify:
+**Smoke Test**
+
+We send a CSV, parse and stringify:
 
 ```sh
 echo "name,age\nAlice,30\nBob,25\n" | \
@@ -864,6 +865,100 @@ console.log(back);"
 #Alice,30
 #Bob,25
 ```
+
+### Markdown
+
+**Smoke test: HTML -> MD**
+
+```sh
+echo "<html><body>
+  <h2>DOM to Markdown</h2>
+  <p>A paragraph with <strong>bold</strong> and <em>italic</em> text.</p>
+  <ul><li>Item A</li><li>Item B</li></ul>
+</body></html>" \
+| ./zig-out/bin/zxp run -e \
+"zxp.loadHTML(zxp.stdin.read()); 
+const mdFromDOM = zxp.toMarkdown(document.body);
+console.error('toMarkdown output:\n' + mdFromDOM);"
+
+
+# -> toMarkdown output:
+# ## DOM to Markdown
+
+# A paragraph with **bold** and _italic_ text.
+
+# *   Item A
+#*   Item B
+```
+
+**Smoke Test: MD -> HTML**
+
+```sh
+```md
+const md = `# Hello from Markdown
+
+This is **GFM** rendered natively via md4c.
+
+| Column A | Column B |
+|----------|----------|
+| foo      | bar      |
+| baz      | qux      |
+
+- [x] md4c parses GFM Markdown
+- [x] lexbor renders the resulting HTML
+- [ ] profit
+
+~~Strikethrough~~, https://example.com autolink, and <span style="color:red">raw HTML</span> all pass through.
+```
+
+```sh
+echo "# Hello from Markdown
+
+This is **GFM** rendered natively via md4c.
+
+| Column A | Column B |
+|----------|----------|
+| foo      | bar      |
+| baz      | qux      |
+
+- [x] md4c parses GFM Markdown
+- [x] lexbor renders the resulting HTML
+- [ ] profit
+
+~~Strikethrough~~, https://example.com autolink, and <span style="color:red">raw HTML</span> all pass through." | ./zig-out/bin/zxp run -e "zxp.markdownToHTML(zxp.stdin.read())"
+```
+
+gives:
+
+```html
+<h1>Hello from Markdown</h1>
+  <p>This is <strong>GFM</strong> rendered natively via md4c.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Column A</th>
+        <th>Column B</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>foo</td>
+        <td>bar</td>
+      </tr>
+      <tr>
+        <td>baz</td>
+        <td>qux</td>
+      </tr>
+    </tbody>
+  </table>
+  <ul>
+    <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled checked>md4c parses GFM Markdown</li>
+    <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled checked>lexbor renders the resulting HTML</li>
+    <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled>profit</li>
+  </ul>
+<p><del>Strikethrough</del>, <a href="https://example.com">https://example.com</a> autolink, and <span style=color:red>raw HTML</span> all pass through.</p>
+```
+
 
 ## Library quick start
 
