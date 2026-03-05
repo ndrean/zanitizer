@@ -19,7 +19,7 @@ async function fetchImages() {
   });
 
   // Fetch all in parallel via libcurl multi.
-  const results = fetchAll(
+  const results = zxp.fetchAll(
     urls.filter((u) => u !== null),
     {
       Accept: "image/png,image/jpeg,image/webp,*/*;q=0.5",
@@ -34,7 +34,7 @@ async function fetchImages() {
     if (urls[i] === null) continue;
     const r = results[ri++];
     if (!r || !r.ok) continue;
-    imgs[i].setAttribute("src", arrayBufferToBase64DataUri(r.data, r.type));
+    imgs[i].setAttribute("src", zxp.arrayBufferToBase64DataUri(r.data, r.type));
     imgs[i].removeAttribute("srcset");
   }
 

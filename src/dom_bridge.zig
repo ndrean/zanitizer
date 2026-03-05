@@ -433,7 +433,8 @@ pub const DOMBridge = struct {
         try ctx.setPropertyStr(global, "__native_stdinReadBytes", ctx.newCFunction(js_stdin.js_native_stdinReadBytes, "stdinReadBytes", 0));
         try ctx.setPropertyStr(global, "__native_paintDOM", ctx.newCFunction(js_compositor.js_paintDOM, "paintDOM", 5));
         try ctx.setPropertyStr(global, "__native_paintElement", ctx.newCFunction(js_compositor.js_paintElement, "paintElement", 2));
-        try ctx.setPropertyStr(global, "__native_paintSVG", ctx.newCFunction(js_paintSVG, "paintSVG", 1));
+        try ctx.setPropertyStr(global, "__native_paintSVG", ctx.newCFunction(js_paintSVG, "paintSVG", 2));
+        try ctx.setPropertyStr(global, "__native_measureText", ctx.newCFunction(js_compositor.js_measureText, "measureText", 2));
         try ctx.setPropertyStr(global, "__native_streamFrom", ctx.newCFunction(js_streamfrom.js_native_streamFrom, "streamFrom", 1));
         try ctx.setPropertyStr(global, "__native_llmHTML", ctx.newCFunction(js_llm.js_native_llmHTML, "llmHTML", 1));
         try ctx.setPropertyStr(global, "__native_llmStream", ctx.newCFunction(js_llm.js_native_llmStream, "llmStream", 1));
@@ -986,7 +987,9 @@ fn js_querySelector(
 
     if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
         root_node = z.elementToNode(@ptrCast(ptr));
-    } else if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| {
+    } else if (ctx.getOpaque(this_val, rc.classes.document) orelse
+        ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr|
+    {
         // Document: start searching from the document root (<html>)
         const doc: *z.HTMLDocument = @ptrCast(ptr);
         root_node = z.documentRoot(doc);
@@ -1030,7 +1033,9 @@ fn js_querySelectorAll(
 
     if (ctx.getOpaque(this_val, rc.classes.html_element)) |ptr| {
         root_node = z.elementToNode(@ptrCast(ptr));
-    } else if (ctx.getOpaque(this_val, rc.classes.document)) |ptr| {
+    } else if (ctx.getOpaque(this_val, rc.classes.document) orelse
+        ctx.getOpaque(this_val, rc.classes.owned_document)) |ptr|
+    {
         const doc: *z.HTMLDocument = @ptrCast(ptr);
         root_node = z.documentRoot(doc);
     } else if (ctx.getOpaque(this_val, rc.classes.document_fragment)) |ptr| {
@@ -2739,7 +2744,27 @@ fn js_paintSVG(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: 
     } else svg_slice;
     defer if (needs_fixup and svg_to_render.ptr != svg_slice.ptr) rc.allocator.free(svg_to_render);
 
-    const img = js_image.Image.initFromSvg(rc.allocator, svg_to_render, 0) catch |err| {
+    // Optional second arg: { width?: number, height?: number }
+    var opt_w: ?u32 = null;
+    var opt_h: ?u32 = null;
+    if (argc >= 2 and ctx.isObject(argv[1])) {
+        const wv = ctx.getPropertyStr(argv[1], "width");
+        defer ctx.freeValue(wv);
+        if (!ctx.isUndefined(wv) and !ctx.isNull(wv)) {
+            if (ctx.toFloat64(wv) catch null) |n| {
+                if (n > 0) opt_w = @intFromFloat(n);
+            }
+        }
+        const hv = ctx.getPropertyStr(argv[1], "height");
+        defer ctx.freeValue(hv);
+        if (!ctx.isUndefined(hv) and !ctx.isNull(hv)) {
+            if (ctx.toFloat64(hv) catch null) |n| {
+                if (n > 0) opt_h = @intFromFloat(n);
+            }
+        }
+    }
+
+    const img = js_image.Image.initFromSvgWithSize(rc.allocator, svg_to_render, opt_w, opt_h) catch |err| {
         std.debug.print("[paintSVG] initFromSvg failed: {}\n", .{err});
         return w.UNDEFINED;
     };

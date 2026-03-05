@@ -186,6 +186,16 @@ pub fn js_parseFromString(ctx_ptr: ?*qjs.JSContext, this_val: qjs.JSValue, argc:
     };
     const doc_obj = qjs.JS_NewObjectClass(ctx_ptr, @intCast(rc.classes.owned_document));
     _ = qjs.JS_SetOpaque(doc_obj, @ptrCast(result));
+    // Pin the document in node_cache to prevent premature GC.
+    // Without this, `doc` going out of scope in user code (e.g. Turndown's RootNode())
+    // causes documentFinalizer to free the Lexbor document while child nodes are still
+    // being used → use-after-free SIGSEGV.
+    // The cache holds a live reference; documentFinalizer fires safely during DOMBridge.deinit().
+    if (rc.dom_bridge) |bridge_ptr| {
+        const bridge: *DOMBridge = @ptrCast(@alignCast(bridge_ptr));
+        const dup = ctx.dupValue(doc_obj);
+        bridge.node_cache.put(@intFromPtr(result), dup) catch {};
+    }
     return doc_obj;
 }
 // Property Getter for type

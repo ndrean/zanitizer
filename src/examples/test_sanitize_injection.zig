@@ -12,7 +12,9 @@
 ///
 /// Run: zig build example -Dname=test_sanitize_injection
 const std = @import("std");
-const z = @import("zexplorer");
+const z = @import("zxp");
+const ScriptEngine = z.ScriptEngine;
+const ZxpRuntime = z.ZxpRuntime;
 
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
@@ -33,7 +35,9 @@ pub fn main() !void {
 }
 
 fn runTest(ta: std.mem.Allocator, sbr: []const u8, html: []const u8, sanitize: bool) !void {
-    var engine = try z.ScriptEngine.init(ta, sbr);
+    var zxp_rt = try ZxpRuntime.init(ta, sbr);
+    defer zxp_rt.deinit();
+    var engine = try ScriptEngine.init(ta, zxp_rt);
     defer engine.deinit();
 
     try engine.loadPage(html, .{
@@ -70,7 +74,7 @@ fn runTest(ta: std.mem.Allocator, sbr: []const u8, html: []const u8, sanitize: b
         const bg_img = try z.getComputedStyle(ta, el.?, "background-image");
         defer if (bg_img) |c| ta.free(c);
 
-        const color_ok  = if (color) |c| std.mem.eql(u8, c, "red") else false;
+        const color_ok = if (color) |c| std.mem.eql(u8, c, "red") else false;
         const threat_gone = bg_img == null;
         const pass = if (sanitize) color_ok and threat_gone else !threat_gone;
 

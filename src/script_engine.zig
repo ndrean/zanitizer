@@ -89,6 +89,9 @@ pub const ScriptEngine = struct {
     dom: DOMBridge, // VALUE!! to own the DOMBridge struct so DOMBridge deinit its content and ScriptEngine
     interrupt_deadline: i64 = 0, // in milliseconds, 0 means no deadline
     streaming_active: bool = false,
+    /// Set by evalAsync when a Promise is rejected, cleared on next evalAsync call.
+    /// Owned by this engine; freed in deinit or on next evalAsync call.
+    last_rejection_msg: ?[]const u8 = null,
 
     // TODO: need to read the import_map as external
     /// Initialize JS Environment on the heap.
@@ -97,6 +100,13 @@ pub const ScriptEngine = struct {
         const self = try allocator.create(ScriptEngine);
         self.allocator = allocator;
         errdefer allocator.destroy(self);
+
+        // allocator.create() gives uninitialized memory — explicitly zero fields
+        // that have default values in the struct definition but are never assigned
+        // in the body below (debug builds fill uninitialized memory with 0xaa).
+        self.interrupt_deadline = 0;
+        self.streaming_active = false;
+        self.last_rejection_msg = null;
 
         // Borrow the thread-local runtime — we do NOT own rt or sandbox.
         self.zxp_rt = zxp_rt;
@@ -147,6 +157,7 @@ pub const ScriptEngine = struct {
         _ = try self.ctx.setPropertyStr(global, "__loadHTML", self.ctx.newCFunction(js_loadHTML, "__loadHTML", 1));
         _ = try self.ctx.setPropertyStr(global, "__native_readFileSync", self.ctx.newCFunction(js_file_sync.js_readFileSync, "__native_readFileSync", 1));
         _ = try self.ctx.setPropertyStr(global, "__native_writeFileSync", self.ctx.newCFunction(js_file_sync.js_writeFileSync, "__native_writeFileSync", 2));
+        _ = try self.ctx.setPropertyStr(global, "__native_getCwd", self.ctx.newCFunction(js_file_sync.js_getCwd, "__native_getCwd", 0));
         _ = try self.ctx.setPropertyStr(global, "__native_save", self.ctx.newCFunction(js_compositor.js_native_save, "__native_save", 4));
         _ = try self.ctx.setPropertyStr(global, "__native_encode", self.ctx.newCFunction(js_compositor.js_native_encode, "__native_encode", 4));
 
@@ -219,6 +230,10 @@ pub const ScriptEngine = struct {
     }
 
     pub fn deinit(self: *ScriptEngine) void {
+        if (self.last_rejection_msg) |msg| {
+            self.allocator.free(msg);
+            self.last_rejection_msg = null;
+        }
         self.rc.cleanUp(self.ctx);
         self.dom.deinit();
         if (self.rc.last_result) |val| {
@@ -438,6 +453,11 @@ pub const ScriptEngine = struct {
     ///
     /// Caller OWNS the returned value!
     pub fn evalAsync(self: *ScriptEngine, code: []const u8, name: []const u8) !zqjs.Value {
+        // Clear any previous rejection message.
+        if (self.last_rejection_msg) |msg| {
+            self.allocator.free(msg);
+            self.last_rejection_msg = null;
+        }
         const val = try self.eval(code, name, .global);
 
         // Sync case
@@ -477,6 +497,7 @@ pub const ScriptEngine = struct {
                 if (self.ctx.isUndefined(reason)) {
                     std.debug.print("❌ JS Promise Rejected with: undefined\n", .{});
                     std.debug.print("   (catch block swallowed the error — check console output above)\n", .{});
+                    self.last_rejection_msg = self.allocator.dupe(u8, "Promise rejected with undefined (catch block may have swallowed the error)") catch null;
                     return error.JSPromiseRejected;
                 }
 
@@ -484,17 +505,21 @@ pub const ScriptEngine = struct {
                 const pending = self.ctx.getException();
                 if (!self.ctx.isNull(pending)) self.ctx.freeValue(pending);
 
-                // Try direct toString first
+                // Try direct toString first; also store in last_rejection_msg for callers.
                 if (self.ctx.toCString(reason)) |reason_str| {
                     defer self.ctx.freeCString(reason_str);
-                    z.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(reason_str)});
+                    const msg = std.mem.span(reason_str);
+                    z.print("❌ JS Promise Rejected: {s}\n", .{msg});
+                    self.last_rejection_msg = self.allocator.dupe(u8, msg) catch null;
                 } else |_| {
                     // Try .message then .stack for Error objects
                     const msg_prop = self.ctx.getPropertyStr(reason, "message");
                     defer self.ctx.freeValue(msg_prop);
                     if (self.ctx.toCString(msg_prop)) |msg_str| {
                         defer self.ctx.freeCString(msg_str);
-                        z.print("❌ JS Promise Rejected: {s}\n", .{std.mem.span(msg_str)});
+                        const msg = std.mem.span(msg_str);
+                        z.print("❌ JS Promise Rejected: {s}\n", .{msg});
+                        self.last_rejection_msg = self.allocator.dupe(u8, msg) catch null;
 
                         const stack_prop = self.ctx.getPropertyStr(reason, "stack");
                         defer self.ctx.freeValue(stack_prop);
@@ -505,10 +530,13 @@ pub const ScriptEngine = struct {
                     } else |_| {
                         if (self.ctx.isNull(reason)) {
                             z.print("❌ JS Promise Rejected with: null\n", .{});
+                            self.last_rejection_msg = self.allocator.dupe(u8, "Promise rejected with null") catch null;
                         } else if (self.ctx.isObject(reason)) {
                             z.print("❌ JS Promise Rejected with: [object] (toString failed)\n", .{});
+                            self.last_rejection_msg = self.allocator.dupe(u8, "Promise rejected with [object]") catch null;
                         } else {
                             z.print("❌ JS Promise Rejected with: (unknown type)\n", .{});
+                            self.last_rejection_msg = self.allocator.dupe(u8, "Promise rejected (unknown reason)") catch null;
                         }
                     }
                 }

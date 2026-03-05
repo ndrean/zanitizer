@@ -113,6 +113,15 @@ pub fn getOrCreate(allocator: std.mem.Allocator, sandbox_root: []const u8) !*Zxp
     return rt;
 }
 
+/// Crash recovery: forget the current thread's ZxpRuntime without freeing it.
+/// Called after a SIGSEGV recovery in toolRunScript — the runtime may be in an
+/// unknown state (QuickJS heap partially corrupted).  Leaking it is safer than
+/// calling deinit() on corrupted memory.  The next call to getOrCreate() on
+/// this thread will create a fresh ZxpRuntime.
+pub fn invalidateThreadLocal() void {
+    tl_instance = null; // leak — intentional after crash recovery
+}
+
 /// Free all thread-local ZxpRuntimes.  Call this AFTER the HTTP server's
 /// thread pool has been joined (server.deinit()) so no worker threads are
 /// still using the runtimes, and BEFORE debug_gpa.deinit().

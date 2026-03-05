@@ -55,9 +55,9 @@ extern "c" fn lxb_dom_node_replace_all(parent: *z.DomNode, node: *z.DomNode) c_i
 extern "c" fn lxb_dom_document_destroy_element(element: *z.HTMLElement) *z.HTMLElement;
 extern "c" fn lexbor_dom_interface_node_wrapper(obj: *anyopaque) *z.DomNode;
 extern "c" fn lexbor_dom_interface_element_wrapper(node: *z.DomNode) ?*z.HTMLElement;
-extern "c" fn lxb_dom_node_name(node: *z.DomNode, len: ?*usize) [*:0]const u8;
-extern "c" fn lxb_dom_element_tag_name(element: *z.HTMLElement, len: ?*usize) [*:0]const u8;
-extern "c" fn lxb_dom_element_qualified_name(element: *z.HTMLElement, len: *usize) [*:0]const u8;
+extern "c" fn lxb_dom_node_name(node: *z.DomNode, len: ?*usize) ?[*:0]const u8;
+extern "c" fn lxb_dom_element_tag_name(element: *z.HTMLElement, len: ?*usize) ?[*:0]const u8;
+extern "c" fn lxb_dom_element_qualified_name(element: *z.HTMLElement, len: *usize) ?[*:0]const u8;
 extern "c" fn lxb_dom_node_remove_wo_events(node: *z.DomNode) void;
 extern "c" fn lxb_dom_node_remove(node: *z.DomNode) void;
 extern "c" fn lxb_dom_node_destroy(node: *z.DomNode) void;
@@ -780,7 +780,9 @@ test "create element and comment" {
 /// ---
 /// ```
 pub fn nodeName_zc(node: *z.DomNode) []const u8 {
-    const name_ptr = lxb_dom_node_name(node, null);
+    // lxb_dom_node_name returns NULL for foreign-namespace elements (SVG, MathML).
+    // std.mem.span(null) would SIGSEGV — return safe fallback instead.
+    const name_ptr = lxb_dom_node_name(node, null) orelse return "#unknown";
     return std.mem.span(name_ptr);
 }
 
@@ -846,7 +848,9 @@ test "nodeName/_zc" {
 /// ---
 /// ```
 pub fn tagName_zc(element: *z.HTMLElement) []const u8 {
-    const name_ptr = lxb_dom_element_tag_name(element, null);
+    // lxb_dom_element_tag_name returns NULL for foreign-namespace elements (SVG, MathML).
+    // std.mem.span(null) would SIGSEGV — return safe fallback instead.
+    const name_ptr = lxb_dom_element_tag_name(element, null) orelse return "UNKNOWN";
     return std.mem.span(name_ptr);
 }
 
@@ -929,8 +933,7 @@ pub fn namespaceURI(element: *z.HTMLElement) []const u8 {
 /// ```
 pub fn qualifiedName(allocator: std.mem.Allocator, element: *z.HTMLElement) ![]u8 {
     var name_len: usize = 0;
-    const name_ptr = lxb_dom_element_qualified_name(element, &name_len);
-
+    const name_ptr = lxb_dom_element_qualified_name(element, &name_len) orelse return try allocator.dupe(u8, "unknown");
     const result = try allocator.alloc(u8, name_len);
     @memcpy(result, name_ptr[0..name_len]);
     return result;
@@ -961,7 +964,7 @@ test "qualified name" {
 /// ```
 pub fn qualifiedName_zc(element: *z.HTMLElement) []const u8 {
     var name_len: usize = 0;
-    const name_ptr = lxb_dom_element_qualified_name(element, &name_len);
+    const name_ptr = lxb_dom_element_qualified_name(element, &name_len) orelse return "unknown";
     return name_ptr[0..name_len];
 }
 

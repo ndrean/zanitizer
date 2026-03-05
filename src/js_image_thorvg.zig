@@ -122,6 +122,75 @@ pub const Image = struct {
         return initFromSvg(allocator, svg_data, 0);
     }
 
+    /// Rasterize SVG at explicit pixel dimensions.
+    /// opt_w / opt_h = null → derive from aspect ratio or use auto-scale default.
+    /// Both provided → exact output size (ThorVG fits content within the box).
+    /// Only one provided → compute the other from the SVG aspect ratio.
+    /// Neither provided → auto-scale (longest side ≥ 800px).
+    pub fn initFromSvgWithSize(
+        allocator: std.mem.Allocator,
+        svg_data: []const u8,
+        opt_w: ?u32,
+        opt_h: ?u32,
+    ) !*Image {
+        if (opt_w == null and opt_h == null) return initFromSvg(allocator, svg_data, 0);
+
+        if (tvg_engine_init(0) != 0) return error.SvgRasterizerFailed;
+        defer _ = tvg_engine_term();
+
+        thorvg.loadEmbeddedFonts() catch {};
+
+        const picture = tvg_picture_new() orelse return error.SvgParseFailed;
+        if (tvg_picture_load_data(picture, svg_data.ptr, @intCast(svg_data.len), "svg", null, true) != 0) {
+            return error.SvgParseFailed;
+        }
+
+        var fw: f32 = 0;
+        var fh: f32 = 0;
+        _ = tvg_picture_get_size(picture, &fw, &fh);
+        if (fw < 1 or fh < 1 or fw > 8192 or fh > 8192) return error.ImageTooLarge;
+
+        var out_w: i32 = undefined;
+        var out_h: i32 = undefined;
+        if (opt_w != null and opt_h != null) {
+            out_w = @intCast(opt_w.?);
+            out_h = @intCast(opt_h.?);
+        } else if (opt_w) |tw| {
+            const scale = @as(f32, @floatFromInt(tw)) / fw;
+            out_w = @intCast(tw);
+            out_h = @intFromFloat(@ceil(fh * scale));
+        } else {
+            const th = opt_h.?;
+            const scale = @as(f32, @floatFromInt(th)) / fh;
+            out_w = @intFromFloat(@ceil(fw * scale));
+            out_h = @intCast(th);
+        }
+
+        const stride = out_w * 4;
+        const pixel_count: usize = @intCast(stride * out_h);
+        const pixels = try allocator.alloc(u8, pixel_count);
+        errdefer allocator.free(pixels);
+
+        const canvas = tvg_swcanvas_create(0) orelse return error.SvgRasterizerFailed;
+        defer _ = tvg_canvas_destroy(canvas);
+        _ = tvg_swcanvas_set_target(canvas, @ptrCast(@alignCast(pixels.ptr)), @intCast(out_w), @intCast(out_w), @intCast(out_h), 0);
+        _ = tvg_picture_set_size(picture, @floatFromInt(out_w), @floatFromInt(out_h));
+        _ = tvg_canvas_add(canvas, picture);
+        _ = tvg_canvas_draw(canvas, true);
+        _ = tvg_canvas_sync(canvas);
+
+        const self = try allocator.create(Image);
+        self.* = .{
+            .width = out_w,
+            .height = out_h,
+            .channels = 4,
+            .pixels = pixels.ptr,
+            .allocator = allocator,
+            .pixel_owner = .zig,
+        };
+        return self;
+    }
+
     pub fn initFromSvg(allocator: std.mem.Allocator, svg_data: []const u8, requested_scale: f32) !*Image {
         // 1. Init ThorVG Engine (0 threads = auto-detect)
         if (tvg_engine_init(0) != 0) return error.SvgRasterizerFailed;

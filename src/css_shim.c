@@ -5,6 +5,75 @@
  * avoiding the need to mirror struct layouts in Zig.
  */
 
+// SIGSEGV crash protection — must come before any Lexbor headers to avoid
+// macro conflicts with signal.h on some platforms.
+#include <setjmp.h>
+#include <signal.h>
+#include <stdint.h>
+
+/* Thread-local crash-recovery state.
+ * When g_tl_armed != 0, a SIGSEGV in this thread is caught and execution
+ * resumes at the sigsetjmp() call inside zexp_crash_protect_run(), which
+ * returns 1 to its Zig caller.  Otherwise the old handler is chained.
+ */
+static _Thread_local sigjmp_buf  g_tl_recovery_buf;
+static _Thread_local volatile sig_atomic_t g_tl_armed = 0;
+
+static struct sigaction g_old_segv_sa;
+static volatile sig_atomic_t g_handler_installed = 0;
+
+static void segv_recovery_handler(int sig, siginfo_t *info, void *ucontext) {
+    if (g_tl_armed) {
+        g_tl_armed = 0;
+        siglongjmp(g_tl_recovery_buf, 1);
+    }
+    /* Not armed — chain to previous handler so unprotected crashes still
+     * produce the expected behaviour (core dump / debugger attach). */
+    if (g_old_segv_sa.sa_flags & SA_SIGINFO) {
+        g_old_segv_sa.sa_sigaction(sig, info, ucontext);
+    } else if (g_old_segv_sa.sa_handler == SIG_DFL) {
+        /* Restore default and re-raise so the OS generates a core. */
+        signal(SIGSEGV, SIG_DFL);
+        raise(SIGSEGV);
+    } else if (g_old_segv_sa.sa_handler != SIG_IGN) {
+        g_old_segv_sa.sa_handler(sig);
+    }
+}
+
+/* Install the SIGSEGV recovery handler.  Safe to call multiple times. */
+void zexp_crash_protect_install(void) {
+    if (g_handler_installed) return;
+    struct sigaction sa;
+    sa.sa_sigaction = segv_recovery_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    if (sigaction(SIGSEGV, &sa, &g_old_segv_sa) == 0) {
+        g_handler_installed = 1;
+    }
+}
+
+/* Callback type used by zexp_crash_protect_run(). */
+typedef void (*ZexpProtectedFn)(void *ctx);
+
+/* Run fn(user_ctx) with SIGSEGV protection.
+ * Returns 0 on normal completion, 1 if a SIGSEGV was caught.
+ *
+ * IMPORTANT: fn() is called synchronously and must not return after a longjmp
+ * (i.e. the longjmp always restores the frame of this function, which is still
+ * on the stack during the fn() call — this is the standard sigsetjmp pattern).
+ */
+int zexp_crash_protect_run(ZexpProtectedFn fn, void *user_ctx) {
+    g_tl_armed = 1;
+    if (sigsetjmp(g_tl_recovery_buf, 1) != 0) {
+        /* SIGSEGV was caught — fn() did not complete normally. */
+        g_tl_armed = 0;
+        return 1;
+    }
+    fn(user_ctx);
+    g_tl_armed = 0;
+    return 0;
+}
+
 #include <lexbor/css/css.h>
 #include <lexbor/css/stylesheet.h>
 #include <lexbor/css/rule.h>

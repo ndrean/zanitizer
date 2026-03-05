@@ -23,9 +23,42 @@ const js_streamfrom = z.js_streamfrom;
 const js_store = z.js_store;
 const AppContext = z.serve.AppContext;
 
-const MCP_VERSION = "2024-11-05";
+// ── Crash protection (css_shim.c) ────────────────────────────────────────────
+// Install a SIGSEGV handler that catches crashes in native C code (Lexbor /
+// QuickJS) and allows the server to return an error instead of dying.
+
+extern "c" fn zexp_crash_protect_install() void;
+
+const ZexpProtectedFn = *const fn (ctx: ?*anyopaque) callconv(.c) void;
+extern "c" fn zexp_crash_protect_run(fn_ptr: ZexpProtectedFn, user_ctx: ?*anyopaque) c_int;
+
+const MCP_VERSION = "2025-11-25";
 const SERVER_NAME = "zexplorer";
 const SERVER_VERSION = "0.1.0";
+
+// Default stylesheet injected into render_html and render_markdown.
+// GFM-compatible subset: em→px converted, pseudo-selectors stripped, table→flex shim.
+const GFM_CSS =
+    \\body{font-family:-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.5;color:#24292e;padding:24px;max-width:860px}
+    \\h1{font-size:32px;font-weight:600;margin:24px 0 16px}
+    \\h2{font-size:24px;font-weight:600;margin:24px 0 16px}
+    \\h3{font-size:20px;font-weight:600;margin:24px 0 16px}
+    \\h4{font-size:16px;font-weight:600;margin:24px 0 16px}
+    \\h5{font-size:14px;font-weight:600;margin:24px 0 16px}
+    \\h6{font-size:13px;font-weight:600;color:#6a737d;margin:24px 0 16px}
+    \\p{margin:0 0 16px}
+    \\ol,ul{padding-left:32px;margin:0 0 16px}
+    \\li{margin-top:4px}
+    \\blockquote{padding:0 16px;color:#6a737d;border-left:4px solid #dfe2e5;margin:0 0 16px}
+    \\code{font-size:13px;background-color:#f0f0f0;padding:3px 6px}
+    \\pre{font-size:13px;padding:16px;background-color:#f6f8fa;margin-bottom:16px}
+    \\hr{height:4px;margin:24px 0;background-color:#e1e4e8}
+    \\table{display:flex;flex-direction:column;width:100%;margin-bottom:16px}
+    \\thead,tbody{display:flex;flex-direction:column;width:100%}
+    \\tr{display:flex;flex-direction:row;width:100%}
+    \\th,td{flex:1;padding:6px 13px;border:1px solid #dfe2e5}
+    \\th{font-weight:600;background-color:#f6f8fa}
+;
 
 // ── JSON-RPC 2.0 request ──────────────────────────────────────────────────────
 
@@ -37,6 +70,16 @@ const McpRequest = struct {
 };
 
 // ── Entry point ───────────────────────────────────────────────────────────────
+
+// GET /mcp — mcp-remote (Streamable HTTP 2025-03-26) opens a GET SSE channel
+// for server-initiated events. We don't push events; return 405 so the client
+// falls back to pure request-response mode without waiting for a stream.
+pub fn mcpGetHandler(_: *AppContext, _: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 405;
+    res.header("Allow", "POST, OPTIONS");
+    res.header("Content-Type", "application/json");
+    res.body = "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Server-sent events not supported; use POST\"}}";
+}
 
 pub fn mcpHandler(app_ctx: *AppContext, req: *httpz.Request, res: *httpz.Response) !void {
     const alloc = app_ctx.allocator;
@@ -111,11 +154,11 @@ const TOOLS_JSON =
     \\[
     \\  {
     \\    "name": "render_html",
-    \\    "description": "Render an HTML string to a PNG image. Fast headless DOM render — returns a base64-encoded image.",
+    \\    "description": "Render a high fidelity self-contained HTML string to a PNG image. Use this to visually inspect generated UIs or charts, static HTML with inline styles/SVG only.\n\n STRICT GUIDELINES: The rendering engine supports standard HTML, CSS Flexbox, and inline SVG. It does NOT support CSS Grid 2D, CSS variables, or complex external CSS functions. Keep layouts simple, absolute, or Flexbox-based.\n\n⚠️  EXTERNAL SCRIPTS DON'T WORK: <script src=\"https://...\"> CDN links are NOT fetched — external libraries (ECharts, D3, Chart.js, etc.) will not load, leaving charts blank. For charts/visualisations that require external JS libraries, use run_script with zxp.importScript() instead (see worked examples 7 and 10 in get_zxp_docs).\n\nBEST FOR: static layouts, tables, markdown-rendered HTML, inline SVG, custom cards — anything that doesn't need external JS libraries.",
     \\    "inputSchema": {
     \\      "type": "object",
     \\      "properties": {
-    \\        "html":   {"type": "string", "description": "HTML content to render"},
+    \\        "html":   {"type": "string", "description": "Self-contained HTML (no external <script src> CDN links — those are not fetched). Use inline styles and inline SVG."},
     \\        "width":  {"type": "integer", "description": "Viewport width in pixels (default 800)"},
     \\        "format": {"type": "string", "enum": ["png","webp","jpeg"], "description": "Output image format (default png)"}
     \\      },
@@ -151,11 +194,11 @@ const TOOLS_JSON =
     \\  },
     \\  {
     \\    "name": "run_script",
-    \\    "description": "Execute JavaScript in a headless DOM+JS engine (QuickJS, browser-like). Returns plain text/JSON, or a base64 image if the script returns an ArrayBuffer from zxp.encode().\n\nENVIRONMENT: Full DOM (document, querySelector, innerHTML, events), fetch(), URL, setTimeout, TextDecoder/Encoder.\n\nZXP API:\n  zxp.goto(url)                       - fetch URL with browser headers, parse HTML+CSS, run scripts\n  zxp.streamFrom(url)                 - streaming fetch into parser (better for large pages)\n  zxp.fetchAll(urlArray, hdrsArray)   - parallel fetch; returns [{ok,status,data,type}] — use for batch image replacement\n  zxp.loadHTML(html)                  - parse an HTML string into document\n  zxp.paintDOM(node, width)           - render DOM node to RGBA canvas {data,width,height}\n  zxp.paintElement(el, width)         - render a single element (cropped to its bbox)\n  zxp.encode(img, format)             - encode canvas to ArrayBuffer (png/webp/jpeg/pdf) — return this for an image response\n  zxp.arrayBufferToBase64DataUri(buf,mime) - convert ArrayBuffer to data URI string\n  zxp.markdownToHTML(md)              - Markdown to HTML (GFM: tables, strikethrough, tasks)\n  zxp.toMarkdown(element)             - DOM element to Markdown string (compact for LLM input)\n  zxp.llmHTML({model,prompt,...})     - call Ollama, stream HTML response, return as string\n  zxp.llmStream({model,prompt,...})   - stream LLM tokens directly into DOM\n  zxp.csv.parse(str)                  - CSV string to array of objects\n  zxp.csv.stringify(rows)             - array of objects to CSV string\n  zxp.fs.readFileSync(path)           - read file to ArrayBuffer\n  zxp.stdin.read()                    - read stdin as string (CLI only)\n  zxp.store.save(name, data, opts?)   - persist text/ArrayBuffer to SQLite; opts: {mime,note}\n  zxp.store.get(name)                 - retrieve entry → {name,mime,note,hash,data:ArrayBuffer}\n  zxp.store.list()                    - list all entries (metadata only)\n  zxp.store.delete(name)              - delete entry by name\n\nSCRAPING:\n  await zxp.goto('https://news.ycombinator.com');\n  return Array.from(document.querySelectorAll('.titleline a')).map(a => a.textContent);\n\nSCRAPE + REPLACE IMAGES (render a live page with real images):\n  await zxp.goto('https://example.com');\n  const imgs = Array.from(document.querySelectorAll('img[src]'));\n  const urls = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));\n  const fetched = await zxp.fetchAll(urls, urls.map(() => ({})));\n  fetched.forEach((r,i) => { if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type)); });\n  return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');\n\nCall get_zxp_docs before writing scripts to get worked examples and understand CSS rendering constraints.",
+    \\    "description": "Execute JavaScript in a headless DOM+JS engine (QuickJS). Returns plain text/JSON, or an inline image if the script returns an ArrayBuffer from zxp.encode().\n\nUSE zxp WHEN: fetching remote resources (avatars, pages) + rendering them as an image in one call; rendering HTML/CSS templates (invoices, cards, OG images); scraping pages; tasks that need no Python dependencies.\nUSE PYTHON INSTEAD FOR: pure data visualisation from known data (bar charts, line charts, pie charts) — matplotlib is simpler and better-tested for that. zxp is not a charting library.\nSTRUCTURED DATA (JSON/CSV → image): use loadHTML + paintDOM, NOT hand-crafted SVG. A <table> or two-column <div style='display:flex'> with inline styles renders correctly and is far easier to write than SVG. See example 5.\n\n⚠️  TOP-LEVEL await/return NOT allowed: never write 'await' or 'return' at the top level of the script. Always wrap async code and return values inside an async function: async function run() { await ...; return ...; } run()\n\nENVIRONMENT: Full DOM (document, querySelector, innerHTML, events), fetch(), URL, setTimeout, TextDecoder/Encoder.\n\n⚠️  SCRAPING PUBLIC SITES (Wikipedia, news portals, etc.): ALWAYS pass { execute_scripts: false, load_stylesheets: false } to goto() — complex JS frameworks (jQuery, MediaWiki) will crash the engine otherwise.\n\nZXP API:\n  zxp.goto(url, opts?)                - fetch URL, parse HTML. opts: { execute_scripts: false, load_stylesheets: false } (REQUIRED for public sites)\n  zxp.waitForSelector(sel, ms?)       - poll until selector appears in DOM (default 5000ms); use after goto() on SPAs to wait for async render\n  zxp.streamFrom(url)                 - streaming fetch into parser (better for large pages)\n  zxp.fetchAll(urlArray, hdrsArray)   - parallel fetch; returns [{ok,status,data,type}]\n  zxp.loadHTML(html)                  - parse an HTML string into document\n  zxp.paintDOM(node, width)           - render DOM node to RGBA canvas {data,width,height}\n  zxp.paintElement(el, width)         - render a single element (cropped to its bbox)\n  zxp.paintSVG(svg, opts?)            - rasterize SVG string via ThorVG → {data,width,height}; opts: {width,height} for exact output size (default: longest side ≥ 800px)\n  zxp.measureText(text, fontSize)     - measure Roboto text in pixels → {width,height}; use for SVG word-wrap before paintSVG\n  zxp.encode(img, format)             - encode canvas to ArrayBuffer (png/webp/jpeg/pdf) — return this for an image response\n  zxp.arrayBufferToBase64DataUri(buf,mime) - convert ArrayBuffer to data URI string\n  zxp.markdownToHTML(md)              - Markdown to HTML (GFM: tables, strikethrough, tasks)\n  zxp.toMarkdown(element)             - DOM element to Markdown string (compact for LLM input)\n  zxp.llmHTML({model,prompt,...})     - call Ollama, stream HTML response, return as string\n  zxp.llmStream({model,prompt,...})   - stream LLM tokens directly into DOM\n  zxp.csv.parse(str)                  - CSV string to array of objects\n  zxp.csv.stringify(rows)             - array of objects to CSV string\n  zxp.fs.readFileSync(path)           - read file to ArrayBuffer\n  zxp.fs.writeFileSync(path, data)    - write string/ArrayBuffer to file. ALWAYS use a RELATIVE path (e.g. 'output.png') — it resolves to the server's working directory. Absolute paths like /mnt/... refer to the SERVER machine's filesystem, NOT the Claude Desktop sandbox, and will fail with FileNotFound.\n  zxp.fs.cwd()                        - return the server's working directory as a string (tell user where saved files landed)\n  zxp.stdin.read()                    - read stdin as string (CLI only)\n  zxp.store.save(name, data, opts?)   - persist text/ArrayBuffer to SQLite; opts: {mime,note}\n  zxp.store.get(name)                 - retrieve entry → {name,mime,note,hash,data:ArrayBuffer}\n  zxp.store.list()                    - list all entries (metadata only)\n  zxp.store.delete(name)              - delete entry by name\n\n⚠️  SAVE TO DISK: zxp is a LOCAL server running on the user's own machine. writeFileSync with a relative path saves directly to the user's local filesystem — this IS the final delivery step. Do NOT attempt any store/base64/Python pipeline after a successful writeFileSync; the file is already on the user's disk. NEVER use /mnt/... absolute paths — those are Claude Desktop's own sandbox, not the user's machine.\n  async function run() {\n    // ... build pngBuf ...\n    zxp.fs.writeFileSync('wiki_consoles.png', pngBuf);  // file is NOW on the user's local disk\n    return { image: pngBuf, path: zxp.fs.cwd() + '/wiki_consoles.png' };  // tell user exact path\n  }\n  run()\n\nSCRAPING PUBLIC SITES (Wikipedia, news, etc.) — scripts/css OFF by default:\n  async function run() {\n    await zxp.goto('https://en.wikipedia.org/wiki/...', { execute_scripts: false, load_stylesheets: false });\n    return Array.from(document.querySelectorAll('table.wikitable tbody tr'))\n      .map(r => Array.from(r.querySelectorAll('th,td')).map(c => c.textContent.trim()));\n  }\n  run()\n\nSCRAPE + REPLACE IMAGES:\n  async function run() {\n    await zxp.goto('https://example.com', { execute_scripts: false, load_stylesheets: false });\n    const imgs = Array.from(document.querySelectorAll('img[src]'));\n    const urls = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));\n    const fetched = await zxp.fetchAll(urls, urls.map(() => ({})));\n    fetched.forEach((r,i) => { if (r.ok) imgs[i].setAttribute('src', zxp.arrayBufferToBase64DataUri(r.data, r.type)); });\n    return zxp.encode(zxp.paintDOM(document.body, 1200), 'png');\n  }\n  run()\n\nCall get_zxp_docs before writing scripts to get worked examples and understand CSS rendering constraints.",
     \\    "inputSchema": {
     \\      "type": "object",
     \\      "properties": {
-    \\        "script": {"type": "string", "description": "JavaScript code to execute"}
+    \\        "script": {"type": "string", "description": "JavaScript code to execute. Do NOT use top-level 'await' or 'return' — wrap async/return code in an async function: async function run() { await ...; return ...; } run()"}
     \\      },
     \\      "required": ["script"]
     \\    }
@@ -280,7 +323,7 @@ const DOC_EXAMPLES =
     \\      <p>Rendered headlessly in Zig.</p>
     \\    </div>
     \\  `);
-    \\  return zxp.encode(zxp.paintDOM(document.body, 600), 'png');
+    \\  zxp.encode(zxp.paintDOM(document.body, 600), 'png')
     \\
     \\## 4. Extract page content as Markdown (for LLM input)
     \\
@@ -290,14 +333,40 @@ const DOC_EXAMPLES =
     \\  }
     \\  run();
     \\
-    \\## 5. Parse a CSV and render it as a table image
+    \\## 5. Structured data → image (JSON / CSV / two-column layout)
     \\
-    \\  const csv = `Name,Score\nAlice,95\nBob,82\nCarol,91`;
+    \\  // RULE: for tables and structured layouts, use loadHTML + paintDOM, NOT hand-crafted SVG.
+    \\  // A plain HTML <table> or flex <div> with inline styles is simpler and more reliable.
+    \\
+    \\  // 5a. JSON array → table image
+    \\  const data = [
+    \\    { name: 'Alice', score: 95, grade: 'A' },
+    \\    { name: 'Bob',   score: 82, grade: 'B' },
+    \\    { name: 'Carol', score: 91, grade: 'A' },
+    \\  ];
+    \\  const cols = Object.keys(data[0]);
+    \\  const thead = '<tr>' + cols.map(c => `<th style="background:#2563eb;color:#fff;padding:8px 16px;text-align:left">${c}</th>`).join('') + '</tr>';
+    \\  const tbody = data.map(r => '<tr>' + cols.map(c => `<td style="padding:8px 16px;border-bottom:1px solid #e5e7eb">${r[c]}</td>`).join('') + '</tr>').join('');
+    \\  zxp.loadHTML(`<div style="padding:24px;font-family:system-ui;font-size:15px"><table style="border-collapse:collapse">${thead}${tbody}</table></div>`);
+    \\  zxp.encode(zxp.paintDOM(document.body, 600), 'png')
+    \\
+    \\  // 5b. Two-column layout from JSON
+    \\  const info = { Name: 'Alice', Role: 'Engineer', Score: 95, Status: 'Active' };
+    \\  const left  = Object.keys(info).slice(0, 2);
+    \\  const right = Object.keys(info).slice(2);
+    \\  const col = (keys) => keys.map(k =>
+    \\    `<div style="margin-bottom:12px"><div style="color:#6b7280;font-size:12px">${k}</div>
+    \\     <div style="font-size:18px;font-weight:600">${info[k]}</div></div>`).join('');
+    \\  zxp.loadHTML(`<div style="display:flex;gap:40px;padding:32px;font-family:system-ui;background:#fff">
+    \\    <div style="flex:1">${col(left)}</div>
+    \\    <div style="flex:1">${col(right)}</div>
+    \\  </div>`);
+    \\  zxp.encode(zxp.paintDOM(document.body, 600), 'png')
+    \\
+    \\  // 5c. CSV → table (same pattern, just parse first)
+    \\  const csv = `Name,Score\nAlice,95\nBob,82`;
     \\  const rows = zxp.csv.parse(csv);
-    \\  const thead = rows[0] ? '<tr>' + Object.keys(rows[0]).map(k => `<th style="background:#2563eb;color:#fff;padding:8px 12px">${k}</th>`).join('') + '</tr>' : '';
-    \\  const tbody = rows.map(r => '<tr>' + Object.values(r).map(v => `<td style="padding:8px 12px;border-bottom:1px solid #e5e7eb">${v}</td>`).join('') + '</tr>').join('');
-    \\  zxp.loadHTML(`<table style="border-collapse:collapse;font-family:system-ui">${thead}${tbody}</table>`);
-    \\  return zxp.encode(zxp.paintDOM(document.body, 600), 'png');
+    \\  // then build thead/tbody as in 5a
     \\
     \\## 6. Generate UI with a local LLM (Ollama)
     \\
@@ -343,6 +412,20 @@ const DOC_EXAMPLES =
     \\    return zxp.encode(zxp.paintElement(document.querySelector('#chart'), { width: 800 }), 'png');
     \\  }
     \\  run();
+    \\
+    \\  // D3 GOTCHAS (confirmed in zxp):
+    \\  // 1. &amp; entity — ThorVG does NOT decode XML entities. It renders &amp; as the literal
+    \\  //    string "&amp;". XMLSerializer always encodes & as &amp;. Fix (MUST use raw &):
+    \\  //      svgStr = svgStr.replace(/&amp;/g, '&');   // raw & — ThorVG handles it fine
+    \\  //    Or build SVG as a JS template string to avoid XMLSerializer entirely.
+    \\  //    NOTE: replacing back to &amp; (valid XML) does NOT help — ThorVG still shows it literally.
+    \\  // 2. d3.interpolateRgbBasis (and D3 color interpolators) crash QuickJS with:
+    \\  //      "TypeError: cannot read property 'name' of undefined"
+    \\  //    Fix: use a plain hex color array and index by position, e.g.:
+    \\  //      const COLORS = ['#7b2fff','#a855f7','#ec4899','#f97316','#eab308'];
+    \\  //      const fill = COLORS[Math.floor(i / data.length * COLORS.length)];
+    \\  //    d3.scaleBand(), d3.scaleLinear(), d3.axisBottom/Left all work fine.
+    \\  // 3. goto() then loadHTML() in the same script loses D3 — always importScript AFTER loadHTML.
     \\
     \\## 8. Leaflet map with GeoJSON route overlay (via zxp.importScript)
     \\
@@ -415,33 +498,135 @@ const DOC_EXAMPLES =
     \\
     \\## 11. Persist and retrieve results across tool calls (zxp.store)
     \\
-    \\  // Save a rendered PNG for later reference
+    \\  // Save a rendered PNG for later reference — last expression is the result
     \\  zxp.loadHTML('<h1 style="color:#2563eb;font-size:48px">Report v1</h1>');
     \\  const img = zxp.encode(zxp.paintDOM(document.body, 600), 'png');
     \\  zxp.store.save('report_v1', img, { mime: 'image/png', note: 'first draft' });
-    \\  return { saved: true };
+    \\  ({ saved: true })
     \\
     \\  // — in a later tool call, retrieve and decode it —
     \\  const entry = zxp.store.get('report_v1');
-    \\  // entry.data is an ArrayBuffer — return it directly to get an image in MCP
-    \\  return zxp.encode(zxp.paintSVG(entry.data), 'png'); // or just: return entry.data;
+    \\  // entry.data is an ArrayBuffer — last expression sends it as image in MCP
+    \\  zxp.encode(zxp.paintSVG(entry.data), 'png') // or just: entry.data
     \\
-    \\  // List what is stored
-    \\  return zxp.store.list();   // [{name, mime, note, hash, created_at}, ...]
+    \\  // List what is stored — last expression value is returned
+    \\  zxp.store.list()   // [{name, mime, note, hash, created_at}, ...]
     \\
     \\  // Clean up
     \\  zxp.store.delete('report_v1');
     \\
     \\  // Save scraped markdown so the next call can use it without re-fetching
-    \\  await zxp.goto('https://example.com');
-    \\  const md = zxp.toMarkdown(document.body);
-    \\  zxp.store.save('example_md', md, { mime: 'text/markdown' });
-    \\  return md;
+    \\  async function run() {
+    \\    await zxp.goto('https://example.com');
+    \\    const md = zxp.toMarkdown(document.body);
+    \\    zxp.store.save('example_md', md, { mime: 'text/markdown' });
+    \\    return md;
+    \\  }
+    \\  run()
     \\
-    \\  // — next call —
+    \\  // — next call — no async needed, store.get is sync
     \\  const entry = zxp.store.get('example_md');
-    \\  const text = new TextDecoder().decode(entry.data);
-    \\  return text; // markdown ready for LLM processing
+    \\  new TextDecoder().decode(entry.data)  // last expression = returned string
+    \\
+    \\## 12. Save a rendered image to disk (writeFileSync)
+    \\
+    \\  // zxp is a LOCAL server on the user's machine. writeFileSync with a relative path
+    \\  // saves the file directly to the user's local disk — this IS the final step.
+    \\  // After writeFileSync returns successfully, the task is done. No store/base64/Python needed.
+    \\  //
+    \\  // DO NOT use /mnt/user-data/outputs/... — that is Claude Desktop's sandbox, not the user's machine.
+    \\  // Use a plain filename: it saves to the cwd where 'zxp serve' was launched (the user's project folder).
+    \\  async function run() {
+    \\    // ... build pngBuf via zxp.encode / zxp.paintSVG / etc. ...
+    \\    zxp.fs.writeFileSync('wiki_consoles.png', pngBuf);  // file is on the user's local disk — DONE
+    \\    return pngBuf;   // also return so Claude sees the image inline
+    \\  }
+    \\  run()
+    \\
+    \\## 13. OG image — fetch remote avatar, embed in SVG template, rasterize to PNG
+    \\
+    \\  // This is zexplorer's unique strength: fetch a remote image, embed as base64 data URI,
+    \\  // composite it into an SVG template (with circular clip), and rasterize — all in one call.
+    \\  // Python equivalent needs requests + PIL + cairosvg; cairosvg alone can't do SVG <image> embed + clip.
+    \\  async function run() {
+    \\    // 1. Fetch avatar from any URL
+    \\    const avatarRes = await fetch('https://github.com/torvalds.png');
+    \\    const avatarBuf = await avatarRes.arrayBuffer();
+    \\    const mime = avatarRes.headers.get('content-type') || 'image/jpeg';
+    \\    const avatarUri = zxp.arrayBufferToBase64DataUri(avatarBuf, mime);
+    \\
+    \\    // 2. Build SVG template inline (or load from file with zxp.fs.readFileSync)
+    \\    const title = 'Headless Browser in Zig';
+    \\    const author = 'N. Drean';
+    \\    const svg = `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+    \\      <defs><clipPath id="av"><circle cx="175" cy="175" r="75"/></clipPath></defs>
+    \\      <rect width="1200" height="630" fill="#0f172a"/>
+    \\      <image href="${avatarUri}" x="100" y="100" width="150" height="150" clip-path="url(#av)"/>
+    \\      <text x="100" y="380" font-family="Arial" font-size="80" fill="#fff" font-weight="bold">${title}</text>
+    \\      <text x="100" y="480" font-family="Arial" font-size="40" fill="#94a3b8">by ${author}</text>
+    \\    </svg>`;
+    \\
+    \\    // SVG TEXT WRAPPING: SVG <text> has no auto-wrap.
+    \\    // Use zxp.measureText to mathematically calculate line breaks:
+    \\    //
+    \\    // const maxWidth = 900;
+    \\    // const words = title.split(' ');
+    \\    // let line = ''; let tspans = ''; let y = 0;
+    \\    // for (const word of words) {
+    \\    //   const testLine = line + word + ' ';
+    \\    //   if (zxp.measureText(testLine, 80).width > maxWidth && line !== '') {
+    \\    //     tspans += `<tspan x="100" dy="${y === 0 ? 0 : 90}">${line.trim()}</tspan>`;
+    \\    //     line = word + ' ';
+    \\    //     y += 90;
+    \\    //   } else { line = testLine; }
+    \\    // }
+    \\    // tspans += `<tspan x="100" dy="${y === 0 ? 0 : 90}">${line.trim()}</tspan>`;
+    \\    //
+    \\    // Usage: <text font-size="80" ...>${tspans}</text>
+    \\
+    \\    // 3. Rasterize at exact 1200×630 and save
+    \\    const pngBuf = zxp.encode(zxp.paintSVG(svg, { width: 1200, height: 630 }), 'png');
+    \\    zxp.fs.writeFileSync('og_image.png', pngBuf);
+    \\    return pngBuf;
+    \\  }
+    \\  run()
+    \\
+    \\## 14. Test a locally-running SPA (React/Vue/Solid)
+    \\
+    \\  // Zero-dependency headless tests — no Playwright, no Chrome, no test framework config.
+    \\  // Ask Claude: "test my counter component" and give it the URL.
+    \\  // Claude writes the script, posts it here, gets back structured pass/fail results.
+    \\
+    \\  // ⚠️  REQUIRES A BUILT BUNDLE — vite dev (port 5173) does NOT work.
+    \\  //   vite dev serves unbundled ESM modules that zxp cannot resolve.
+    \\  //   You must run: vite build && vite preview   (serves on port 4173)
+    \\  //   Or any other bundled output (webpack, rollup, etc.) served over HTTP.
+    \\
+    \\  // Rules:
+    \\  //   - goto() executes the bundle automatically — no runScripts() needed
+    \\  //   - Events MUST use { bubbles: true } — React/Vue use root-level delegation
+    \\  //   - After state-changing events: await new Promise(r => setTimeout(r, 0))
+    \\  //     to flush the framework's microtask re-render queue before reading state
+    \\
+    \\  async function run() {
+    \\    const results = [];
+    \\    await zxp.goto('http://localhost:4173'); // vite preview (built bundle)
+    \\
+    \\    const btn = await zxp.waitForSelector('button');
+    \\    results.push({ test: 'initial render',   pass: btn.textContent === 'count is 0' });
+    \\
+    \\    btn.dispatchEvent(new Event('click', { bubbles: true }));
+    \\    await new Promise(r => setTimeout(r, 0));
+    \\    results.push({ test: 'click increments', pass: btn.textContent === 'count is 1' });
+    \\
+    \\    btn.dispatchEvent(new Event('click', { bubbles: true }));
+    \\    btn.dispatchEvent(new Event('click', { bubbles: true }));
+    \\    await new Promise(r => setTimeout(r, 0));
+    \\    results.push({ test: '3 total clicks',   pass: btn.textContent === 'count is 3' });
+    \\
+    \\    return results; // [{test, pass}] — Claude reports which passed/failed and why
+    \\  }
+    \\  run()
 ;
 
 const DOC_API =
@@ -453,6 +638,21 @@ const DOC_API =
     \\  zxp.goto(url: string, opts?): Promise<void>
     \\    Fetch url with browser headers, parse HTML+CSS, execute inline scripts.
     \\    opts: { sanitize?: bool, execute_scripts?: bool }
+    \\    For SPAs (React/Vue/Solid): goto() already executes the JS bundle. No need for runScripts().
+    \\    goto() returns after the initial synchronous render. Use waitForSelector() if the
+    \\    content you need appears asynchronously (data fetches, lazy components).
+    \\    Simulating clicks: ALWAYS pass { bubbles: true } — React/Vue use root-level event
+    \\    delegation, so non-bubbling events never reach the framework handler:
+    \\      el.dispatchEvent(new Event('click', { bubbles: true }));
+    \\      await new Promise(r => setTimeout(r, 0)); // flush React re-render microtasks
+    \\
+    \\  zxp.waitForSelector(selector: string, timeoutMs?: number): Promise<Element>
+    \\    Poll until selector appears in the DOM (default timeout 5000ms).
+    \\    Uses __native_flush() between polls to let React/Vue microtasks settle.
+    \\    Use after goto() on SPAs when content loads asynchronously:
+    \\      await zxp.goto('http://localhost:4173');
+    \\      const el = await zxp.waitForSelector('.product-list');
+    \\      return el.textContent;
     \\
     \\  zxp.streamFrom(url: string): void
     \\    Streaming fetch into lexbor parser. Better for large pages. Executes scripts.
@@ -512,14 +712,51 @@ const DOC_API =
     \\    await zxp.importScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js');
     \\
     \\## SVG rendering
-    \\  zxp.paintSVG(svg: string | Uint8Array | ArrayBuffer): { data: ArrayBuffer, width, height }
+    \\  zxp.paintSVG(svg: string | Uint8Array | ArrayBuffer, opts?: { width?: number, height?: number }): { data: ArrayBuffer, width, height }
     \\    Rasterize SVG via ThorVG. Accepts a plain string (most convenient), Uint8Array,
-    \\    or ArrayBuffer. Reads the SVG viewBox and auto-scales so the longest side is ≥ 800px.
-    \\    Returns { data, width, height } — same shape as paintDOM/paintElement.
+    \\    or ArrayBuffer. Returns { data, width, height } — same shape as paintDOM/paintElement.
     \\    Use zxp.encode(img, 'png') to get a PNG ArrayBuffer.
+    \\
+    \\    Output size (opts):
+    \\      { width: 1200, height: 630 } → exact pixel dimensions (SVG scaled to fit the box)
+    \\      { width: 1200 }              → 1200px wide, height derived from SVG aspect ratio
+    \\      { height: 630 }              → 630px tall, width derived from SVG aspect ratio
+    \\      (no opts)                    → DEFAULT: auto-scale so longest side ≥ 800px
+    \\    For OG images and social cards, always pass both: paintSVG(svg, { width: 1200, height: 630 })
+    \\
     \\    Note: fill="transparent" is automatically normalised to fill="none" (ThorVG quirk).
     \\    Prefer SVG output over canvas for chart libraries — pixel-perfect with no browser
     \\    geometry engine required. Works great with ECharts, D3, any SVG-generating lib.
+    \\
+    \\    ThorVG SVG text gotchas:
+    \\      - text-anchor="start|middle|end"  ✓ all work correctly
+    \\      - dominant-baseline="middle"       ✗ NOT SUPPORTED — silently shifts text upward,
+    \\        making it disappear or clip. Use dy="0.35em" instead for vertical centring.
+    \\      - clipPath                          ✓ works
+    \\      - xml:space="preserve"              Add to <svg> root to prevent whitespace collapse
+    \\        in multi-word text or tspan elements. Harmless if text is simple.
+    \\
+    \\  zxp.measureText(text: string, fontSize: number): { width: number, height: number }
+    \\    Measure pixel dimensions of text at a given font size (Roboto, same as paintSVG).
+    \\    Use this for exact SVG text wrapping — no guesswork, no heuristic constants needed.
+    \\
+    \\    // SVG TEXT WRAPPING: SVG <text> has no auto-wrap.
+    \\    // Use zxp.measureText to mathematically calculate line breaks:
+    \\    //
+    \\    // const maxWidth = 900;
+    \\    // const words = title.split(' ');
+    \\    // let line = ''; let tspans = ''; let y = 0;
+    \\    // for (const word of words) {
+    \\    //   const testLine = line + word + ' ';
+    \\    //   if (zxp.measureText(testLine, 80).width > maxWidth && line !== '') {
+    \\    //     tspans += `<tspan x="100" dy="${y === 0 ? 0 : 90}">${line.trim()}</tspan>`;
+    \\    //     line = word + ' ';
+    \\    //     y += 90;
+    \\    //   } else { line = testLine; }
+    \\    // }
+    \\    // tspans += `<tspan x="100" dy="${y === 0 ? 0 : 90}">${line.trim()}</tspan>`;
+    \\    //
+    \\    // Usage: <text font-size="80" ...>${tspans}</text>
     \\
     \\## File I/O
     \\  zxp.fs.readFileSync(path: string): ArrayBuffer
@@ -551,21 +788,43 @@ const DOC_API =
 const DOC_SCRAPING =
     \\# Scraping guide
     \\
-    \\Use zxp.goto() for single-page scraping:
+    \\## IMPORTANT: Use execute_scripts: false for public sites (Wikipedia, news sites, etc.)
     \\
-    \\  await zxp.goto('https://example.com');
+    \\Complex public websites (Wikipedia, news portals) load heavy JS frameworks (jQuery,
+    \\MediaWiki, etc.) that use browser APIs not fully implemented in zexplorer. Running
+    \\these scripts will crash the engine (segfault). Always disable script execution when
+    \\scraping public websites for data extraction — you only need the HTML/DOM anyway.
+    \\
+    \\  // CORRECT — disable scripts for public site scraping
+    \\  await zxp.goto('https://en.wikipedia.org/wiki/...', { execute_scripts: false });
+    \\  const rows = Array.from(document.querySelectorAll('table.wikitable tbody tr'));
+    \\  return rows.map(r => Array.from(r.querySelectorAll('td')).map(c => c.textContent.trim()));
+    \\
+    \\  // WRONG — will crash with jQuery/MediaWiki/complex frameworks
+    \\  await zxp.goto('https://en.wikipedia.org/wiki/...');  // no options = scripts ON
+    \\
+    \\## When to enable scripts (execute_scripts: true, the default)
+    \\
+    \\Only enable scripts for:
+    \\  - Pages where content is rendered by JS (SPAs: React, Vue, etc.)
+    \\  - Sites you control or know have compatible JS
+    \\  - Simple pages without heavy third-party frameworks
+    \\
+    \\## Link extraction
+    \\
+    \\  await zxp.goto('https://example.com', { execute_scripts: false });
     \\  const links = Array.from(document.querySelectorAll('a[href]'))
     \\    .map(a => ({ text: a.textContent.trim(), href: a.getAttribute('href') }));
     \\  return links;
     \\
-    \\For just the text content (compact for LLMs):
+    \\## Text as Markdown (compact for LLMs)
     \\
-    \\  await zxp.goto('https://example.com');
+    \\  await zxp.goto('https://example.com', { execute_scripts: false });
     \\  return zxp.toMarkdown(document.body);
     \\
-    \\To replace images so the compositor can paint them:
+    \\## Replace images then render
     \\
-    \\  await zxp.goto('https://example.com');
+    \\  await zxp.goto('https://example.com', { execute_scripts: false });
     \\  const imgs = Array.from(document.querySelectorAll('img[src]'));
     \\  const srcs = imgs.map(i => i.getAttribute('src')).filter(s => s.startsWith('http'));
     \\  const fetched = await zxp.fetchAll(srcs, srcs.map(() => ({})));
@@ -581,6 +840,27 @@ const DOC_SCRAPING =
 
 const DOC_RENDERING =
     \\# Rendering guide
+    \\
+    \\## Two golden rules
+    \\
+    \\  RULE 1 — structured data / layouts → loadHTML + paintDOM:
+    \\    Load HTML with inline styles. paintDOM renders it via the CSS compositor.
+    \\    Best for: invoices, email templates, OG images, cards, tables, multi-column layouts.
+    \\    For JSON/CSV data: build a <table> or flex <div> — do NOT hand-craft SVG for tables.
+    \\    Keep CSS simple — no external fonts, no animation, no complex media queries.
+    \\    Use flex/block. <table> with border-collapse and inline padding works perfectly.
+    \\    Avoid percentage widths in nested flex.
+    \\
+    \\  RULE 2 — hand-craft SVG, use paintSVG:
+    \\    Build the SVG as a JS template string. paintSVG rasterizes via ThorVG.
+    \\    Best for: charts, diagrams, data visualisations.
+    \\    More reliable than D3/ECharts because it avoids the browser measurement
+    \\    feedback loop that those libraries depend on.
+    \\    Pass { width, height } for exact output size: paintSVG(svg, { width: 1200, height: 630 })
+    \\    Default (no opts): auto-scale so longest side ≥ 800px.
+    \\    Add xml:space="preserve" on the <svg> root to prevent whitespace collapse in text.
+    \\    text-anchor works. dominant-baseline="middle" does NOT — use dy="0.35em".
+    \\    &amp; in text: use raw & (ThorVG doesn't decode XML entities).
     \\
     \\## HTML string → PNG
     \\  zxp.loadHTML('<h1 style="color:blue">Hello</h1>');
@@ -811,7 +1091,8 @@ fn toolRenderHtml(
     var engine = try z.ScriptEngine.init(alloc, zxp_rt);
     defer engine.deinit();
 
-    engine.loadHTML(html) catch |err| {
+    const styled_html = try std.fmt.allocPrint(aa, "<style>{s}</style>{s}", .{ GFM_CSS, html });
+    engine.loadHTML(styled_html) catch |err| {
         const msg = try std.fmt.allocPrint(aa, "render_html: loadHTML failed: {s}", .{@errorName(err)});
         try buildError(id, -32603, msg, out);
         return;
@@ -854,15 +1135,14 @@ fn toolRenderMarkdown(
     // jsonEscape produces a quoted JS string literal: "# Hello" → `"# Hello"`
     const esc_md = try jsonEscape(aa, markdown);
     const esc_css = try jsonEscape(aa, css);
+    const esc_gfm = try jsonEscape(aa, GFM_CSS);
     const load_js = try std.fmt.allocPrint(
         aa,
         "(function(){{" ++
             "var h=zxp.markdownToHTML({s});" ++
-            "zxp.loadHTML('<html><head><style>" ++
-            "body{{font-family:system-ui,sans-serif;padding:24px;max-width:860px;line-height:1.6;color:#1a1a1a}}' +{s}+" ++
-            "'</style></head><body>'+h+'</body></html>');" ++
+            "zxp.loadHTML('<html><head><style>'+{s}+{s}+'</style></head><body>'+h+'</body></html>');" ++
             "}})()",
-        .{ esc_md, esc_css },
+        .{ esc_md, esc_gfm, esc_css },
     );
 
     const setup_val = engine.evalAsync(load_js, "<mcp-md>") catch |err| {
@@ -952,6 +1232,41 @@ fn toolGetZxpDocs(
 
 // ── run_script ────────────────────────────────────────────────────────────────
 
+/// Context passed through the C callback boundary into runScriptCb.
+const ScriptRunCtx = struct {
+    engine: *z.ScriptEngine,
+    /// User script: last-expression value is the MCP result.
+    script: []const u8,
+    /// Set to true once evalAsync + engine.run() both complete (no SIGSEGV).
+    finished: bool = false,
+    /// Non-null if evalAsync returned a Zig error.
+    eval_error: ?[:0]const u8 = null,
+    /// The JS result value.  Valid only when finished=true and eval_error=null.
+    val: z.qjs.JSValue = undefined,
+};
+
+/// C-callable callback that runs the script inside zexp_crash_protect_run().
+fn runScriptCb(ptr: ?*anyopaque) callconv(.c) void {
+    const ctx: *ScriptRunCtx = @ptrCast(@alignCast(ptr.?));
+    const val = ctx.engine.evalAsync(ctx.script, "<mcp-script>") catch |err| {
+        ctx.eval_error = @errorName(err);
+        ctx.finished = true;
+        return;
+    };
+    ctx.val = val;
+    if (!ctx.engine.ctx.isException(val)) {
+        ctx.engine.run() catch {};
+    }
+    ctx.finished = true;
+}
+
+/// C-callable callback that calls engine.deinit() — wrapped so SIGSEGV during
+/// CSS cleanup (lxb_html_document_stylesheet_destroy_all bug) is caught.
+fn engineDeinitCb(ptr: ?*anyopaque) callconv(.c) void {
+    const engine: *z.ScriptEngine = @ptrCast(@alignCast(ptr.?));
+    engine.deinit();
+}
+
 fn toolRunScript(
     app_ctx: *AppContext,
     id: ?std.json.Value,
@@ -960,55 +1275,111 @@ fn toolRunScript(
     aa: std.mem.Allocator,
     alloc: std.mem.Allocator,
 ) !void {
+    // Install SIGSEGV handler once (idempotent).
+    zexp_crash_protect_install();
+
     const script = getStrArg(args, "script") orelse {
         try buildError(id, -32602, "run_script: missing required argument 'script'", out);
         return;
     };
 
-    const zxp_rt = try zxp_runtime.getOrCreate(alloc, app_ctx.sandbox_root);
-    var engine = try z.ScriptEngine.init(alloc, zxp_rt);
-    defer engine.deinit();
+    // Per-request arena for the engine.  On SIGSEGV recovery we skip
+    // cleanup entirely (leaking this arena) rather than risk re-crashing
+    // on corrupted allocator state.  The global `alloc` is never touched
+    // by QuickJS/Lexbor directly, so it stays clean.
+    var engine_arena = std.heap.ArenaAllocator.init(alloc);
+    const engine_alloc = engine_arena.allocator();
 
-    try engine.loadHTML("<html><head></head><body></body></html>");
-
-    const val = engine.evalAsync(script, "<mcp-script>") catch |err| {
-        const msg = try std.fmt.allocPrint(aa, "run_script: eval failed: {s}", .{@errorName(err)});
-        try buildError(id, -32603, msg, out);
-        return;
+    const zxp_rt = zxp_runtime.getOrCreate(alloc, app_ctx.sandbox_root) catch |err| {
+        engine_arena.deinit();
+        return err;
     };
-    defer engine.ctx.freeValue(val);
-
-    if (engine.ctx.isException(val)) {
-        const ex = engine.ctx.getException();
-        defer engine.ctx.freeValue(ex);
-
-        if (engine.ctx.toZString(ex)) |err_str| {
-            defer engine.ctx.freeZString(err_str);
-            const msg = try std.fmt.allocPrint(aa, "JavaScript Error:\n{s}", .{err_str});
-            const content = try textContent(msg, aa);
-            try buildToolResult(id, content, out);
-        } else |_| {
-            try buildError(id, -32603, "run_script: Unknown JavaScript exception", out);
-        }
-        return;
-    }
-
-    engine.run() catch |err| {
-        std.debug.print("❌ [MCP run_script event loop error]: {}\n", .{err});
+    const engine = z.ScriptEngine.init(engine_alloc, zxp_rt) catch |err| {
+        engine_arena.deinit();
+        return err;
+    };
+    engine.loadHTML("<html><head></head><body></body></html>") catch |err| {
+        engine.deinit();
+        engine_arena.deinit();
+        return err;
     };
 
-    // ArrayBuffer → base64 image
-    if (engine.ctx.isArrayBuffer(val)) {
-        const bytes = engine.ctx.getArrayBuffer(val) catch {
-            try buildError(id, -32603, "run_script: failed to read ArrayBuffer", out);
-            return;
-        };
-        const content = try imageContent(bytes, sniffMime(bytes), aa);
+    // ── Execute with SIGSEGV crash protection ──────────────────────────────
+    var run_ctx = ScriptRunCtx{ .engine = engine, .script = script };
+    const script_crashed = zexp_crash_protect_run(runScriptCb, &run_ctx);
+
+    if (script_crashed != 0) {
+        // SIGSEGV caught during script execution.  The engine and its arena
+        // may be corrupted — intentionally leak them and invalidate the
+        // thread-local ZxpRuntime so the next request starts fresh.
+        zxp_runtime.invalidateThreadLocal();
+        std.debug.print("💥 [MCP run_script] SIGSEGV caught during eval — runtime invalidated, arena leaked\n", .{});
+        const content = try textContent(
+            "Script execution crashed (segfault). " ++
+                "For public websites always pass { execute_scripts: false, load_stylesheets: false } to goto().",
+            aa,
+        );
         try buildToolResult(id, content, out);
         return;
     }
 
-    // String, object/array → text content
+    // ── Handle JS-level errors ─────────────────────────────────────────────
+    if (run_ctx.eval_error) |ename| {
+        // Zig error from evalAsync.  For JSPromiseRejected, include the reason.
+        const msg = if (std.mem.eql(u8, ename, "JSPromiseRejected"))
+            if (engine.last_rejection_msg) |reason|
+                try std.fmt.allocPrint(aa, "run_script: Promise rejected: {s}", .{reason})
+            else
+                try std.fmt.allocPrint(aa, "run_script: Promise rejected (see server log)", .{})
+        else
+            try std.fmt.allocPrint(aa, "run_script: eval failed: {s}", .{ename});
+        cleanupEngine(engine, &engine_arena);
+        try buildError(id, -32603, msg, out);
+        return;
+    }
+
+    // val is a JSValue owned by the context — must be freed before engine.deinit().
+    // We do NOT use defer here to ensure freeValue comes before engineDeinitCb.
+    const val = run_ctx.val;
+
+    if (engine.ctx.isException(val)) {
+        const ex = engine.ctx.getException();
+        const result_content = blk: {
+            if (engine.ctx.toZString(ex)) |err_str| {
+                defer engine.ctx.freeZString(err_str);
+                const msg = try std.fmt.allocPrint(aa, "JavaScript Error:\n{s}", .{err_str});
+                break :blk try textContent(msg, aa);
+            } else |_| {
+                break :blk try textContent("run_script: Unknown JavaScript exception", aa);
+            }
+        };
+        engine.ctx.freeValue(ex);
+        engine.ctx.freeValue(val);
+        cleanupEngine(engine, &engine_arena);
+        try buildToolResult(id, result_content, out);
+        return;
+    }
+
+    // ── Extract result (all paths: freeValue(val) before engine cleanup) ──
+
+    // ArrayBuffer → base64 image
+    if (engine.ctx.isArrayBuffer(val)) {
+        const bytes_result = engine.ctx.getArrayBuffer(val);
+        if (bytes_result) |bytes| {
+            const bytes_copy = try aa.dupe(u8, bytes); // copy before engine goes away
+            const content = try imageContent(bytes_copy, sniffMime(bytes_copy), aa);
+            engine.ctx.freeValue(val);
+            cleanupEngine(engine, &engine_arena);
+            try buildToolResult(id, content, out);
+        } else |_| {
+            engine.ctx.freeValue(val);
+            cleanupEngine(engine, &engine_arena);
+            try buildError(id, -32603, "run_script: failed to read ArrayBuffer", out);
+        }
+        return;
+    }
+
+    // String, object/array → text content (copy into aa before engine cleanup)
     const text: []const u8 = blk: {
         if (engine.ctx.isUndefined(val) or engine.ctx.isNull(val)) break :blk "null";
 
@@ -1025,8 +1396,25 @@ fn toolRunScript(
         break :blk try aa.dupe(u8, json_str);
     };
 
+    engine.ctx.freeValue(val);
+    cleanupEngine(engine, &engine_arena);
+
     const content = try textContent(text, aa);
     try buildToolResult(id, content, out);
+}
+
+/// Protected engine cleanup: runs engine.deinit() inside SIGSEGV protection
+/// (guards against the Lexbor lxb_html_document_stylesheet_destroy_all bug),
+/// then frees the arena.  On crash: invalidates runtime and leaks the arena.
+fn cleanupEngine(engine: *z.ScriptEngine, engine_arena: *std.heap.ArenaAllocator) void {
+    const deinit_crashed = zexp_crash_protect_run(engineDeinitCb, engine);
+    if (deinit_crashed != 0) {
+        std.debug.print("💥 [MCP] SIGSEGV in engine.deinit() — runtime invalidated, arena leaked\n", .{});
+        zxp_runtime.invalidateThreadLocal();
+        // Do NOT call engine_arena.deinit() — it may also be corrupted.
+    } else {
+        engine_arena.deinit();
+    }
 }
 
 // ── store_save ─────────────────────────────────────────────────────────────────

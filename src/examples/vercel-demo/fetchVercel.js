@@ -42,8 +42,9 @@ async function scrape() {
   url = "https://demo.vercel.store";
   await zxp.goto(url);
   const html = await fetchImages(url);
-  return html;
-  // return zxp.fs.writeFileSync("src/examples/vercel-demo/vv.html", html);
+  // return html;
+  const ab = zxp.encode(zxp.paintDOM(document.body, 1200), 'png')
+  return zxp.fs.writeFileSync("src/examples/vercel-demo/vv.png", ab);
 }
 
 scrape();

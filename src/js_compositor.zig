@@ -1057,6 +1057,31 @@ fn measureText(allocator: std.mem.Allocator, text: []const u8, font_size: f32) s
     return .{ .w = 0, .h = 0 };
 }
 
+/// __native_measureText(text: string, fontSize: number) → { width: number, height: number }
+/// Measures pixel dimensions of text rendered in Roboto at the given font size.
+/// Uses ThorVG layout — results match SVG paintSVG output exactly.
+/// Useful for dynamic SVG text wrapping without a browser geometry engine.
+pub fn js_measureText(ctx_ptr: ?*z.qjs.JSContext, _: z.qjs.JSValue, argc: c_int, argv: [*c]z.qjs.JSValue) callconv(.c) z.qjs.JSValue {
+    const ctx = w.Context.from(ctx_ptr);
+    if (argc < 2) return ctx.throwTypeError("measureText(text, fontSize) requires two arguments");
+    const rc = RuntimeContext.get(ctx);
+
+    const text_c = ctx.toCString(argv[0]) catch return w.UNDEFINED;
+    defer ctx.freeCString(text_c);
+    const font_size: f32 = @floatCast(ctx.toFloat64(argv[1]) catch return w.UNDEFINED);
+
+    _ = tvg_engine_init(0);
+    defer _ = tvg_engine_term();
+    thorvg.loadEmbeddedFonts() catch {};
+
+    const dims = measureText(rc.allocator, std.mem.span(text_c), font_size);
+
+    const obj = ctx.newObject();
+    ctx.setPropertyStr(obj, "width", ctx.newFloat64(dims.w)) catch return w.UNDEFINED;
+    ctx.setPropertyStr(obj, "height", ctx.newFloat64(dims.h)) catch return w.UNDEFINED;
+    return obj;
+}
+
 /// Split text into lines that fit within max_width at the given font_size.
 /// Each returned string is allocated from allocator. Caller owns the slice.
 fn wordWrapText(

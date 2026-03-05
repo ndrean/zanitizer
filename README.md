@@ -68,10 +68,9 @@ If you use your own trusted code, you can skip sanitization entirely. For untrus
 | [Scrape Hacker News](#scrape-hacker-news) | fetch → DOM query → structured data | JSON | ✓ | ✓ |
 | [Vercel SPA scrape](#scrape-a-vercel-site-in-less-than-1s) | Next.js hydration → `waitForSelector` | JSON | ✓ | ✓ |
 | [Vercel site snapshot](#render-the-vercel-side) | SSR page → inlined images → render | WEBP | ✓ | ✓ |
-| [Echarts](#echarts) | Echarts SVG -> rasterize | WEBP | ✓ | ✓ |
+| [Echarts](#render-echarts) | Echarts SVG -> rasterize | WEBP | ✓ | ✓ |
 | [Leaflet map PDF](#generate-a-leaflet-map-pdf-report) | GeoJSON route → OSM tiles → SVG → PDF | PDF | – | ✓ |
-
----
+| [Sanitzer](#sanitize-html-and-css) | External stylesheet + stylesheet + inline style | parse CSS -> sanitize | ✓ | ✓ |
 
 ### MCP server
 
@@ -139,6 +138,7 @@ curl -s -X POST http://localhost:9984/mcp \
 
 Source: <https://github.com/ndrean/zexplorer/blob/main/src/examples/d3_chart/example_d3.js>
 
+NOPE
 ```sh
 curl -s -X POST http://localhost:9984/run --data-binary @src/examples/d3_chart/output_chart.webp
 ```
@@ -330,9 +330,9 @@ pub const default_system =
 
 </details>
 
-### ECharts
+### Render ECharts
 
-An example that shows how to collect public data from a CSV source and build a [D3.js](https://github.com/d3/d3) chart.
+An example that shows how to draw and render an [ECharts](https://github.com/apache/echarts) chart.
 
 We use the following functions: `zxp.loadHTML()` , `zxp.runScripts()`, `new XMLSerializer()` (serialize the SVG), `zxp.paintSVG()` and `zxp.encode()` (generate WEBP encoded binary) and `zxp.fs.writeFileSync()` to save it locally.
 
@@ -344,17 +344,15 @@ The dev-server is up and running. We send a POST request to the endpoint where t
 curl -s -X POST http://localhost:9984/run --data-binary @src/examples/echarts/run_svg.js
 ```
 
-<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/echarts/echarts_svg.png" alt="D3 chart from CSV" width="400">
+<img src="https://github.com/ndrean/zexplorer/blob/main/src/examples/echarts/echarts_svg.png" alt="EChart_svg" width="400">
 
 <br>
-
-
 
 ### Use dynamic HTML with `htm` and paint
 
 <details><summary>We use htm to build dynamic HTML and render it as an image</summary>
 
-[Source](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/teset_html.html")
+[Source](https://github.com/ndrean/zexplorer/blob/main/src/examples/frameworks/htm/test_html.html")
 
 ```html
 <html>
@@ -427,7 +425,7 @@ run(input, output);
 We POST the request to the dev-server:
 
 ```sh
-  curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
+curl -s -X POST http://localhost:9984/run --data-binary @src/examples/frameworks/htm/run.js
 ```
 
 or alternatively with the CLI (`-o` to output into the format you want, PNG, JPEG, WEBP or PDF):
@@ -600,13 +598,7 @@ async function render() {
 render();
 ```
 
-We start the dev-server with:
-
-```sh
-./zig-out/bin/zxp server
-```
-
-and send an HTTP request with the content of the JavaScript snippet and pipe to display an image in the terminal:
+The dev-server isup and running (`./zig-out/bin/zxp serve .`) we and send an HTTP request with the content of the JavaScript snippet and pipe to display an image in the terminal:
 
 ```sh
 curl -s -X POST http://localhost:9984/run  \
@@ -623,18 +615,14 @@ and get in your terminal the image:
 **CLI**: we pipe `cat` with  `zxp render` to run the snippet and express the desired format with the `-f` flag (defaults to PNG)
 
 ```sh
-cat src/examples/render_grid_1d/grid_1d.js | ./zig-out/bin/zxp render - -f webp | kitty +kitten icat
+cat src/examples/render_grid_1d/grid_1d_kitty.js | ./zig-out/bin/zxp render - -f webp | kitty +kitten icat
 ```
 
 ### Scrape Hacker news
 
 Let's fetch the newest posts from the "hacker news" website.
 
-We start the dev-server with:
-
-```sh
-./zig-out/bin/zxp serve
-```
+The dev-server is running: `./zig-out/bin/zxp serve .`
 
 <details><summary>We run this JavaScript snippet:</summary>
 
@@ -717,13 +705,7 @@ async function select() {
 select();
 ```
 
-Your server is still running:
-
-```sh
-./zig-out/bin/zxp server
-```
-
-You send a POST request:
+Your server is upaand running. You send ad a POST request:
 
 ```sh
 curl -s -X POST http://localhost:9984/run  \
@@ -741,7 +723,6 @@ You receive in your terminal:
 ```sh
 zxp run src/examples/vercel-demo/inline-select.js --pretty
 ```
-
 
 ---
 
@@ -784,7 +765,7 @@ async function fetchImages() {
   });
 
   // Fetch all in parallel via libcurl multi.
-  const results = fetchAll(
+  const results = zxp.fetchAll(
     urls.filter((u) => u !== null),
     {
       Accept: "image/png,image/jpeg,image/webp,*/*;q=0.5",
@@ -798,7 +779,7 @@ async function fetchImages() {
     if (urls[i] === null) continue;
     const r = results[ri++];
     if (!r || !r.ok) continue;
-    imgs[i].setAttribute("src", arrayBufferToBase64DataUri(r.data, r.type));
+    imgs[i].setAttribute("src", zxp.arrayBufferToBase64DataUri(r.data, r.type));
     imgs[i].removeAttribute("srcset");
   }
 
@@ -925,7 +906,8 @@ This is **GFM** rendered natively via md4c.
 - [x] lexbor renders the resulting HTML
 - [ ] profit
 
-~~Strikethrough~~, https://example.com autolink, and <span style="color:red">raw HTML</span> all pass through." | ./zig-out/bin/zxp run -e "zxp.markdownToHTML(zxp.stdin.read())"
+~~Strikethrough~~, https://example.com autolink, and <span style="color:red">raw HTML</span> all pass through." \
+| ./zig-out/bin/zxp run -e "zxp.markdownToHTML(zxp.stdin.read())"
 ```
 
 gives:
@@ -959,390 +941,19 @@ gives:
 <p><del>Strikethrough</del>, <a href="https://example.com">https://example.com</a> autolink, and <span style=color:red>raw HTML</span> all pass through.</p>
 ```
 
-
-## Library quick start
-
-### Hello world
-
-**[Dual primitives]** When you use `zexplorer` as a `Zig` library, you have DOM primitives accessible in the Zig code. Since these primitives are ported into the JavaScript runtime, you can access them as well in the runtime.
-
-**[First example]** You have a simple HTML file, _examples/hello_world.html_.
-
-```html
-<div>
-  <p>Hello world</p>
-</div>
-```
-
-We will parse it with `z.parseHTML()` and print the DOM into the console with `prettyPrint()`. We will build and execute the following _src/ex1.zig_ file where we respect the careful and explicit Zig memory allocation ceremony:
-
-```zig
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main() !void {
-  const gpa = debug_allocator.allocator();
-  defer { 
-    _= .ok == debug_allocator.deinit();
-  }
-
-  const html = @embedFile("examples/hello_world.html");
-
-  const doc = try z.parseHTML(allocator, html);
-  defer z.destroyDocument(doc);
-
-  try z.prettyPrint(gpa, z.documentRoot(doc).?);
-}
-
-const std = @import("std");
-const z = @import("zexplorer");
-```
-
-The executable is named "zxp". We build the _main.zig_ file (defined for you in _build.zig_ asa the "run" step), and execute it by using its name:
-
 ```sh
-$> zig build run
-$> ./zig-out/bin/zxp
+echo "...." \
+js -Rs '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"render_markdown","arguments":{"markdown":.,"width":800}}}' \
+| curl -s -X POST http://localhost:9984/mcp \
+  -H "Content-Type: application/json" \
+  -d @-
+
+# -> {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"image","data":"iVB......."}]}}
+
+| jq -r '.result.content[0].data' | base64 -d > out.png
 ```
 
-In the terminal, you see:
-
-```txt
-<div>
-  <p>
-    "Hello world"
-  </p>
-</div>
-```
-
----
-
-**[Example of dual primitives]** We create a DOM and query it in pur Zig and then using embedded JavaScript:
-
-In this example, we first parse the HTML file with `DOMParser.parseFromString()` and then we can query the "VDOM" in Zig with `z.querySelector()` and get the content with `textContent_zc()`.
-
-<details><summary>Use parser.parseFromString </summary>
-
-```zig
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main() !void {
-  const gpa = debug_allocator.allocator();
-  defer {
-    _ =  .ok == debug_allocator.deinit();
-  }
-
-  // alternative: using DOMParser alternative instead of `parseHTML()`
-  var parser = try z.DOMParser.init(gpa);
-  defer parser.deinit();
-
-  const html = @embedFile("examples/hello_world.html");
-  const doc = try parser.parseFromString(html);
-  defer z.destroyDocument(doc);
-
-  const p_elt = try z.querySelector(gpa, z.bodyNode(doc).?, "p");
-  const p_node = z.elementToNode(p_elt.?);
-  const inner_text = z.textContent_zc(p_node); // no allocation
-
-  std.debug.print("[Zig] {s}\n", .{inner_text});
-}
-
-const std = @import("std");
-const z = @import("zexplorer");
-```
-
-</details>
-
-Then, we run a JavaScript snippet that knows about the "vDOM". Indeed, zexplorer brings in a default `document` to which the JavaScript code accesses via a globalThis `document`. We use the engine `z.ScriptEngine`  and the `loadHTML()` and `evalModule()` methods.
-
-<details><summary>With a JavaScript snippet</summary>
-
-```zig
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main() !void {
-  const gpa = debug_allocator.allocator();
-  defer _ = debug_allocator.deinit();
-
-  const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
-  defer gpa.free(sandbox_root);
-
-  var engine = try z.ScriptEngine.init(gpa, sandbox_root);
-  defer engine.deinit();
-
-  const js =
-    \\const innerText = document.querySelector("p").textContent;
-    \\console.log("[JS]", innerText);
-    ;
-  const html = @embedFile("examples/hello_world.html");
-
-  try engine.loadHTML(html);
-  try engine.evalModule(js, "<script>");
-}
-
-const std = @import("std");
-const z = @import("zexplorer");
-```
-
-</details>
-
-You build and execute the _main.zig_ file via the "run" step:
-
-```sh
-$> zig build run
-$> ./zig-out/bin/zxp-ex
-```
-
-and get in the terminal:
-
-```txt
-[Zig] Hello world
-[JS] Hello world
-```
-
----
-
-**[Run JavaScript]** Let's run a JavaScript snippet that builds the same DOM programmatically and adds a `<script>` to it:
-
-```js
-// src/examples/hello_world.js
-const div = document.createElement("div");
-const p = document.createElement("p");
-p.textContent = "Hello zexplorer";
-div.appendChild(p);
-document.body.appendChild(div);
-
-const script = document.createElement("script");
-script.textContent = "const hello = document.querySelector('p').textContent; console.log("[JS]", hello);";
-document.head.appendChild(script);
-```
-
-In the _main.zig_ file, we use the `z.ScriptEngine` to load the JS code `engine.evalModule()` and then execute it with `engine.executeScripts()`. We take care of all the memory allocations:
-
-<details><summary>Using engine.evalModule() and engine.executeScripts()</summary>
-
-```zig
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main() !void {
-    const gpa = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
-    defer gpa.free(sandbox_root);
-
-    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
-    defer engine.deinit();
-
-    const script = @embedFile("examples/hello_world.js");
-
-    const val = try engine.evalModule(script, "<my-script>");
-    defer engine.ctx.freeValue(val);
-
-    try engine.executeScripts(gpa, ".");
-
-    // Print the DOM to stdout
-    try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
-}
-
-const std = @import("std");
-const z = @import("zexplorer");
-```
-
-</details>
-
-You build and execute the _main.zig_ file via the "run" step:
-
-
-```sh
-$> zig build run
-$> ./zig-out/bin/zxp-ex
-```
-
-The output in the terminal:
-
-```txt
-[JS] Hello zexplorer  <-- zexplorer executed the script
-
-<html>                <-- zexplorer "pretty-printed" the DOM to stdout
-  <head>
-    <script>
-      "const hello = document.querySelector('p').textContent; console.log('[JS]', hello);"
-    </script>
-  </head>
-  <body>
-    <div>
-      <p>
-        "Hello zexplorer"
-      </p>
-    </div>
-  </body>
-</html>
-```
-
----
-
-**[HTML with script]** You have an HTML file (_examples/html-script.html_) with a script. We use the `z.ScriptEngine` and use a higher level primitive `loadPage()` that parses the HTML and CSS and syncs it, and reads and evaluates the found `<script>`'s elements.
-
-```html
-<body>
-  <p>Hello Zig</p>
-  <script>
-    const p = document.querySelector("p");
-    console.log(p.textContent);
-  </script>
-</body>
-```
-
-Your _main.zig_  file contains:
-
-<details><summary>Using ScriptEngine.loadPage()</summary>
-
-```zig
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main() !void {
-    const gpa = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
-    defer gpa.free(sandbox_root);
-
-    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
-    defer engine.deinit();
-
-    const html = @embedFile("html-script.html");
-    try engine.loadPage(html, .{});
-
-    try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
-}
-
-const std = @import("std");
-const z = @import("zexplorer");
-```
-
-</details>
-
-You build and execute _main.zig_:
-
-```sh
-$> zig build run
-$> ./zig-out/bin/zxp-ex
-```
-
-The output is as expected:
-
-```txt
-[JS] Hello Zig
-
-<html>
-  <head>
-    ...
-```
-
-### Scrape a Vercel site
-
-We scrape <https://demo.vercel.store>. It makes 12 HTTP requests and runs 42 scripts in order to hydrate the first SSR rendered page.
-
-You can scrap the Vercel website with this JavaScript snippet that mimics `Puppeteer`'s API.
-
-```js
-// vercel.js
-
-async function testVercel() {
-  try {
-    await zexplorer.goto("https://demo.vercel.store");
-
-    await zexplorer.waitForSelector("a[href^='/product/']");
-
-    const links = document.querySelectorAll("a[href^='/product/']");
-    const unique = [...new Set(Array.from(links).map(el => el.getAttribute('href')))];
-    const items = unique.map(href => {
-      const el = document.querySelector(`a[href='${href}']`);
-      return el.textContent.trim();
-    });
-
-    console.log(items);
-    return items; // <-- return to the engine to marshall the array
-  } catch (err) {
-    console.error(err);
-  }
-}
-```
-
-You pass it to the engine:
-
-<details><summary>Using engine.Eval() and engine.evalAsyncAs()</summary>
-
-```zig
-var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
-
-pub fn main() !void {
-    const gpa = debug_allocator.allocator();
-    defer _ = debug_allocator.deinit();
-    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
-    defer gpa.free(sandbox_root);
-
-    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
-    defer engine.deinit();
-
-    const script = @embedFile("vercel.js");
-    const val = try engine.eval(script, "test_vercel.js", .global);
-    defer engine.ctx.freeValue(val);
-    
-    // output is an Array of strings
-    const items = try engine.evalAsyncAs(
-        allocator,
-        []const []const u8,
-        "testVercel()",
-        "<vercel>",
-    );
-    defer {
-        for (items) |item| allocator.free(item);
-        allocator.free(items);
-    }
-
-    // output : toOwnedSlice or file
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(allocator);
-    for (items) |item| {
-        try buf.appendSlice(allocator, item);
-        try buf.append(allocator, '\n');
-    }
-
-    try std.fs.cwd().writeFile(
-        .{
-            .sub_path = "vercel_data.txt",
-            .data = buf.items,
-        },
-    );
-}
-```
-
-</details>
-
-and you get your data back in 1s:
-
-```txt
-0.17s user 0.14s system 37% cpu 0.835 total
-
-[
-  "Acme Circles T-Shirt$20.00USD",
-  "Acme Drawstring Bag$12.00USD",
-  "Acme Cup$15.00USD",
-  "Acme Mug$15.00USD",
-  "Acme Hoodie$50.00USD",
-  "Acme Baby Onesie$10.00USD",
-  "Acme Baby Cap$10.00USD"
-]
-```
-
-TODO
-
-```sh
-TODO
-```
-
----
-
-## Sanitize HTML & CSS
+### Sanitize HTML and CSS
 
 Four CSS threat vectors are sanitized in a single pass — covering every way untrusted CSS can reach a document:
 
@@ -1357,7 +968,7 @@ Vectors 1–3 are static (present in the HTML source). Vector 4 is dynamic — i
 
 ---
 
-### Vectors 1–3: static CSS (`<link>`, `<style>`, inline)
+#### Vectors 1–3: static CSS (`<link>`, `<style>`, inline)
 
 <details><summary>src/examples/test_example.css</summary>
 
@@ -1410,6 +1021,8 @@ Vectors 1–3 are static (present in the HTML source). Vector 4 is dynamic — i
 </details>
 
 **Sanitize and render:**
+
+NOPE
 
 ```sh
 zxp sanitize src/examples/test_example.html > sanitized.html
@@ -1489,7 +1102,7 @@ if (z.querySelector(doc, "div.untrusted")) |el| {
 
 ---
 
-### Vector 4: JS DOM mutation
+#### Vector 4: JS DOM mutation
 
 JavaScript can inject HTML at runtime via `innerHTML`, `outerHTML`, `insertAdjacentHTML`, or `createElement` + `setAttribute`. Each mutation is intercepted and sanitized at the point of injection when `sanitize = true`.
 
@@ -1526,6 +1139,8 @@ JavaScript can inject HTML at runtime via `innerHTML`, `outerHTML`, `insertAdjac
 </details>
 
 **Run (Zig API — sanitize + render):**
+
+NOPE
 
 ```sh
 zig build example -Dname=test_sanitize_injection
@@ -1893,225 +1508,9 @@ The result is:
 
 ---
 
-### Render D3.js to PNG
 
-<details><summary>HTML & JavaScript snippet to render a pie chart</summary>
 
-```html
-<!doctype html>
-<html>
-  <head>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
-  </head>
-  <body>
-    <div id="chart" style="width: 800px; height: 600px"></div>
 
-    <script>
-      async function runDrawD3Chart() {
-        console.log("[Test] Booting D3.js Engine...");
-
-        const width = 800;
-        const height = 600;
-        const margin = 40;
-        const radius = Math.min(width, height) / 2 - margin;
-
-        // Setup the SVG canvas
-        const svg = d3
-          .select("#chart")
-          .append("svg")
-          .attr("width", width)
-          .attr("height", height)
-          // Crucial for ThorVG!
-          .attr("xmlns", "http://www.w3.org/2000/svg")
-          .append("g")
-          .attr("transform", `translate(${width / 2},${height / 2})`);
-
-        const data = {
-          "In Transit": 45,
-          Delivered: 120,
-          Delayed: 15,
-          Maintenance: 5,
-        };
-
-        // Color scale
-        const color = d3
-          .scaleOrdinal()
-          .domain(Object.keys(data))
-          .range(["#3b82f6", "#22c55e", "#ef4444", "#f59e0b"]);
-
-        // the pie slices
-        const pie = d3.pie().value((d) => d[1]);
-        const data_ready = pie(Object.entries(data));
-
-        // Shape generator for the arcs (Donut chart)
-        const arcGenerator = d3
-          .arc()
-          .innerRadius(radius * 0.5) // This makes it a donut!
-          .outerRadius(radius);
-
-        // Build the SVG DOM elements!
-        svg
-          .selectAll("path")
-          .data(data_ready)
-          .join("path")
-          .attr("d", arcGenerator)
-          .attr("fill", (d) => color(d.data[0]))
-          .attr("stroke", "white")
-          .style("stroke-width", "4px");
-
-        // text labels
-        svg
-          .selectAll("text")
-          .data(data_ready)
-          .join("text")
-          .text((d) => d.data[0])
-          .attr("transform", (d) => `translate(${arcGenerator.centroid(d)})`)
-          .style("text-anchor", "middle")
-          .style("font-family", "sans-serif")
-          .style("font-size", "16px")
-          .style("fill", "#ffffff")
-          .style("font-weight", "bold");
-
-        // Extract the SVG string
-        const svgElement = document.querySelector("#chart svg");
-        const svgString = svgElement ? svgElement.outerHTML : "";
-
-        // Send to Zig Compositor (just the SVG saved as PNG)
-        zexplorer.generateRoutePng(
-          [], // Empty tiles array
-          svgString,
-          "D3_Chart_report.png",
-          width,
-          height,
-        );
-
-        console.log("🟢 Chart Report generated");
-      }
-
-      runDrawD3Chart().catch((e) =>
-        console.error("Error:", e.message, e.stack),
-      );
-    </script>
-  </body>
-</html>
-```
-
-</details>
-
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/D3_Chart_report.png" alt="d3 char" with="600" height="400">
-
----
-
-### Render Chart.js to PNG
-
-You can run [Chart.js](https://www.chartjs.org/) server-side and export the result as a PNG file. 
-
-❗️ The Chart.js bundle is _pre-built_ with `Bun` and embedded at compile time.
-
-<details><summary>ChartJS example</summary>
-
-```sh
-cd src/examples/zexp-frams && bun run build_chartjs.js
-zig build example -Dname=test_canvas -Doptimize=ReleaseFast
-```
-
-The HTML file defines the chart configuration and uses the `Chart` constructor:
-
-```html
-<!-- src/examples/test_canvas.html -->
-<html>
-  <body>
-    <script>
-      globalThis.window = globalThis;
-      if (typeof Intl === "undefined") {
-        globalThis.Intl = {
-          NumberFormat: function(locale, opts) {
-            return { format: function(n) { return String(n); } };
-          }
-        };
-      }
-      window.devicePixelRatio = 1;
-      window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
-
-      const canvas = document.createElement("canvas");
-      canvas.width = 800;
-      canvas.height = 600;
-      document.body.insertAdjacentElement("afterbegin", canvas);
-
-      async function render() {
-        const config = {
-          type: "bar",
-          data: {
-            labels: ["Zig", "Rust", "C++", "Go", "Python"],
-            datasets: [{
-              label: "Performance (Imaginary Units)",
-              data: [150, 145, 140, 120, 80],
-              backgroundColor: [
-                "rgba(255, 99, 132, 0.8)", "rgba(54, 162, 235, 0.8)",
-                "rgba(255, 206, 86, 0.8)", "rgba(75, 192, 192, 0.8)",
-                "rgba(153, 102, 255, 0.8)",
-              ],
-              borderColor: "black",
-              borderWidth: 2,
-            }],
-          },
-          options: {
-            animation: false,  // CRITICAL: disable animation for SSR
-            responsive: false,
-            plugins: {
-              title: { display: true, text: "Language Speed Test", font: { size: 30 } },
-            },
-          },
-        };
-
-        new globalThis.Chart(canvas, config);
-
-        // Since animation is false, it renders synchronously!
-        const blob = await canvas.toBlob();
-        return await blob.arrayBuffer();
-      }
-      render();
-    </script>
-  </body>
-</html>
-```
-
-The Zig runner loads the `Chart.js` bundle, then evaluates the HTML with its inline script:
-
-```zig
-fn chartJS(allocator: std.mem.Allocator, sbx: []const u8) !void {
-    var engine = try ScriptEngine.init(allocator, sbx);
-    defer engine.deinit();
-
-    // Load Chart.js bundle (pre-built IIFE, embedded at compile time)
-
-    const chartjs = @embedFile("vendor/chart.js");
-    const chartjs_val = try engine.eval(chartjs, "<chartjs>", .global);
-    engine.ctx.freeValue(chartjs_val);
-
-    // Load the HTML with chart config, extract and run the <script>
-
-    const html = @embedFile("test_canvas.html");
-    try engine.loadHTML(html);
-
-    // access the DOM with Zig
-
-    const body = z.bodyNode(engine.dom.doc);
-    const script_elt = z.getElementByTag(body.?, .script).?;
-    const script = z.textContent_zc(z.elementToNode(script_elt));
-
-    const png_bytes = try engine.evalAsyncAs(allocator, []const u8, script, "<chart>");
-    defer allocator.free(png_bytes);
-
-    try std.fs.cwd().writeFile(.{ .sub_path = "canvas_chartjs.png", .data = png_bytes });
-}
-```
-
-</details>
-
-<img src="https://github.com/ndrean/zexplorer/blob/main/canvas_graphJS_test.png" alt="chartjs example" width="600" height="400">
-
----
 
 ### Run React bundled code
 
@@ -2499,6 +1898,283 @@ zig build example -Dname=test_vue --release=fast
 </details>
 
 ---
+
+## Library quick start
+
+### Hello world
+
+**[Dual primitives]** When you use `zexplorer` as a `Zig` library, you have DOM primitives accessible in the Zig code. Since these primitives are ported into the JavaScript runtime, you can access them as well in the runtime.
+
+**[First example]** You have a simple HTML file, _examples/hello_world.html_.
+
+```html
+<div>
+  <p>Hello world</p>
+</div>
+```
+
+We will parse it with `z.parseHTML()` and print the DOM into the console with `prettyPrint()`. We will build and execute the following _src/ex1.zig_ file where we respect the careful and explicit Zig memory allocation ceremony:
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+  const gpa = debug_allocator.allocator();
+  defer { 
+    _= .ok == debug_allocator.deinit();
+  }
+
+  const html = @embedFile("examples/hello_world.html");
+
+  const doc = try z.parseHTML(allocator, html);
+  defer z.destroyDocument(doc);
+
+  try z.prettyPrint(gpa, z.documentRoot(doc).?);
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+The executable is named "zxp". We build the _main.zig_ file (defined for you in _build.zig_ asa the "run" step), and execute it by using its name:
+
+```sh
+$> zig build run
+$> ./zig-out/bin/zxp
+```
+
+In the terminal, you see:
+
+```txt
+<div>
+  <p>
+    "Hello world"
+  </p>
+</div>
+```
+
+---
+
+**[Example of dual primitives]** We create a DOM and query it in pur Zig and then using embedded JavaScript:
+
+In this example, we first parse the HTML file with `DOMParser.parseFromString()` and then we can query the "VDOM" in Zig with `z.querySelector()` and get the content with `textContent_zc()`.
+
+<details><summary>Use parser.parseFromString </summary>
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+  const gpa = debug_allocator.allocator();
+  defer {
+    _ =  .ok == debug_allocator.deinit();
+  }
+
+  // alternative: using DOMParser alternative instead of `parseHTML()`
+  var parser = try z.DOMParser.init(gpa);
+  defer parser.deinit();
+
+  const html = @embedFile("examples/hello_world.html");
+  const doc = try parser.parseFromString(html);
+  defer z.destroyDocument(doc);
+
+  const p_elt = try z.querySelector(gpa, z.bodyNode(doc).?, "p");
+  const p_node = z.elementToNode(p_elt.?);
+  const inner_text = z.textContent_zc(p_node); // no allocation
+
+  std.debug.print("[Zig] {s}\n", .{inner_text});
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+</details>
+
+Then, we run a JavaScript snippet that knows about the "vDOM". Indeed, zexplorer brings in a default `document` to which the JavaScript code accesses via a globalThis `document`. We use the engine `z.ScriptEngine`  and the `loadHTML()` and `evalModule()` methods.
+
+<details><summary>With a JavaScript snippet</summary>
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+  const gpa = debug_allocator.allocator();
+  defer _ = debug_allocator.deinit();
+
+  const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+  defer gpa.free(sandbox_root);
+
+  var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+  defer engine.deinit();
+
+  const js =
+    \\const innerText = document.querySelector("p").textContent;
+    \\console.log("[JS]", innerText);
+    ;
+  const html = @embedFile("examples/hello_world.html");
+
+  try engine.loadHTML(html);
+  try engine.evalModule(js, "<script>");
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+</details>
+
+You build and execute the _main.zig_ file via the "run" step:
+
+```sh
+$> zig build run
+$> ./zig-out/bin/zxp-ex
+```
+
+and get in the terminal:
+
+```txt
+[Zig] Hello world
+[JS] Hello world
+```
+
+---
+
+**[Run JavaScript]** Let's run a JavaScript snippet that builds the same DOM programmatically and adds a `<script>` to it:
+
+```js
+// src/examples/hello_world.js
+const div = document.createElement("div");
+const p = document.createElement("p");
+p.textContent = "Hello zexplorer";
+div.appendChild(p);
+document.body.appendChild(div);
+
+const script = document.createElement("script");
+script.textContent = "const hello = document.querySelector('p').textContent; console.log("[JS]", hello);";
+document.head.appendChild(script);
+```
+
+In the _main.zig_ file, we use the `z.ScriptEngine` to load the JS code `engine.evalModule()` and then execute it with `engine.executeScripts()`. We take care of all the memory allocations:
+
+<details><summary>Using engine.evalModule() and engine.executeScripts()</summary>
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    const gpa = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+
+    const script = @embedFile("examples/hello_world.js");
+
+    const val = try engine.evalModule(script, "<my-script>");
+    defer engine.ctx.freeValue(val);
+
+    try engine.executeScripts(gpa, ".");
+
+    // Print the DOM to stdout
+    try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+</details>
+
+You build and execute the _main.zig_ file via the "run" step:
+
+
+```sh
+$> zig build run
+$> ./zig-out/bin/zxp-ex
+```
+
+The output in the terminal:
+
+```txt
+[JS] Hello zexplorer  <-- zexplorer executed the script
+
+<html>                <-- zexplorer "pretty-printed" the DOM to stdout
+  <head>
+    <script>
+      "const hello = document.querySelector('p').textContent; console.log('[JS]', hello);"
+    </script>
+  </head>
+  <body>
+    <div>
+      <p>
+        "Hello zexplorer"
+      </p>
+    </div>
+  </body>
+</html>
+```
+
+---
+
+**[HTML with script]** You have an HTML file (_examples/html-script.html_) with a script. We use the `z.ScriptEngine` and use a higher level primitive `loadPage()` that parses the HTML and CSS and syncs it, and reads and evaluates the found `<script>`'s elements.
+
+```html
+<body>
+  <p>Hello Zig</p>
+  <script>
+    const p = document.querySelector("p");
+    console.log(p.textContent);
+  </script>
+</body>
+```
+
+Your _main.zig_  file contains:
+
+<details><summary>Using ScriptEngine.loadPage()</summary>
+
+```zig
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
+pub fn main() !void {
+    const gpa = debug_allocator.allocator();
+    defer _ = debug_allocator.deinit();
+    const sandbox_root = try std.fs.cwd().realpathAlloc(gpa, ".");
+    defer gpa.free(sandbox_root);
+
+    var engine = try z.ScriptEngine.init(gpa, sandbox_root);
+    defer engine.deinit();
+
+    const html = @embedFile("html-script.html");
+    try engine.loadPage(html, .{});
+
+    try z.prettyPrint(gpa, z.documentRoot(engine.dom.doc).?);
+}
+
+const std = @import("std");
+const z = @import("zexplorer");
+```
+
+</details>
+
+You build and execute _main.zig_:
+
+```sh
+$> zig build run
+$> ./zig-out/bin/zxp-ex
+```
+
+The output is as expected:
+
+```txt
+[JS] Hello Zig
+
+<html>
+  <head>
+    ...
+```
 
 ## Tests & performance
 
@@ -3138,52 +2814,7 @@ DOMPurify reference: ~11 ms
 
 ---
 
-## Features by example
 
-**TODO**: link each to a src/example/*.
-
-List of implemented server and Web API and examples
-
-- async Timers: `setTimeout`, `setInterval`
-- EventLoop.
-- `Event`: with bubbling
-- `Worker` (OS thread). With `onmessage` (`data`) , `postMessage`, `terminate`,  
-- `URL`, `URLPattern`, `URLSearchParams`. With `url.createObjectURL(blob)` and `url.revokeObjectURL`. TODO: check what is missing. `
-- `Blob`: `arrayBuffer`, `text`. With `size` and `type`. TODO `slice`, `bytes` (promise -> Unit8Array)
-- `HTMLCanvasElement`  with `width`, `height`, `canvas`, `fillStyle` and `font`. Drawing methods `drawImage`, `beginPath`, `closePath`, `moveTo`, `stroke`, `strokeStyle`, `lineWidth`, `fillText`, `fillRect`, `scale`, `translate`, `measureText`, `save`, `restore`, `arc`. Methods `getContext`, `getPngData`, `getJpegData`, `toDataURL()`, `toBlob()` (promise based but support for callback based), support image PNG/JPEG via `stb_image_write`.
-- `HTMLImageElement` : via `createImageBitmap`, to add property `src` to be able to do : `image.src = URL.createObjectURL(blob)`
-- `File`, inherits from `Blob`,with `size`, `path`, `lastModified`, `name`; `fromPath()`.
-- `FileList` with `length` and `item()`.
-- `FormData` with `append`, `serializeFormData` for Fetch/multi-part. TODO (?) `delete`, `entries`,
-- `fetch` API (async `CurlMulti`), with `Headers` and `body` (-> `ReadableStream` via OS thread), `status`, `url`. `Response` methods `text()`, `json()`, `arrayBuffer()`, `blob()`. TODO ? `Request`.
-- `fs`: sandboxed file system with: `readFile`, `readFileBuffer`, `writeFile`, `appendFile`, `stat`, `exists`, `readDir`, `mkdir`, `rm`, `copyFile`, `rename`, `fileFromPath`, `createReadStream`, `createWriteStream`.
-- `ReadableStream` (via `fs` and Worker thread, not event I/O): `read`, `releaseLock`, `cancel`.
-- `WritableStream` (via `fs` and Worker thread, not event I/O): 
-- async `FileReader` (Worker based): `readAsText`, `readAsArrayBuffer`, `'readAsDataURL`
-- `FileReaderSync`: `readAsArrayBuffer`,  `readAsText`,  `readAsDataURL`,
-- `DocumentFragment` and `Template`.
-- `CSSStyleDeclaration`, with `style`, `window.getComputedStyle`, `setProperty`, `getPropertyValue`
-- `Classlist` and `DomTokenList` with `add`, `remove`, `contains`, `toggle`, `replace`, `item`, `toString`.
-- `Dataset` and `DOMStringMap`.
-- `console`
-- `Range` with `setStartBefore`, `setEndAfter`, `deleteContents`. **TODO**  `window.getSelection()`, `selection.addRange()`
-- `DOMParser` with `parseFromString()`.
-- `Canvas` and `Image`
-- `addEventListener`, `dispatchEventListener`, `removeEventListener`, `reportResult` (helper->Zig)
-- `querySelector(All)`, `matches`, `getElementById`, `getElementByTagName`, `childNodes`, `children`, `append`, `prepend`, `before`, `after`, `insertAdjacentHTML`, `insertAdjacentElement`, `replaceWith`, `replaceChildren`,
-- `TreeWalker`,
-- DOM: `document` with createElement|comment|header|TextNode, `parseHTML`, siblings, etc
-- `Sanitizer`. (`setHTML` or parseHTMLUnsafe to be aliased?)
-- log and printing helpers: `prettyPrint`, `printDoc`, `printDocStruct`, `saveDOM` (to file).
-
-- `crypto.getRandomValues` via Zig `std.crypto.random`
-- `localStorage` (`getItem`, `setItem`, `removeItem`, `clear`) backed by a Zig HashMap
-- TODO: `alert`, `prompt`, `confirm` : implement dumb versions
-
-
-
-> [!IMPORTANT] 
- > Use `ReleaseFast` as debug mode causes Maximum call stack size exceeded
 
 ### Other examples
 
@@ -3472,29 +3103,48 @@ You can send p from Zig to JS and receive typed data from JS to Zig.
 
 You can use native Zig functions in JS
 
-## State of the DOM API integration
-  
-- **Event Loop**. Native Zig thread-safe loop handling Timers (microtasks) and  Promises (macrotasks).
-- **Worker pool**: OS-threaded with message passing and library import support for CPU-intensive tasks (eg CSV parsing); inject Zig functions into JS code.
-- **EventListeners** (add, remove, dispatch) and _bubbling_ supported.
-- **ES6 Module System**: Load external, third-party libraries (es-toolkit) from disk, resolving paths, handling extensions, and executing them natively.
-- **CSSOM**: _inline_ CSS-inJS and _StyleSheet_ support. [WIP] The 500+ CSS properties (`Object.keys(document.body.style).filter(k => !k.startsWith('webkit'))`). Currently,  functional accessors: `Element.getPropertyValue()` and `Element.setProperty()` and `getComputedStyles()`.
-- Templating support.
-- **DOM Sanitizer**. Handles templates. To become closer to `DOMPurify`, [TODO] Missing full support of SVG sanitization and only basic CSS sanitization.
-- `fetch` API (via libCurl Multi).
-- Binary Interop: Zero-copy passing of ArrayBuffers and efficient Tuples.
-- **Security: RCE**. Sandboxing.
+## Features by example
 
-**Expectations**:
+**TODO**: link each to a src/example/*.
 
-- instant start, low footprint
-- No JIT Compilation: QuickJS compiles JS to bytecode. Very performant for one-shot, short-lived scripts, cold starts.
-- For long-lived scripts, CPU intensive, loop heavy ➡ Move hot paths to `Zig`: embed native Zig functions for this! (data processing, CSV parsing, batch and send to Zig...)
+List of implemented server and Web API and examples
 
-## Limitations
+- async Timers: `setTimeout`, `setInterval`
+- EventLoop.
+- `Event`: with bubbling
+- `Worker` (OS thread). With `onmessage` (`data`) , `postMessage`, `terminate`,  
+- `URL`, `URLPattern`, `URLSearchParams`. With `url.createObjectURL(blob)` and `url.revokeObjectURL`. TODO: check what is missing. `
+- `Blob`: `arrayBuffer`, `text`. With `size` and `type`. TODO `slice`, `bytes` (promise -> Unit8Array)
+- `HTMLCanvasElement`  with `width`, `height`, `canvas`, `fillStyle` and `font`. Drawing methods `drawImage`, `beginPath`, `closePath`, `moveTo`, `stroke`, `strokeStyle`, `lineWidth`, `fillText`, `fillRect`, `scale`, `translate`, `measureText`, `save`, `restore`, `arc`. Methods `getContext`, `getPngData`, `getJpegData`, `toDataURL()`, `toBlob()` (promise based but support for callback based), support image PNG/JPEG via `stb_image_write`.
+- `HTMLImageElement` : via `createImageBitmap`, to add property `src` to be able to do : `image.src = URL.createObjectURL(blob)`
+- `File`, inherits from `Blob`,with `size`, `path`, `lastModified`, `name`; `fromPath()`.
+- `FileList` with `length` and `item()`.
+- `FormData` with `append`, `serializeFormData` for Fetch/multi-part. TODO (?) `delete`, `entries`,
+- `fetch` API (async `CurlMulti`), with `Headers` and `body` (-> `ReadableStream` via OS thread), `status`, `url`. `Response` methods `text()`, `json()`, `arrayBuffer()`, `blob()`. TODO ? `Request`.
+- `fs`: sandboxed file system with: `readFile`, `readFileBuffer`, `writeFile`, `appendFile`, `stat`, `exists`, `readDir`, `mkdir`, `rm`, `copyFile`, `rename`, `fileFromPath`, `createReadStream`, `createWriteStream`.
+- `ReadableStream` (via `fs` and Worker thread, not event I/O): `read`, `releaseLock`, `cancel`.
+- `WritableStream` (via `fs` and Worker thread, not event I/O): 
+- async `FileReader` (Worker based): `readAsText`, `readAsArrayBuffer`, `'readAsDataURL`
+- `FileReaderSync`: `readAsArrayBuffer`,  `readAsText`,  `readAsDataURL`,
+- `DocumentFragment` and `Template`.
+- `CSSStyleDeclaration`, with `style`, `window.getComputedStyle`, `setProperty`, `getPropertyValue`
+- `Classlist` and `DomTokenList` with `add`, `remove`, `contains`, `toggle`, `replace`, `item`, `toString`.
+- `Dataset` and `DOMStringMap`.
+- `console`
+- `Range` with `setStartBefore`, `setEndAfter`, `deleteContents`. **TODO**  `window.getSelection()`, `selection.addRange()`
+- `DOMParser` with `parseFromString()`.
+- `Canvas` and `Image`
+- `addEventListener`, `dispatchEventListener`, `removeEventListener`, `reportResult` (helper->Zig)
+- `querySelector(All)`, `matches`, `getElementById`, `getElementByTagName`, `childNodes`, `children`, `append`, `prepend`, `before`, `after`, `insertAdjacentHTML`, `insertAdjacentElement`, `replaceWith`, `replaceChildren`,
+- `TreeWalker`,
+- DOM: `document` with createElement|comment|header|TextNode, `parseHTML`, siblings, etc
+- `Sanitizer`. (`setHTML` or parseHTMLUnsafe to be aliased?)
+- log and printing helpers: `prettyPrint`, `printDoc`, `printDocStruct`, `saveDOM` (to file).
 
-No AsyncIO, no WebSocket, no planned WASM support.
-  
+- `crypto.getRandomValues` via Zig `std.crypto.random`
+- `localStorage` (`getItem`, `setItem`, `removeItem`, `clear`) backed by a Zig HashMap
+- TODO: `alert`, `prompt`, `confirm` : implement dumb versions
+
 ## A few JS examples
 
 <details><summary>Import CSS</summary>

@@ -66,3 +66,15 @@ pub fn js_writeFileSync(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, a
 
     return zqjs.UNDEFINED;
 }
+
+/// __native_getCwd() → string
+/// Returns the server's current working directory as a string.
+pub fn js_getCwd(ctx_ptr: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValue) callconv(.c) qjs.JSValue {
+    const ctx = zqjs.Context.from(ctx_ptr);
+    const rc = RuntimeContext.get(ctx);
+    const cwd = std.process.getCwdAlloc(rc.allocator) catch |err| {
+        return ctx.throwInternalError(@errorName(err));
+    };
+    defer rc.allocator.free(cwd);
+    return ctx.newString(cwd);
+}

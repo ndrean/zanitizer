@@ -193,6 +193,7 @@ globalThis.zxp = {
   fs: {
     readFileSync: (path) => __native_readFileSync(path),
     writeFileSync: (path, buffer) => __native_writeFileSync(path, buffer),
+    cwd: () => __native_getCwd(),
   },
 
   // stdin — reads piped input. Returns "" / empty buffer when nothing is piped (TTY).
@@ -246,8 +247,8 @@ globalThis.zxp = {
     __native_loadPage(html, {
       base_dir: url,
       sanitize: options.sanitize ?? false,
-      execute_scripts: true,
-      load_stylesheets: true,
+      execute_scripts: options.execute_scripts ?? true,
+      load_stylesheets: options.load_stylesheets ?? true,
       browser_profile: options.browser_profile ?? true,
     });
     if (
@@ -292,9 +293,12 @@ globalThis.zxp = {
   // GFM plugin adds: tables (pipe syntax), strikethrough, task lists, highlighted code blocks.
   toMarkdown(input, options) {
     const td = new TurndownService(Object.assign({ headingStyle: "atx" }, options));
-    td.use(turndownPluginGfm.gfm);
-    // Patch: the GFM 'table' filter uses HTMLTableElement.rows which lexbor doesn't implement.
-    // Override it using querySelector("tr") which lexbor does support.
+    // Use individual GFM plugins, skipping 'tables' — the GFM tables plugin uses
+    // HTMLTableElement.rows (not implemented in lexbor).  Our custom rule below handles tables.
+    td.use(turndownPluginGfm.highlightedCodeBlock);
+    td.use(turndownPluginGfm.strikethrough);
+    td.use(turndownPluginGfm.taskListItems);
+    // Custom table rule: uses querySelector("tr") instead of HTMLTableElement.rows.
     td.addRule("table", {
       filter(node) {
         if (node.nodeName !== "TABLE") return false;
@@ -409,12 +413,23 @@ globalThis.zxp = {
     return __native_paintElement(element, w);
   },
 
-  // paintSVG(svgBytes) → { data: ArrayBuffer, width, height }
-  // Rasterize raw SVG bytes via ThorVG. ThorVG reads the viewBox and auto-scales
-  // so the longest side is ≥ 800px. Returns the same shape as paintDOM / paintElement.
+  // paintSVG(svgBytes, opts?) → { data: ArrayBuffer, width, height }
+  // Rasterize raw SVG bytes via ThorVG. Returns the same shape as paintDOM / paintElement.
   // Use zxp.encode(img, 'png') to get a PNG ArrayBuffer.
-  paintSVG(svgBytes) {
-    return __native_paintSVG(svgBytes);
+  // opts.width / opts.height — explicit output pixel dimensions:
+  //   { width: 1200, height: 630 } → exact size (SVG content scaled to fit)
+  //   { width: 1200 }              → 1200px wide, height derived from aspect ratio
+  //   { height: 630 }              → 630px tall, width derived from aspect ratio
+  //   (omit opts)                  → auto-scale: longest side ≥ 800px
+  paintSVG(svgBytes, opts) {
+    return __native_paintSVG(svgBytes, opts);
+  },
+
+  // measureText(text: string, fontSize: number) → { width: number, height: number }
+  // Measures pixel dimensions of text rendered in Roboto via ThorVG.
+  // Matches paintSVG output exactly — use for SVG text wrapping calculations.
+  measureText(text, fontSize) {
+    return __native_measureText(text, fontSize);
   },
 
   // save(img, path) — encode RGBA + write to disk; extension decides format

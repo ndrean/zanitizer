@@ -31,12 +31,17 @@ pub const Handler = struct {
 
         var is_sse = false;
 
-        if (req.header("accept")) |accept| {
-            if (std.mem.indexOf(u8, accept, "text/event-stream") != null) {
-                is_sse = true;
-                res.header("Content-Type", "text/event-stream");
-                res.header("Cache-Control", "no-cache");
-                res.header("Connection", "keep-alive");
+        // /mcp uses JSON-RPC; mcp-remote sends "Accept: application/json, text/event-stream"
+        // but expects a plain JSON response, not an SSE stream. Skip SSE injection for it.
+        const is_mcp = std.mem.startsWith(u8, req.url.path, "/mcp");
+        if (!is_mcp) {
+            if (req.header("accept")) |accept| {
+                if (std.mem.indexOf(u8, accept, "text/event-stream") != null) {
+                    is_sse = true;
+                    res.header("Content-Type", "text/event-stream");
+                    res.header("Cache-Control", "no-cache");
+                    res.header("Connection", "keep-alive");
+                }
             }
         }
 
@@ -96,6 +101,10 @@ pub const Server = struct {
         router.get("/render_llm", renderLlmHandler, .{});
         router.post("/render_llm", renderLlmPostHandler, .{});
         router.post("/mcp", mcp.mcpHandler, .{});
+        // GET /mcp — Streamable HTTP 2025-03-26: mcp-remote opens a GET SSE
+        // channel for server→client events. We don't push events, so return 405
+        // so mcp-remote falls back to request-response mode immediately.
+        router.get("/mcp", mcp.mcpGetHandler, .{});
         // OPTIONS preflight — dispatch() adds the CORS headers; these just ensure
         // the route is matched so dispatch is actually called.
         router.options("/render_llm", corsPreflightHandler, .{});
