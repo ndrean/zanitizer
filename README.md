@@ -30,6 +30,13 @@ Sanitize:
 | DOMPurify 84kB HTML  |  1.1ms       | 16ms            |
 | H5SC 24kB HTML       |  11ms        | 72ms            |
 
+```sh
+node src/tests/jsdom/dompurify-jsdom-html-speed.js
+node src/tests/wasm/dompurify-html-speed.js
+node src/tests/jsdom/h5sc-dompurify-jsdom.js
+node src/tests/wasm/h5sc-speed-test.js
+```
+
 ---
 
 ## Quick start
