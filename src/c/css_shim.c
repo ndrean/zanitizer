@@ -5,6 +5,13 @@
  * avoiding the need to mirror struct layouts in Zig.
  */
 
+// Enable POSIX.1-2008 extensions (sigaction, siginfo_t, sigjmp_buf, etc.).
+// Must be defined before ANY system header because glibc uses it as a gate.
+// macOS exposes these unconditionally; Linux/glibc requires this define.
+#ifndef __wasm__
+#  define _POSIX_C_SOURCE 200809L
+#endif
+
 // SIGSEGV crash protection — must come before any Lexbor headers to avoid
 // macro conflicts with signal.h on some platforms.
 #include <stdint.h>
