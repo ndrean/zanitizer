@@ -1,7 +1,7 @@
 # Lexbor - ignore build artifacts except essential distribution files
 /vendor/lexbor_src_master/build/
 /vendor/bytecode
-/vendor/js_cache
+/vendor/turndown/
 
 /.zig-cache
 /zig-out/
@@ -11,5 +11,5 @@
 /z_mds/
 .claude/
 /src/examples/jsdom/
-/tests/jsdom/node_modules/
-tests/wasm/node_modules/
+/src/tests/jsdom/node_modules/
+/src/tests/wasm/node_modules/
