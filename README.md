@@ -5,7 +5,7 @@
 `zantizer` is a fast HTML+CSS sanitizer, heavily based on `lexbor`.
 
 <p align="center">
-<img src="https://github.com/ndrean/zexplorer/blob/main/images/GGI_zanitzer.png" alt="Gemini Generated Image" width="700" height="700" />
+<img src="https://github.com/ndrean/zexplorer/blob/zanitizer/images/GGI_zanitizer.png" alt="Gemini Generated Image" width="700" height="700" />
 </p>
 
 <br>
@@ -269,6 +269,10 @@ Sanitize a 24kB HTML: <https://github.com/ndrean/zexplorer/blob/main/src/tests/i
 zig build test --summary all
 # 138 tests passed
 ```
+
+Quick smoke test: `bash src/tests/smoke.sh`
+
+
 
 #### WASM vector tests (Node.js)
 
