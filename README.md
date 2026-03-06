@@ -14,7 +14,7 @@
 This tool can be used:
 
 - as a WASM module (700kB) (`Node` and browser).
-- or as acomposable, embeddable CLI (1.4MB unzipped)
+- or as a composable, embeddable CLI (1.4MB unzipped)
 
 It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure.
 It follows the  `SanitizeConfig` API, uses presets and can allow framework attributes.
@@ -38,7 +38,7 @@ pnpm add zanitzer
 
 Add `"type": "module"` to _package.json_ .
 
-**CLI (OSX, Linux)**: using `brew` (OSX, Linux)
+**CLI (OSX, Linux)**: using `brew`
 
 ```sh
 brew tap ndrean/zanitizer
