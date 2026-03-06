@@ -10,7 +10,7 @@
 
 <br>
 
-It can be used as a:
+This tool can be used as a:
 
 - composable, embeddable CLI (1.7MB)
 - as a WASM module (700kB) (`Node` and browser).
