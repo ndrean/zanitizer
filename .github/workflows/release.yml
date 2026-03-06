@@ -64,9 +64,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.sha }}
-          name: Release ${{ github.sha }}
-          draft: true
           files: '**/*.tar.gz'
 
   npm:
