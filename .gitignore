@@ -1,4 +1,5 @@
 # Lexbor - ignore build artifacts except essential distribution files
+/vendor/lexbor_src_master/build/
 /vendor/bytecode
 /vendor/js_cache
 
@@ -11,4 +12,3 @@
 .claude/
 /docs/
 /src/examples/jsdom/
-.github/workflows/

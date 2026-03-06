@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest      # arm64 (Apple Silicon) — Intel Mac users use Rosetta or npm
+            artifact: zan-darwin-arm64
+          - os: ubuntu-latest     # x86_64
+            artifact: zan-linux-x86_64
+          - os: ubuntu-24.04-arm  # aarch64 (AWS Graviton, Raspberry Pi, etc.)
+            artifact: zan-linux-aarch64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - name: Install cmake
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y cmake ninja-build
+          else
+            brew install cmake ninja
+          fi
+        shell: bash
+
+      - name: Build lexbor
+        run: |
+          cd vendor/lexbor_src_master
+          cmake -B build -G Ninja -DLEXBOR_BUILD_SHARED=OFF
+          cmake --build build
+
+      - name: Build zan
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Package
+        run: tar -czf ${{ matrix.artifact }}.tar.gz -C zig-out/bin zan
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: '**/*.tar.gz'
+
+  npm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: '0.15.2'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Build WASM
+        run: zig build wasm -Doptimize=ReleaseSmall
+
+      - name: Publish to npm
+        run: npm publish wasm-out/ --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
