@@ -13,3 +13,4 @@
 /src/examples/jsdom/
 /src/tests/jsdom/node_modules/
 /src/tests/wasm/node_modules/
+/src/tests/output/
