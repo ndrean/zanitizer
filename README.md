@@ -28,7 +28,7 @@ Sanitize:
 | Operation            | WASM zaniter | JSDOM+DOMPurify |
 | -------------------- | ---------    | --------------- |
 | DOMPurify 84kB HTML  |  1.1ms       | 16ms            |
-| H5SC 24kB HTML       |  11ms        | 72ms            |
+| H5SC 24kB HTML       |  10ms        | 72ms            |
 
 ```sh
 node src/tests/jsdom/dompurify-jsdom-html-speed.js
@@ -156,7 +156,7 @@ zan.init();                                          // default preset
 
 **Field reference**:
 
-```json
+```js
 {
   // Element allowlist — only these elements survive (others are unwrapped, children kept).
   // Cannot combine with removeElements.
