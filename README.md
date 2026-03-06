@@ -348,41 +348,6 @@ input: url('http://evil.com/')
 out  : <div style="background: url(&quot;http://evil.com/&quot;)">x</div>
 ```
 
-## Install
-
-TO BE REVIEWED
-
-```sh
-zig fetch --save https://github.com/ndrean/zexplorer/archive/main.tar.gz
-```
-
-In your _build.zig_:
-
-```zig
-const zanitizer = b.dependency("zanitzer", .{
-    .target = target,
-    .optimize = optimize,
-});
-
-exe.root_module.addImport("zanitzer", zanitizer.module("zan"));
-```
-
-## Building the lib
-
-- `lexbor` is built with static linking
-
-```sh
-zig build 
-```
-
-**Tests**: The _build.zig_ file runs all the tests from _root.zig_. It imports all the submodules and runs the tests.
-
-```sh
-zig build test --summary all
-```
-
----
-
 ## Security Policy
 
 [SECURITY.md](https://github.com/ndrean/zexplorer/blob/main/SECURITY.md)
