@@ -6,7 +6,7 @@
 `zantizer` is a fast and lightweight HTML+CSS sanitizer, DOM-CSS aware, not regex-based. Built on top of `lexbor`.
 
 <p align="center">
-<img src="https://github.com/ndrean/zanitzer/blob/zanitizer/images/GGI_zanitizer.png" alt="Gemini Generated Image" width="700" height="700" />
+<img src="https://github.com/ndrean/zanitizer/blob/main/images/GGI_zanitizer.png" alt="Gemini Generated Image" width="700" height="700" />
 </p>
 
 <br>
@@ -23,8 +23,8 @@ It follows the  `SanitizeConfig` API, uses presets and can allow framework attri
 
 Sanitize:
 
-- <https://github.com/ndrean/zanitzer/blob/main/src/tests/input/dirty.html>
-- <https://github.com/ndrean/zanitzer/blob/main/src/tests/input/h5sc-test.html>
+- <https://github.com/ndrean/zanitizer/blob/main/src/tests/input/dirty.html>
+- <https://github.com/ndrean/zanitizer/blob/main/src/tests/input/h5sc-test.html>
 
 | Test                 | Zaniter (WASM) | JSDOM+DOMPurify |
 | -------------------- | ---------      | --------------- |
@@ -262,20 +262,20 @@ const clean = zan.sanitizeFragment(userHtml);
 
 ## Tests
 
-It applies whitelist and [html_specs rules](https://github.com/ndrean/zanitzer/blob/main/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
+It applies whitelist and [html_specs rules](https://github.com/ndrean/zanitizer/blob/main/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
 
 There are settings for the sanitizer (remove comments, remove/keep `<script>`, `<style>`, custom elements, allow framework attributes, embedded media with attributes in context...).
 Preset built-in modes are proposed but can be customized per run.
 
 ### Speed tests
 
-Sanitize a 84kB HTML: <https://github.com/ndrean/zanitzer/blob/main/src/tests/input/dirty.html>
+Sanitize a 84kB HTML: <https://github.com/ndrean/zanitizer/blob/main/src/tests/input/dirty.html>
 
 
 `node src/tests/jsdom/dompurify-jsdom-html-speed.js`: 16.5ms
 `node src/tests/wasm/dompurify-html-speed.js`: 1.1ms
 
-Sanitize a 24kB HTML: <https://github.com/ndrean/zanitzer/blob/main/src/tests/input/h5sc-test.html>
+Sanitize a 24kB HTML: <https://github.com/ndrean/zanitizer/blob/main/src/tests/input/h5sc-test.html>
 
 `node src/tests/jsdom/h5sc-dompurify-jsdom.js`: 71ms
 `node src/tests/wasm/h5sc-speed-test.js`: 10.1ms
@@ -333,8 +333,8 @@ We can use `"bypassSafety" to check how strings are parsed by Lexbor, and then e
 
 ```sh
 node -e "
-import('/Users/nevendrean/code/zig/zanitzer/wasm-out/zanitize.js').then(async ({loadZanitize}) => {
-  const zan = await loadZanitize(new URL('file:///Users/nevendrean/code/zig/zanitzer/wasm-out/zanitize.wasm'));
+import('/Users/nevendrean/code/zig/zaniter/wasm-out/zanitize.js').then(async ({loadZanitize}) => {
+  const zan = await loadZanitize(new URL('file:////Users/nevendrean/code/zig/zanitizer/wasm-out/zanitize.wasm'));
   zan.init('{\"bypassSafety\": true}');  // skip sanitize to see what Lexbor serializes
   const variants = [
     'url(http://evil.com/)',         // unquoted
@@ -362,7 +362,7 @@ out  : <div style="background: url(&quot;http://evil.com/&quot;)">x</div>
 
 ## Security Policy
 
-[SECURITY.md](https://github.com/ndrean/zanitzer/blob/main/SECURITY.md)
+[SECURITY.md](https://github.com/ndrean/zanitizer/blob/main/SECURITY.md)
 
 ## Reporting Vulnerabilities
 
