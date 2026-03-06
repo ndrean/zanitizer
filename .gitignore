@@ -12,3 +12,5 @@
 .claude/
 /docs/
 /src/examples/jsdom/
+/tests/jsdom/node_modules/
+tests/wasm/node_modules/
