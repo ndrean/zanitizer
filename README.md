@@ -15,7 +15,6 @@ This tool can be used as a:
 - composable, embeddable CLI (1.6MB)
 - as a WASM module (700kB) (`Node` and browser).
 
-
 It's a DOM-CSS level sanitizer, not a string filter. It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure.
 It can allow framework attributes and uses presets or a `SanitizeConfig`.
 
