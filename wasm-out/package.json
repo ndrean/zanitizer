@@ -9,8 +9,22 @@
       "types": "./zanitize.d.ts"
     }
   },
-  "files": ["zanitize.js", "zanitize.wasm", "zanitize.d.ts", "README.md"],
-  "keywords": ["html", "sanitizer", "xss", "css", "wasm"],
+  "files": [
+    "zanitize.js",
+    "zanitize.wasm",
+    "zanitize.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "html",
+    "sanitizer",
+    "xss",
+    "css",
+    "wasm"
+  ],
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/ndrean/zexplorer" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ndrean/zanitizer.git"
+  }
 }
