@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "dependencies": {
+    "zanitize": "^0.1.0"
+  }
+}

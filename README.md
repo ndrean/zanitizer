@@ -3,7 +3,7 @@
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 
-`zantizer` is a fast HTML+CSS sanitizer, heavily based on `lexbor`.
+`zantizer` is a fast and lightweight HTML+CSS sanitizer, DOM-CSS aware, not regex-based. Built on top of `lexbor`.
 
 <p align="center">
 <img src="https://github.com/ndrean/zexplorer/blob/zanitizer/images/GGI_zanitizer.png" alt="Gemini Generated Image" width="700" height="700" />
@@ -11,13 +11,13 @@
 
 <br>
 
-This tool can be used as a:
+This tool can be used:
 
-- composable, embeddable CLI (1.6MB)
 - as a WASM module (700kB) (`Node` and browser).
+- or as acomposable, embeddable CLI (1.4MB unzipped)
 
-It's a DOM-CSS level sanitizer, not a string filter. It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure.
-It can allow framework attributes and uses presets or a `SanitizeConfig`.
+It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure.
+It follows the  `SanitizeConfig` API, uses presets and can allow framework attributes.
 
 **Speed test**:
 
@@ -26,19 +26,29 @@ Sanitize:
 - <https://github.com/ndrean/zexplorer/blob/main/src/tests/input/dirty.html>
 - <https://github.com/ndrean/zexplorer/blob/main/src/tests/input/h5sc-test.html>
 
-| Operation            | WASM zaniter | JSDOM+DOMPurify |
-| -------------------- | ---------    | --------------- |
-| DOMPurify 84kB HTML  |  1.1ms       | 16ms            |
-| H5SC 24kB HTML       |  10ms        | 72ms            |
-
-```sh
-node src/tests/jsdom/dompurify-jsdom-html-speed.js
-node src/tests/wasm/dompurify-html-speed.js
-node src/tests/jsdom/h5sc-dompurify-jsdom.js
-node src/tests/wasm/h5sc-speed-test.js
-```
+| Test                 | Zaniter (WASM) | JSDOM+DOMPurify |
+| -------------------- | ---------      | --------------- |
+| DOMPurify 84kB HTML  |  1.1ms         | 16ms            |
+| H5SC 24kB HTML       |  10ms          | 72ms            |
 
 ---
+
+## Installation
+
+**WASM module (Node/browser)**: from the `npm` repository.
+
+```sh
+pnpm add zanitzer
+```
+
+Add `"type": "module"` to _package.json_ .
+
+**CLI (OSX, Linux)**: using `brew` (OSX, Linux)
+
+```sh
+brew tap ndrean/zanitizer
+brew install zanitize
+```
 
 ## Quick start
 
@@ -262,7 +272,7 @@ Preset built-in modes are proposed but can be customized per run.
 Sanitize a 84kB HTML: <https://github.com/ndrean/zexplorer/blob/main/src/tests/input/dirty.html>
 
 
-`node src/tests/jsdom/dompurify-jsdom-html-speed.js`: 16ms
+`node src/tests/jsdom/dompurify-jsdom-html-speed.js`: 16.5ms
 `node src/tests/wasm/dompurify-html-speed.js`: 1.1ms
 
 Sanitize a 24kB HTML: <https://github.com/ndrean/zexplorer/blob/main/src/tests/input/h5sc-test.html>
