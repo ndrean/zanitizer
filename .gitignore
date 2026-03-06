@@ -10,12 +10,5 @@
 /z_mds/
 .claude/
 /docs/
-/js/vendor/
-/js/bench/node_modules/
-/js/bench/pnpm-lock.yaml
-/node_modules/
-/js/js-fram-1/node_modules/
-/js/js-fram-2/node_modules/
-/js/js-fram-3/node_modules/
-
+/src/examples/jsdom/
 .github/workflows/

@@ -242,6 +242,18 @@ pub const SanitizerOptions = struct {
     /// When styles are allowed (remove_styles=false), sanitize inline style attribute values
     /// using the CSS sanitizer to remove dangerous CSS like expressions, url(), etc.
     sanitize_inline_styles: bool = true,
+
+    // ── WHATWG SanitizerConfig element/attribute filters ──────────────────────
+    /// Per-element config (allowlist). If set, only listed elements pass (after safety checks).
+    elements: ?[]const ElementConfig = null,
+    /// Element blocklist. Listed elements are removed (in addition to always-dangerous ones).
+    remove_elements: ?[]const []const u8 = null,
+    /// Elements to unwrap (replace with their children).
+    replace_with_children: ?[]const []const u8 = null,
+    /// Global attribute allowlist. If set, only listed attrs pass (after safety checks).
+    allowed_attributes: ?[]const []const u8 = null,
+    /// Global attribute blocklist. Listed attrs are removed (after safety checks).
+    remove_attributes: ?[]const []const u8 = null,
 };
 
 const AttributeAction = struct {
@@ -269,6 +281,7 @@ const SanitizeContext = struct {
 
     // Dynamic storage - all use arena allocator
     nodes_to_remove: std.ArrayListUnmanaged(*z.DomNode),
+    nodes_to_unwrap: std.ArrayListUnmanaged(*z.DomNode),
     attributes_to_remove: std.ArrayListUnmanaged(AttributeAction),
     attributes_to_update: std.ArrayListUnmanaged(AttributeUpdateAction),
     template_nodes: std.ArrayListUnmanaged(*z.DomNode),
@@ -278,6 +291,7 @@ const SanitizeContext = struct {
             .arena = std.heap.ArenaAllocator.init(backing_allocator),
             .options = opts,
             .nodes_to_remove = .empty,
+            .nodes_to_unwrap = .empty,
             .attributes_to_remove = .empty,
             .attributes_to_update = .empty,
             .template_nodes = .empty,
@@ -302,6 +316,10 @@ const SanitizeContext = struct {
 
     fn addNodeToRemove(self: *@This(), node: *z.DomNode) !void {
         try self.nodes_to_remove.append(self.alloc(), node);
+    }
+
+    fn addNodeToUnwrap(self: *@This(), node: *z.DomNode) !void {
+        try self.nodes_to_unwrap.append(self.alloc(), node);
     }
 
     fn addAttributeToRemove(self: *@This(), element: *z.HTMLElement, attr_name: []const u8) !void {
@@ -534,6 +552,35 @@ fn handleKnownElementWithContent(context: *SanitizeContext, node: *z.DomNode, el
         return removeAndContinue(context, node);
     }
 
+    // 2b. Config-level element filter (WHATWG SanitizerConfig)
+    {
+        const tag_name = z.qualifiedName_zc(element);
+        // Structural skeleton elements are always preserved regardless of config.
+        const is_structural = (std.mem.eql(u8, tag_name, "html") or
+            std.mem.eql(u8, tag_name, "head") or
+            std.mem.eql(u8, tag_name, "body"));
+        if (!is_structural) {
+            // remove_elements: explicit blocklist — remove element + children
+            if (context.options.remove_elements) |blocked| {
+                if (isInStringList(tag_name, blocked)) return removeAndContinue(context, node);
+            }
+            // elements: allowlist — elements not in list are unwrapped (WHATWG spec)
+            if (context.options.elements) |allowed| {
+                if (findElementConfig(tag_name, allowed) == null) {
+                    context.addNodeToUnwrap(node) catch return z._STOP;
+                    return z._CONTINUE;
+                }
+            }
+            // replace_with_children: unwrap instead of remove
+            if (context.options.replace_with_children) |rlist| {
+                if (isInStringList(tag_name, rlist)) {
+                    context.addNodeToUnwrap(node) catch return z._STOP;
+                    return z._CONTINUE;
+                }
+            }
+        }
+    }
+
     // 3. Proactive Security Checks (Element-specific Logic)
     // These checks run BEFORE we validate attributes or descend into children.
     switch (tag) {
@@ -582,6 +629,20 @@ fn handleUnknownElementWithContent(context: *SanitizeContext, node: *z.DomNode, 
 
     if (context.parent == .math) {
         return handleMathMLElement(context, node, element, tag_name);
+    }
+
+    // Config-level element filter for unknown/custom elements
+    if (context.options.remove_elements) |blocked| {
+        if (isInStringList(tag_name, blocked)) return removeAndContinue(context, node);
+    }
+    if (context.options.elements) |allowed| {
+        if (findElementConfig(tag_name, allowed) == null) return removeAndContinue(context, node);
+    }
+    if (context.options.replace_with_children) |rlist| {
+        if (isInStringList(tag_name, rlist)) {
+            context.addNodeToUnwrap(node) catch return z._STOP;
+            return z._CONTINUE;
+        }
     }
 
     if (context.options.allow_custom_elements and isCustomElement(tag_name)) {
@@ -851,8 +912,11 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
                             // Don't remove - we're updating instead
                             continue;
                         }
+                    } else {
+                        // CSS sanitizer approved the value as-is — skip the simpler
+                        // validateStyle() spec check (which would block all url()).
+                        continue;
                     }
-                    // If same, fall through to spec validation
                 }
                 // If no CSS sanitizer, fall through to the Spec check below
                 // which will call z.validateStyle() automatically.
@@ -932,6 +996,26 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
             if (!has_safe_rel) should_remove = true;
         }
 
+        // Config-level attribute filter (WHATWG SanitizerConfig) — applied AFTER safety checks
+        if (!should_remove) {
+            const tag_name = z.qualifiedName_zc(element);
+            if (findElementConfig(tag_name, context.options.elements)) |ec| {
+                // Per-element config takes priority over global
+                if (ec.attributes) |allowed| {
+                    if (!isInStringList(attr_pair.name, allowed)) should_remove = true;
+                } else if (ec.removeAttributes) |blocked| {
+                    if (isInStringList(attr_pair.name, blocked)) should_remove = true;
+                }
+            } else {
+                // Global attribute filter
+                if (context.options.allowed_attributes) |allowed| {
+                    if (!isInStringList(attr_pair.name, allowed)) should_remove = true;
+                } else if (context.options.remove_attributes) |blocked| {
+                    if (isInStringList(attr_pair.name, blocked)) should_remove = true;
+                }
+            }
+        }
+
         if (should_remove) {
             // We MUST duplicate the name here because 'attr_pair.name' is a temporary
             // pointer into Lexbor's memory, but the removal list persists.
@@ -967,7 +1051,20 @@ fn sanitizePostWalkOperationsWithCss(allocator: std.mem.Allocator, context: *San
         );
     }
 
-    // 3. Remove nodes in REVERSE order
+    // 3. Unwrap nodes (replace with children) — process in reverse order, before removes.
+    // Detach each child from the wrapper and insert it before the wrapper in the parent.
+    while (context.nodes_to_unwrap.pop()) |node| {
+        if (z.parentNode(node) != null) {
+            while (z.firstChild(node)) |child| {
+                z.removeNode(child);        // detach child from wrapper
+                z.insertBefore(node, child); // re-insert before wrapper in parent
+            }
+        }
+        z.removeNode(node);
+        z.destroyNode(node);
+    }
+
+    // 4. Remove nodes in REVERSE order
     // The walker usually discovers parents before children.
     // If we destroy a parent first, the child is destroyed. Accessing the child later would be use-after-free.
     // By popping from the end (children first), we ensure safe destruction.
@@ -1071,6 +1168,33 @@ pub fn sanitizePermissive(allocator: std.mem.Allocator, root_node: *z.DomNode) (
 /// Framework-specific attribute configuration.
 /// Controls which framework directive attributes are allowed.
 /// Event handlers (onclick, x-on:*, @click, etc.) are ALWAYS blocked for security.
+/// Per-element attribute configuration (WHATWG SanitizerConfig `elements` array item).
+/// Either `attributes` (allowlist) or `removeAttributes` (blocklist) may be set, not both.
+pub const ElementConfig = struct {
+    name: []const u8,
+    /// Per-element attribute allowlist. Only these attrs survive on this element (after safety checks).
+    attributes: ?[]const []const u8 = null,
+    /// Per-element attribute blocklist. These attrs are removed from this element (after safety checks).
+    removeAttributes: ?[]const []const u8 = null,
+};
+
+/// Return the ElementConfig for `name` from the elements list, or null.
+fn findElementConfig(name: []const u8, elements: ?[]const ElementConfig) ?ElementConfig {
+    const list = elements orelse return null;
+    for (list) |ec| {
+        if (std.mem.eql(u8, ec.name, name)) return ec;
+    }
+    return null;
+}
+
+/// Check if `name` is present in a string slice list.
+fn isInStringList(name: []const u8, list: []const []const u8) bool {
+    for (list) |item| {
+        if (std.mem.eql(u8, item, name)) return true;
+    }
+    return false;
+}
+
 pub const FrameworkConfig = struct {
     /// Allow Alpine.js attributes (x-data, x-show, x-bind, etc.)
     /// Event handlers (x-on:*) are always blocked
@@ -1161,6 +1285,18 @@ pub const SanitizeOptions = struct {
     /// Only use for templates you control!
     bypass_safety: bool = false,
 
+    // ── WHATWG SanitizerConfig element/attribute filters ──────────────────────
+    /// Per-element config (allowlist). If set, only listed elements pass (after safety checks).
+    elements: ?[]const ElementConfig = null,
+    /// Element blocklist. Listed elements are removed (in addition to always-dangerous ones).
+    remove_elements: ?[]const []const u8 = null,
+    /// Elements to unwrap (replace with their children).
+    replace_with_children: ?[]const []const u8 = null,
+    /// Global attribute allowlist. If set, only listed attrs pass (after safety checks).
+    allowed_attributes: ?[]const []const u8 = null,
+    /// Global attribute blocklist. Listed attrs are removed (after safety checks).
+    remove_attributes: ?[]const []const u8 = null,
+
     /// Convert to internal SanitizerOptions for walker
     fn toInternal(self: SanitizeOptions) SanitizerOptions {
         return .{
@@ -1173,6 +1309,11 @@ pub const SanitizeOptions = struct {
             .allow_embeds = self.allow_embeds,
             .sanitize_dom_clobbering = self.sanitize_dom_clobbering,
             .sanitize_inline_styles = self.sanitize_css,
+            .elements = self.elements,
+            .remove_elements = self.remove_elements,
+            .replace_with_children = self.replace_with_children,
+            .allowed_attributes = self.allowed_attributes,
+            .remove_attributes = self.remove_attributes,
         };
     }
 };
@@ -1202,7 +1343,7 @@ pub const Sanitizer = struct {
             .sanitize_inline_styles = options.sanitize_css,
             .sanitize_style_elements = options.sanitize_css,
             .sanitize_style_attributes = options.sanitize_css,
-            .allow_css_urls = !options.strict_uri,
+            .allow_css_urls = false, // Block external CSS URLs by default (data exfil protection)
             .allow_data_urls = !options.strict_uri,
         };
 
@@ -3186,7 +3327,7 @@ test "iframe sandbox validation" {
     const result = try z.outerNodeHTML(allocator, body);
     defer allocator.free(result);
 
-    const expected = "<body><iframe sandbox src=\"https://example.com\">Safe iframe</iframe><iframe sandbox>Safe - empty sandbox, no src</iframe></body>";
+    const expected = "<body><iframe sandbox=\"\" src=\"https://example.com\">Safe iframe</iframe><iframe sandbox=\"\">Safe - empty sandbox, no src</iframe></body>";
     try testing.expectEqualStrings(expected, result);
 }
 

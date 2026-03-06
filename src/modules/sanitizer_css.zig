@@ -682,7 +682,13 @@ pub const CssSanitizer = struct {
             return true;
         }
 
-        // Allow other URLs if configured
+        // Relative URLs (no scheme) are always safe for same-origin content.
+        // External URLs (http://, https://, //) are blocked by default (data exfiltration).
+        const has_scheme = std.mem.indexOf(u8, trimmed, "://") != null or
+            std.mem.startsWith(u8, trimmed, "//");
+        if (!has_scheme) return true;
+
+        // External absolute URLs: require explicit permission
         return self.options.allow_css_urls;
     }
     /// Sanitize a full CSS stylesheet (with selectors and at-rules)

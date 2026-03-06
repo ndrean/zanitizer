@@ -1559,7 +1559,7 @@ fn containsProtocol(value: []const u8, protocol: []const u8) bool {
 test "sanitizer vectors: H5SC (HTML5 Security Cheatsheet)" {
     const allocator = testing.allocator;
 
-    const html_content = @embedFile("../examples/sanitizer/h5sc-test.html");
+    const html_content = @embedFile("../tests/input/h5sc-test.html");
 
     const doc = try z.parseHTML(allocator, html_content);
     defer z.destroyDocument(doc);

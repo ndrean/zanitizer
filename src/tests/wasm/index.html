@@ -1,0 +1,22 @@
+<html>
+    <body>
+        <div id="bad">
+            <span>To be sanitzed</span>
+            <b>ok</b>
+            <script>alert(1);</script>
+        </div>
+        <pre id="out"></pre>
+        <script type="module">
+            import { loadZanitize } from '../wasm-out/zanitize.js';
+            const zan = await loadZanitize(new URL('../wasm-out/zanitize.wasm', import.meta.url));
+            const start = performance.now();
+            const initOk = zan.init('{"removeElements":["b"]}');
+            const original = document.getElementById("bad");
+            const sanitized = zan.sanitizeFragment(original.outerHTML);
+            original.outerHTML = sanitized;
+            const ms = (performance.now() - start).toFixed(3);
+            document.getElementById('out').textContent =
+                `time: ${ms}ms`;
+        </script>
+    </body>
+</html>

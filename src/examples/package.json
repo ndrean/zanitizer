@@ -1,7 +1,0 @@
-{
-  "dependencies": {
-    "@grucloud/bau": "^0.106.0",
-    "leaflet": "^1.9.4",
-    "mermaid": "^11.12.3"
-  }
-}

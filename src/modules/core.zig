@@ -15,7 +15,7 @@ pub const LXB_TAG_SCRIPT: u32 = 0x29;
 
 // =============================================================
 extern "c" fn lxb_html_document_create() ?*z.HTMLDocument;
-extern "c" fn lxb_html_document_destroy(doc: *z.HTMLDocument) void;
+extern "c" fn lxb_html_document_destroy(doc: *z.HTMLDocument) ?*z.HTMLDocument;
 extern "c" fn lxb_html_document_clean(doc: *z.HTMLDocument) void;
 
 extern "c" fn lxb_html_document_create_element_noi(doc: *z.HTMLDocument, tag_name: [*]const u8, tag_len: usize, reserved_for_opt: ?*anyopaque) ?*z.HTMLElement;
@@ -60,7 +60,7 @@ extern "c" fn lxb_dom_element_tag_name(element: *z.HTMLElement, len: ?*usize) ?[
 extern "c" fn lxb_dom_element_qualified_name(element: *z.HTMLElement, len: *usize) ?[*:0]const u8;
 extern "c" fn lxb_dom_node_remove_wo_events(node: *z.DomNode) void;
 extern "c" fn lxb_dom_node_remove(node: *z.DomNode) void;
-extern "c" fn lxb_dom_node_destroy(node: *z.DomNode) void;
+extern "c" fn lxb_dom_node_destroy(node: *z.DomNode) ?*z.DomNode;
 extern "c" fn lxb_dom_document_destroy_text_noi(node: *z.DomNode, text: []const u8) void;
 
 extern "c" fn lxb_dom_node_clone(node: *z.DomNode, deep: bool) ?*z.DomNode;
@@ -102,7 +102,7 @@ pub fn createDocument() !*z.HTMLDocument {
 
 /// [core] Destroy an HTML document.
 pub fn destroyDocument(doc: *z.HTMLDocument) void {
-    lxb_html_document_destroy(doc);
+    _ = lxb_html_document_destroy(doc);
 }
 
 /// [core] Clean up an HTML document.
@@ -1065,7 +1065,7 @@ test "removeChild on comment and text nodes" {
 
 /// [core] Destroy a node from the DOM with its children
 pub fn destroyNode(node: *z.DomNode) void {
-    lxb_dom_node_destroy(node);
+    _ = lxb_dom_node_destroy(node);
 }
 
 // /// [core] Destroy an element in the document
@@ -3056,7 +3056,7 @@ test "bigger test with string-to-DOM scenarios" {
             \\      <button class="btn btn-primary">Click me</button>
             \\    </div>
             \\    <div class="component-1">
-            \\      <input type="email" placeholder="Enter email" required>
+            \\      <input type="email" placeholder="Enter email" required="">
             \\    </div>
             \\    <div class="component-2">
             \\      <div class="alert alert-info">Information message</div>

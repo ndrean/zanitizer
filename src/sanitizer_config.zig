@@ -12,6 +12,9 @@
 const std = @import("std");
 const z = @import("root.zig");
 
+/// Re-export from sanitizer.zig so JSON consumers use the same type.
+pub const ElementConfig = z.ElementConfig;
+
 /// Framework-specific configuration (runtime, user-configurable)
 /// This is the primary use case for runtime configuration - allowing users
 /// to control which framework attributes are permitted in their content.
@@ -56,10 +59,11 @@ pub const SanitizerConfig = struct {
     // Web API Standard Properties
     // ============================================================================
 
-    /// Elements to allow (allowlist approach)
-    /// If null, uses html_spec's default safe elements
-    /// If provided, ONLY these elements pass (still validated against html_spec)
-    elements: ?[]const []const u8 = null,
+    /// Elements to allow (allowlist approach).
+    /// Each entry is an ElementConfig with a required `name` and optional
+    /// `attributes`/`removeAttributes` for per-element attribute control.
+    /// If null, uses html_spec's default safe elements.
+    elements: ?[]const ElementConfig = null,
 
     /// Elements to remove (blocklist approach)
     /// Cannot be used together with `elements`
@@ -132,6 +136,37 @@ pub const SanitizerConfig = struct {
     // ============================================================================
     // Validation & Helpers
     // ============================================================================
+
+    /// Convert to the canonical SanitizeOptions used by the DOM walker.
+    pub fn toSanitizeOptions(self: @This()) z.SanitizeOptions {
+        return .{
+            .remove_scripts = true, // always enforced
+            .remove_styles = false,
+            .sanitize_css = self.sanitizeInlineStyles,
+            .remove_comments = !self.comments,
+            .strict_uri = self.strictUriValidation,
+            .sanitize_dom_clobbering = self.sanitizeDomClobbering,
+            .allow_custom_elements = self.allowCustomElements,
+            .allow_embeds = false,
+            .allow_iframes = false,
+            .frameworks = .{
+                .allow_alpine = self.frameworks.allow_alpine,
+                .allow_vue = self.frameworks.allow_vue,
+                .allow_htmx = self.frameworks.allow_htmx,
+                .allow_phoenix = self.frameworks.allow_phoenix,
+                .allow_angular = self.frameworks.allow_angular,
+                .allow_svelte = self.frameworks.allow_svelte,
+                .allow_data_attrs = self.frameworks.allow_data_attrs and self.dataAttributes,
+                .allow_aria_attrs = self.frameworks.allow_aria_attrs,
+            },
+            .bypass_safety = self.bypassSafety,
+            .elements = self.elements,
+            .remove_elements = self.removeElements,
+            .replace_with_children = self.replaceWithChildrenElements,
+            .allowed_attributes = self.attributes,
+            .remove_attributes = self.removeAttributes,
+        };
+    }
 
     /// Validate that the configuration is valid according to Web API rules
     pub fn validate(self: @This()) !void {
@@ -264,8 +299,8 @@ pub const SanitizerConfig = struct {
     pub fn isElementAllowed(self: @This(), element_tag: []const u8) bool {
         // Allowlist mode: only listed elements
         if (self.elements) |allowed_list| {
-            for (allowed_list) |allowed| {
-                if (std.mem.eql(u8, allowed, element_tag)) {
+            for (allowed_list) |ec| {
+                if (std.mem.eql(u8, ec.name, element_tag)) {
                     return true;
                 }
             }
@@ -434,9 +469,9 @@ pub const Sanitizer = struct {
 const testing = std.testing;
 
 test "SanitizerConfig validation" {
-    // Valid config: allowlist elements
+    // Valid config: allowlist elements (now ElementConfig structs)
     const config1 = SanitizerConfig{
-        .elements = &[_][]const u8{ "div", "p", "span" },
+        .elements = &[_]ElementConfig{ .{ .name = "div" }, .{ .name = "p" }, .{ .name = "span" } },
         .comments = true,
     };
     try config1.validate();
@@ -449,7 +484,7 @@ test "SanitizerConfig validation" {
 
     // Invalid config: both allowlist and blocklist
     const config3 = SanitizerConfig{
-        .elements = &[_][]const u8{ "div" },
+        .elements = &[_]ElementConfig{.{ .name = "div" }},
         .removeElements = &[_][]const u8{ "script" },
     };
     try testing.expectError(error.InvalidConfig, config3.validate());
@@ -465,7 +500,7 @@ test "SanitizerConfig validation" {
 test "SanitizerConfig element filtering" {
     // Allowlist mode
     const config1 = SanitizerConfig{
-        .elements = &[_][]const u8{ "div", "p", "span" },
+        .elements = &[_]ElementConfig{ .{ .name = "div" }, .{ .name = "p" }, .{ .name = "span" } },
     };
     try testing.expect(config1.isElementAllowed("div"));
     try testing.expect(config1.isElementAllowed("p"));

@@ -1,0 +1,48 @@
+<html>
+    <head>
+        <style>
+            body {background: url(javascript:alert('xss'));}
+            div {-moz-binding: url("http://evil.com/xss.xml#xss");}
+            p {behavior: url(#default#something);}
+            span {color: red;font-size: 16px;}  
+            .danger { -moz-binding: url("http://evil.com/xss.xml#xss"); }
+            .exploit { behavior: url(#default#something); }
+            .safe { color: red; font-size: 16px; margin: 10px; }
+        </style>
+    </head>
+    <body>
+        <div style="background: expression(alert('xss')); color: blue;">
+            Content with dangerous inline style
+        </div>
+        <div x-data="{ open: false }" x-show="open"  @click="open = !open" \\ onclick="alert('XSS')">
+            <button hx-get="/api/data" hx-target="#result" onmouseover="steal()">
+                Load Data
+            </button>
+            <span v-if="show"  class="{ active: isActive }" onfocus="evil()">
+                {{ message }}
+            </span>
+        </div>
+        <div class="exploit danger safe">
+            Only class 'safe' should persist in the styles
+        </div>
+        <div class="safe" style="background: expression(alert('xss')); border: 1px solid black;">
+            Safe content with dangerous inline style
+        </div>
+        <p class="danger">This paragraph has an emptied dangerous class style</p>
+        <div hx-get="/api" x-data="{}" v-if="true" data-id="123">
+         <!-- secret comment -->
+            <script>alert('xss')</script>
+           Content
+        </div>
+        <svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <circle cx="50" cy="50" r="40" fill="red" />
+            <script>alert('xss')</script>
+            <foreignObject>
+                <body onload="evil()" />
+            </foreignObject>
+            <animate attributeName="href" to="javascript:alert()" />
+            <use xlink:href="javascript:attack()" />
+            <rect x="10" y="10" width="80" height="80" fill="blue" />
+        </svg>
+    </body>
+</html>
