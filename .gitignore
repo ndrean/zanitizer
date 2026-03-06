@@ -2,7 +2,6 @@
 /vendor/lexbor_src_master/build/
 /vendor/bytecode
 /vendor/turndown/
-
 /.zig-cache
 /zig-out/
 /.vscode/

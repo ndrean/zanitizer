@@ -2,6 +2,7 @@
 
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
+
 `zantizer` is a fast HTML+CSS sanitizer, heavily based on `lexbor`.
 
 <p align="center">
@@ -259,6 +260,7 @@ Preset built-in modes are proposed but can be customized per run.
 ### Speed tests
 
 Sanitize a 84kB HTML: <https://github.com/ndrean/zexplorer/blob/main/src/tests/input/dirty.html>
+
 
 `node src/tests/jsdom/dompurify-jsdom-html-speed.js`: 16ms
 `node src/tests/wasm/dompurify-html-speed.js`: 1.1ms
