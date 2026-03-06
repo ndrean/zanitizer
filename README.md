@@ -21,15 +21,10 @@ It follows the  `SanitizeConfig` API, uses presets and can allow framework attri
 
 **Speed test**:
 
-Sanitize:
-
-- <https://github.com/ndrean/zanitizer/blob/main/src/tests/input/dirty.html>
-- <https://github.com/ndrean/zanitizer/blob/main/src/tests/input/h5sc-test.html>
-
 | Test                 | Zaniter (WASM) | JSDOM+DOMPurify |
 | -------------------- | ---------      | --------------- |
-| DOMPurify 84kB HTML  |  1.1ms         | 16ms            |
-| H5SC 24kB HTML       |  10ms          | 72ms            |
+| [DOMPurify 84kB HTML](https://github.com/ndrean/zanitizer/blob/main/src/tests/input/dirty.html)  |  1.1ms         | 16ms            |
+| [H5SC 24kB HTML ](https://github.com/ndrean/zanitizer/blob/main/src/tests/input/h5sc-test.html)      |  10ms          | 72ms            |
 
 ---
 
