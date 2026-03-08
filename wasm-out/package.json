@@ -1,6 +1,6 @@
 {
   "name": "zanitize",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "description": "Fast HTML+CSS sanitizer — Zig/Lexbor compiled to WASM",
   "type": "module",
   "exports": {
