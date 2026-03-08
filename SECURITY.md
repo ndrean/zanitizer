@@ -2,7 +2,7 @@
 
 ## Overview
 
-Zexplorer's HTML/CSS sanitizer provides defense-in-depth against XSS, mXSS, CSS injection, DOM clobbering, and protocol-based attacks. It operates structurally on the parsed DOM and CSS AST — not with regex or string replacement — making it resistant to parser differentials and encoding tricks.
+Zanitize's HTML/CSS sanitizer provides defense-in-depth against XSS, mXSS, CSS injection, DOM clobbering, and protocol-based attacks. It operates structurally on the parsed DOM and CSS AST — not with regex or string replacement — making it resistant to parser differentials and encoding tricks.
 
 The architecture follows a **parse → annotate → batch-remove** pattern: the document is parsed into a full DOM tree (via Lexbor), walked once to collect dangerous nodes and attributes, then all removals are applied in reverse order in a second pass. This avoids iterator corruption and use-after-free issues that plague in-place removal approaches.
 
@@ -37,36 +37,34 @@ Raw HTML / SVG / CSS
 
 **Policy decisions and known trade-offs:**
 
-| Threat                                                                                         | Policy                                                                                                                     | Rationale                                                                                                                                          | Gap / known trade-off                                                                                                                                 |
-| ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<script>` tags                                                                                | Removed by default; configurable via `remove_scripts: bool`                                                                | Scripts execute in the QuickJS sandbox during `loadPage` — the sandbox is the boundary                                                             | When allowed, no CSP is generated; caller is responsible                                                                                              |
-| `on*` event handlers                                                                           | Always removed                                                                                                             | No legitimate use in sanitized output                                                                                                              | —                                                                                                                                                     |
-| `href="javascript:"`, `vbscript:`, `file:`                                                     | Blocked on all URL attributes (`href`, `src`, `action`, `poster`, `data`, …)                                               | These protocols execute code or access local files                                                                                                 | —                                                                                                                                                     |
-| `data:` URIs — non-image                                                                       | Blocked entirely                                                                                                           | `data:text/html`, `data:text/javascript` are direct XSS vectors                                                                                    | —                                                                                                                                                     |
-| `data:image/svg+xml`                                                                           | Blocked                                                                                                                    | SVG images can contain `<script>` and event handlers                                                                                               | —                                                                                                                                                     |
-| `data:image/*` — other                                                                         | Allowed only with `;base64` encoding **and** matching magic bytes                                                          | Non-base64 binary images are never legitimate; magic byte check (PNG/JPEG/WebP/GIF header) blocks mislabeled or polyglot payloads                  | `image/avif`, `image/bmp`, etc. have no magic checker — pass through on MIME type alone                                                               |
-| External image `src` (`https://…`)                                                             | Allowed                                                                                                                    | External images are legitimate content; blocking would break most pages                                                                            | Tracking pixels are a known consequence — this is a content policy decision, not a sanitizer decision                                                 |
-| `srcset` attribute                                                                             | Allowed without URL validation                                                                                             | `srcset` contains multiple space-separated URLs; browsers do not execute JavaScript from `srcset`                                                  | Known gap: a `javascript:` URL in `srcset` would pass through (browsers ignore it, but the string survives)                                           |
-| `//evil.com` protocol-relative                                                                 | Allowed                                                                                                                    | Protocol-relative URLs are legitimate for same-protocol assets                                                                                     | In HTTP contexts, loads HTTP even on an HTTPS page; caller should enforce CSP                                                                         |
-| `<style>` blocks                                                                               | CSS AST sanitized — dangerous at-rules (`@import`, `@namespace`) removed, unsafe properties stripped                       | Tokenized AST parsing: obfuscated `expression()` and `url(javascript:)` are structurally detected, not regex-matched                               | —                                                                                                                                                     |
-| External stylesheets (`<link>`)                                                                | Fetched, sanitized, inlined as `<style>` in the output                                                                     | The serialized output is self-contained; re-fetching the original URL would bypass sanitization                                                    | Only enforced in sanitize mode; SSRF limits apply to the fetch                                                                                        |
-| Inline `style=""`                                                                              | CSS sanitizer applied per-attribute                                                                                        | `background-image: url(evil.com)` is an exfiltration vector — stripped                                                                             | —                                                                                                                                                     |
-| JS DOM mutation (`innerHTML`, `outerHTML`, `insertAdjacentHTML`, `createElement+setAttribute`) | Sanitized post-mutation via the same CSS sanitizer pipeline                                                                | Mutations happen in the QuickJS sandbox; results are sanitized before the DOM is considered stable                                                 | —                                                                                                                                                     |
-| SVG `<foreignObject>`, `<feImage>`, `<animate>`, `<animateMotion>`, `<set>`, `<switch>`        | Blocked                                                                                                                    | `foreignObject` re-enters HTML parsing context (primary mXSS entry point); `feImage` loads external resources; animate* can trigger event handlers | —                                                                                                                                                     |
-| SVG `href` / `xlink:href`                                                                      | Fragment-only (`#id`) for most elements; `<image>` and `<a>` use standard URI validation                                   | External SVG resources via `<use href="external.svg#x">` load arbitrary SVG                                                                        | —                                                                                                                                                     |
-| MathML                                                                                         | Allowed in correct context with attribute allowlist; `href`, `xlink:href`, `on*` removed                                   | Prevents XSS via invalid MathML nesting or href abuse                                                                                              | —                                                                                                                                                     |
-| DOM clobbering (`id`, `name`)                                                                  | Values that shadow `window`/`document` properties filtered                                                                 | Prevents `id="cookie"` from overriding `document.cookie` etc.                                                                                      | —                                                                                                                                                     |
-| mXSS / obfuscated encoding                                                                     | Entity decoding happens at Lexbor parse time; `containsMxssPattern` run on all attribute values; CSS content AST-sanitized | No serialize/re-parse step means no parse-differential surface                                                                                     | Text nodes inside SVG `<title>`, `<desc>`, `<text>` are not pattern-checked — low risk because `foreignObject` (the main SVG escape hatch) is blocked |
-| `<iframe>`                                                                                     | Allowed only with `sandbox` attribute; `src` and `srcdoc` validated                                                        | Prevents loading of arbitrary external content                                                                                                     | `allow-scripts` in `sandbox` is blocked; other dangerous combinations not exhaustively validated                                                      |
-| Framework attributes (`v-html`, `ng-bind-html`, `x-html`, `:innerHTML`)                        | Removed by default; configurable via `allow_framework_attrs`                                                               | These attributes trigger HTML injection in their respective runtimes                                                                               | When allowed, values are checked against `DANGEROUS_JS_PATTERNS` but not fully sanitized                                                              |
-| CSP generation                                                                                 | Not provided                                                                                                               | CSP is a server/browser responsibility, not a DOM sanitizer responsibility                                                                         | Caller must set appropriate `Content-Security-Policy` headers when serving sanitized output                                                           |
+| Threat | Policy | Rationale | Gap / known trade-off |
+| --- | --- | --- | --- |
+| `<script>` tags | Removed by default; configurable via `remove_scripts: bool` | Removed at parse time before any execution can occur | — |
+| `on*` event handlers | Always removed | No legitimate use in sanitized output | — |
+| `href="javascript:"`, `vbscript:`, `file:` | Blocked on all URL attributes (`href`, `src`, `action`, `poster`, `data`, …) | These protocols execute code or access local files | — |
+| `data:` URIs — non-image | Blocked entirely | `data:text/html`, `data:text/javascript` are direct XSS vectors | — |
+| `data:image/svg+xml` | Blocked | SVG images can contain `<script>` and event handlers | — |
+| `data:image/*` — other | Allowed only with `;base64` encoding **and** matching magic bytes | Non-base64 binary images are never legitimate; magic byte check (PNG/JPEG/WebP/GIF header) blocks mislabeled or polyglot payloads | `image/avif`, `image/bmp`, etc. have no magic checker — pass through on MIME type alone |
+| External image `src` (`https://…`) | Allowed | External images are legitimate content; blocking would break most pages | Tracking pixels are a known consequence — this is a content policy decision, not a sanitizer decision |
+| `srcset` attribute | Allowed without URL validation | `srcset` contains multiple space-separated URLs; browsers do not execute JavaScript from `srcset` | Known gap: a `javascript:` URL in `srcset` would pass through (browsers ignore it, but the string survives) |
+| `//evil.com` protocol-relative | Allowed | Protocol-relative URLs are legitimate for same-protocol assets | In HTTP contexts, loads HTTP even on an HTTPS page; caller should enforce CSP |
+| `<style>` blocks | CSS AST sanitized — dangerous at-rules (`@import`, `@namespace`) removed, unsafe properties stripped | Tokenized AST parsing: obfuscated `expression()` and `url(javascript:)` are structurally detected, not regex-matched | — |
+| Inline `style=""` | CSS sanitizer applied per-attribute | `background-image: url(evil.com)` is an exfiltration vector — stripped | — |
+| SVG `<foreignObject>`, `<feImage>`, `<animate>`, `<animateMotion>`, `<set>`, `<switch>` | Blocked | `foreignObject` re-enters HTML parsing context (primary mXSS entry point); `feImage` loads external resources; animate* can trigger event handlers | — |
+| SVG `href` / `xlink:href` | Fragment-only (`#id`) for most elements; `<image>` and `<a>` use standard URI validation | External SVG resources via `<use href="external.svg#x">` load arbitrary SVG | — |
+| MathML | Allowed in correct context with attribute allowlist; `href`, `xlink:href`, `on*` removed | Prevents XSS via invalid MathML nesting or href abuse | — |
+| DOM clobbering (`id`, `name`) | Values that shadow `window`/`document` properties filtered | Prevents `id="cookie"` from overriding `document.cookie` etc. | — |
+| mXSS / obfuscated encoding | Entity decoding happens at Lexbor parse time; `containsMxssPattern` run on all attribute values; CSS content AST-sanitized | No serialize/re-parse step means no parse-differential surface | Text nodes inside SVG `<title>`, `<desc>`, `<text>` are not pattern-checked — low risk because `foreignObject` (the main SVG escape hatch) is blocked |
+| `<iframe>` | Allowed only with `sandbox` attribute; `src` and `srcdoc` validated | Prevents loading of arbitrary external content | `allow-scripts` in `sandbox` is blocked; other dangerous combinations not exhaustively validated |
+| Framework attributes (`v-html`, `ng-bind-html`, `x-html`, `:innerHTML`) | Removed by default; configurable via `frameworks: FrameworkConfig` | These attributes trigger HTML injection in their respective runtimes | When allowed, values are checked against `DANGEROUS_JS_PATTERNS` but not fully sanitized |
+| CSP generation | Not provided | CSP is a server/browser responsibility, not a DOM sanitizer responsibility | Caller must set appropriate `Content-Security-Policy` headers when serving sanitized output |
 
 ---
 
 ### Elements
 
 | Category | Strategy | Action | Examples |
-|----------|----------|--------|----------|
+| --- | --- | --- | --- |
 | Known HTML elements | **allowlist** | keep | `<div>`, `<p>`, `<table>`, `<form>`, `<details>`, `<search>`, ... |
 | `<script>` | **blocklist** | remove (configurable) | `<script>alert(1)</script>` |
 | `<style>` | **blocklist** or **sanitize** | remove or sanitize CSS content | `<style>body{color:red}</style>` |
@@ -83,7 +81,7 @@ Raw HTML / SVG / CSS
 ### Attributes
 
 | Category | Strategy | Action | Examples |
-|----------|----------|--------|----------|
+| --- | --- | --- | --- |
 | Event handlers (`on*`) | **pattern remove** | always remove (any `on` + alpha) | `onclick`, `onerror`, `onanimationend`, ... (all 72+ variants) |
 | Named dangerous attrs | **blocklist** | always remove | `innerHTML`, `outerHTML`, `formaction`, `background`, `autofocus`, `integrity` |
 | Framework HTML injection | **blocklist** | always remove | `x-html`, `v-html`, `ng-bind-html` |
@@ -105,7 +103,7 @@ Raw HTML / SVG / CSS
 ### Attribute Values — mXSS Detection
 
 | Pattern | Threat | Action |
-|---------|--------|--------|
+| --- | --- | --- |
 | `</style>`, `</script>`, `</title>`, ... | Tag breakout on re-parse | remove attribute |
 | `]]>`, `-->`, `--!>` | CDATA/comment breakout | remove attribute |
 | `xmlns=`, `xmlns:` | Namespace injection | remove attribute |
@@ -114,7 +112,7 @@ Raw HTML / SVG / CSS
 ### URIs
 
 | Category | Strategy | Action | Examples |
-|----------|----------|--------|----------|
+| --- | --- | --- | --- |
 | `javascript:` | **blocked protocol** | remove attribute | `href="javascript:alert(1)"` |
 | `vbscript:` | **blocked protocol** | remove attribute | `href="vbscript:MsgBox"` |
 | `file:` | **blocked protocol** | remove attribute | `src="file:///etc/passwd"` |
@@ -130,7 +128,7 @@ Raw HTML / SVG / CSS
 ### CSS
 
 | Category | Strategy | Action | Examples |
-|----------|----------|--------|----------|
+| --- | --- | --- | --- |
 | `@import` | **blocked at-rule** | always remove | `@import url("evil.css")` |
 | `@charset` | **blocked at-rule** | always remove | `@charset "UTF-7"` |
 | `@namespace` | **blocked at-rule** | always remove | `@namespace svg url(...)` |
@@ -153,39 +151,36 @@ Raw HTML / SVG / CSS
 | Unknown functions | **blocked** (default ruleset) | remove | any function not in ruleset |
 | String literal content | **skip** (structural parsing) | safe — never executes | `content: "expression() is not code"` |
 
-### Network (Fetch Security)
-
-| Category | Strategy | Action |
-|----------|----------|--------|
-| Timeouts | **hardened** | 30s total, 10s connect on all requests |
-| Redirects | **limited** | max 5 redirects |
-| Response size | **limited** | max 50MB |
-| Protocols | **allowlist** | HTTP(S) only |
-| SSRF targets | **blocked** (sanitize mode) | localhost, private IPs, cloud metadata |
-
 ## Sanitization Modes
 
-| Mode           | Scripts      | Styles       | Comments     | Strict URI   | Custom Elements | Framework Attrs |
-| -------------- | ------------ | ------------ | ------------ | ------------ | --------------- | --------------- |
-| **strict**     | removed      | removed      | removed      | yes          | blocked         | blocked         |
-| **permissive** | removed      | removed      | removed      | no           | allowed         | allowed         |
-| **minimum**    | kept         | kept         | kept         | no           | allowed         | allowed         |
-| **custom**     | configurable | configurable | configurable | configurable | configurable    | configurable    |
+| Preset | Scripts | Styles | Comments | data-* | Custom elements | Strict URIs | DOM clobbering |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **default** | removed | sanitized | stripped | kept | allowed | no | protected |
+| **strict** | removed | sanitized | stripped | stripped | blocked | yes | protected |
+| **permissive** | removed | sanitized | kept | kept | allowed | no | protected |
+| **trusted** ⚠️ | kept | kept | kept | kept | allowed | no | off |
 
-Custom mode exposes `SanitizeOptions` for fine-grained control:
+The public `SanitizeOptions` struct (use `.{}` for safe defaults):
 
 ```zig
 pub const SanitizeOptions = struct {
-    remove_scripts: bool = true,
-    remove_styles: bool = false,        // false = sanitize CSS instead of stripping
-    sanitize_inline_styles: bool = true,
-    skip_comments: bool = true,
-    strict_uri_validation: bool = false,
-    allow_custom_elements: bool = true,
-    allow_framework_attrs: bool = true,
+    remove_scripts: bool = true,       // remove <script> tags
+    remove_styles: bool = false,       // false = sanitize CSS instead of stripping
+    sanitize_css: bool = true,         // sanitize inline styles + <style> content
+    remove_comments: bool = true,      // strip HTML comments
+    strict_uri: bool = false,          // block relative paths and data: URIs
     sanitize_dom_clobbering: bool = true,
+    allow_custom_elements: bool = true,
     allow_embeds: bool = false,
     allow_iframes: bool = false,
+    frameworks: FrameworkConfig = .{}, // per-framework attribute config
+    bypass_safety: bool = false,       // ⚠️ DANGER: only for trusted content
+    // WHATWG SanitizerConfig element/attribute filters:
+    elements: ?[]const ElementConfig = null,
+    remove_elements: ?[]const []const u8 = null,
+    replace_with_children: ?[]const []const u8 = null,
+    allowed_attributes: ?[]const []const u8 = null,
+    remove_attributes: ?[]const []const u8 = null,
 };
 ```
 
@@ -234,7 +229,7 @@ Each attribute passes through up to five layers:
 
 - **Named event handlers**: `onclick`, `onload`, `onerror`, `onfocus`, `onblur`, `onchange`, `onsubmit`, `onkeydown`, `onkeyup`, `onmouseover`, `onmouseenter`, `onmouseleave`, `onresize`, `onmessage`, `onstorage`, `onunload`, `onbeforeunload`, `onhashchange`
 - **Generic `on*` pattern**: any attribute starting with `on` followed by an alphabetic character is removed — catches all 72+ event handler variants without needing to enumerate them
-- **HTML injection**: `innerHTML`, `outerHTML`, `insertAdjacentHTML`
+- **HTML injection**: `innerHTML`, `outerHTML` — framework binding attributes that trigger innerHTML injection (e.g. `[innerHTML]="expr"` in Angular, `<div innerHTML="...">` in some SSR renderers)
 - **Framework HTML injection**: `x-html`, `v-html`, `ng-bind-html`
 - **Legacy/dangerous**: `formaction`, `background`, `autofocus`, `integrity`
 
@@ -373,7 +368,7 @@ Example: `<img id="location">` is sanitized because it shadows `window.location`
 
 ## Framework Attribute Support
 
-When `allow_framework_attrs` is enabled, framework-specific attributes are preserved with safety checks:
+When `frameworks: FrameworkConfig` is configured, framework-specific attributes are preserved with safety checks:
 
 | Framework        | Allowed Prefixes  | Blocked (Event Handlers)                |
 | ---------------- | ----------------- | --------------------------------------- |
@@ -397,18 +392,18 @@ Parser differential attacks exploit differences between the sanitizer's parser a
 
 ## Test Coverage
 
-The sanitizer is validated against **350+ attack vectors** from multiple sources:
+The sanitizer is validated against **228 OWASP/PortSwigger vectors + 138 Zig unit tests**:
 
 | Source                                                                                                                  | Vectors | Coverage                                                             |
 | ----------------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------- |
-| [OWASP XSS Filter Evasion](https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html)          | 87      | Script injection, encoding bypasses, event handlers, protocol tricks |
+| [OWASP XSS Filter Evasion](https://cheatsheetseries.owasp.org/cheatsheets/XSS_Filter_Evasion_Cheat_Sheet.html)          | 70      | Script injection, encoding bypasses, event handlers, protocol tricks |
 | [OWASP XSS Prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html) | 6       | Context-specific injection patterns                                  |
 | [OWASP DOM Clobbering](https://cheatsheetseries.owasp.org/cheatsheets/DOM_Clobbering_Prevention_Cheat_Sheet.html)       | 5       | Property shadowing attacks                                           |
 | [DOMPurify test suite](https://github.com/cure53/DOMPurify)                                                             | 14      | Real-world bypass patterns                                           |
-| [PortSwigger XSS Cheat Sheet](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet)                    | 72      | Comprehensive event handler coverage (72 on\* variants)               |
-| CSS Injection Vectors                                                                                                   | 12      | expression(), url() protocols, @import, dangerous properties         |
-| [OWASP HTML5 Security](https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html)                  | 19      | SVG/MathML, data: URIs, template injection, HTML5 APIs               |
-| [H5SC (HTML5 Security Cheatsheet)](https://html5sec.org/)                                                               | 139     | Comprehensive HTML5 attack vectors                                   |
+| OWASP Encoding Bypasses                                                                                                 | 23      | Entity encoding, unicode tricks, protocol obfuscation                |
+| [PortSwigger XSS Cheat Sheet](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet)                    | 79      | Comprehensive event handler coverage (72 `on*` variants)             |
+| CSS Injection Vectors                                                                                                   | 11      | `expression()`, `url()` protocols, `@import`, dangerous properties   |
+| [OWASP HTML5 Security](https://cheatsheetseries.owasp.org/cheatsheets/HTML5_Security_Cheat_Sheet.html)                  | 20      | SVG/MathML, `data:` URIs, template injection, HTML5 APIs             |
 
 Tests fail hard — any unhandled vector is a test failure:
 

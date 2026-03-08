@@ -24,6 +24,7 @@
 
 const std = @import("std");
 const z = @import("root.zig");
+const config = @import("modules/config.zig");
 
 // wasm32-wasi: use libc malloc (from Zig's bundled wasi-libc) so that
 // both Zig allocations and Lexbor's internal malloc use the same heap.
@@ -72,19 +73,25 @@ export fn init(config_ptr: [*]const u8, config_len: usize) u32 {
     // can then reuse the same address during the next sanitize() call,
     // silently corrupting the stored option strings (e.g. removeElements[0]).
     // Owning the bytes in the arena keeps them alive for the module's lifetime.
-    const config_copy: []const u8 = if (config_len > 0)
+    const json_src: ?[]const u8 = if (config_len > 0)
         arena.allocator().dupe(u8, config_ptr[0..config_len]) catch {
             arena.deinit();
             return 0;
         }
     else
-        &[_]u8{};
-    const opts = resolveOpts(arena.allocator(), config_copy) catch {
+        null;
+    const opts = config.resolveOptions(
+        arena.allocator(),
+        null,
+        json_src,
+    ) catch {
         arena.deinit();
         return 0;
     };
-
-    global_sanitizer = z.Sanitizer.init(allocator, opts) catch {
+    global_sanitizer = z.Sanitizer.init(
+        allocator,
+        opts,
+    ) catch {
         arena.deinit();
         return 0;
     };
@@ -148,45 +155,3 @@ export fn dealloc(ptr: [*]u8, n: usize) void {
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-
-fn resolveOpts(arena: std.mem.Allocator, config_json: []const u8) !z.SanitizeOptions {
-    if (config_json.len == 0) return z.SanitizeOptions{};
-    // Do NOT deinit parsed — the arena (config_arena) owns the memory.
-    const parsed = try std.json.parseFromSlice(JsonSanitizerConfig, arena, config_json, .{
-        .ignore_unknown_fields = true,
-    });
-    var sc = z.SanitizerConfig{};
-    applyJsonConfig(&sc, parsed.value);
-    return sc.toSanitizeOptions();
-}
-
-// Mirror of the JsonSanitizerConfig in main.zig (kept here to keep wasm.zig self-contained).
-const JsonSanitizerConfig = struct {
-    elements: ?[]const z.ElementConfig = null,
-    removeElements: ?[]const []const u8 = null,
-    replaceWithChildrenElements: ?[]const []const u8 = null,
-    attributes: ?[]const []const u8 = null,
-    removeAttributes: ?[]const []const u8 = null,
-    comments: ?bool = null,
-    dataAttributes: ?bool = null,
-    allowCustomElements: ?bool = null,
-    strictUriValidation: ?bool = null,
-    sanitizeDomClobbering: ?bool = null,
-    sanitizeInlineStyles: ?bool = null,
-    bypassSafety: ?bool = null,
-};
-
-fn applyJsonConfig(sc: *z.SanitizerConfig, j: JsonSanitizerConfig) void {
-    if (j.elements) |v| sc.elements = v;
-    if (j.removeElements) |v| sc.removeElements = v;
-    if (j.replaceWithChildrenElements) |v| sc.replaceWithChildrenElements = v;
-    if (j.attributes) |v| sc.attributes = v;
-    if (j.removeAttributes) |v| sc.removeAttributes = v;
-    if (j.comments) |v| sc.comments = v;
-    if (j.dataAttributes) |v| sc.dataAttributes = v;
-    if (j.allowCustomElements) |v| sc.allowCustomElements = v;
-    if (j.strictUriValidation) |v| sc.strictUriValidation = v;
-    if (j.sanitizeDomClobbering) |v| sc.sanitizeDomClobbering = v;
-    if (j.sanitizeInlineStyles) |v| sc.sanitizeInlineStyles = v;
-    if (j.bypassSafety) |v| sc.bypassSafety = v;
-}

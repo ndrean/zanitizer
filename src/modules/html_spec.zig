@@ -924,7 +924,7 @@ pub fn startsWithIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 /// ensures defense-in-depth for any SVG element with href/xlink:href.
 pub fn validateSvgUri(value: []const u8) bool {
     var buf: [4096]u8 = undefined;
-    const decoded = normalizeUri(&buf, value) catch value;
+    const decoded = normalizeUri(&buf, value) catch return false;
     const trimmed = trimUnicodeWhitespace(decoded);
     if (trimmed.len == 0) return false;
 
@@ -1026,6 +1026,9 @@ fn normalizeUri(buf: []u8, value: []const u8) ![]const u8 {
         }
     }
 
+    // If we didn't process the entire string, the buffer was too small.
+    // Return error to prevent validation bypass via truncation.
+    if (i < value.len) return error.OutputTruncated;
     return buf[0..len];
 }
 
@@ -1103,7 +1106,7 @@ pub fn validateUri(value: []const u8) bool {
     var buf: [4096]u8 = undefined;
 
     // Decode HTML entities that could hide dangerous protocols
-    const decoded = normalizeUri(&buf, value) catch value;
+    const decoded = normalizeUri(&buf, value) catch return false;
 
     // Trim both ASCII and Unicode whitespace
     const trimmed = trimUnicodeWhitespace(decoded);
@@ -1135,7 +1138,7 @@ pub fn validateUri(value: []const u8) bool {
 /// Validates audio src URIs - allows data:audio/* in addition to standard URIs
 pub fn validateAudioUri(value: []const u8) bool {
     var buf: [4096]u8 = undefined;
-    const decoded = normalizeUri(&buf, value) catch value;
+    const decoded = normalizeUri(&buf, value) catch return false;
     const trimmed = trimUnicodeWhitespace(decoded);
 
     if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
@@ -1160,7 +1163,7 @@ pub fn validateAudioUri(value: []const u8) bool {
 /// Validates video src URIs - allows data:video/* in addition to standard URIs
 pub fn validateVideoUri(value: []const u8) bool {
     var buf: [4096]u8 = undefined;
-    const decoded = normalizeUri(&buf, value) catch value;
+    const decoded = normalizeUri(&buf, value) catch return false;
     const trimmed = trimUnicodeWhitespace(decoded);
 
     if (startsWithIgnoreCase(trimmed, "javascript:")) return false;
@@ -1415,10 +1418,13 @@ const custom_element_spec = ElementSpec{
 /// HTML element specifications
 pub const element_specs = [_]ElementSpec{
     // Text elements (commonly used with frameworks)
-    .{ .tag_enum = .body, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "alink" }, // deprecated active link color (OWASP safe)
-        .{ .name = "vlink" }, // deprecated visited link color (OWASP safe)
-    } ++ common_attrs) },
+    .{
+        .tag_enum = .body,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "alink" }, // deprecated active link color (OWASP safe)
+            .{ .name = "vlink" }, // deprecated visited link color (OWASP safe)
+        } ++ common_attrs),
+    },
     .{ .tag_enum = .p, .allowed_attrs = &framework_attrs },
     .{ .tag_enum = .span, .allowed_attrs = &framework_attrs },
     .{ .tag_enum = .div, .allowed_attrs = &framework_attrs },
@@ -1566,14 +1572,18 @@ pub const element_specs = [_]ElementSpec{
     .{ .tag_enum = .map, .allowed_attrs = &([_]AttrSpec{
         .{ .name = "name" },
     } ++ common_attrs) },
-    .{ .tag_enum = .area, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "alt" },
-        .{ .name = "coords" },
-        .{ .name = "shape", .valid_values = &[_][]const u8{ "default", "rect", "circle", "poly" } },
-        .{ .name = "href" },
-        .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },
-        .{ .name = "nohref", .valid_values = &[_][]const u8{""} }, // deprecated boolean (OWASP safe)
-    } ++ common_attrs), .void_element = true },
+    .{
+        .tag_enum = .area,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "alt" },
+            .{ .name = "coords" },
+            .{ .name = "shape", .valid_values = &[_][]const u8{ "default", "rect", "circle", "poly" } },
+            .{ .name = "href" },
+            .{ .name = "target", .valid_values = &[_][]const u8{ "_blank", "_self", "_parent", "_top" } },
+            .{ .name = "nohref", .valid_values = &[_][]const u8{""} }, // deprecated boolean (OWASP safe)
+        } ++ common_attrs),
+        .void_element = true,
+    },
 
     // Document elements
     .{ .tag_enum = .html, .allowed_attrs = &common_attrs },
@@ -1618,9 +1628,13 @@ pub const element_specs = [_]ElementSpec{
 
     // Void elements
     .{ .tag_enum = .br, .allowed_attrs = &common_attrs, .void_element = true },
-    .{ .tag_enum = .hr, .allowed_attrs = &([_]AttrSpec{
-        .{ .name = "noshade", .valid_values = &[_][]const u8{""} }, // deprecated boolean (OWASP safe)
-    } ++ common_attrs), .void_element = true },
+    .{
+        .tag_enum = .hr,
+        .allowed_attrs = &([_]AttrSpec{
+            .{ .name = "noshade", .valid_values = &[_][]const u8{""} }, // deprecated boolean (OWASP safe)
+        } ++ common_attrs),
+        .void_element = true,
+    },
 
     // Template elements
     .{ .tag_enum = .template, .allowed_attrs = &common_attrs },

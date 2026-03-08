@@ -585,6 +585,9 @@ pub const CssSanitizer = struct {
     /// Parse and sanitize CSS declarations (property: value pairs)
     /// This is the main sanitization logic for inline styles
     fn simpleCssFilter(self: *@This(), css: []const u8) ![]const u8 {
+        // WARNING: This is a naive fallback that splits on semicolons.
+        // It may incorrectly split strings or URLs containing semicolons (e.g. data URIs).
+        // Lexbor parser is the primary path; this is only used if Lexbor fails.
         var result: std.ArrayListUnmanaged(u8) = .empty;
         errdefer result.deinit(self.allocator);
 

@@ -3,7 +3,7 @@
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 
-`zantizer` is a fast and lightweight HTML+CSS sanitizer, DOM-CSS aware, not regex-based. Built on top of `lexbor`.
+`zanitizer` is a fast and lightweight HTML+CSS sanitizer, DOM-CSS aware, not regex-based. Built on top of `lexbor`.
 
 <p align="center">
 <img src="https://github.com/ndrean/zanitizer/blob/main/images/GGI_zanitizer.png" alt="Gemini Generated Image" width="700" height="700" />
@@ -17,7 +17,7 @@ This tool can be used:
 - or as a composable, embeddable CLI (1.4MB unzipped)
 
 It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure.
-It follows the  `SanitizeConfig` API, uses presets and can allow framework attributes.
+It follows the `SanitizerConfig` API with presets and per-element attribute control.
 
 **Speed test**:
 
@@ -33,7 +33,7 @@ It follows the  `SanitizeConfig` API, uses presets and can allow framework attri
 **WASM module (Node/browser)**: from the `npm` repository.
 
 ```sh
-pnpm add zanitzer
+npm install zanitize
 ```
 
 Add `"type": "module"` to _package.json_ .
@@ -50,33 +50,41 @@ brew install zanitize
 - Using the composable CLI:
 
 ```sh
-echo "<script>alert(1)</script><p>Hello</p>" \
-  | ./zig-out/bin/zan - 
-
+echo "<script>alert(1)</script><p>Hello</p>" | zan -
 # => <html><head></head><body><p>Hello</p></body></html>
+
+# Fragment mode — body content only, ready for innerHTML:
+echo "<script>alert(1)</script><p>Hello</p>" | zan - -f
+# => <p>Hello</p>
+
+# File input, write output to file:
+zan dirty.html -o clean.html
 ```
 
 - Using the WASM module:
 
-```sh
-echo "
-import('./wasm-out/zanitize.js').then(({loadZanitize}) => {
-  loadZanitize(new URL('./wasm-out/zanitize.wasm', import.meta.url)).then(zan => {
-    zan.init();
-    const html = '<script>alert(1)</script><p>ok</p>';
-    console.log(zan.sanitize(html));
-  });
-});" \
-  | node -
+```js
+import { loadZanitize } from 'zanitize';
 
-# => <html><head></head><body><p>ok</p></body></html>
+const zan = await loadZanitize(
+  new URL('./node_modules/zanitize/zanitize.wasm', import.meta.url)
+);
+zan.init();
+
+// Full document output:
+console.log(zan.sanitize('<script>alert(1)</script><p>ok</p>'));
+// => <html><head></head><body><p>ok</p></body></html>
+
+// Fragment mode — body content only, ready for innerHTML:
+console.log(zan.sanitizeFragment('<script>alert(1)</script><p>ok</p>'));
+// => <p>ok</p>
 ```
 
 ### Example: Sanitize HTML and CSS
 
-The  `<style>` elements and inline styles are sanitzed in oe-pass.
+`<style>` elements and inline styles are sanitized in one pass — `javascript:` in `url()`, external HTTP URLs, and dangerous properties are stripped; safe CSS is kept intact.
 
-Example: _test.html_
+Given _test.html_:
 
 ```html
 <html>
@@ -84,7 +92,7 @@ Example: _test.html_
     <style>
       body { margin: 10px; padding: 5px; background: url(javascript:alert("xss")); }
       .trusted { color: green; }
-      .untrusted {color: red; background-image: url("evil.com"); }
+      .untrusted { color: red; background-image: url("evil.com"); }
     </style>
   </head>
   <body>
@@ -101,13 +109,26 @@ Example: _test.html_
 </html>
 ```
 
-Then run:
+#### CLI
 
 ```sh
-cat test.html | ./zig-out/bin/zan -
+cat test.html | zan -
 ```
 
-This gives:
+#### Node.js (WASM)
+
+```js
+import { loadZanitize } from 'zanitize';
+import { readFileSync } from 'fs';
+
+const zan = await loadZanitize(
+  new URL('./node_modules/zanitize/zanitize.wasm', import.meta.url)
+);
+zan.init();
+console.log(zan.sanitize(readFileSync('test.html', 'utf8')));
+```
+
+Both produce:
 
 ```html
 <html>
@@ -257,10 +278,9 @@ const clean = zan.sanitizeFragment(userHtml);
 
 ## Tests
 
-It applies whitelist and [html_specs rules](https://github.com/ndrean/zanitizer/blob/main/src/modules/html_specs.zig) marks the node or attributes for removal or update (sanitized attributes) and processes templates separately. It then applies the collected changes once the walk completes.
+The sanitizer walks the DOM and applies [html_spec rules](https://github.com/ndrean/zanitizer/blob/main/src/modules/html_specs.zig) — marking nodes and attributes for removal or update, then applying all changes in one pass after the walk completes.
 
-There are settings for the sanitizer (remove comments, remove/keep `<script>`, `<style>`, custom elements, allow framework attributes, embedded media with attributes in context...).
-Preset built-in modes are proposed but can be customized per run.
+Settings cover: comments, `<script>`/`<style>` handling, custom elements, data-* attributes, URI validation, DOM clobbering protection, and inline CSS sanitization. Preset modes are provided but every field is overridable per run.
 
 ### Speed tests
 
@@ -305,16 +325,16 @@ node tests/run_wasm_vectors.mjs --filter "onerror"
 
 Suites covered:
 
-|Suite	|Cases|
-|---|----|
-|OWASP XSS Filter Evasion	|70|
-|OWASP XSS Prevention	|6|
-|OWASP DOM Clobbering	|5|
-|DOMPurify-derived	|14|
-|OWASP Encoding Bypasses	|23|
-|PortSwigger Event Handlers	|79|
-||CSS Injection Vectors	|11|
-|HTML5 Security Vectors	|20|
+| Suite | Cases |
+| --- | --- |
+| OWASP XSS Filter Evasion | 70 |
+| OWASP XSS Prevention | 6 |
+| OWASP DOM Clobbering | 5 |
+| DOMPurify-derived | 14 |
+| OWASP Encoding Bypasses | 23 |
+| PortSwigger Event Handlers | 79 |
+| CSS Injection Vectors | 11 |
+| HTML5 Security Vectors | 20 |
 
 The vector source is _tests/input/owasp_vectors.json_, extracted from _src/modules/sanitizer_test_vectors.zig_:
 
@@ -328,8 +348,8 @@ We can use `"bypassSafety" to check how strings are parsed by Lexbor, and then e
 
 ```sh
 node -e "
-import('/Users/nevendrean/code/zig/zaniter/wasm-out/zanitize.js').then(async ({loadZanitize}) => {
-  const zan = await loadZanitize(new URL('file:////Users/nevendrean/code/zig/zanitizer/wasm-out/zanitize.wasm'));
+import('./node_modules/zanitize/zanitize.js').then(async ({loadZanitize}) => {
+  const zan = await loadZanitize(new URL('./node_modules/zanitize/zanitize.wasm', import.meta.url));
   zan.init('{\"bypassSafety\": true}');  // skip sanitize to see what Lexbor serializes
   const variants = [
     'url(http://evil.com/)',         // unquoted
@@ -376,7 +396,7 @@ This software uses heavily [lexbor](https://lexbor.com)
 
 ## Using Markdown input
 
-We use the library [md4c](https://github.com/mity/md4c).
+We use the library [md4c](https://github.com/mity/md4c) with `MD_DIALECT_GITHUB` — tables, strikethrough, task lists, and autolinks are all enabled.
 
 > Usage: just add the flag `--md`.
 
@@ -392,11 +412,11 @@ This is **GFM** rendered natively via md4c.
 | foo      | bar      |
 | baz      | qux      |
 
-- [x] md4c parses GFM Markdown
+- [x] md4c parses GFM tables and task lists
 - [x] lexbor renders the resulting HTML
 - [ ] profit
 
-~~Strikethrough~~, https://example.com autolink, and <span style="color:red">raw HTML</span> all pass through." \
+~~Strikethrough~~, https://example.com autolink, and <span style=\"color:red\">raw HTML</span> all work." \
 | ./zig-out/bin/zan - --md
 ```
 
@@ -408,50 +428,19 @@ gives:
   <body>
     <h1>Hello from Markdown</h1>
     <p>This is <strong>GFM</strong> rendered natively via md4c.</p>
-    <p>
-      | Column A | Column B |
-      |----------|----------|
-      | foo      | bar      |
-      | baz      | qux      |
-    </p>
+    <table>
+      <thead><tr><th>Column A</th><th>Column B</th></tr></thead>
+      <tbody>
+        <tr><td>foo</td><td>bar</td></tr>
+        <tr><td>baz</td><td>qux</td></tr>
+      </tbody>
+    </table>
     <ul>
-      <li>[x] md4c parses GFM Markdown</li>
-      <li>[x] lexbor renders the resulting HTML</li>
-      <li>[ ] profit</li>
+      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled="" checked=""> md4c parses GFM tables and task lists</li>
+      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled="" checked=""> lexbor renders the resulting HTML</li>
+      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled=""> profit</li>
     </ul>
-    <p>
-      ~~Strikethrough~~, https://example.com autolink, and <span style="color: red">raw HTML</span> all pass through.
-    </p>
+    <p><del>Strikethrough</del>, <a href="https://example.com">https://example.com</a> autolink, and <span style="color: red">raw HTML</span> all work.</p>
   </body>
 </html>
-```
-
----
-
-## Notes
-
-**Update lexbor**:
-
-```sh
-git submodule update --remote vendor/lexbor_src_master
-```
-
-**Leaks**: lexbor + Zig
-
-```sh
-MallocStackLogging=1 leaks -atExit -- cat dirty.html | ./zig-out/bin/zan -
-```
-
-**search in `lexbor` built static**: to check if primitives are exported, you can use:
-
-```sh
-nm vendor/lexbor_src_master/build/liblexbor_static.a | grep " T " | grep -i "serialize"
-```
-
-Directly in the source code:
-
-```sh
-find vendor/lexbor_src_master/source -name "*.h" | xargs grep -l "lxb_html_seralize_tree_cb"
-
-grep -r "lxb_html_serialize_tree_cb" vendor/lexbor_src_master/source/lexbor/
 ```

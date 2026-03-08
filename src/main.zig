@@ -1,6 +1,7 @@
 const std = @import("std");
 const z = @import("root.zig");
 const builtin = @import("builtin");
+const config = @import("modules/config.zig");
 const native_os = builtin.os.tag;
 
 const md4c_h = @cImport({
@@ -28,6 +29,7 @@ pub fn main() !void {
     var input_path: ?[]const u8 = null;
     var output_path: ?[]const u8 = null;
     var from_markdown: bool = false;
+    var fragment: bool = false;
     var config_json: ?[]const u8 = null;
     var config_file: ?[]const u8 = null;
     var preset: ?[]const u8 = null;
@@ -35,6 +37,8 @@ pub fn main() !void {
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--md")) {
             from_markdown = true;
+        } else if (std.mem.eql(u8, arg, "--fragment") or std.mem.eql(u8, arg, "-f")) {
+            fragment = true;
         } else if (std.mem.eql(u8, arg, "-o")) {
             output_path = args.next();
         } else if (std.mem.eql(u8, arg, "--config")) {
@@ -56,7 +60,7 @@ pub fn main() !void {
     defer json_arena.deinit();
 
     // Resolve sanitize options from preset + optional JSON patch
-    const opts = try resolveOptions(json_arena.allocator(), preset, config_json, config_file);
+    const opts = try resolveCliOptions(json_arena.allocator(), preset, config_json, config_file);
 
     // Read input (file, stdin, or "-")
     const html_src: []u8 = blk: {
@@ -67,7 +71,7 @@ pub fn main() !void {
     };
     defer gpa.free(html_src);
 
-    const out = try sanitizeHtml(gpa, html_src, opts);
+    const out = try sanitizeHtml(gpa, html_src, opts, fragment);
     defer gpa.free(out);
 
     if (output_path) |p| {
@@ -80,7 +84,9 @@ pub fn main() !void {
 }
 
 /// Core sanitize function — shared by CLI and WASM entry points.
-pub fn sanitizeHtml(allocator: std.mem.Allocator, html: []const u8, opts: z.SanitizeOptions) ![]u8 {
+/// fragment=true returns only the <body> inner content (ready for innerHTML),
+/// fragment=false returns the full <html>…</html> document.
+pub fn sanitizeHtml(allocator: std.mem.Allocator, html: []const u8, opts: z.SanitizeOptions, fragment: bool) ![]u8 {
     const doc = try z.parseHTML(allocator, html);
     defer z.destroyDocument(doc);
 
@@ -88,74 +94,26 @@ pub fn sanitizeHtml(allocator: std.mem.Allocator, html: []const u8, opts: z.Sani
     defer san.deinit();
     try san.sanitize(doc);
 
+    if (fragment) {
+        const body = z.bodyElement(doc) orelse return error.NoBody;
+        return z.innerHTML(allocator, body);
+    }
     const root = z.documentRoot(doc) orelse return error.NoDocumentRoot;
     return z.outerNodeHTML(allocator, root);
 }
 
 /// Build SanitizeOptions from an optional preset + optional JSON patch (JSON wins on overlap).
-fn resolveOptions(allocator: std.mem.Allocator, preset_name: ?[]const u8, json_inline: ?[]const u8, json_file: ?[]const u8) !z.SanitizeOptions {
-    var sc: z.SanitizerConfig = if (preset_name) |p| blk: {
-        if (std.mem.eql(u8, p, "strict")) break :blk z.SanitizerConfig.strict();
-        if (std.mem.eql(u8, p, "permissive")) break :blk z.SanitizerConfig.permissive();
-        if (std.mem.eql(u8, p, "trusted")) break :blk z.SanitizerConfig.trusted();
-        if (std.mem.eql(u8, p, "default")) break :blk z.SanitizerConfig.default();
-        std.debug.print("Unknown preset '{s}', using default.\n", .{p});
-        break :blk z.SanitizerConfig.default();
-    } else z.SanitizerConfig{};
-
+fn resolveCliOptions(allocator: std.mem.Allocator, preset_name: ?[]const u8, json_inline: ?[]const u8, json_file: ?[]const u8) !z.SanitizeOptions {
     // Load JSON source (inline string or file).
     // NOTE: json_file_buf is intentionally NOT freed here — json_arena (caller) owns
     // its lifetime. json_arena.deinit() at end of main() cleans everything up.
-    // Premature free (even no-op arena free) corrupts string refs in Zig 0.15.
     const json_src: ?[]const u8 = if (json_inline) |j|
         j
     else if (json_file) |f| blk: {
         const buf = try std.fs.cwd().readFileAlloc(allocator, f, 512 * 1024);
         break :blk buf;
     } else null;
-
-    if (json_src) |src| {
-        // Do NOT deinit `parsed` — the strings in parsed.value are owned by `allocator`'s
-        // arena (json_arena in main), which outlives the returned SanitizeOptions.
-        const parsed = try std.json.parseFromSlice(JsonSanitizerConfig, allocator, src, .{
-            .ignore_unknown_fields = true,
-        });
-        applyJsonConfig(&sc, parsed.value);
-    }
-
-    return sc.toSanitizeOptions();
-}
-
-/// JSON-deserialization mirror of SanitizerConfig (all fields optional = patch semantics).
-const JsonSanitizerConfig = struct {
-    elements: ?[]const z.ElementConfig = null,
-    removeElements: ?[]const []const u8 = null,
-    replaceWithChildrenElements: ?[]const []const u8 = null,
-    attributes: ?[]const []const u8 = null,
-    removeAttributes: ?[]const []const u8 = null,
-    comments: ?bool = null,
-    dataAttributes: ?bool = null,
-    allowCustomElements: ?bool = null,
-    strictUriValidation: ?bool = null,
-    sanitizeDomClobbering: ?bool = null,
-    sanitizeInlineStyles: ?bool = null,
-    bypassSafety: ?bool = null,
-};
-
-/// Patch a SanitizerConfig with non-null values from parsed JSON.
-fn applyJsonConfig(sc: *z.SanitizerConfig, j: JsonSanitizerConfig) void {
-    if (j.elements) |v| sc.elements = v;
-    if (j.removeElements) |v| sc.removeElements = v;
-    if (j.replaceWithChildrenElements) |v| sc.replaceWithChildrenElements = v;
-    if (j.attributes) |v| sc.attributes = v;
-    if (j.removeAttributes) |v| sc.removeAttributes = v;
-    if (j.comments) |v| sc.comments = v;
-    if (j.dataAttributes) |v| sc.dataAttributes = v;
-    if (j.allowCustomElements) |v| sc.allowCustomElements = v;
-    if (j.strictUriValidation) |v| sc.strictUriValidation = v;
-    if (j.sanitizeDomClobbering) |v| sc.sanitizeDomClobbering = v;
-    if (j.sanitizeInlineStyles) |v| sc.sanitizeInlineStyles = v;
-    if (j.bypassSafety) |v| sc.bypassSafety = v;
+    return config.resolveOptions(allocator, preset_name, json_src);
 }
 
 fn readInput(allocator: std.mem.Allocator, path: ?[]const u8) ![]u8 {
@@ -188,7 +146,7 @@ const MdCtx = struct {
 fn markdownToHtml(allocator: std.mem.Allocator, md: []const u8) ![]u8 {
     var ctx = MdCtx{ .allocator = allocator };
     errdefer ctx.list.deinit(allocator);
-    const rc = md4c_h.md_html(md.ptr, @intCast(md.len), MdCtx.callback, &ctx, 0, 0);
+    const rc = md4c_h.md_html(md.ptr, @intCast(md.len), MdCtx.callback, &ctx, md4c_h.MD_DIALECT_GITHUB, 0);
     if (rc != 0) return error.MarkdownConversionFailed;
     return ctx.list.toOwnedSlice(allocator);
 }
@@ -196,7 +154,7 @@ fn markdownToHtml(allocator: std.mem.Allocator, md: []const u8) ![]u8 {
 fn printUsage() void {
     const stdout = std.fs.File.stdout();
     stdout.writeAll(
-        \\Usage: zanitize [FILE] [OPTIONS]
+        \\Usage: zan [FILE] [OPTIONS]
         \\
         \\  FILE             HTML file to sanitize (default: stdin)
         \\  -                Read from stdin explicitly
@@ -206,6 +164,7 @@ fn printUsage() void {
         \\  --config JSON    SanitizerConfig as inline JSON (patches preset)
         \\  --config-file F  SanitizerConfig as JSON file (patches preset)
         \\  --md             Treat input as Markdown (convert to HTML first)
+        \\  -f, --fragment   Output body content only (no <html>/<head>/<body> wrapper)
         \\  -o FILE          Write output to file (default: stdout)
         \\  -h, --help       Show this help
         \\
@@ -225,10 +184,10 @@ fn printUsage() void {
         \\
         \\Examples:
         \\  echo '<script>alert(1)</script><p>Hello</p>' | zanitize
-        \\  zanitize dirty.html > clean.html
-        \\  zanitize dirty.html --preset strict -o clean.html
-        \\  zanitize dirty.html --config '{"elements":[{"name":"p"},{"name":"a","attributes":["href"]}]}'
-        \\  zanitize dirty.html --config '{"replaceWithChildrenElements":["b","i"]}'
+        \\  zan dirty.html > clean.html
+        \\  zan dirty.html --preset strict -o clean.html
+        \\  zan dirty.html --config '{"elements":[{"name":"p"},{"name":"a","attributes":["href"]}]}'
+        \\  zan dirty.html --config '{"replaceWithChildrenElements":["b","i"]}'
         \\  cat README.md | zanitize --md
         \\
     ) catch {};

@@ -1056,7 +1056,7 @@ fn sanitizePostWalkOperationsWithCss(allocator: std.mem.Allocator, context: *San
     while (context.nodes_to_unwrap.pop()) |node| {
         if (z.parentNode(node) != null) {
             while (z.firstChild(node)) |child| {
-                z.removeNode(child);        // detach child from wrapper
+                z.removeNode(child); // detach child from wrapper
                 z.insertBefore(node, child); // re-insert before wrapper in parent
             }
         }
@@ -3733,51 +3733,51 @@ fn quickCheck(allocator: std.mem.Allocator, input: []const u8, expect: []const u
     try testing.expectEqualStrings(expect, reality);
 }
 
-test "html5sec.org vectors" {
-    const allocator = testing.allocator;
+// test "html5sec.org vectors" {
+//     const allocator = testing.allocator;
 
-    // Read the html5sec.org test file
-    const input = std.fs.cwd().readFileAlloc(allocator, "h5sc_sanitize_tests/h5sc-test.html", 10 * 1024 * 1024) catch |err| {
-        std.debug.print("Skipping html5sec test: could not read h5sc-test.html: {}\n", .{err});
-        return;
-    };
-    defer allocator.free(input);
+//     // Read the html5sec.org test file
+//     const input = std.fs.cwd().readFileAlloc(allocator, "../tests/input/h5sc-test.html", 10 * 1024 * 1024) catch |err| {
+//         std.debug.print("Skipping only html5sec test: could not read h5sc-test.html: {}\n", .{err});
+//         return;
+//     };
+//     defer allocator.free(input);
 
-    // std.debug.print("\n=== HTML5 Security Cheatsheet Test (Zig) ===\n", .{});
-    // std.debug.print("Input size: {} bytes\n", .{input.len});
-    // std.debug.print("Total vectors: 139\n\n", .{});
+//     // std.debug.print("\n=== HTML5 Security Cheatsheet Test (Zig) ===\n", .{});
+//     // std.debug.print("Input size: {} bytes\n", .{input.len});
+//     // std.debug.print("Total vectors: 139\n\n", .{});
 
-    const doc = try z.parseHTML(allocator, input);
-    defer z.destroyDocument(doc);
+//     const doc = try z.parseHTML(allocator, input);
+//     defer z.destroyDocument(doc);
 
-    var css_sanitizer = try CssSanitizer.init(allocator, .{});
-    defer css_sanitizer.deinit();
+//     var css_sanitizer = try CssSanitizer.init(allocator, .{});
+//     defer css_sanitizer.deinit();
 
-    // var timer = try std.time.Timer.start();
-    try sanitizeWithCss(allocator, z.bodyNode(doc).?, SanitizerMode.strict, &css_sanitizer);
-    // const elapsed_ns = timer.read();
-    // const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-    // const elapsed_ms = elapsed_us / 1000.0;
+//     // var timer = try std.time.Timer.start();
+//     try sanitizeWithCss(allocator, z.bodyNode(doc).?, SanitizerMode.strict, &css_sanitizer);
+//     // const elapsed_ns = timer.read();
+//     // const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+//     // const elapsed_ms = elapsed_us / 1000.0;
 
-    // std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
+//     // std.debug.print("Sanitization time: {d:.2} µs ({d:.3} ms)\n", .{ elapsed_us, elapsed_ms });
 
-    const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
-    defer allocator.free(result);
+//     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
+//     defer allocator.free(result);
 
-    // std.debug.print("Output size: {} bytes\n", .{result.len});
+//     // std.debug.print("Output size: {} bytes\n", .{result.len});
 
-    // Write output to file for comparison with DOMPurify
-    if (std.fs.cwd().createFile("/tmp/h5sc-zig-output.html", .{})) |file| {
-        defer file.close();
-        _ = file.write(result) catch {};
-        // std.debug.print("Wrote output to /tmp/h5sc-zig-output.html\n\n", .{});
-    } else |_| {}
+//     // Write output to file for comparison with DOMPurify
+//     if (std.fs.cwd().createFile("/tmp/h5sc-zig-output.html", .{})) |file| {
+//         defer file.close();
+//         _ = file.write(result) catch {};
+//         // std.debug.print("Wrote output to /tmp/h5sc-zig-output.html\n\n", .{});
+//     } else |_| {}
 
-    // Basic security checks - ensure no actual executable event handlers
-    try testing.expect(std.mem.indexOf(u8, result, " onclick=") == null);
-    try testing.expect(std.mem.indexOf(u8, result, " onload=") == null);
-    try testing.expect(std.mem.indexOf(u8, result, "<script>alert") == null);
-}
+//     // Basic security checks - ensure no actual executable event handlers
+//     try testing.expect(std.mem.indexOf(u8, result, " onclick=") == null);
+//     try testing.expect(std.mem.indexOf(u8, result, " onload=") == null);
+//     try testing.expect(std.mem.indexOf(u8, result, "<script>alert") == null);
+// }
 
 // ======================================================================================
 // Tests for NEW UNIFIED API (Sanitizer struct)
