@@ -254,6 +254,8 @@ pub const SanitizerOptions = struct {
     allowed_attributes: ?[]const []const u8 = null,
     /// Global attribute blocklist. Listed attrs are removed (after safety checks).
     remove_attributes: ?[]const []const u8 = null,
+    /// User-declared attribute prefixes to allow through with protocol-only value checking.
+    custom_attr_prefixes: ?[]const []const u8 = null,
 };
 
 const AttributeAction = struct {
@@ -871,7 +873,7 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
     var iter = z.iterateAttributes(element);
     // std.debug.print("\nChecking attributes for element: {s}\t", .{@tagName(tag)});
 
-    while (iter.next()) |attr_pair| {
+    attr_loop: while (iter.next()) |attr_pair| {
         var should_remove = false;
 
         // FAIL FAST: Dangerous attributes check (includes blocklist + all on* handlers)
@@ -935,17 +937,43 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
         // Framework Attributes
         if (!should_remove and isFrameworkAttribute(attr_pair.name)) {
             if (context.options.allow_framework_attrs) {
-                // Check for dangerous patterns in framework attribute values
-                for (z.DANGEROUS_JS_PATTERNS) |pattern| {
-                    if (containsCaseInsensitive(attr_pair.value, pattern)) {
-                        should_remove = true;
-                        break;
-                    }
+                // Protocol injection is dangerous in any framework context.
+                // We do NOT scan for JS code patterns (eval, import, etc.) because
+                // framework attribute values may be URLs, CSS selectors, or expressions
+                // and the sanitizer cannot know which without framework-specific knowledge.
+                const v = attr_pair.value;
+                if (std.ascii.startsWithIgnoreCase(v, "javascript:") or
+                    std.ascii.startsWithIgnoreCase(v, "vbscript:") or
+                    std.ascii.startsWithIgnoreCase(v, "data:text/html") or
+                    std.ascii.startsWithIgnoreCase(v, "data:text/javascript"))
+                {
+                    should_remove = true;
                 }
                 if (!should_remove) continue;
             } else {
                 // Framework attributes not allowed in this mode
                 should_remove = true;
+            }
+        }
+
+        // Custom attribute prefixes (user-declared, protocol-only check)
+        if (!should_remove) {
+            if (context.options.custom_attr_prefixes) |prefixes| {
+                for (prefixes) |prefix| {
+                    if (std.mem.startsWith(u8, attr_pair.name, prefix)) {
+                        const v = attr_pair.value;
+                        if (std.ascii.startsWithIgnoreCase(v, "javascript:") or
+                            std.ascii.startsWithIgnoreCase(v, "vbscript:") or
+                            std.ascii.startsWithIgnoreCase(v, "data:text/html") or
+                            std.ascii.startsWithIgnoreCase(v, "data:text/javascript"))
+                        {
+                            should_remove = true;
+                        } else {
+                            continue :attr_loop; // accepted — skip spec engine
+                        }
+                        break;
+                    }
+                }
             }
         }
 
@@ -979,7 +1007,7 @@ fn collectDangerousAttributesEnum(context: *SanitizeContext, element: *z.HTMLEle
         }
 
         // Cross-Attribute Dependency (target="_blank" -> rel="noopener")
-        if (!should_remove and std.mem.eql(u8, attr_pair.name, "target") and std.mem.eql(u8, attr_pair.value, "_blank")) {
+        if (!should_remove and std.mem.eql(u8, attr_pair.name, "target") and std.ascii.eqlIgnoreCase(attr_pair.value, "_blank")) {
             var has_safe_rel = false;
             // CHEAP RE-ITERATION (No allocation)
             var rel_iter = z.iterateAttributes(element);
@@ -1296,6 +1324,11 @@ pub const SanitizeOptions = struct {
     allowed_attributes: ?[]const []const u8 = null,
     /// Global attribute blocklist. Listed attrs are removed (after safety checks).
     remove_attributes: ?[]const []const u8 = null,
+    /// Custom attribute prefixes to allow through with protocol-only value checking.
+    /// Example: &[_][]const u8{"wire:", "livewire:", "data-turbo"}
+    /// Values are checked only for dangerous protocols (javascript:, vbscript:, data:text/html,
+    /// data:text/javascript). JS code pattern scanning is intentionally skipped.
+    custom_attr_prefixes: ?[]const []const u8 = null,
 
     /// Convert to internal SanitizerOptions for walker
     fn toInternal(self: SanitizeOptions) SanitizerOptions {
@@ -1314,6 +1347,7 @@ pub const SanitizeOptions = struct {
             .replace_with_children = self.replace_with_children,
             .allowed_attributes = self.allowed_attributes,
             .remove_attributes = self.remove_attributes,
+            .custom_attr_prefixes = self.custom_attr_prefixes,
         };
     }
 };
@@ -1758,10 +1792,12 @@ test "blocks dangerous values in framework attributes" {
     const result = try z.innerHTML(allocator, z.bodyElement(doc).?);
     defer allocator.free(result);
 
-    // Should remove attributes with dangerous values
+    // Protocol injection is always blocked.
     try testing.expect(std.mem.indexOf(u8, result, "javascript:") == null);
-    try testing.expect(std.mem.indexOf(u8, result, "import(") == null);
     try testing.expect(std.mem.indexOf(u8, result, "data:text/html") == null);
+    // import('evil.js') is NOT blocked: the sanitizer cannot distinguish a JS expression
+    // from a framework DSL value (URL, selector, etc.) without framework-specific knowledge.
+    // Protocol-only blocking is intentional: see plan/decision notes.
 }
 
 test "removes framework attributes in strict mode" {

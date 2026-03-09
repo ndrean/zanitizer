@@ -133,6 +133,12 @@ pub const SanitizerConfig = struct {
     /// Default: false (safety checks enabled)
     bypassSafety: bool = false,
 
+    /// Custom attribute prefixes to allow through with protocol-only value checking.
+    /// Example: &[_][]const u8{"wire:", "livewire:", "data-turbo"}
+    /// Values are checked only for dangerous protocols (javascript:, vbscript:, data:text/html,
+    /// data:text/javascript). JS code pattern scanning is intentionally skipped.
+    customAttrPrefixes: ?[]const []const u8 = null,
+
     // ============================================================================
     // Validation & Helpers
     // ============================================================================
@@ -165,6 +171,7 @@ pub const SanitizerConfig = struct {
             .replace_with_children = self.replaceWithChildrenElements,
             .allowed_attributes = self.attributes,
             .remove_attributes = self.removeAttributes,
+            .custom_attr_prefixes = self.customAttrPrefixes,
         };
     }
 

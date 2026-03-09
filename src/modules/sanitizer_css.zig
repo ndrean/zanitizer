@@ -455,11 +455,10 @@ pub const CssSanitizer = struct {
     fn sanitizeWithLexbor(self: *@This(), input: []const u8) ![]const u8 {
         // Initialize parser if needed
         const parser = self.ensureParser() catch {
-            // Fallback to simple filter if parser fails
             if (comptime builtin.mode == .Debug) {
-                std.debug.print("[CSS] ❌ Lexbor parser init failed, using string fallback\n", .{});
+                std.debug.print("⚠️ CSS parser init failed, blocking inline style\n", .{});
             }
-            return try self.simpleCssFilter(input);
+            return "";
         };
 
         // Clean parser state for fresh parsing
@@ -468,11 +467,10 @@ pub const CssSanitizer = struct {
         // Parse the CSS declaration list (inline style format)
         const decl_list = lxb_css_declaration_list_parse(parser, input.ptr, input.len);
         if (decl_list == null) {
-            // Parse failed - fallback to simple filter
             if (comptime builtin.mode == .Debug) {
-                std.debug.print("[CSS] ❌ Lexbor parse failed for: {s}..., using string fallback\n", .{input[0..@min(50, input.len)]});
+                std.debug.print("⚠️ CSS parse failed on: {s}...\n", .{input[0..@min(50, input.len)]});
             }
-            return try self.simpleCssFilter(input);
+            return "";
         }
         // Lexbor AST path active
         if (comptime builtin.mode == .Debug) {
@@ -662,7 +660,7 @@ pub const CssSanitizer = struct {
 
     /// Validate URL in CSS url() function
     fn isCssUrlSafe(self: *@This(), url_content: []const u8) bool {
-        const trimmed = std.mem.trim(u8, url_content, " '\"");
+        const trimmed = std.mem.trim(u8, url_content, " '\"\t\n\r\x0C\x00");
 
         // Block dangerous protocols
         if (specs.startsWithIgnoreCase(trimmed, "javascript:") or

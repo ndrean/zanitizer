@@ -26,6 +26,10 @@ pub fn main() !void {
     defer args.deinit();
     _ = args.next(); // skip exe name
 
+    // JSON config arena — kept alive until after sanitizeHtml() so string slices remain valid.
+    var json_arena = std.heap.ArenaAllocator.init(gpa);
+    defer json_arena.deinit();
+
     var input_path: ?[]const u8 = null;
     var output_path: ?[]const u8 = null;
     var from_markdown: bool = false;
@@ -33,6 +37,7 @@ pub fn main() !void {
     var config_json: ?[]const u8 = null;
     var config_file: ?[]const u8 = null;
     var preset: ?[]const u8 = null;
+    var attr_prefixes: std.ArrayList([]const u8) = .empty;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--md")) {
@@ -47,6 +52,10 @@ pub fn main() !void {
             config_file = args.next();
         } else if (std.mem.eql(u8, arg, "--preset")) {
             preset = args.next();
+        } else if (std.mem.eql(u8, arg, "--allow-attr-prefix")) {
+            if (args.next()) |prefix| {
+                try attr_prefixes.append(json_arena.allocator(), prefix);
+            }
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             printUsage();
             return;
@@ -55,12 +64,11 @@ pub fn main() !void {
         }
     }
 
-    // JSON config arena — kept alive until after sanitizeHtml() so string slices remain valid.
-    var json_arena = std.heap.ArenaAllocator.init(gpa);
-    defer json_arena.deinit();
-
     // Resolve sanitize options from preset + optional JSON patch
-    const opts = try resolveCliOptions(json_arena.allocator(), preset, config_json, config_file);
+    var opts = try resolveCliOptions(json_arena.allocator(), preset, config_json, config_file);
+    if (attr_prefixes.items.len > 0) {
+        opts.custom_attr_prefixes = attr_prefixes.items;
+    }
 
     // Read input (file, stdin, or "-")
     const html_src: []u8 = blk: {
@@ -119,7 +127,7 @@ fn resolveCliOptions(allocator: std.mem.Allocator, preset_name: ?[]const u8, jso
 fn readInput(allocator: std.mem.Allocator, path: ?[]const u8) ![]u8 {
     const p = path orelse "-";
     if (std.mem.eql(u8, p, "-")) {
-        var list: std.ArrayListUnmanaged(u8) = .empty;
+        var list: std.ArrayList(u8) = .empty;
         errdefer list.deinit(allocator);
         var buf: [8192]u8 = undefined;
         while (true) {
@@ -127,6 +135,7 @@ fn readInput(allocator: std.mem.Allocator, path: ?[]const u8) ![]u8 {
             if (n == 0) break;
             try list.appendSlice(allocator, buf[0..n]);
         }
+
         return list.toOwnedSlice(allocator);
     }
     return std.fs.cwd().readFileAlloc(allocator, p, 10 * 1024 * 1024);
@@ -134,7 +143,7 @@ fn readInput(allocator: std.mem.Allocator, path: ?[]const u8) ![]u8 {
 
 // md4c callback context
 const MdCtx = struct {
-    list: std.ArrayListUnmanaged(u8) = .empty,
+    list: std.ArrayList(u8) = .empty,
     allocator: std.mem.Allocator,
 
     fn callback(text: [*c]const u8, size: c_uint, userdata: ?*anyopaque) callconv(.c) void {
@@ -162,7 +171,8 @@ fn printUsage() void {
         \\Options:
         \\  --preset NAME    Base preset: default (default), strict, permissive, trusted
         \\  --config JSON    SanitizerConfig as inline JSON (patches preset)
-        \\  --config-file F  SanitizerConfig as JSON file (patches preset)
+        \\  --config-file F      SanitizerConfig as JSON file (patches preset)
+        \\  --allow-attr-prefix PFX  Allow attrs with this prefix (repeatable, e.g. wire: livewire:)
         \\  --md             Treat input as Markdown (convert to HTML first)
         \\  -f, --fragment   Output body content only (no <html>/<head>/<body> wrapper)
         \\  -o FILE          Write output to file (default: stdout)
@@ -181,6 +191,7 @@ fn printUsage() void {
         \\  sanitizeDomClobbering bool (default: true)
         \\  sanitizeInlineStyles  bool (default: true)
         \\  bypassSafety          bool — allow event handlers (default: false)
+        \\  customAttrPrefixes    ["wire:", "livewire:"] — custom prefix allowlist (protocol-only check)
         \\
         \\Examples:
         \\  echo '<script>alert(1)</script><p>Hello</p>' | zanitize

@@ -18,6 +18,17 @@
  *   catching the ExitError thrown by the polyfill.
  */
 
+
+/* === Process
+JS asks WASM for memory: ptr = alloc(size)
+JS writes string to ptr
+JS calls sanitize(ptr, size)
+WASM works, returns out_ptr
+JS reads from out_ptr to out_ptr + result_len()
+JS cleans up: free_result() and dealloc(ptr, size)
+*/
+
+
 'use strict';
 
 const ENC = new TextEncoder();
@@ -107,11 +118,14 @@ class Zanitize {
     const bytes = ENC.encode(configJson);
     const ptr = alloc(bytes.length);
     if (!ptr) { console.warn('zanitize: alloc() failed in init() — OOM?'); return false; }
-    new Uint8Array(this.#mem.buffer, ptr, bytes.length).set(bytes);
-    const ok = init(ptr, bytes.length) === 1;
-    dealloc(ptr, bytes.length);
-    if (!ok) console.warn('zanitize: init() returned 0 — config parse failed?', configJson);
-    return ok;
+    try {
+      new Uint8Array(this.#mem.buffer, ptr, bytes.length).set(bytes);
+      const ok = init(ptr, bytes.length) === 1;
+      if (!ok) console.warn('zanitize: init() returned 0 — config parse failed?', configJson);
+      return ok;
+    } finally {
+      dealloc(ptr, bytes.length);
+    }
   }
 
   /**
@@ -149,8 +163,11 @@ class Zanitize {
     dealloc(ptr, bytes.length);
     if (!resultPtr) return null;
     const len = result_len();
-    const out = DEC.decode(new Uint8Array(this.#mem.buffer, resultPtr, len));
-    free_result();
-    return out;
+    try {
+      return DEC.decode(new Uint8Array(this.#mem.buffer, resultPtr, len));
+    } finally {
+      free_result();
+    }
   }
 }
+

@@ -558,6 +558,11 @@ const OWASP_DOM_CLOBBERING = [_]TestCase{
         .threat_html = "<form onmouseover='alert(1)'><input name=\"attributes\"><input name=\"attributes\">",
         .should_not_contain = &.{"onmouseover"},
     },
+
+    // NOTE: input name=action/method/enctype are NOT blocked.
+    // These shadow form element IDL properties only via named property access
+    // (document.myForm.action), not via direct IDL access (formElem.action).
+    // DOMPurify does not block these either. Out of scope for this sanitizer.
 };
 
 // ============================================================================
@@ -1432,6 +1437,50 @@ const HTML5_SECURITY_VECTORS = [_]TestCase{
 };
 
 // ============================================================================
+// Null Byte & Control Character Injection Vectors
+// HTML5 spec: null bytes in input → replaced with U+FFFD (0xEF 0xBF 0xBD) by parser.
+// Tests that this Lexbor normalization does not create exploitable bypass paths.
+// ============================================================================
+
+const NULL_BYTE_VECTORS = [_]TestCase{
+    // --- Null byte in tag name ---
+    // Null byte in a tag name → parse error, U+FFFD substitution.
+    // <sc\x00ript> is NOT parsed as <script>; it becomes an unknown element
+    // that the sanitizer unwraps. The inner text is preserved but is safe text.
+    .{
+        .name = "NullByte: null byte in script tag name",
+        .threat_html = "<sc\x00ript>alert(1)</sc\x00ript>",
+        .should_not_contain = &.{"<script"},
+    },
+
+    // --- Null byte in event handler attribute name ---
+    // on\x00error → on\uFFFDerror after U+FFFD substitution.
+    // The "on" prefix check in the sanitizer still matches → handler stripped.
+    .{
+        .name = "NullByte: null byte in event handler attr name",
+        .threat_html = "<img on\x00error=\"alert(1)\">",
+        .should_not_contain = &.{"alert(1)"},
+    },
+
+    // --- Null byte splitting javascript: scheme in URL attributes ---
+    // java\x00script: → java\uFFFDscript: after U+FFFD substitution.
+    // Not recognized as the javascript: scheme by browsers.
+    // normalizeUri strips chars ≤ 0x20 but U+FFFD > 0x20, so literal
+    // "javascript:" won't appear in output.
+    .{
+        .name = "NullByte: null byte splitting javascript: in href",
+        .threat_html = "<a href=\"java\x00script:alert(1)\">Click</a>",
+        .should_not_contain = &.{"javascript:"},
+        .should_contain = &.{"Click"},
+    },
+    .{
+        .name = "NullByte: null byte splitting javascript: in img src",
+        .threat_html = "<img src=\"java\x00script:alert(1)\">",
+        .should_not_contain = &.{"javascript:"},
+    },
+};
+
+// ============================================================================
 // Test Entrypoints
 // ============================================================================
 
@@ -1472,6 +1521,10 @@ test "sanitizer vectors: CSS injection" {
 
 test "sanitizer vectors: HTML5 security" {
     try runSuite(&HTML5_SECURITY_VECTORS);
+}
+
+test "sanitizer vectors: null byte injection" {
+    try runSuite(&NULL_BYTE_VECTORS);
 }
 
 // ============================================================================

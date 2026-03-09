@@ -110,6 +110,25 @@ check  "file output: p present"    "<p>ok</p>" "$out"
 out=$(echo '<em>hi</em>' | "$BIN" -)
 check  "stdin -: em kept" "<em>hi</em>" "$out"
 
+# --allow-attr-prefix: safe value kept, protocol injection removed
+out=$(echo '<div wire:model="name" wire:click="javascript:alert(1)">x</div>' | "$BIN" --allow-attr-prefix 'wire:' -f)
+check  "allow-attr-prefix: safe attr kept"          'wire:model="name"'   "$out"
+absent "allow-attr-prefix: javascript: removed"     'wire:click'          "$out"
+
+# --allow-attr-prefix: multiple prefixes
+out=$(echo '<div data-turbo-frame="main" livewire:model="x">x</div>' | "$BIN" --allow-attr-prefix 'data-turbo' --allow-attr-prefix 'livewire:' -f)
+check  "allow-attr-prefix multi: data-turbo kept"   'data-turbo-frame'    "$out"
+check  "allow-attr-prefix multi: livewire: kept"    'livewire:model'      "$out"
+
+# customAttrPrefixes via JSON --config
+out=$(echo '<div wire:model="x" wire:click="vbscript:run()">x</div>' | "$BIN" --config '{"customAttrPrefixes":["wire:"]}' -f)
+check  "customAttrPrefixes JSON: safe attr kept"    'wire:model="x"'      "$out"
+absent "customAttrPrefixes JSON: vbscript: removed" 'wire:click'          "$out"
+
+# custom prefix without the flag: unknown attrs are stripped by spec engine
+out=$(echo '<div wire:model="x">x</div>' | "$BIN" -f)
+absent "no prefix flag: wire:model stripped"        'wire:model'          "$out"
+
 echo "---"
 echo "Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -3,7 +3,7 @@
  * run_wasm_vectors.mjs — Run OWASP/PortSwigger/CSS/HTML5 test vectors
  * against the zanitize WASM module.
  *
- * Test data: tests/input/owasp_vectors.json  (extracted from
+ * Test data: src/tests/input/owasp_vectors.json  (extracted from
  *            src/modules/sanitizer_test_vectors.zig via extract_zig_vectors.mjs)
  *
  * Each case uses `should_not_contain` / `should_contain` checks
@@ -11,15 +11,15 @@
  * but exercising the WASM code path.
  *
  * Usage:
- *   node tests/run_wasm_vectors.mjs [--suite SUITE_NAME] [--filter SUBSTR]
+ *   node src/tests/wasm/run_wasm_vectors.mjs [--suite SUITE_NAME] [--filter SUBSTR]
  *
  * Examples:
- *   node tests/run_wasm_vectors.mjs
- *   node tests/run_wasm_vectors.mjs --suite PORTSWIGGER_EVENT_HANDLERS
- *   node tests/run_wasm_vectors.mjs --filter "onerror"
+ *   node src/tests/wasm/run_wasm_vectors.mjs
+ *   node src/tests/wasm/run_wasm_vectors.mjs --suite PORTSWIGGER_EVENT_HANDLERS
+ *   node src/tests/wasm/run_wasm_vectors.mjs --filter "onerror"
  */
 
-import { loadZanitize } from '../wasm-out/zanitize.js';
+import { loadZanitize } from '../../../wasm-out/zanitize.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
@@ -33,13 +33,13 @@ const nameFilter   = args[args.indexOf('--filter') + 1] ?? null;
 
 // ── Load WASM ──────────────────────────────────────────────────────────────
 const zan = await loadZanitize(
-  new URL('../wasm-out/zanitize.wasm', import.meta.url)
+  new URL('../../../wasm-out/zanitize.wasm', import.meta.url)
 );
 zan.init(); // default/strict config
 
 // ── Load vectors ───────────────────────────────────────────────────────────
 const suites = JSON.parse(
-  readFileSync(resolve(__dir, 'input/owasp_vectors.json'), 'utf8')
+  readFileSync(resolve(__dir, '../input/owasp_vectors.json'), 'utf8')
 );
 
 // ── Helpers ────────────────────────────────────────────────────────────────

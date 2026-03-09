@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * One-time extractor: reads src/modules/sanitizer_test_vectors.zig
- * and writes tests/input/owasp_vectors.json.
+ * and writes src/tests/input/owasp_vectors.json.
  *
- * Usage: node tests/extract_zig_vectors.mjs
+ * Usage: node src/tests/wasm/extract_zig_vectors.mjs
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const zigPath  = resolve(__dir, '../src/modules/sanitizer_test_vectors.zig');
-const outPath  = resolve(__dir, 'input/owasp_vectors.json');
+const zigPath  = resolve(__dir, '../../modules/sanitizer_test_vectors.zig');
+const outPath  = resolve(__dir, '../input/owasp_vectors.json');
 
 const src = readFileSync(zigPath, 'utf8');
 

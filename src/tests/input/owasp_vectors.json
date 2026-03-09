@@ -1555,7 +1555,7 @@
         ],
         "should_contain": [
           "test"
-        ],
+        ]
       }
     ]
   },
@@ -1712,6 +1712,42 @@
         "threat_html": "<iframe srcdoc=\"<script>alert(1)</script>\"></iframe>",
         "should_not_contain": [
           "iframe"
+        ]
+      }
+    ]
+  },
+  {
+    "suite": "NULL_BYTE_VECTORS",
+    "cases": [
+      {
+        "name": "NullByte: null byte in script tag name",
+        "threat_html": "<sc\u0000ript>alert(1)</sc\u0000ript>",
+        "should_not_contain": [
+          "<script"
+        ]
+      },
+      {
+        "name": "NullByte: null byte in event handler attr name",
+        "threat_html": "<img on\u0000error=\"alert(1)\">",
+        "should_not_contain": [
+          "alert(1)"
+        ]
+      },
+      {
+        "name": "NullByte: null byte splitting javascript: in href",
+        "threat_html": "<a href=\"java\u0000script:alert(1)\">Click</a>",
+        "should_not_contain": [
+          "javascript:"
+        ],
+        "should_contain": [
+          "Click"
+        ]
+      },
+      {
+        "name": "NullByte: null byte splitting javascript: in img src",
+        "threat_html": "<img src=\"java\u0000script:alert(1)\">",
+        "should_not_contain": [
+          "javascript:"
         ]
       }
     ]

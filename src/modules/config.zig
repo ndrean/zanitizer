@@ -18,6 +18,7 @@ pub const JsonSanitizerConfig = struct {
     sanitizeDomClobbering: ?bool = null,
     sanitizeInlineStyles: ?bool = null,
     bypassSafety: ?bool = null,
+    customAttrPrefixes: ?[]const []const u8 = null,
 };
 
 /// Patch a SanitizerConfig with non-null values from parsed JSON.
@@ -34,6 +35,7 @@ pub fn applyJsonConfig(sc: *z.SanitizerConfig, j: JsonSanitizerConfig) void {
     if (j.sanitizeDomClobbering) |v| sc.sanitizeDomClobbering = v;
     if (j.sanitizeInlineStyles) |v| sc.sanitizeInlineStyles = v;
     if (j.bypassSafety) |v| sc.bypassSafety = v;
+    if (j.customAttrPrefixes) |v| sc.customAttrPrefixes = v;
 }
 
 /// Build SanitizeOptions from an optional preset + optional JSON patch (JSON wins on overlap).

